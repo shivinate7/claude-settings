@@ -102,7 +102,7 @@ FAMILIES = {
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
-    "override": "the owner override pass: one act or a timed pass, one session, the exclusions it never lifts",
+    "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on lane-start calls, the reader seam, no child process, no per-call read, no CPU read or wait, the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -683,7 +683,7 @@ def _real_process_start_ms(pid):
     guessed offset) could drift from what `hooks/guard.py` itself computes and pass or fail the
     live-session cases for the wrong reason. This is a second, independent implementation of the
     same read, not a call into the guard's own function, so a fixture and the code it proves
-    cannot share one bug. That holds on Windows too: the arm below copies guard.py's own
+    cannot share one defect. That holds on Windows too: the arm below copies guard.py's own
     `_process_start_ms_windows` logic rather than calling it.
     """
     if sys.platform.startswith("win"):
@@ -1580,7 +1580,7 @@ def _build_worktrees():
     # A live session record, built against THIS TEST RUNNER'S OWN pid, which stays alive for the
     # whole run. `startedAt` is read with `_real_process_start_ms`, a second, independent
     # implementation of the same `ps`-plus-`mktime` read the guard makes, so the fixture cannot
-    # share a bug with the code it proves.
+    # share a defect with the code it proves.
     self_pid = os.getpid()
     self_start_ms = _real_process_start_ms(self_pid)
     os.makedirs(os.path.join(WTLIVECFG, "sessions"), exist_ok=True)
@@ -2021,7 +2021,7 @@ sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the ou
    "python3 <<'EOF'\ncd " + SUBJCLEAN + "\nprint('hi')\nEOF\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJDIRTY)
 # A body `cd` is a live line when a stray `EOF` closes the body early, so the reset after the closer runs in the dirty tree.
-# The body never runs, so this deny is a bandaid, kept under the no-hole ruling (hold-unsafe-after-round-3).
+# The body never runs, so this deny is a bandaid, kept under the no-safety-hole ruling (hold-unsafe-after-round-3).
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
@@ -2663,7 +2663,7 @@ for _name, _command in (
 # ============================================================ 1. branch delete / worktree remove/prune
 FAMILY = "branch-worktree"
 #
-# The three git forms the machine-wide janitor plan named as a hole in this rule: `git branch
+# The three git forms the machine-wide janitor plan named as a safety hole in this rule: `git branch
 # -d/-D`, `git worktree remove`, `git worktree prune`. Each is judged on the STATE OF ITS SUBJECT,
 # the same shape every other arm of this rule already uses, never a name list.
 #
@@ -3317,7 +3317,7 @@ sh("kill: pgrep alone only reads", "pgrep -f node", "allow", cwd=NOGIT)
 # same act as `lsof -t | xargs kill`. `kill -9 -1` reads `-1` as a flag, so pid -1 (every process)
 # never reaches the pid check; `kill -9 -- -1` above already denies. Claude writes each of these when
 # a dev server holds a port, so each is a mistake it could make. `kill -KILL -1` and `kill -s KILL -1`
-# are the same hole as `kill -9 -1`; they were found while verifying the finding, not named in it.
+# are the same safety hole as `kill -9 -1`; they were found while verifying the finding, not named in it.
 for _name, _command in (
     ("a pid list made by lsof -t", "kill $(lsof -t -i :3000)"),
     ("a pid list made by lsof -ti behind a signal", "kill -9 $(lsof -ti :3000)"),
@@ -4253,7 +4253,7 @@ for _label, _open, _close, _mw in (
         ("E'OF'", "E'OF'", "EOF", "E"),
         ("EOF{", "EOF{", "EOF{", "EOF"),
 ):
-    sh("heredoc-hole: delimiter %s, a kill in the second body that sh runs, denies" % _label,
+    sh("heredoc safety hole: delimiter %s, a kill in the second body that sh runs, denies" % _label,
        "cat <<" + _open + "\na\n" + _close + "\ncat <<EOF2 > x.sh\necho hi\n" + _mw + "\n" + R3_KILL + "\nEOF2\nsh x.sh",
        "deny", "machine-wide-kill", cwd=PROJ)
 FAMILY = "wsl"
@@ -4262,7 +4262,7 @@ for _label, _open, _close, _mw in (
         ('"E"OF', '"E"OF', "EOF", "E"),
         ("EOF.1", "EOF.1", "EOF.1", "EOF"),
 ):
-    sh("heredoc-hole: delimiter %s, a wsl shutdown in the second body that sh runs, denies" % _label,
+    sh("heredoc safety hole: delimiter %s, a wsl shutdown in the second body that sh runs, denies" % _label,
        "cat <<" + _open + "\na\n" + _close + "\ncat <<EOF2 > x.sh\necho hi\n" + _mw + "\n" + HOLE_WSL + "\nEOF2\nsh x.sh",
        "deny", "wsl-allow-list", cwd=NOGIT)
 
@@ -5255,7 +5255,7 @@ sh("wsl: a cmd /c with a backslash before ; hides wsl --shutdown in a PowerShell
 sh("wsl: a PowerShell tool doubled single quote then wsl --shutdown, denies",
    "pwsh -c '\"a`''\"; wsl --shutdown'", "deny", rule=WSL_RULE, tool="PowerShell", cwd=NOGIT)
 
-# ---- PowerShell quoting, holes F1 to F3.
+# ---- PowerShell quoting, safety holes F1 to F3.
 # F1: PowerShell opens `<#` and `@'` only at a token start, so mid-word they are text. F2: a
 # PowerShell call reads an sh -c or bash -c script with PowerShell rules. F3: pwsh -c and iex keep
 # a backtick that the outer string already consumed.
@@ -5277,7 +5277,7 @@ sh("wsl: a PowerShell unclosed comment at a token start with no call after it, a
 sh("wsl: a Bash pwsh -c with a closed comment at a token start hides wsl --shutdown, allowed",
    "pwsh -c 'echo ok <# wsl --shutdown #>'", "allow", cwd=NOGIT)
 
-# ---- hole F4: a backtick hides the next `;` before an env read.
+# ---- safety hole F4: a backtick hides the next `;` before an env read.
 # It sits here, not in the env section below, so it stays above the TEMP_DIR = None line.
 FAMILY = "env"
 sh("env: a PowerShell backtick pair before ; then a read of the env file, denies",
@@ -6372,8 +6372,8 @@ for _name, _command in (
 ):
     rm_parent("Bash allows " + _name, _command, "allow")
 
-# HOLES. A delete inside `( )`, `$( )` or backticks must deny like the bare one: the closing
-# parenthesis is no part of the target. `rm -rf /` inside a group is the same hole on a root.
+# SAFETY HOLES. A delete inside `( )`, `$( )` or backticks must deny like the bare one: the closing
+# parenthesis is no part of the target. `rm -rf /` inside a group is the same safety hole on a root.
 for _command in ("(rm -rf .)", "(rm -rf ..)", "x=$(rm -rf .)", "echo $(rm -rf .)",
                  "echo `rm -rf .`", "(rm -rf /)", "(rm -rf ~)", "x=$(rm -rf /)",
                  "(cd build && rm -rf .)"):
@@ -8517,7 +8517,7 @@ records_deny("a commit by path that names the page, with the page staged earlier
              COMMIT_X + " -- src/app.py docs/records.md", "staged-edit")
 
 # First adoption: the base has no page, and the lane creates it. Allowed (the rule reads a base with no
-# page as no hit). A limit, named in the decision's holes.
+# page as no hit). A limit, named in the decision's safety holes.
 records_allow("a lane that creates the page where the base has none", COMMIT_X, REC_ADOPT_LANE)
 records_allow("a chain that runs the generator, then add -A and commit, where the base has no page",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_ADOPT_LANE)
@@ -8938,7 +8938,7 @@ sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"'
 sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
 
 # A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
-# assignments that the guard does not read. The one lift is the owner override pass (family
+# assignments that the guard does not read. The one lift is the owner override (family
 # `override`): the owner types it as a prompt, and the guard reads it from a state file.
 sh("frozen: a leftover token is not a key to the environment rule",
    "DESTRUCTIVE_OK=1 cat " + ENV, "deny", "env-file", cwd=NOGIT)
@@ -9144,7 +9144,7 @@ sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs t
 
 
 # ================================================================ 6a-2. cap-ask-fix (frozen)
-# Each case is a frozen write the guard reads as text, so each case names its hole. Each DENIES. The
+# Each case is a frozen write the guard reads as text, so each case names its safety hole. Each DENIES. The
 # cap-key twins of H2 and H3 are in the model-cap section below.
 #
 # H1: `_words_of` cuts a word at each quote, so a frozen path with a quote inside it reads as two
@@ -9617,11 +9617,11 @@ chained_ask("cap shell: fix H3, Set-Alias maps echo to iex, a Set-Content of the
 # command. The key and the path are built from pieces here.
 R3_CAP_LINE = CAP_KEY + "=" + OPUS + " > $'" + PROJ_LOCAL + "'"
 for _n in ("bash -c", "sh -c", "eval"):
-    sh("cap shell: hole r3, " + _n + " writes the cap to a project local settings file by an ANSI-C path, asks "
-       "[cap-ask-hole r3 red]", _n + " \"echo " + R3_CAP_LINE + "\"", "ask", "agent-model-cap",
+    sh("cap shell: safety hole r3, " + _n + " writes the cap to a project local settings file by an ANSI-C path, asks "
+       "[cap-ask safety hole r3 red]", _n + " \"echo " + R3_CAP_LINE + "\"", "ask", "agent-model-cap",
        cwd=NOGIT, carries=(OPUS,))
-    chained_ask("cap shell: hole r3, " + _n + " runs a quote pair then the cap write to an ANSI-C path, "
-                "denies as a chained ask command [cap-ask-hole r3 red]",
+    chained_ask("cap shell: safety hole r3, " + _n + " runs a quote pair then the cap write to an ANSI-C path, "
+                "denies as a chained ask command [cap-ask safety hole r3 red]",
                 _n + " \"echo 'ok'; echo " + R3_CAP_LINE + "\"", cwd=NOGIT,
                 carries=("agent-model-cap",))
 
@@ -9887,7 +9887,7 @@ chained_ask("ask-alone: the prune piped to sh, a command with effects, still den
 chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
             "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf y", cwd=NOGIT)
 
-# TWO HOLES (owner review, 2026-10-15). Both must DENY. The first: the `\"` inside the echo is an
+# TWO SAFETY HOLES, from an owner review. Both must DENY. The first: the `\"` inside the echo is an
 # escaped quote, so the `; rm -rf y` after it is a real command. The second: `cd -` moves to the previous
 # folder, which no path in the command names, so it is no harmless lead, and the prune after it is a
 # chained ask command.
@@ -11740,9 +11740,9 @@ add("floor: Agent with a list role and haiku is denied", "deny", "agent-model-fl
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
-# Explore on opus passes: a standing word covers an audit Explore, and the guard cannot tell an
+# Explore on opus passes: a standing grant covers an audit Explore, and the guard cannot tell an
 # audit from a plain search. The Opus ceiling block below asks for the rest.
-add("floor: Agent Explore with model opus is allowed (owner word)", "allow",
+add("floor: Agent Explore with model opus is allowed (owner grant)", "allow",
     tool="Agent", prompt="do it", model="opus", subagent_type="Explore")
 # record-writer (owner ruling 2026-10-10): Haiku is allowed only for the exact role name. A
 # near-miss name is another role, so it is denied, the same as `reviewer-lite` above.
@@ -11782,9 +11782,9 @@ add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "all
     subagent_type="reviewer")
 add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
-add("floor step-up: builder Try 3 of 3 on opus is allowed (standing word)", "allow",
+add("floor step-up: builder Try 3 of 3 on opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
-add("floor step-up: builder Try 1 of 3 on opus asks (only try 3 is a standing word)", "ask",
+add("floor step-up: builder Try 1 of 3 on opus asks (only try 3 is a standing grant)", "ask",
     "agent-model-cap", tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
 add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
@@ -11797,20 +11797,20 @@ add("floor step-up: round line after a lone quote on line two is denied", "deny"
     model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
-add("floor step-up: reviewer Round 3 of 3 on opus asks (the word is per spawn, not standing)", "ask",
+add("floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, not standing)", "ask",
     "agent-model-cap", tool="Agent", prompt="Round 3 of 3. Re-check the diff.",
     model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
-# Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing word
-# covers it: Plan, a builder's `Try 3 of 3` line, and Explore (the class-level word, pinned above).
+# Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing grant
+# covers it: Plan, a builder's `Try 3 of 3` line, and Explore (the class-level grant, pinned above).
 # A reviewer's last step-up is a per-spawn word, so it asks. The floor and the step-up deny first,
 # so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
 # Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
-# the role does not own earns the word), a false ask (a standing word, a Sonnet spawn, or text that
+# the role does not own earns the grant), a false ask (a standing grant, a Sonnet spawn, or text that
 # only names opus asks).
 CEILING = "agent-model-cap"
 add("ceiling: Agent with model opus and no role asks", "ask", CEILING, tool="Agent", prompt="x",
@@ -11821,22 +11821,22 @@ for _spelling in ("claude-opus-5-5", "Claude-OPUS-5-5", ["opus"]):
         tool="Agent", prompt="x", model=_spelling)
 for _role in ("claude", "general-purpose", "builder", "reviewer", "test-author", "record-writer",
               "Planner"):
-    add("ceiling: Agent %s with model opus and no standing word asks" % _role, "ask", CEILING,
+    add("ceiling: Agent %s with model opus and no standing grant asks" % _role, "ask", CEILING,
         tool="Agent", prompt="do it", model="opus", subagent_type=_role)
-add("ceiling: Agent Plan with model opus is allowed (standing word)", "allow",
+add("ceiling: Agent Plan with model opus is allowed (standing grant)", "allow",
     tool="Agent", prompt="Design the plan.", model="opus", subagent_type="Plan")
-add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing word)", "allow",
+add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing grant)", "allow",
     tool="Task", prompt="Design the plan.", model="claude-opus-5-5", subagent_type="Plan")
-# The designer and the design reviewer run Opus by the owner's standing word
-# (decision design-agents). A near-miss role name earns no word.
+# The designer and the design reviewer run Opus by the owner's standing grant
+# (decision design-agents). A near-miss role name earns no grant.
 for _role in ("designer", "design-reviewer"):
     for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
-        add("ceiling: %s %s on %s is allowed (standing word)" % (_tool, _role, _model), "allow",
+        add("ceiling: %s %s on %s is allowed (standing grant)" % (_tool, _role, _model), "allow",
             tool=_tool, prompt="Draw the mockup.", model=_model, subagent_type=_role)
 for _role in ("design", "designers", "design-review", "Designer"):
-    add("ceiling: Agent %s on opus asks (no standing word)" % _role, "ask", CEILING,
+    add("ceiling: Agent %s on opus asks (no standing grant)" % _role, "ask", CEILING,
         tool="Agent", prompt="Draw the mockup.", model="opus", subagent_type=_role)
-add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing word)", "allow",
+add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing grant)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="claude-opus-5-5",
     subagent_type="builder")
 # The marker is a line of its own, as step_up_hit reads it. A lone quote and comment openers in the
@@ -11844,7 +11844,7 @@ add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing 
 add("ceiling: Agent builder Try 3 of 3 on line two after a lone quote and comment openers is allowed",
     "allow", tool="Agent", prompt="Don't skip /* the // check # now.\nTry 3 of 3. Finish the fix.",
     model="opus", subagent_type="builder")
-# A marker the role does not own, or one that is only prose, earns no word.
+# A marker the role does not own, or one that is only prose, earns no grant.
 for _role, _brief in (
         ("reviewer", "Try 3 of 3. Finish the fix."),
         ("general-purpose", "Try 3 of 3. Finish the fix."),
@@ -12298,7 +12298,7 @@ def _load_guard_module():
     Every other case in this file drives the guard as a subprocess, one JSON object on
     stdin. `split_segments` has no JSON-shaped entry point of its own, so this loads the
     file under test directly, the same way `python3 -c "import guard; guard.split_segments(...)"`
-    in the bug report does.
+    in the defect report does.
     """
     import importlib.util
     # guard.py imports guard_core and the guard_<family> modules by name, and guard_core imports
@@ -14276,31 +14276,31 @@ LOG_CHECKS_EXTRA.append(("session-log: a stale guard_core lacking both names sti
                          "its line has five fields", session_log_stale_core_case))
 
 
-# --------------------------------------------------------------------------- the owner override pass
+# --------------------------------------------------------------------------- the owner override
 FAMILY = "override"
 #
 # The owner types `override` as a whole prompt, and the guard lets the next refused act through (a
-# one-act pass). `override 15m` or `override 3h` lets every refused act through until the pass ends
-# (a timed pass, no cap, the owner picks the length). hooks/local_time.py grants the pass with
-# override_pass.grant(session_id, prompt, now). refuse() in guard_core.py spends it with
-# override_pass.take(session_id, agent_id, rule, now). The pass file is
+# one-act override). `override 15m` or `override 3h` lets every refused act through until the override ends
+# (a timed override, no cap, the owner picks the length). hooks/local_time.py grants the override with
+# override.grant(session_id, prompt, now). refuse() in guard_core.py spends it with
+# override.take(session_id, agent_id, rule, now). The override file is
 # <config dir>/state/override/<session_id>.json, {"kind": "once" or "timed", "until": ISO-8601}.
 #
-# What a pass does: it covers only the session that typed it. An agent's call spends only a timed
-# pass. A valid pass makes the guard print nothing, so the normal permission flow runs, and it logs
-# one line with decision `override` and the rule it lifted. What no pass does: lift frozen-path,
-# git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable pass file as a pass.
+# What an override does: it covers only the session that typed it. An agent's call spends only a timed
+# override. A valid override makes the guard print nothing, so the normal permission flow runs, and it logs
+# one line with decision `override` and the rule it lifted. What no override does: lift frozen-path,
+# git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable override file as an override.
 #
-# A one-act pass is state that a call uses up, so each case is a story over several guard calls on
+# A one-act override is state that a call uses up, so each case is a story over several guard calls on
 # one fixed clock (LOCAL_TIME_NOW). A single-call `sh` case cannot show "allowed once, then refused
-# again", so each story runs as a log check. Every story first makes the call with no pass and wants
+# again", so each story runs as a log check. Every story first makes the call with no override and wants
 # the refusal, so a fixture that refuses nothing cannot turn a story green.
 
-OV_T0 = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)  # the clock when a pass is typed
-OV_ONCE_SECONDS = 10 * 60   # a one-act pass that nothing uses ends after this long
-OV_TIMED_SECONDS = 15 * 60  # the length of the timed pass these stories type: `override 15m`
+OV_T0 = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)  # the clock when an override is typed
+OV_ONCE_SECONDS = 10 * 60   # a one-act override that nothing uses ends after this long
+OV_TIMED_SECONDS = 15 * 60  # the length of the timed override these stories type: `override 15m`
 OV_AGENT = "a0f1e2d3c4b5a6978"  # an agent's id on the payload, in the shape AGENT_ID accepts
-OV_KILL = "kill $(pgrep -f override-pass-target)"  # refused with no `ps` read, so it runs on Windows too
+OV_KILL = "kill $(pgrep -f override-target)"  # refused with no `ps` read, so it runs on Windows too
 
 
 def ov_clock(seconds):
@@ -14309,7 +14309,7 @@ def ov_clock(seconds):
 
 
 def ov_config(name):
-    """A config directory of its own, so one story's passes and log never reach another's."""
+    """A config directory of its own, so one story's overrides and log never reach another's."""
     folder = os.path.join(ROOT, "ovcfg", name)
     os.makedirs(folder, exist_ok=True)
     return folder
@@ -14325,16 +14325,16 @@ OV_GRANT_CHILD = (
     "from datetime import datetime\n"
     "sys.path.insert(0, sys.argv[1])\n"
     "try:\n"
-    "    import override_pass\n"
+    "    import override\n"
     "except ImportError as e:\n"
     "    print('import failed: %s' % e, file=sys.stderr)\n"
     "    sys.exit(3)\n"
-    "override_pass.grant(sys.argv[2], sys.argv[3], datetime.fromisoformat(sys.argv[4]))\n"
+    "override.grant(sys.argv[2], sys.argv[3], datetime.fromisoformat(sys.argv[4]))\n"
 )
 
 
 def ov_write_pass(config, session, prompt, seconds):
-    """The pass file as the design documents it, for a story that runs while override_pass.py does
+    """The override file as the design documents it, for a story that runs while override.py does
     not import. The story then still reaches the guard and fails there, for the right reason."""
     path = ov_pass_path(config, session)
     said = prompt.strip().lower()
@@ -14351,9 +14351,9 @@ def ov_write_pass(config, session, prompt, seconds):
 
 
 def ov_type(config, session, prompt, seconds=0):
-    """The owner types `prompt` at OV_T0 + seconds: override_pass.grant runs in a child that reads
+    """The owner types `prompt` at OV_T0 + seconds: override.grant runs in a child that reads
     `config` as its config directory. Returns '' when the module ran, else a note for the story's
-    failure line: the import failed (the pass was written by hand), or the module raised."""
+    failure line: the import failed (the override was written by hand), or the module raised."""
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = config
     env["LOCAL_TIME_NOW"] = ov_clock(seconds)
@@ -14364,9 +14364,9 @@ def ov_type(config, session, prompt, seconds=0):
         return ""
     if run.returncode == 3:
         ov_write_pass(config, session, prompt, seconds)
-        return "override_pass.py does not import (%s); the pass was written by hand" % (
+        return "override.py does not import (%s); the override was written by hand" % (
             run.stderr.strip()[-90:])
-    return "override_pass.grant raised: %s" % run.stderr.strip()[-120:]
+    return "override.grant raised: %s" % run.stderr.strip()[-120:]
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
@@ -14381,7 +14381,7 @@ def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agen
 
 
 def ov_kill(config, session, seconds, agent_id=None):
-    """The `kill $(pgrep ...)` call: refused by machine-wide-kill with no pass, in any directory."""
+    """The `kill $(pgrep ...)` call: refused by machine-wide-kill with no override, in any directory."""
     return ov_call("Bash", {"command": OV_KILL}, NOGIT, config, session, seconds, agent_id)
 
 
@@ -14400,7 +14400,7 @@ def ov_want(got, reason, want, rule):
 
 def ov_story(steps, note=""):
     """Run (label, call, want, rule) steps in order. Returns (False, why) at the first miss, else
-    (True, ''). The note says how the pass was typed, so a failure line shows a hand-written pass."""
+    (True, ''). The note says how the override was typed, so a failure line shows a hand-written override."""
     for label, call, want, rule in steps:
         problem = ov_want(*call(), want, rule)
         if problem:
@@ -14408,7 +14408,7 @@ def ov_story(steps, note=""):
     return True, ""
 
 
-# The refusals the owner named; each one is refused when no pass exists. (key, what it is, command,
+# The refusals the owner named; each one is refused when no override exists. (key, what it is, command,
 # cwd, decision, rule, a config directory whose sessions/ folder the story copies in.) The
 # live-session act needs the session record that names this runner's own pid.
 OV_ACTS = (
@@ -14434,8 +14434,8 @@ OV_ACTS = (
 
 
 def ov_act_check(act, timed):
-    """A one-act pass lets the act through once, then it is refused again. A timed pass lets it through
-    every time until the pass ends, and the call at the end instant is refused."""
+    """A one-act override lets the act through once, then it is refused again. A timed override lets it through
+    every time until the override ends, and the call at the end instant is refused."""
     key, _, command, cwd, refused, rule, sessions_from = act
     kind = "timed" if timed else "once"
 
@@ -14449,7 +14449,7 @@ def ov_act_check(act, timed):
         def call(seconds):
             return lambda: ov_call("Bash", {"command": command}, cwd, config, session, seconds)
 
-        ok, why = ov_story([("with no pass", call(0), refused, rule)])
+        ok, why = ov_story([("with no override", call(0), refused, rule)])
         if not ok:
             return False, why
         note = ov_type(config, session, "override 15m" if timed else "override")
@@ -14459,34 +14459,34 @@ def ov_act_check(act, timed):
                      ("call at the end instant", call(OV_TIMED_SECONDS), refused, rule)]
         else:
             steps = [("first call", call(60), "allow", rule),
-                     ("second call, pass spent", call(120), refused, rule)]
+                     ("second call, override spent", call(120), refused, rule)]
         ok, why = ov_story(steps, note)
         if not ok:
             return False, why
-        return True, "%s with no pass, then allowed %s" % (refused, "until the end" if timed else "once")
+        return True, "%s with no override, then allowed %s" % (refused, "until the end" if timed else "once")
     return check
 
 
 for _act in OV_ACTS:
     for _is_timed in (False, True):
-        _label = ("override: a timed pass lets through %s until it ends" if _is_timed
-                  else "override: a one-act pass lets through %s once, then it is refused again") % _act[1]
+        _label = ("override: a timed override lets through %s until it ends" if _is_timed
+                  else "override: a one-act override lets through %s once, then it is refused again") % _act[1]
         if _act[0] == "kill-foreign" and os.name == "nt":
             skip_case(_label, NO_PS)
         else:
             LOG_CHECKS_EXTRA.append((_label, ov_act_check(_act, _is_timed)))
 
 
-# The ask on an Opus spawn is liftable (an override pass lifts it like any other ask), while the
-# same rule's ask on a settings write stays outside every pass (ov_role_acts and ov_cap_shell_acts
-# below). Each story first wants the ask with no pass.
+# The ask on an Opus spawn is liftable (an override lifts it like any other ask), while the
+# same rule's ask on a settings write stays outside every override (ov_role_acts and ov_cap_shell_acts
+# below). Each story first wants the ask with no override.
 OV_OPUS_SPAWN = {"prompt": "Review the diff for typos.", "model": "opus",
                  "subagent_type": "general-purpose"}
 
 
 def ov_opus_spawn_check(timed):
-    """A one-act pass lets an Opus spawn through once, then it asks again. A timed pass lets it through
-    every time until the pass ends, and the call at the end instant asks."""
+    """A one-act override lets an Opus spawn through once, then it asks again. A timed override lets it through
+    every time until the override ends, and the call at the end instant asks."""
     kind = "timed" if timed else "once"
     rule = "agent-model-cap"
 
@@ -14496,7 +14496,7 @@ def ov_opus_spawn_check(timed):
         def call(seconds):
             return lambda: ov_call("Agent", dict(OV_OPUS_SPAWN), NOGIT, config, session, seconds)
 
-        ok, why = ov_story([("with no pass", call(0), "ask", rule)])
+        ok, why = ov_story([("with no override", call(0), "ask", rule)])
         if not ok:
             return False, why
         note = ov_type(config, session, "override 15m" if timed else "override")
@@ -14506,26 +14506,26 @@ def ov_opus_spawn_check(timed):
                      ("spawn at the end instant", call(OV_TIMED_SECONDS), "ask", rule)]
         else:
             steps = [("first spawn", call(60), "allow", rule),
-                     ("second spawn, pass spent", call(120), "ask", rule)]
+                     ("second spawn, override spent", call(120), "ask", rule)]
         ok, why = ov_story(steps, note)
         if not ok:
             return False, why
-        return True, "an Opus spawn asked with no pass, then went through %s" % (
+        return True, "an Opus spawn asked with no override, then went through %s" % (
             "until the end" if timed else "once")
     return check
 
 
 for _is_timed in (False, True):
     LOG_CHECKS_EXTRA.append(
-        ("override: a timed pass lets an Opus spawn through until it ends" if _is_timed
-         else "override: a one-act pass lets an Opus spawn through once, then it asks again",
+        ("override: a timed override lets an Opus spawn through until it ends" if _is_timed
+         else "override: a one-act override lets an Opus spawn through once, then it asks again",
          ov_opus_spawn_check(_is_timed)))
 
 
-# THE OPUS PASS (decision owner-override-pass). `opus <n>[m|h]` lifts only the Opus spawn ask of
+# THE OPUS OVERRIDE (decision owner-override). `opus <n>[m|h]` lifts only the Opus spawn ask of
 # agent-model-cap, for the typing session and its agents, until it ends. `opus <role> <n>[m|h]`
 # lifts it only for spawns of that role. Every other refusal and ask stands.
-OP_SECONDS = 2 * 3600  # the length of the pass these stories type: `opus 2h`
+OP_SECONDS = 2 * 3600  # the length of the override these stories type: `opus 2h`
 OP_BUILDER = {"prompt": "Try 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
 OP_REVIEWER = {"prompt": "Round 3 of 3. Re-check the diff.", "model": "claude-opus-5-5",
                "subagent_type": "reviewer"}
@@ -14540,10 +14540,10 @@ def op_spawn(config, session, seconds, spawn=None, agent_id=None):
 
 
 def op_timed_check():
-    """`opus 2h`: an Opus spawn asks with no pass, then goes through for the session and its agents
-    until the pass ends, and asks again at the end instant."""
+    """`opus 2h`: an Opus spawn asks with no override, then goes through for the session and its agents
+    until the override ends, and asks again at the end instant."""
     config, session, rule = ov_config("opus-timed"), "op-timed", "agent-model-cap"
-    ok, why = ov_story([("with no pass", lambda: op_spawn(config, session, 0), "ask", rule)])
+    ok, why = ov_story([("with no override", lambda: op_spawn(config, session, 0), "ask", rule)])
     if not ok:
         return False, why
     note = ov_type(config, session, "opus 2h")
@@ -14556,11 +14556,11 @@ def op_timed_check():
     ], note)
     if not ok:
         return False, why
-    return True, "asked with no pass, went through for the session and an agent until the end"
+    return True, "asked with no override, went through for the session and an agent until the end"
 
 
 def op_minutes_check():
-    """`opus 15m` is fifteen minutes, and `opus off` ends the pass at once."""
+    """`opus 15m` is fifteen minutes, and `opus off` ends the override at once."""
     config, session, rule = ov_config("opus-minutes"), "op-minutes", "agent-model-cap"
     note = ov_type(config, session, "opus 15m")
     ok, why = ov_story([
@@ -14585,7 +14585,7 @@ def op_minutes_check():
 def op_role_check():
     """`opus builders 2h` lifts only builder spawns. A spawn of any other role still asks."""
     config, session, rule = ov_config("opus-role"), "op-role", "agent-model-cap"
-    ok, why = ov_story([("a builder with no pass", lambda: op_spawn(config, session, 0, OP_BUILDER),
+    ok, why = ov_story([("a builder with no override", lambda: op_spawn(config, session, 0, OP_BUILDER),
                          "ask", rule)])
     if not ok:
         return False, why
@@ -14604,12 +14604,12 @@ def op_role_check():
     ok, why = ov_story([
         ("a reviewer after `opus reviewer 2h`", lambda: op_spawn(config, session, 270, OP_REVIEWER),
          "allow", rule),
-        ("a builder after the new pass replaced the old", lambda: op_spawn(config, session, 300, OP_BUILDER),
+        ("a builder after the new override replaced the old", lambda: op_spawn(config, session, 300, OP_BUILDER),
          "ask", rule),
     ], note)
     if not ok:
         return False, why
-    return True, "the role pass lifted only its own role, plural or singular"
+    return True, "the role override lifted only its own role, plural or singular"
 
 
 # Each prompt is ambiguous or not the word, so it grants nothing: the spawn still asks.
@@ -14621,7 +14621,7 @@ OP_NOT_THE_WORD = (
     "opus bogus 2h",
     "opus builders reviewers 2h",
     "opus off 2h",
-    "opus plan 2h",           # Plan already runs Opus by standing word
+    "opus plan 2h",           # Plan already runs Opus by standing grant
     "use opus 2h",
     "opus2h",
     "opuses 2h",
@@ -14639,12 +14639,12 @@ def op_not_the_word_check():
         if problem:
             return False, "after %r: %s; %s" % (prompt, problem, note or "typed")
         if os.path.exists(op_pass_path(config, session)):
-            return False, "%r wrote an Opus pass file" % prompt
+            return False, "%r wrote an Opus override file" % prompt
     return True, "%d prompts granted nothing" % len(OP_NOT_THE_WORD)
 
 
 def op_scope_check():
-    """An Opus pass covers only the session that typed it."""
+    """An Opus override covers only the session that typed it."""
     config, rule = ov_config("opus-scope"), "agent-model-cap"
     note = ov_type(config, "op-scope-a", "opus 2h")
     ok, why = ov_story([
@@ -14658,7 +14658,7 @@ def op_scope_check():
 
 
 def op_other_acts(config, session):
-    """Refusals an Opus pass never lifts: every rule but the Opus spawn ask, the settings-write ask of
+    """Refusals an Opus override never lifts: every rule but the Opus spawn ask, the settings-write ask of
     the same rule included."""
     lifted_by_override = tuple(OvAct(label, "Bash", {"command": command}, rule, want, cwd=cwd)
                                for label, command, cwd, want, rule in (
@@ -14668,27 +14668,27 @@ def op_other_acts(config, session):
         ("a hard reset in a linked worktree", VCS + " reset --hard", GITWT, "ask", "shared-tree"),
     ))
     return lifted_by_override + ov_role_acts(config, session) + ov_frozen_acts(config, session) + (
-        ("a Write of the Opus pass file", "Write",
+        ("a Write of the Opus override file", "Write",
          {"file_path": slash(op_pass_path(config, session)), "content": "{}"}, "frozen-path"),
-        ("a cp onto the Opus pass file", "Bash",
+        ("a cp onto the Opus override file", "Bash",
          {"command": "cp /tmp/x.json " + slash(op_pass_path(config, session))}, "frozen-path"),
     )
 
 
 def op_lifts_nothing_else_check():
     """Under `opus 2h` every other refusal and ask stands, and a typed `override` is not spent by an
-    Opus spawn the Opus pass already lifts."""
+    Opus spawn the Opus override already lifts."""
     config, session = ov_config("opus-only"), "op-only"
     acts = [OvAct(*act) for act in op_other_acts(config, session)]
     for act in acts:
         problem = ov_want(*ov_act_call(act, config, session, 0), act.want, act.first or act.rule)
         if problem:
-            return False, "%s with no pass: %s" % (act.label, problem)
+            return False, "%s with no override: %s" % (act.label, problem)
     note = ov_type(config, session, "opus 2h")
     for act in acts:
         problem = ov_want(*ov_act_call(act, config, session, 60), act.want, act.rule)
         if problem:
-            return False, "%s under an Opus pass: %s; %s" % (act.label, problem, note or "typed")
+            return False, "%s under an Opus override: %s; %s" % (act.label, problem, note or "typed")
     note = ov_type(config, session, "override", 120) or note
     ok, why = ov_story([
         ("an Opus spawn beside a one-act override", lambda: op_spawn(config, session, 150), "allow",
@@ -14697,16 +14697,16 @@ def op_lifts_nothing_else_check():
          "machine-wide-kill"),
         ("a second kill, the override spent", lambda: ov_kill(config, session, 210), "deny",
          "machine-wide-kill"),
-        ("an Opus spawn, the Opus pass still there", lambda: op_spawn(config, session, 240), "allow",
+        ("an Opus spawn, the Opus override still there", lambda: op_spawn(config, session, 240), "allow",
          "agent-model-cap"),
     ], note)
     if not ok:
         return False, why
-    return True, "%d other refusals stood under an Opus pass; it left a typed override unspent" % len(acts)
+    return True, "%d other refusals stood under an Opus override; it left a typed override unspent" % len(acts)
 
 
 def op_corrupt_check():
-    """An Opus pass file the guard cannot read, or one of another shape, is no pass."""
+    """An Opus override file the guard cannot read, or one of another shape, is no override."""
     config, rule = ov_config("opus-corrupt"), "agent-model-cap"
     later = ov_clock(OP_SECONDS)
     for name, body in (
@@ -14719,13 +14719,13 @@ def op_corrupt_check():
         write(op_pass_path(config, session), body)
         problem = ov_want(*op_spawn(config, session, 60), "ask", rule)
         if problem:
-            return False, "a %s Opus pass file: %s" % (name, problem)
-    return True, "seven unreadable or misshapen Opus pass files, each asked"
+            return False, "a %s Opus override file: %s" % (name, problem)
+    return True, "seven unreadable or misshapen Opus override files, each asked"
 
 
 def op_log_check():
-    """The grant writes one log line naming the pass, and each lifted spawn writes one line whose
-    decision cell says `opus-pass` and whose rule cell says agent-model-cap."""
+    """The grant writes one log line naming the override, and each lifted spawn writes one line whose
+    decision cell says `opus-override` and whose rule cell says agent-model-cap."""
     config, session = ov_config("opus-log"), "op-log-session"
     log = os.path.join(config, "guard.log")
     note = ov_type(config, session, "opus builders 2h")
@@ -14743,8 +14743,8 @@ def op_log_check():
     with open(log, encoding="utf-8") as handle:
         lines = [l for l in handle.read().splitlines() if l.strip()]
     fields = lines[0].split("\t") if len(lines) == 1 else []
-    if len(fields) != 6 or fields[2:4] != ["opus-pass", "agent-model-cap"] or fields[5] != session:
-        return False, "the lift wrote %r, want one opus-pass + agent-model-cap line" % lines
+    if len(fields) != 6 or fields[2:4] != ["opus-override", "agent-model-cap"] or fields[5] != session:
+        return False, "the lift wrote %r, want one opus-override + agent-model-cap line" % lines
     os.remove(log)
     note = ov_type(config, session, "opus off", 90) or note
     with open(log, encoding="utf-8") as handle:
@@ -14755,20 +14755,20 @@ def op_log_check():
 
 
 for _label, _check in (
-    ("opus pass: `opus 2h` lets an Opus spawn through, an agent's too, until it ends", op_timed_check),
-    ("opus pass: `opus 15m` lasts fifteen minutes and `opus off` ends it", op_minutes_check),
-    ("opus pass: `opus builders 2h` lifts only builder spawns", op_role_check),
-    ("opus pass: an ambiguous prompt grants nothing", op_not_the_word_check),
-    ("opus pass: it covers only the session that typed it", op_scope_check),
-    ("opus pass: every other refusal and ask stands under it", op_lifts_nothing_else_check),
-    ("opus pass: an unreadable or misshapen pass file is no pass", op_corrupt_check),
-    ("opus pass: the grant, each lift and the end each write one log line", op_log_check),
+    ("opus override: `opus 2h` lets an Opus spawn through, an agent's too, until it ends", op_timed_check),
+    ("opus override: `opus 15m` lasts fifteen minutes and `opus off` ends it", op_minutes_check),
+    ("opus override: `opus builders 2h` lifts only builder spawns", op_role_check),
+    ("opus override: an ambiguous prompt grants nothing", op_not_the_word_check),
+    ("opus override: it covers only the session that typed it", op_scope_check),
+    ("opus override: every other refusal and ask stands under it", op_lifts_nothing_else_check),
+    ("opus override: an unreadable or misshapen override file is no override", op_corrupt_check),
+    ("opus override: the grant, each lift and the end each write one log line", op_log_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
 def ov_once_expiry_check():
-    """A one-act pass that nothing uses ends after 10 minutes: it works just before, and not at the end."""
+    """A one-act override that nothing uses ends after 10 minutes: it works just before, and not at the end."""
     config = ov_config("once-expiry")
     note = ""
     for session, seconds, want in (("ov-expiry-before", OV_ONCE_SECONDS - 1, "allow"),
@@ -14776,13 +14776,13 @@ def ov_once_expiry_check():
         note = ov_type(config, session, "override") or note
         problem = ov_want(*ov_kill(config, session, seconds), want, "machine-wide-kill")
         if problem:
-            return False, "call at +%ds: %s; %s" % (seconds, problem, note or "the pass was typed")
+            return False, "call at +%ds: %s; %s" % (seconds, problem, note or "the override was typed")
     return True, "allowed at +599 s, refused at +600 s"
 
 
 def ov_corrupt_check():
-    """A pass file the guard cannot read is no pass: the call is refused, never allowed. Garbage text
-    also logs `override-unread`, so the owner can see why the pass did nothing."""
+    """An override file the guard cannot read is no override: the call is refused, never allowed. Garbage text
+    also logs `override-unread`, so the owner can see why the override did nothing."""
     config = ov_config("corrupt")
     for name, body in (
             ("text", b"not json {"), ("empty", b""), ("list", b"[]"), ("no-until", b'{"kind": "timed"}'),
@@ -14794,18 +14794,18 @@ def ov_corrupt_check():
             handle.write(body)
         problem = ov_want(*ov_kill(config, session, 60), "deny", "machine-wide-kill")
         if problem:
-            return False, "a %s pass file: %s" % (name, problem)
+            return False, "a %s override file: %s" % (name, problem)
         if name == "text":
             with open(os.path.join(config, "guard.log"), encoding="utf-8") as handle:
                 mine = [l for l in handle.read().splitlines() if l.endswith("\t" + session)]
             if not any("override-unread" in l for l in mine):
-                return False, "a text pass file logged no override-unread line: %r" % mine
-    return True, "five unreadable pass files, each refused; garbage text logged override-unread"
+                return False, "a text override file logged no override-unread line: %r" % mine
+    return True, "five unreadable override files, each refused; garbage text logged override-unread"
 
 
 def ov_scope_check():
-    """A pass covers only the session that typed it. Another session's call, and a call that names no
-    session, are refused. The typing session's pass is still there afterwards."""
+    """An override covers only the session that typed it. Another session's call, and a call that names no
+    session, are refused. The typing session's override is still there afterwards."""
     config = ov_config("scope")
     for kind, prompt in (("timed", "override 15m"), ("once", "override")):
         session = "ov-scope-a-" + kind
@@ -14816,18 +14816,18 @@ def ov_scope_check():
         for label, call, want in steps:
             problem = ov_want(*call(), want, "machine-wide-kill")
             if problem:
-                return False, "a %s pass, %s: %s; %s" % (kind, label, problem, note or "typed")
+                return False, "a %s override, %s: %s; %s" % (kind, label, problem, note or "typed")
     return True, "both kinds: another session and an unnamed one refused, the typing session allowed"
 
 
 def ov_parallel_check(workers=6, rounds=5):
-    """Calls that run together on one one-act pass: exactly one is allowed, and the rest are refused.
+    """Calls that run together on one one-act override: exactly one is allowed, and the rest are refused.
     How often this case catches a check-then-delete race is unmeasured: the guard processes start
     tens of milliseconds apart, and the race window is far shorter."""
     config = ov_config("parallel")
     problem = ov_want(*ov_kill(config, "ov-parallel-warm", 0), "deny", "machine-wide-kill")
     if problem:
-        return False, "with no pass: " + problem  # also builds every lazy fixture before the threads start
+        return False, "with no override: " + problem  # also builds every lazy fixture before the threads start
     for n in range(rounds):
         session = "ov-parallel-%d" % n
         note = ov_type(config, session, "override")
@@ -14843,7 +14843,7 @@ def ov_parallel_check(workers=6, rounds=5):
         for thread in threads:
             thread.join()
         if verdicts.count("allow") != 1 or verdicts.count("deny") != workers - 1:
-            return False, "round %d: %d calls raced for one pass, verdicts %r, want one allow; %s" % (
+            return False, "round %d: %d calls raced for one override, verdicts %r, want one allow; %s" % (
                 n, workers, verdicts, note or "typed")
     return True, "%d rounds of %d racing calls, one allow each" % (rounds, workers)
 
@@ -14852,13 +14852,13 @@ OV_TAKE_CHILD = (
     "import sys\n"
     "from datetime import datetime\n"
     "sys.path.insert(0, sys.argv[1])\n"
-    "import override_pass\n"
-    "print(override_pass.take(sys.argv[2], None, datetime.fromisoformat(sys.argv[3])))\n"
+    "import override\n"
+    "print(override.take(sys.argv[2], None, datetime.fromisoformat(sys.argv[3])))\n"
 )
 
 
 def ov_take_race_check(workers=6, rounds=30):
-    """Processes that call take() on one one-act pass at once: exactly one gets it. A Windows rename
+    """Processes that call take() on one one-act override at once: exactly one gets it. A Windows rename
     acts on an open handle, so a rename claim let two racers win (2 of 40 rounds, run 40296652083)."""
     config = ov_config("take-race")
     env = dict(os.environ, CLAUDE_CONFIG_DIR=config)
@@ -14885,8 +14885,8 @@ def ov_take_race_check(workers=6, rounds=30):
 
 
 def ov_late_reader_check():
-    """A call that read the pass before another call spent it is refused. Its bytes come back as the
-    pass file here, which is what it sees. A new `override` typed at the same instant still lifts one act."""
+    """A call that read the override before another call spent it is refused. Its bytes come back as the
+    override file here, which is what it sees. A new `override` typed at the same instant still lifts one act."""
     config, session = ov_config("late-reader"), "ov-late-reader"
     rule = "machine-wide-kill"
     note = ov_type(config, session, "override")
@@ -14895,48 +14895,48 @@ def ov_late_reader_check():
         with open(path, "rb") as handle:
             seen = handle.read()
     except OSError as error:
-        return False, "no pass file after `override`: %s; %s" % (error, note or "typed")
+        return False, "no override file after `override`: %s; %s" % (error, note or "typed")
     ok, why = ov_story([("the first call", lambda: ov_kill(config, session, 60), "allow", rule)], note)
     if not ok:
         return False, why
     with open(path, "wb") as handle:
         handle.write(seen)
-    ok, why = ov_story([("a call that read the pass before it was spent",
+    ok, why = ov_story([("a call that read the override before it was spent",
                          lambda: ov_kill(config, session, 90), "deny", rule)], note)
     if not ok:
         return False, why
     os.remove(path)
     note = ov_type(config, session, "override") or note
-    ok, why = ov_story([("a new pass typed at the same instant",
+    ok, why = ov_story([("a new override typed at the same instant",
                          lambda: ov_kill(config, session, 120), "allow", rule)], note)
     if not ok:
         return False, why
-    return True, "the spent pass stayed spent for a late reader, and a new pass lifted one act"
+    return True, "the spent override stayed spent for a late reader, and a new override lifted one act"
 
 
 def ov_agent_once_check():
-    """An agent's call never spends a one-act pass, and the pass stays for the orchestrator's next call."""
+    """An agent's call never spends a one-act override, and the override stays for the orchestrator's next call."""
     config, session = ov_config("agent-once"), "ov-agent-once"
     rule = "machine-wide-kill"
-    ok, why = ov_story([("agent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
+    ok, why = ov_story([("agent, no override", lambda: ov_kill(config, session, 0, OV_AGENT),
                          "deny", rule)])
     if not ok:
         return False, why
     note = ov_type(config, session, "override")
     ok, why = ov_story([
-        ("agent under a one-act pass", lambda: ov_kill(config, session, 60, OV_AGENT), "deny", rule),
-        ("orchestrator, pass unspent", lambda: ov_kill(config, session, 120), "allow", rule),
-        ("orchestrator, pass spent", lambda: ov_kill(config, session, 180), "deny", rule)], note)
+        ("agent under a one-act override", lambda: ov_kill(config, session, 60, OV_AGENT), "deny", rule),
+        ("orchestrator, override unspent", lambda: ov_kill(config, session, 120), "allow", rule),
+        ("orchestrator, override spent", lambda: ov_kill(config, session, 180), "deny", rule)], note)
     if not ok:
         return False, why
-    return True, "the agent was refused and left the pass; the orchestrator used it once"
+    return True, "the agent was refused and left the override; the orchestrator used it once"
 
 
 def ov_agent_timed_check():
-    """A timed pass reaches the owner's agents as well as the session itself, until it ends."""
+    """A timed override reaches the owner's agents as well as the session itself, until it ends."""
     config, session = ov_config("agent-timed"), "ov-agent-timed"
     rule = "machine-wide-kill"
-    ok, why = ov_story([("agent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
+    ok, why = ov_story([("agent, no override", lambda: ov_kill(config, session, 0, OV_AGENT),
                          "deny", rule)])
     if not ok:
         return False, why
@@ -14949,20 +14949,20 @@ def ov_agent_timed_check():
          lambda: ov_kill(config, session, OV_TIMED_SECONDS, OV_AGENT), "deny", rule)], note)
     if not ok:
         return False, why
-    return True, "an agent is allowed under a timed pass until it ends"
+    return True, "an agent is allowed under a timed override until it ends"
 
 
 def ov_frozen_acts(config, session):
-    """frozen-path and git-env-set refusals. The pass file itself is frozen: a session that could
-    write it could grant itself a pass."""
+    """frozen-path and git-env-set refusals. The override file itself is frozen: a session that could
+    write it could grant itself an override."""
     pass_file = slash(ov_pass_path(config, session))
     return (
         ("a Write of a config hook", "Write",
          {"file_path": slash(os.path.join(config, "hooks", "guard.py")), "content": "x"},
          "frozen-path"),
-        ("a Write of the pass file", "Write", {"file_path": pass_file, "content": "{}"},
+        ("a Write of the override file", "Write", {"file_path": pass_file, "content": "{}"},
          "frozen-path"),
-        ("a cp onto the pass file", "Bash", {"command": "cp /tmp/x.json " + pass_file},
+        ("a cp onto the override file", "Bash", {"command": "cp /tmp/x.json " + pass_file},
          "frozen-path"),
         ("a command that sets GIT_DIR", "Bash",
          {"command": "export GIT_DIR=/x; python -m pytest"}, "git-env-set"),
@@ -14971,7 +14971,7 @@ def ov_frozen_acts(config, session):
 
 def ov_kill_all_acts(config, session):
     """A kill of pid 0 (the process group), 1 (init) or -1 (every process) can end the owner's whole
-    machine session. No pass covers it, so a pass that lifts `kill $(pgrep ...)` still refuses these."""
+    machine session. No override covers it, so an override that lifts `kill $(pgrep ...)` still refuses these."""
     return tuple((label, "Bash", {"command": command}, "machine-wide-kill") for label, command in (
         ("a kill of pid 0", "kill 0"),
         ("a kill of pid 1", "kill 1"),
@@ -14981,7 +14981,7 @@ def ov_kill_all_acts(config, session):
 
 
 # One act of an exclusion story. `rule` names the refusal (a tuple lists the rules that may name it
-# under a pass); `first` names the refusal with no pass, when the first rule to fire is another
+# under an override); `first` names the refusal with no override, when the first rule to fire is another
 # one. `want` is the decision: an ask for agent-model-cap, else a deny.
 OvAct = namedtuple("OvAct", "label tool tool_input rule want first cwd agent_id agent_type temp",
                    defaults=("deny", None, NOGIT, None, None, None))
@@ -14994,8 +14994,8 @@ def ov_act_call(act, config, session, seconds):
 
 def ov_drift_acts(config, session):
     """An agent that left its own worktree: worktree-home, rule 0, refuses every call it makes, and
-    no pass lifts it (owner, 18:37 CDT). Each act is refused as worktree-home under a timed pass, with
-    or without another refusal in the same command. A pass that lifted rule 0 would free the agent."""
+    no override lifts it (owner, 18:37 CDT). Each act is refused as worktree-home under a timed override, with
+    or without another refusal in the same command. An override that lifted rule 0 would free the agent."""
     primary = os.path.join(ROOT, "ovdrift_primary")
     worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + OV_AGENT)
     if not os.path.isdir(worktree):
@@ -15021,7 +15021,7 @@ def ov_drift_acts(config, session):
 
 def ov_cap_shell_acts(config, session):
     """The shell form of agent-model-cap: a write of the cap variable into the project settings
-    file by echo, printf or a heredoc. It asks with no pass, and no pass lifts it, as for a Write."""
+    file by echo, printf or a heredoc. It asks with no override, and no override lifts it, as for a Write."""
     line = CAP_KEY + "=opus"
     return tuple(OvAct(label, "Bash", {"command": command}, "agent-model-cap", "ask")
                  for label, command in (
@@ -15035,8 +15035,8 @@ def ov_cap_shell_acts(config, session):
 
 
 def ov_chain_acts(config, session):
-    """A refusal no pass lifts, in one command with a refusal a pass does lift. Reaching the lifted
-    one must not end the judging before the other, and the one-act pass stays unspent."""
+    """A refusal no override lifts, in one command with a refusal an override does lift. Reaching the lifted
+    one must not end the judging before the other, and the one-act override stays unspent."""
     hook = "echo x > " + slash(os.path.join(config, "hooks", "guard.py"))
     silent = VCS + " commit -m x >/dev/null 2>&1; "
     # The guard reads ROOT/tmp as the system temp, so the NOGIT cwd is no throwaway and a silenced
@@ -15057,7 +15057,7 @@ def ov_chain_acts(config, session):
 
 
 def ov_role_acts(config, session):
-    """The model and role guards stay outside every pass, as frozen paths do: a pass that lifted them
+    """The model and role guards stay outside every override, as frozen paths do: an override that lifted them
     would let an agent pick its own model or edit the tests it is judged by."""
     return (
         OvAct("a settings write that lifts the agent model cap", "Write",
@@ -15080,7 +15080,7 @@ def ov_role_acts(config, session):
 
 
 def ov_exclusion_check(timed, make_acts, what):
-    """The acts `make_acts` lists stay refused under either kind of pass. A refusal the pass does
+    """The acts `make_acts` lists stay refused under either kind of override. A refusal the override does
     not lift does not spend it, so the next lifted act still goes through."""
     kind = "timed" if timed else "once"
 
@@ -15090,33 +15090,33 @@ def ov_exclusion_check(timed, make_acts, what):
         for act in acts:
             problem = ov_want(*ov_act_call(act, config, session, 0), act.want, act.first or act.rule)
             if problem:
-                return False, "%s with no pass: %s" % (act.label, problem)
+                return False, "%s with no override: %s" % (act.label, problem)
         note = ov_type(config, session, "override 15m" if timed else "override")
         for act in acts:
             problem = ov_want(*ov_act_call(act, config, session, 60), act.want, act.rule)
             if problem:
-                return False, "%s under a %s pass: %s; %s" % (act.label, kind, problem, note or "typed")
+                return False, "%s under a %s override: %s; %s" % (act.label, kind, problem, note or "typed")
         problem = ov_want(*ov_kill(config, session, 120), "allow", "machine-wide-kill")
         if problem:
             return False, "a lifted act after the excluded refusals: %s; %s" % (problem, note or "typed")
-        return True, "%d excluded refusals stayed; the pass was still there for a lifted act" % len(acts)
+        return True, "%d excluded refusals stayed; the override was still there for a lifted act" % len(acts)
     return check
 
 
 def ov_off_check():
-    """`override off` ends a pass at once, whichever kind it was."""
+    """`override off` ends an override at once, whichever kind it was."""
     config = ov_config("off")
     for kind, prompt, spend_first in (("timed", "override 15m", True), ("once", "override", False)):
         session = "ov-off-" + kind
         note = ov_type(config, session, prompt)
-        if spend_first:  # a timed pass survives a use; a one-act pass would not
+        if spend_first:  # a timed override survives a use; a one-act override would not
             problem = ov_want(*ov_kill(config, session, 30), "allow", "machine-wide-kill")
             if problem:
-                return False, "%s pass, before off: %s; %s" % (kind, problem, note or "typed")
+                return False, "%s override, before off: %s; %s" % (kind, problem, note or "typed")
         note = ov_type(config, session, "override off", 60) or note
         problem = ov_want(*ov_kill(config, session, 90), "deny", "machine-wide-kill")
         if problem:
-            return False, "%s pass, after `override off`: %s; %s" % (kind, problem, note or "typed")
+            return False, "%s override, after `override off`: %s; %s" % (kind, problem, note or "typed")
     return True, "both kinds refused after `override off`"
 
 
@@ -15144,13 +15144,13 @@ def ov_log_check():
 
 
 def ov_no_module_check():
-    """A guard copy that cannot import override_pass never allows on a pass. An import error inside
+    """A guard copy that cannot import override never allows on an override. An import error inside
     the refusal path would otherwise reach the guard's crash handler, which fails open."""
     config, session = ov_config("no-module"), "ov-no-module"
     note = ov_type(config, session, "override 15m")
-    folder = _guard_copy("ov-no-module", "override_pass.py")
-    if os.path.exists(os.path.join(folder, "override_pass.py")):
-        return False, "the scratch copy holds override_pass.py, so the case proves nothing"
+    folder = _guard_copy("ov-no-module", "override.py")
+    if os.path.exists(os.path.join(folder, "override.py")):
+        return False, "the scratch copy holds override.py, so the case proves nothing"
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     env.pop("CLAUDE_CODE_SESSION_ID", None)
@@ -15162,49 +15162,49 @@ def ov_no_module_check():
                          capture_output=True, text=True, env=env, timeout=120)
     got = _decision(run)[0]
     if got != "deny":
-        return False, "a copy with no override_pass.py gave %s under a pass, want deny; %s" % (
+        return False, "a copy with no override.py gave %s under an override, want deny; %s" % (
             got, note or "typed")
-    return True, "a copy with no override_pass.py refuses the call"
+    return True, "a copy with no override.py refuses the call"
 
 
 for _label, _check in (
-    ("override: a one-act pass that nothing uses ends after 10 minutes", ov_once_expiry_check),
-    ("override: an unreadable pass file is no pass, and garbage text logs override-unread",
+    ("override: a one-act override that nothing uses ends after 10 minutes", ov_once_expiry_check),
+    ("override: an unreadable override file is no override, and garbage text logs override-unread",
      ov_corrupt_check),
-    ("override: a pass covers only the session that typed it", ov_scope_check),
-    ("override: two calls racing for one one-act pass, exactly one gets it", ov_parallel_check),
-    ("override: processes racing take() for one one-act pass, exactly one gets it",
+    ("override: an override covers only the session that typed it", ov_scope_check),
+    ("override: two calls racing for one one-act override, exactly one gets it", ov_parallel_check),
+    ("override: processes racing take() for one one-act override, exactly one gets it",
      ov_take_race_check),
-    ("override: a call that read a one-act pass before it was spent is refused", ov_late_reader_check),
-    ("override: an agent never spends a one-act pass", ov_agent_once_check),
-    ("override: a timed pass reaches an agent until it ends", ov_agent_timed_check),
-    ("override: frozen-path and git-env-set stay refused under a one-act pass",
+    ("override: a call that read a one-act override before it was spent is refused", ov_late_reader_check),
+    ("override: an agent never spends a one-act override", ov_agent_once_check),
+    ("override: a timed override reaches an agent until it ends", ov_agent_timed_check),
+    ("override: frozen-path and git-env-set stay refused under a one-act override",
      ov_exclusion_check(False, ov_frozen_acts, "frozen")),
-    ("override: frozen-path and git-env-set stay refused under a timed pass",
+    ("override: frozen-path and git-env-set stay refused under a timed override",
      ov_exclusion_check(True, ov_frozen_acts, "frozen")),
-    ("override: a kill of pid 0, 1 or -1 stays refused under a one-act pass",
+    ("override: a kill of pid 0, 1 or -1 stays refused under a one-act override",
      ov_exclusion_check(False, ov_kill_all_acts, "killall")),
-    ("override: a kill of pid 0, 1 or -1 stays refused under a timed pass",
+    ("override: a kill of pid 0, 1 or -1 stays refused under a timed override",
      ov_exclusion_check(True, ov_kill_all_acts, "killall")),
-    # A one-act pass never reaches an agent (ov_agent_once_check), so the drifted agent has
+    # A one-act override never reaches an agent (ov_agent_once_check), so the drifted agent has
     # a timed story only.
-    ("override: a drifted agent stays refused as worktree-home under a timed pass",
+    ("override: a drifted agent stays refused as worktree-home under a timed override",
      ov_exclusion_check(True, ov_drift_acts, "drift")),
-    ("override: a refusal no pass lifts stays when chained with one a pass lifts, one-act pass",
+    ("override: a refusal no override lifts stays when chained with one an override lifts, one-act override",
      ov_exclusion_check(False, ov_chain_acts, "chain")),
-    ("override: a refusal no pass lifts stays when chained with one a pass lifts, timed pass",
+    ("override: a refusal no override lifts stays when chained with one an override lifts, timed override",
      ov_exclusion_check(True, ov_chain_acts, "chain")),
-    ("override: the model and role guards stay refused under a one-act pass",
+    ("override: the model and role guards stay refused under a one-act override",
      ov_exclusion_check(False, ov_role_acts, "role")),
-    ("override: the model and role guards stay refused under a timed pass",
+    ("override: the model and role guards stay refused under a timed override",
      ov_exclusion_check(True, ov_role_acts, "role")),
-    ("override: a shell write of the agent model cap stays asked under a one-act pass",
+    ("override: a shell write of the agent model cap stays asked under a one-act override",
      ov_exclusion_check(False, ov_cap_shell_acts, "capshell")),
-    ("override: a shell write of the agent model cap stays asked under a timed pass",
+    ("override: a shell write of the agent model cap stays asked under a timed override",
      ov_exclusion_check(True, ov_cap_shell_acts, "capshell")),
-    ("override: `override off` ends a pass at once", ov_off_check),
+    ("override: `override off` ends an override at once", ov_off_check),
     ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
-    ("override: a guard copy that cannot import override_pass never allows on a pass",
+    ("override: a guard copy that cannot import override never allows on an override",
      ov_no_module_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
@@ -16041,7 +16041,7 @@ WINDOWS_CHECKERS.update(FAILCLOSED_CHECKS)
 # load-brake: the checks that reach the real reader, whose Windows arm is ctypes (GlobalMemoryStatusEx
 # and a process snapshot) that no Linux run exercises.
 WINDOWS_CHECKERS.update(LB_CHECKS)
-# override: a one-act pass claimed by a rename let two Windows racers win (run 40296652083), and no
+# override: a one-act override claimed by a rename let two Windows racers win (run 40296652083), and no
 # Linux run shows it, so the claim cases run in the Windows slice.
 WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
 

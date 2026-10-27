@@ -11,10 +11,10 @@ Decision blind-briefs-use-a-template. Standard library only.
   `Blind lanes: none, owner: "<the owner's words>"`.
 - A designer brief with no kind line is a small change outside design-explore, and passes.
 
-Hook: PreToolUse on Agent and Task. A deny goes through guard_core.refuse(), the one home of the
-override pass and the guard.log line, with rule `blind-brief`. Fail open: junk input, a missing
+Hook: PreToolUse on Agent and Task. A refusal goes through guard_core.refuse(), the one home of the
+owner override and the guard.log line, with rule `blind-brief`. Fail open: junk input, a missing
 template or an internal error allows the call, with one stderr line for an error. Cost: one python
-start per Agent or Task call, no file written but the guard.log line of a deny.
+start per Agent or Task call, no file written but the guard.log line of a refusal.
 
 CLI: `python3 blind_brief.py --run DIR [--current NAME ...] [--owner-asked-none WORDS]` checks every
 *.md brief in DIR as one explore run (run_faults). `--current` names a view of today's product, refused
@@ -217,25 +217,25 @@ def describe(faults):
                      for code, where, matched in faults)
 
 
-DENY_BLIND = ("this blind designer brief breaks the template: %s. Build it again from the "
+REFUSE_BLIND = ("this blind designer brief breaks the template: %s. Build it again from the "
               "design-explore blind template: the job in the users' words, the device, the palette, and "
               "the fixed House rules and Deliver text. Name nothing of today's product.")
-DENY_COUNT = ("an informed or directed designer brief must carry a line `Blind lanes: <n>`, with n of 1 or "
+REFUSE_COUNT = ("an informed or directed designer brief must carry a line `Blind lanes: <n>`, with n of 1 or "
               "more, or `Blind lanes: none, owner: \"<the owner's words>\"`. Start the run's blind lanes "
               "too (skill design-explore).")
 
 
-def deny(payload, tool, reason, matched):
-    """Deny through guard_core.refuse(), which lets an owner override pass lift it. refuse() exits."""
+def refuse(payload, tool, reason, matched):
+    """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
-        guard_core.set_pass_context(payload.get("session_id"), payload.get("agent_id"))
-        guard_core.set_pass_veto(lambda: False)
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_veto(lambda: False)  # a spawn holds no act that no override lifts
         guard_core.refuse(tool, "deny", RULE, reason, matched)
     except SystemExit:
         raise
-    except Exception:  # no guard_core: no pass can be read, so the deny stands
+    except Exception:  # no guard_core: no override can be read, so the refusal stands
         pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                              "permissionDecisionReason": RULE + ": " + reason}}))
@@ -263,10 +263,10 @@ def hook(stdin):
             print("blind_brief: template unreadable, fixed sections not checked", file=sys.stderr)
         faults = brief_faults(prompt)
         if faults:
-            deny(payload, payload["tool_name"], DENY_BLIND % ", ".join(dict.fromkeys(f[0] for f in faults)),
+            refuse(payload, payload["tool_name"], REFUSE_BLIND % ", ".join(dict.fromkeys(f[0] for f in faults)),
                  describe(faults)[:200])
     elif kind in ("informed", "directed") and not blind_lanes_ok(prompt):
-        deny(payload, payload["tool_name"], DENY_COUNT, "Blind lanes line: " + kind)
+        refuse(payload, payload["tool_name"], REFUSE_COUNT, "Blind lanes line: " + kind)
 
 
 def cli(argv):

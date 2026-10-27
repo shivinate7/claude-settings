@@ -12,7 +12,7 @@ Owner, 2026-10-21 (spec), 2026-10-22 (foreground), 2026-10-23 (disk) and 2026-10
 - **A read error counts as normal.** On Linux memory is unread, so only disk can trip the brake there. A reading that fails or cannot be read is unread, and one unread reading hides no other.
 - **Which calls read.** Agent, Task, Workflow and `start_session`, once each. No other tool reads load.
 - **How it reads.** Windows: `GlobalMemoryStatusEx`, through ctypes. Mac: `kern.memorystatus_level`, through ctypes. Linux: memory unread. Disk everywhere: `shutil.disk_usage`. Never the load average (107 on 15 cores while `top` showed half idle). No platform starts a child process.
-- **An owner override pass lifts a refusal.** The brake is not in the never-passed list (`owner-override-pass`).
+- **An owner override lifts a refusal.** The brake is not in the never-lifted list (`owner-override`).
 
 Why: many lanes at once can exhaust memory or disk and stall every session.
 

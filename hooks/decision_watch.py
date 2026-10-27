@@ -55,7 +55,7 @@ run is reported as unknown, never as clear and never as a flag. `transcript_path
 or unreadable, `git` unavailable or failing, or the model subprocess failing, timing out, or
 answering something that is not the JSON verdict it was asked for: each of these ends the
 run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook only ever
-reports, so nothing here ever blocks the turn. The incident cap never touches this branch:
+reports, so nothing here ever refuses the turn. The incident cap never touches this branch:
 an UNKNOWN read is never cached and always reported again.
 
 THE CONFIG REPORT. The same Stop run also prints the config report: the project config files,
@@ -450,7 +450,7 @@ def committed_this_turn(cwd, baseline):
 #
 # THE STORE. One small file per session, under `<config dir>/state/decision-watch/`, the
 # same `state` subtree hooks/config_watch.py already uses for its own baseline (frozen by
-# guard.CONFIG_FROZEN_DIRS, so a session write there is denied like any other, never
+# guard.CONFIG_FROZEN_DIRS, so a session write there is refused like any other, never
 # silently swallowed). Keyed by a hash of `session_id`, never the raw id, so the file name
 # carries no session detail. A store this hook cannot read or write is read as "nothing
 # seen yet" -- the fail-open direction, since the alternative is re-flagging forever, and
@@ -596,7 +596,7 @@ JUDGE_INSTRUCTIONS = (
 # `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means the old
 # path. A file that opens but is not text fails closed: no call is made. The
 # parent's own env token is never passed (the allowlist stays closed), and `invoke_model`
-# scrubs the token from any error text it returns. See docs/decisions/reply-judge-samples-never-blocks.md.
+# scrubs the token from any error text it returns. See docs/decisions/reply-judge-samples-never-refuses.md.
 CREDENTIALS_FILENAME = ".credentials.json"
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 
@@ -747,7 +747,7 @@ def run(hook, model_call=invoke_model, expect_key=None):
 
     `expect_key` is the key phase 1 printed (the mod's `--key`). A live key that differs means
     the evidence moved between the two phases, so the reply is not used and the answer is UNKNOWN
-    (HOLE 1 of decision decision-watch-mod-limits).
+    (SAFETY HOLE 1 of decision decision-watch-mod-limits).
     """
     path = hook.get("transcript_path")
     if not path or not isinstance(path, str) or not os.path.exists(path):

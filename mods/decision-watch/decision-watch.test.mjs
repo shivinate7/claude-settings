@@ -16,7 +16,7 @@
 // The trigger is turn.complete, never classic.Stop: the app's sec-default mod reroutes every classic.* event past
 // user-tier mods, so a classic.Stop handler never runs. turn.complete carries no session id, cwd or transcript path,
 // so the judge derives them the way /dw does: $.session.id(), $.session.cwd() and the config folder's projects layout.
-// Guessed contract point, HOLE 12 cases only: the real child's env is the host env merged with the env register.mjs
+// Guessed contract point, SAFETY HOLE 12 cases only: the real child's env is the host env merged with the env register.mjs
 // passes (the host may replace it instead). Those cases run the real hooks/decision_watch.py, not the fake.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -139,7 +139,7 @@ function replyOut(h, key, text) {
 }
 
 // The evidence key: phase 1 prints it, and phase 2 is given it back with --key. A key the live
-// evidence no longer gives reads UNKNOWN (HOLE 1 of decision decision-watch-mod-limits).
+// evidence no longer gives reads UNKNOWN (SAFETY HOLE 1 of decision decision-watch-mod-limits).
 const keyOf = h => 'key:' + h.evidence
 const keyArg = argv => (argv.indexOf('--key') >= 0 ? argv[argv.indexOf('--key') + 1] : undefined)
 const moved = (h, argv) => keyArg(argv) !== undefined && keyArg(argv) !== keyOf(h)
@@ -570,10 +570,10 @@ await test('model error: an aborted reply with a reason and no text goes as --mo
   assert.match(endData, /aborted by user/, 'log does not name the reason')
 })
 
-// ---- HOLE 1 (decision decision-watch-mod-limits): phase 2 is given the phase-1 key.
+// ---- SAFETY HOLE 1 (decision decision-watch-mod-limits): phase 2 is given the phase-1 key.
 
 // With no phase-1 key, the moved evidence is judged afresh and reads a silent ALLOW.
-await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a silent ALLOW', async () => {
+await test('SAFETY HOLE 1: evidence moved between the phases reads UNKNOWN, never a silent ALLOW', async () => {
   let h
   h = await load(host({
     model: () => {
@@ -587,7 +587,7 @@ await test('HOLE 1: evidence moved between the phases reads UNKNOWN, never a sil
   assert.match(endData, /UNKNOWN/, 'the log holds no UNKNOWN')
 })
 
-await test('HOLE 1: phase 2 is given the key phase 1 printed, as --key after the reply', async () => {
+await test('SAFETY HOLE 1: phase 2 is given the key phase 1 printed, as --key after the reply', async () => {
   const h = await load(host())
   await fire(h, 'turn.complete', turnEvent(), {})
   await judged(h)
@@ -597,7 +597,7 @@ await test('HOLE 1: phase 2 is given the key phase 1 printed, as --key after the
 })
 
 // A phase 1 with no key (an old decision_watch.py) cannot be tied to the evidence, so it reads UNKNOWN.
-await test('HOLE 1: no key from phase 1 reads UNKNOWN, never ALLOW', async () => {
+await test('SAFETY HOLE 1: no key from phase 1 reads UNKNOWN, never ALLOW', async () => {
   const h = await load(host({ py1: () => out({ needs_model: true, prompt: PROMPT, model: 'haiku' }) }))
   await fire(h, 'turn.complete', turnEvent(), {})
   const endData = await judged(h)
@@ -727,7 +727,7 @@ await test('model table: a row names mods/decision-watch, and that row names hai
   assert.match(row, /\bhaiku\b/, 'the mods/decision-watch row does not name haiku')
 })
 
-// ---- the ping bug: $.model.complete returns { isAnswered, text, usage }
+// ---- the ping defect: $.model.complete returns { isAnswered, text, usage }
 
 await test('ping: a model object reply reaches python as its .text, and a string reply works too', async () => {
   const replies = [
@@ -918,7 +918,7 @@ await test('busy guard: a failed judge frees the slot, so the next Stop judges a
   assert.ok(!/SKIP busy/.test(allLog(h)), 'the slot was never freed')
 })
 
-// HOLE 5 (decision decision-watch-mod-limits): the one-judge slot has no watchdog. A model call that never
+// SAFETY HOLE 5 (decision decision-watch-mod-limits): the one-judge slot has no watchdog. A model call that never
 // resolves must free the slot at the mod's own limit, log UNKNOWN, and let the next Stop judge. The limit is a
 // timer, so the case runs on fake timers and ticks past MODEL_CEILING_MS. The mod's limit is 50 s, so any
 // limit up to 60 s passes this case.
@@ -945,7 +945,7 @@ await test('busy: a model call that never resolves frees the slot at the mod lim
   }
 })
 
-// The python side of the same hole: a python call that never returns (the finder, or either phase) holds the slot.
+// The python side of the same known limit: a python call that never returns (the finder, or either phase) holds the slot.
 // The slot must free within 60 s (a ceiling this file guesses, as MODEL_CEILING_MS is). Steps of 5 s, each with a
 // flush, so a deadline that starts after a microtask still fires inside the run.
 const HUNG = () => new Promise(() => {})
@@ -1093,7 +1093,7 @@ await test('log: holds the verdict line and timings, never the prompt text', asy
   assert.match(endData, /FLAG/, 'verdict line missing')
 })
 
-// ---- HOLE 12 (decision decision-watch-mod-limits): unread-subject notices under the mod. register.mjs runs python
+// ---- SAFETY HOLE 12 (decision decision-watch-mod-limits): unread-subject notices under the mod. register.mjs runs python
 // with CLAUDE_CONFIG_DIR set to the mod's state folder, so collect_unread reads guard.log there, not in the real
 // config folder. These cases run the real decision_watch.py with the env register.mjs passes.
 
@@ -1161,7 +1161,7 @@ async function realStop(fx) {
   return h
 }
 
-await test('HOLE 12: under the mod env, a real python run shows the unread subject from the real config folder', async () => {
+await test('SAFETY HOLE 12: under the mod env, a real python run shows the unread subject from the real config folder', async () => {
   assert.ok(PY_CMD, 'no python on PATH, so the real-python case cannot run')
   const fx = unreadFixture()
   const h = await realStop(fx)
@@ -1176,7 +1176,7 @@ await test('HOLE 12: under the mod env, a real python run shows the unread subje
 
 // The control: the same fixture, read with the real folder as CLAUDE_CONFIG_DIR. It must pass on the old code too,
 // so a red above comes from the state folder and not from the fixture.
-await test('HOLE 12 control: the same log, read under the real folder, gives one notice', async () => {
+await test('SAFETY HOLE 12 control: the same log, read under the real folder, gives one notice', async () => {
   assert.ok(PY_CMD, 'no python on PATH, so the real-python case cannot run')
   const fx = unreadFixture()
   const r = realRun([PY_CMD, '-I', fx.cfg + '/hooks/decision_watch.py', '--emit-prompt'], {
@@ -1189,10 +1189,10 @@ await test('HOLE 12 control: the same log, read under the real folder, gives one
   assert.ok(out.notices[0].includes(SUBJECT), `the notice does not name the unread subject: ${JSON.stringify(out.notices[0])}`)
 })
 
-// HOLE 13 (same decision): the END line is cut at MAX_LINE (2000 characters), so a notice past the cut leaves the log
+// SAFETY HOLE 13 (same decision): the END line is cut at MAX_LINE (2000 characters), so a notice past the cut leaves the log
 // (its toast still shows). The normal flow cannot reach 3000 characters, so a 3000-character verdict stands in for a
 // long trace. The check reads every log write, not only END, so a fix may shorten or split lines.
-await test('HOLE 13: the END log keeps every notice when the line runs 3000 characters', async () => {
+await test('SAFETY HOLE 13: the END log keeps every notice when the line runs 3000 characters', async () => {
   const LONG = 'v'.repeat(3000)
   const MERGE = pyConst('MERGE_MESSAGE').replace('%s', 'PR #9') + pyConst('TAIL')
   const h = await load(host({ py1: splitOut(LONG, [CONFIG_NOTICE, MERGE]) }))
@@ -1205,7 +1205,7 @@ await test('HOLE 13: the END log keeps every notice when the line runs 3000 char
   }
 })
 
-// ---- dw-unread-dir. Guessed contract points, as the HOLE cases above: a config
+// ---- dw-unread-dir. Guessed contract points, as the SAFETY HOLE cases above: a config
 // notice is written as its own NOTICE line, `<stamp> NOTICE <sid> | NOTICE: <text>`; the mod does not cap a notice, so
 // a long one reaches the log whole; a newline in a notice must not start a log record.
 

@@ -19,7 +19,7 @@ Outcome protected: a lane never loses a CI run, or its place in the batch, to a 
 - A scheduled bump PR, like ios-adblock's `pin-bump.yml`: it opens a PR in each child repo on a timer, whether or not a session works there. Each bump moves a gate's verdict with nobody reading it.
 - Renovate's `git-refs` manager, as `renovate.json` uses for one pin here, could track main. It needs the Renovate app in each child repo, which is unknown. Revisit it if drift still costs CI runs after this lands.
 
-## Holes, named
+## Safety holes, named
 
 - (a) Only `ste-lint` is checked. `stamp`, `readme-links`, `all-jobs-passed`, `ci-alarm` and `ruling-kind` pins can drift unseen. `ste-lint` is the one with a local twin that a session runs.
 - (b) A session that never runs `bin/ste-changed` before a push still meets the old pin in CI. The rule covers that red.

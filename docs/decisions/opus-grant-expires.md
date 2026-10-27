@@ -2,7 +2,7 @@
 
 ## The ruling
 
-An Opus agent is enabled for one repository, on the owner's word in chat (`roles-opus-override-guarded`). The grant raises the fallback and does not pin. For one Opus lane, the orchestrator passes the model on that one call, on the owner's word: narrower and cheaper. The grant is for several lanes in a row, and it needs a fresh session: a running session keeps the old value.
+An Opus agent is enabled for one repository, on the owner's grant in chat (`roles-opus-override-guarded`). The grant raises the fallback and does not pin. For one Opus lane, the orchestrator passes the model on that one call, on the owner's grant: narrower and cheaper. The grant is for several lanes in a row, and it needs a fresh session: a running session keeps the old value.
 
 A write that sets the fallback is always an ask (guard rule `agent-model-cap`). `hooks/config_watch.py` expires it, because a clock protects better than memory.
 

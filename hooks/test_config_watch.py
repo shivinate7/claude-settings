@@ -402,7 +402,7 @@ def ordinary_edit(project):
 def stop_backstop(project):
     project.settle()
     # No PostToolUse fires for a FAILED tool call, so the watch never sees the write. The Stop
-    # sweep is what closes that hole.
+    # sweep is what closes that safety hole.
     shell(project, "cp %s .claude/settings.local.json" % to_bash_path(
         os.path.join(FIXTURE_TMP, "lift_case6.json")))
     message = project.stop()
@@ -419,7 +419,7 @@ def stop_backstop(project):
 # ONE MORE STEP THAN IT LOOKS LIKE IT NEEDS, and each one is load-bearing. `load_baseline`
 # recomputes `"digest": ""` by hand whenever a stored baseline's content is `None` (a genuinely
 # absent file), rather than trusting the stored digest. So a baseline that goes straight from
-# "no baseline yet" to "absent" never asks `digest(None)` an interesting question. The bug only
+# "no baseline yet" to "absent" never asks `digest(None)` an interesting question. The defect only
 # shows through a baseline that starts REAL AND EMPTY (`digest()` is trusted and verified there),
 # and is THEN deleted by an ordinary, non-cap event. A `digest()` confusing absent with empty
 # makes that deletion invisible to the watch's own baseline, so a later cap lift reverts to an

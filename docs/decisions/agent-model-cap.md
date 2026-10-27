@@ -3,9 +3,9 @@
 ## The ruling
 
 Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
-Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing word,
-and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's word for that spawn.
-An audit Explore may run Opus on the owner's word, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level word and date, see its row). Any other spawn
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
+and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's grant for that spawn.
+An audit Explore may run Opus on the owner's grant, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level grant and date, see its row). Any other spawn
 runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling: an Agent
 or Task spawn that sets model opus asks, unless Plan, Explore, designer, design-reviewer or a builder's `Try 3 of 3` covers it.
@@ -22,16 +22,16 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 |---|---|---|
 | `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
 | Explore, claude-code-guide | haiku | xhigh |
-| Explore that audits or judges meaning, not a plain search | sonnet, or opus on the owner's word (2026-10-21 ruling, class level); set per spawn, which overrides the frontmatter `haiku` | high |
+| Explore that audits or judges meaning, not a plain search | sonnet, or opus on the owner's grant (2026-10-21 ruling, class level); set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
-| reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's word for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
+| reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's grant for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
-| builder, try 3 after a FAIL at review round 2 | opus, the owner's standing word; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
+| builder, try 3 after a FAIL at review round 2 | opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
 | Plan (`agents/plan.md`) | opus | high |
-| designer (`agents/designer.md`) | opus, the owner's standing word of 2026-10-26 | high |
-| design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing word of 2026-10-26 | high |
+| designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
+| design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | general-purpose, `claude` | sonnet, by the default | model default |
 | main session | unset, account default | model default |
 | `fallbackModel` | sonnet | n/a |
@@ -59,17 +59,17 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a path with a `decisions` folder segment) | haiku, through `decision_watch.invoke_model` | xhigh |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | feedback judge (`hooks/feedback_judge.py`, a detached child of `hooks/local_time.py`; runs only while `fb` capture is open and the prompt does not open with `fb`) | claude-sonnet-5-5, through `decision_watch.invoke_model` | xhigh |
-| prompt-hook judges: AskUserQuestion, the question reviewer (an agent hook, `settings.json`) | claude-opus-5-5, by the owner's standing word of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default; an agent hook has no effort field |
+| prompt-hook judges: AskUserQuestion, the question reviewer (an agent hook, `settings.json`) | claude-opus-5-5, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default; an agent hook has no effort field |
 | SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
-| SendMessage wording judge (the same script, one call on every send, so an override pass can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
+| SendMessage wording judge (the same script, one call on every send, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and gate | no model; plain code | n/a |
 
-The Agent prompt judge blocks an audit Explore (a brief that asks it to audit, review, judge, rate or
-compare meaning) unless the call sets model sonnet or opus; haiku or no model blocks. Explore stays a
-Haiku role, so Sonnet is the floor for the judge only. Opus for an audit Explore is the owner's word,
+The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
+compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
+Haiku role, so Sonnet is the floor for the judge only. Opus for an audit Explore is the owner's grant,
 given at class level on 2026-10-21; the judge and the guard pass it. A plain search passes on the Haiku default. The caller
 spot-checks findings before it acts on an audit.
 
@@ -78,10 +78,10 @@ missing skill. A skill's model is the model of the session that calls it.
 
 Reason for prose alone at the ceiling: Claude Code emits no rank over models. A rank in a hook copies a
 list (`building-allow-list-is-the-constant`) and goes stale the day a model ships. A permission prompt
-cannot time out, so the guard allows Opus at round 3 and the owner's word stays prose.
+cannot time out, so the guard allows Opus at round 3 and the owner's grant stays prose.
 
 **The floor.** Every role but the five Haiku roles has Sonnet as the floor. `HAIKU_ROLES` in
-`hooks/guard.py` is the one list. Guard rule `agent-model-floor` denies an `Agent`, `Task`, `Workflow`
+`hooks/guard.py` is the one list. Guard rule `agent-model-floor` refuses an `Agent`, `Task`, `Workflow`
 `agent()` or `start_session` call whose `model` holds "haiku", unless the role is a Haiku role.
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
@@ -101,13 +101,13 @@ Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus
 names a model, `inherit` included, beats the variable. In cloud, an Explore search runs Opus, not
 Haiku. Unknown: the same order for a pin in this repo's `agents/*.md`, because cloud installs none.
 
-The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's word, with no magic
+The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's grant, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
-`agent-model-cap`, unless a standing word covers it. A standing word is one of: the role Plan, the role Explore (the
-class-level word above), the role designer or design-reviewer (the 2026-10-26 word above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing word, so
-it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override pass
-lifts the spawn ask like any other ask (`owner-override-pass`); the ask on a settings write under the same
-id stays outside every pass. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was
+`agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role Explore (the
+class-level grant above), the role designer or design-reviewer (the 2026-10-26 grant above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing grant, so
+it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override
+lifts the spawn ask like any other ask (`owner-override`); the ask on a settings write under the same
+id stays outside every override. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
 before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
 write that changes the fallback stays: a write is a standing change, not a dispatch. The gate sees only

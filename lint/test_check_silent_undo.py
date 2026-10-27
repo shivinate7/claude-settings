@@ -1699,9 +1699,9 @@ class RecordsPage(unittest.TestCase):
         return r
 
     def test_a_generator_that_drops_the_debt_rows_is_refused_when_it_regenerates_the_page(self):
-        """Hole: a page was excused when it equalled the generator that the head ships. Here the head edits that generator
+        """Safety hole: a page was excused when it equalled the generator that the head ships. Here the head edits that generator
         to drop the debt rows, regenerates the page, and passes with no trailer. The fixture runs its own checker, as CI
-        runs the head's checkout, so the head's generator is the oracle that the hole trusted."""
+        runs the head's checkout, so the head's generator is the oracle that the safety hole trusted."""
         r = self.fixture()
         r.sh("checkout", "-q", "-b", "oops")
         with open(os.path.join(r.dir, "lint", "layout.json"), encoding="utf-8", newline="") as f:

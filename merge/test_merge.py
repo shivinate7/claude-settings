@@ -3324,7 +3324,7 @@ class GhHalf(Env):
         self.checks_read_fails(RATE_API_SECONDARY_403, rate=True)
 
     def test_a_checks_read_primary_rate_limit_403_is_a_network_error_retried_then_stopped(self):
-        self.checks_read_fails(RATE_API_403, rate=True)  # owner's word: it retries like the 403 (the GraphQL form of this text is gone with GraphQL)
+        self.checks_read_fails(RATE_API_403, rate=True)  # owner's grant: it retries like the 403 (the GraphQL form of this text is gone with GraphQL)
 
     def test_a_retry_after_on_a_checks_429_never_changes_the_rate_wait(self):
         self.set(checks_fail={"n": 1, "msg": "Retry-After: 17\n" + rest_err(429, "Too Many Requests")})

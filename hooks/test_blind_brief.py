@@ -16,7 +16,7 @@ Contract (the module's own docstring):
 - `--run DIR` checks every *.md brief in DIR: exit 0 clean, 1 with one line per fault, 2 unreadable.
 - As a PreToolUse hook on Agent and Task, a designer spawn is judged by its brief. A blind brief with
   a fault, or an informed or directed brief with no `Blind lanes:` line of 1 or more (or `none` with
-  the owner's quoted words), is denied with rule `blind-brief`. Any other spawn passes. Junk input
+  the owner's quoted words), is refused with rule `blind-brief`. Any other spawn passes. Junk input
   passes with no output.
 
 The Duo brief below is the incident of decision blind-briefs-use-a-template. Its four
@@ -309,8 +309,8 @@ class Hook(unittest.TestCase):
         return self.hook({"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": "s1",
                           "tool_input": {"subagent_type": role, "prompt": prompt, "description": "lane"}})
 
-    def assertDenied(self, out):
-        self.assertTrue(out, "want a deny, got no output")
+    def assertRefused(self, out):
+        self.assertTrue(out, "want a refusal, got no output")
         decision = json.loads(out)["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "deny")
         self.assertTrue(decision["permissionDecisionReason"].startswith("blind-brief: "), decision)
@@ -318,20 +318,20 @@ class Hook(unittest.TestCase):
     def test_clean_blind_designer_spawn_passes(self):
         self.assertEqual(self.spawn(brief()), "")
 
-    def test_duo_blind_designer_spawn_is_denied(self):
-        self.assertDenied(self.spawn("Lane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+    def test_duo_blind_designer_spawn_is_refused(self):
+        self.assertRefused(self.spawn("Lane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
 
-    def test_blind_spawn_with_keep_rule_is_denied_on_task_too(self):
-        self.assertDenied(self.spawn(brief(job=JOB + "\nKeep the current layout."), tool="Task"))
+    def test_blind_spawn_with_keep_rule_is_refused_on_task_too(self):
+        self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout."), tool="Task"))
 
     def test_plugin_prefixed_designer_is_judged(self):
-        self.assertDenied(self.spawn(brief(job=JOB + "\nKeep the current layout."), role="kit:designer"))
+        self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout."), role="kit:designer"))
 
-    def test_informed_spawn_with_no_blind_lanes_line_is_denied(self):
-        self.assertDenied(self.spawn("Lane kind: informed\n\n" + DUO_BRIEF))
+    def test_informed_spawn_with_no_blind_lanes_line_is_refused(self):
+        self.assertRefused(self.spawn("Lane kind: informed\n\n" + DUO_BRIEF))
 
-    def test_informed_spawn_with_zero_blind_lanes_is_denied(self):
-        self.assertDenied(self.spawn("Lane kind: directed, denser\nBlind lanes: 0\n\nDraw it."))
+    def test_informed_spawn_with_zero_blind_lanes_is_refused(self):
+        self.assertRefused(self.spawn("Lane kind: directed, denser\nBlind lanes: 0\n\nDraw it."))
 
     def test_informed_spawn_with_blind_lanes_passes(self):
         self.assertEqual(self.spawn("Lane kind: informed\nBlind lanes: 2\n\n" + DUO_BRIEF), "")
@@ -339,14 +339,14 @@ class Hook(unittest.TestCase):
     def test_informed_spawn_with_owner_none_passes(self):
         self.assertEqual(self.spawn('Lane kind: informed\nBlind lanes: none, owner: "informed only"\n\nDraw it.'), "")
 
-    def test_owner_none_with_no_words_is_denied(self):
-        self.assertDenied(self.spawn("Lane kind: informed\nBlind lanes: none\n\nDraw it."))
+    def test_owner_none_with_no_words_is_refused(self):
+        self.assertRefused(self.spawn("Lane kind: informed\nBlind lanes: none\n\nDraw it."))
 
     def test_blind_kind_after_a_preamble_is_judged(self):
-        self.assertDenied(self.spawn("You are the designer.\nLane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+        self.assertRefused(self.spawn("You are the designer.\nLane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
 
     def test_informed_kind_after_a_preamble_is_judged(self):
-        self.assertDenied(self.spawn("You are the designer.\nLane kind: informed\n\nDraw it."))
+        self.assertRefused(self.spawn("You are the designer.\nLane kind: informed\n\nDraw it."))
 
     def test_designer_spawn_with_no_kind_passes(self):
         # A small change to one screen skips design-explore and names no kind.
@@ -362,7 +362,7 @@ class Hook(unittest.TestCase):
         self.assertEqual(self.hook("not json"), "")
         self.assertEqual(self.hook("[]"), "")
 
-    def test_deny_is_logged(self):
+    def test_refusal_is_logged(self):
         self.spawn(brief(job=JOB + "\nKeep the current layout."))
         with open(os.path.join(self.config.name, "guard.log"), encoding="utf-8") as handle:
             self.assertIn("blind-brief", handle.read())

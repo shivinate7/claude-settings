@@ -3,7 +3,7 @@
 ## The ruling
 
 The UX rules that every repo with screens shares, beyond the three third-party sets, live in `docs/design/`. They
-come from the owner's own repos. Each rule cites its repo and entry. A rule that no repo shows is left out.
+come from the owner's own repos. Each rule cites its repo and record. A rule that no repo shows is left out.
 
 - The house rules are `ux-answer-at-press`, `ux-long-run-stops`, `ux-all-is-well` and `ux-thumb-zone`.
   Touch size is the Target size row in `docs/design/a11y.md`: 44px on touch, 24px for mouse.

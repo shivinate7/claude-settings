@@ -814,8 +814,8 @@ class FixedDecisionTests(unittest.TestCase):
 
 class OverrideDecisionTests(unittest.TestCase):
     """A lifted act writes a line whose decision is `override` and whose rule is the one it lifted
-    (the owner override pass). The report counts those lines per rule and per session, so the owner
-    can see which refusals a pass lifted. Without it they would print under the verbatim lines."""
+    (the owner override). The report counts those lines per rule and per session, so the owner
+    can see which refusals an override lifted. Without it they would print under the verbatim lines."""
 
     LINES = [
         "2026-10-11T09:00:00\tBash\toverride\tmachine-wide-kill\tkill $(pgrep x)\tsess-a",

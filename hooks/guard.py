@@ -3,10 +3,10 @@
 
 Modes:
 - PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
-  order and denies or asks on the first match. Bad input allows the call.
+  order and refuses or asks on the first match. Bad input allows the call.
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
   against its role, for example a builder that changed a test path. Logs an offence for
-  the reviewer and never blocks the stop.
+  the reviewer and never refuses the stop.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -14,28 +14,28 @@ JSON object on stdin and answers on stdout.
   stdin  : {"tool_name": str, "tool_input": {...}, "cwd": str}
   allow  : print nothing, exit 0
   refuse : print one hookSpecificOutput object with "deny" or "ask", exit 0; when the owner
-           override pass lifts the refusal, print nothing, exit 0 (the allow output)
+           override lifts the refusal, print nothing, exit 0 (the allow output)
 
 Fail open. Unreadable input, a payload that is not an object, or a missing key
-all allow the call. A guard bug must never brick a session.
+all allow the call. A guard defect must never brick a session.
 
 The rules below are the owner's global CLAUDE.md made mechanical. Each refusal and each note
 logs its rule name. This index lists every rule name that `refuse()` or `record()` writes,
-in the order `judge_shell` and `judge` check them. The first match wins, unless an override pass
-lifts it: then the call is allowed and no later rule runs, so `never_passed` checks the acts no
-pass lifts first. The reason text of a
+in the order `judge_shell` and `judge` check them. The first match wins, unless an override
+lifts it: then the call is allowed and no later rule runs, so `never_lifted` checks the acts no
+override lifts first. The reason text of a
 rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff, author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
-                       The diff it would send is logged for the reviewer. Never blocks.
+                       The diff it would send is logged for the reviewer. Never refuses.
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
                        also role-diff-main-checkout, role-diff-unresolved and
                        role-diff-unread.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
-                       Reading, unsetting, or a mention in quoted text passes. (git-env-set-denied)
+                       Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
                        its subject. An empty subject passes. An unreadable subject is allowed and
                        noted as `subject-unread`. (stash-stack-is-a-shared-subject,
@@ -68,7 +68,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        the working folder or a folder above it, in either shell.
                        (rm-path-wrapper)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
-                       refspec denies. A push that reaches the default branch asks.
+                       refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, or the read
@@ -83,7 +83,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
                        Also an Agent or Task spawn that sets model opus, unless Plan, Explore,
-                       designer, design-reviewer or a builder `Try 3 of 3` covers it. An override pass lifts the spawn ask only.
+                       designer, design-reviewer or a builder `Try 3 of 3` covers it. An override lifts the spawn ask only.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -116,7 +116,7 @@ are not frozen. They are allowed, and the guard logs one `config-edit` line, so 
 Stop hook can show the edit at turn end. `subject-unread` is logged the same way: an allow that a
 person still gets to see.
 
-`agent-model-cap` asks and never denies, because that same write is how an Opus agent is
+`agent-model-cap` asks and never refuses, because that same write is how an Opus agent is
 enabled on purpose. It stands after `frozen-path`, so only a project-scoped write reaches it. Its
 ask names the requested value and the file, which is not an exception to the remedy rule below:
 the ask tells the approver what is turned on and where. That text comes from a tool call, so the
@@ -137,13 +137,13 @@ Every refusal names its rule and says what to do instead. The remedy never names
 command or path, because Claude would copy it as the way round (`git-remedy-never-names-target`).
 The matched text goes to the log, so a person can still see what fired.
 
-An "ask" decision puts the answer in the owner's hands. The one lift is the owner override pass
-(decision owner-override-pass): the owner types `override` as a whole prompt, and refuse() lets the
-next refused act through, or every refused act for a time. The narrower Opus pass (`opus 2h`) lifts
-only the Opus spawn ask. No pass lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
+An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
+(decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
+next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
+only the Opus spawn ask. No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
 `agent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
-or `worktree-home`. No pass check reaches the missing-module deny, the `settings.json` deny list,
+or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list,
 the `bin/rm` and `bin/merge` shims, or any other PreToolUse gate.
 """
 
@@ -329,7 +329,7 @@ def __getattr__(name):
 
 # ------------------------------------------------------------------ the silent write
 #
-# Rule 1c. CLAUDE.md (Git): "Never discard a command's output." A discarding REDIRECT is denied on
+# Rule 1c. CLAUDE.md (Git): "Never discard a command's output." A discarding REDIRECT is refused on
 # every one of these six subcommands, whatever the subcommand does with its own output: the shell
 # throws the stream away before git ever gets a say, so a hook's refusal and git's own proof of
 # landing are both gone, together, always.
@@ -1637,7 +1637,7 @@ def diff_rule(role: str) -> str:
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
-    """Log a role's diff at commit or push for the reviewer. Never blocks: the base can count the
+    """Log a role's diff at commit or push for the reviewer. Never refuses: the base can count the
     parent branch's files as the agent's own (docs/decisions/builders-cannot-edit-tests.md)."""
     found, _ = diff_violation(root, role)
     if found is None:
@@ -1877,7 +1877,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 
 OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for an agent; Opus runs "
-    "only on the owner's word for this spawn, except Plan, Explore, the designer, the design "
+    "only on the owner's grant for this spawn, except Plan, Explore, the designer, the design "
     "reviewer and a builder's Try 3 of 3 "
     "(decision agent-model-cap). Approve it only when the owner asked for Opus here."
 )
@@ -1885,10 +1885,10 @@ OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
 
 
 def opus_spawn_hit(tool: str, tool_input) -> str:
-    """The model of an Agent or Task spawn that sets Opus with no standing word, or "". A standing word
+    """The model of an Agent or Task spawn that sets Opus with no standing grant, or "". A standing grant
     is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds a `Try 3 of 3` line (the same marker
-    step_up_hit reads). A reviewer's spawn is no standing word, so a reviewer on Opus asks. The spawn ask is liftable by an
-    override pass, so never_passed does not read it."""
+    step_up_hit reads). A reviewer's spawn is no standing grant, so a reviewer on Opus asks. The spawn ask is liftable by an
+    override, so never_lifted does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
         return ""
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
@@ -1902,7 +1902,7 @@ def opus_spawn_hit(tool: str, tool_input) -> str:
 
 # ASK ALONE (ruling ask-commands-run-alone). A command that would ASK is held, not printed, while the other rules run, so a
 # deny anywhere still wins. At the end, an ask command with any other command in the shell call (`&&`, `||`,
-# `;`, `|`, a newline) is denied, and the same command alone asks as before, as does one with a named
+# `;`, `|`, a newline) is refused, and the same command alone asks as before, as does one with a named
 # harmless lead or tail (harmless_commands, below). The deny
 # names the command by its kind, never its text. Only the first ask command is held: it is the one that
 # printed before.
@@ -2099,7 +2099,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         # A stash PUT reaches here only when it would discard (state is not True above), and its
         # subject is `refs/stash`, the one ref every worktree of this clone already shares. The
         # worktree "ask" below is earned only for a subject that lives in THIS tree alone, so a
-        # push denies here instead of falling into that ask.
+        # push refuses here instead of falling into that ask.
         if subcommand == "stash":
             refuse(tool, "deny", "shared-tree", PUSH_DENY_REASON, matched)
         worktree = is_worktree(root)
@@ -2262,7 +2262,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
 
-    # 4. A wide delete denies, and a force push asks.
+    # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
     delete_segments = [delete_text(segment) for segment in split_segments(stripped)]
     for number in range(len(delete_segments)):
@@ -2537,10 +2537,10 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
-def never_passed(payload, tool: str, tool_input: dict, cwd: str) -> bool:
-    """True when the call holds an act no owner override pass lifts (decision owner-override-pass): a
+def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
+    """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
-    worktree-home refusal. refuse() asks this before it spends a pass, because a lifted act ends the
+    worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
     check."""
     if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
@@ -2575,13 +2575,13 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
-    guard_core.set_pass_veto(lambda: never_passed(payload, tool, tool_input, cwd))
+    guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
 
-    # 9. The agent model floor. A spawn that names a Haiku model is denied. The reason names no
+    # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
@@ -2592,7 +2592,7 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9c. The Opus ceiling: a spawn on Opus with no standing word asks. An override pass or an Opus
+    # 9c. The Opus ceiling: a spawn on Opus with no standing grant asks. An override or an Opus
     # pass for the spawn's role lifts it. A spawn with no role runs general-purpose.
     opus_model = opus_spawn_hit(tool, tool_input)
     if opus_model:
@@ -2649,7 +2649,7 @@ def judge(payload) -> None:
         return
 
     # Every non-empty string path field the call carries is judged, so a decoy in one field hides
-    # no denied path, and an ask on one field masks no deny on another: every deny (0b, 5, 7)
+    # no refused path, and an ask on one field masks no refusal on another: every refusal (0b, 5, 7)
     # runs over all fields, then the 7b notes, then the 8 asks (docs/decisions/builders-cannot-edit-tests.md,
     # "Judge the result").
     targets = write_targets(tool_input)
@@ -2679,7 +2679,7 @@ def judge(payload) -> None:
         if is_project_config(target, cwd):
             record(tool, "noted", "config-edit", target)
     for target in targets:
-        # 8. The agent model cap. Rule 7 already denied the config directory's own settings, so
+        # 8. The agent model cap. Rule 7 already refused the config directory's own settings, so
         # only a project-scoped or clone-scoped settings file reaches here. The content read is what
         # the tool would WRITE, so a file that carries the variable name anywhere in that content
         # asks, a permission string or a comment line included. That is an over-ask and it stays:
@@ -2711,9 +2711,9 @@ def main() -> None:
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
-        guard_core.set_pass_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
     except Exception:
-        pass  # a guard_core without the setter has no pass: every refusal stands
+        pass  # a guard_core without the setter has no override: every refusal stands
     try:
         judge(payload)
     except SystemExit:

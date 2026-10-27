@@ -449,7 +449,7 @@ def _pattern_words(words, position: int, command: str):
 def _assignment_end(words, position: int) -> int:
     """Return the index after the `VAR=value` assignment that starts at `position`. A quoted value
     with a space (`ADMINS='Shivam Semwal'`) spans several words, and its tail must not read as the
-    command word. MEASURED: 29 false `env-file` denies named an author's surname as the command."""
+    command word: read as one, an author's surname gave 29 false `env-file` refusals."""
     quote = next((c for c in "'\"" if words[position].partition("=")[2].count(c) % 2), "")
     end = position
     while quote and end + 1 < len(words):

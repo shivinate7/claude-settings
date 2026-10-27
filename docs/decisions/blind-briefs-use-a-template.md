@@ -14,7 +14,7 @@ the mold". Roadmap step c109 (a blind design brief cannot carry today's screen) 
 - An explore run keeps at least one blind lane. Each informed and directed brief says so in a
   `Blind lanes: <n>` line, or carries `Blind lanes: none, owner: "<the owner's words>"`.
 - `hooks/blind_brief.py` holds the check. Skill `design-explore` runs it with `--run` over the folder of
-  the run's briefs, with today's view names. As a PreToolUse hook on Agent and Task, it denies a
+  the run's briefs, with today's view names. As a PreToolUse hook on Agent and Task, it refuses a
   designer spawn whose brief fails, with rule `blind-brief`. A designer brief with no kind line is a
   small change outside the skill, and passes.
 - Skill `design-review`, Mockup set check: a design reviewer gives each mockup a structure verdict,
@@ -34,7 +34,7 @@ paraphrase. The check refuses a view name only when the orchestrator passes it w
 The spawn hook does not know view names. The
 `Blind lanes:` line is the orchestrator's own count, not a count of spawned lanes.
 
-Cost: one python start per Agent or Task call. It writes no file but the guard.log line of a deny.
+Cost: one python start per Agent or Task call. It writes no file but the guard.log line of a refusal.
 
 Protected by `hooks/test_blind_brief.py`, with the Duo brief as the red-first fixture.
 

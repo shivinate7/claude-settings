@@ -474,7 +474,7 @@ export const lookAlikes = ({ nodes }, sources) => {
   return { names, families, hidden: [...defs].filter(([, f]) => f.length > 1).length - names.length };
 };
 
-// The rulings. Each decision entry, with the checks it lists
+// The rulings. Each decision record, with the checks it lists
 // (its prose names them, or a check's call or comment block cites it), sorted, and the checks its `Held by:` line holds. A numbered entry comes first, by number. A pending entry (id `pending`) comes after, by slug.
 export const rulingProof = (index) => {
   const num = (e) => Number(String(e.id).match(/\d+/)?.[0] ?? Infinity);

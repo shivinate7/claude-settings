@@ -285,6 +285,8 @@ jobs:
       - name: Glossary homes and avoided names
         run: python3 lint/check_glossary.py
 
+      - name: Retired names, one word per meaning
+        run: python3 lint/test_retired_names.py
       # No scope gate: the suite reads the skill's .md templates, and a .md-only change must run it too.
       - name: project-ops skill scaffold suite
         run: python3 skills/project-ops/tests/test_scaffold.py

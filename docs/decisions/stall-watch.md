@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The session learns within minutes that a background command stalled, and diagnoses the cause. The Stop-time check lists stalled shells and never blocks.
+The session learns within minutes that a background command stalled, and diagnoses the cause. The Stop-time check lists stalled shells and never refuses.
 When the stall is reported, the stuck command keeps running. Reason: a `playwright install` hung unnoticed behind a
 stale cache lock, and the report names the lock file. A stop on a timer would kill a slow but healthy job
 and lose the state that explains the stall. A polling timer in the session is refused by the `waiter`
@@ -25,8 +25,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   exit code from the job, even a healthy silent one such as `python3 hooks/test_guard.py` (owner ruling,
   2026-10-18 15:15 CDT).
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
-  of the session. The guard denies a stop of a process outside the session, unless the owner's override
-  pass covers it (`owner-override-pass`, the owner's typed pass).
+  of the session. The guard refuses a stop of a process outside the session, unless the owner's override
+  covers it (`owner-override`, the owner's typed override).
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line every 120 seconds.
@@ -50,7 +50,7 @@ command names must be quiet too. A relative log resolves against the call record
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
 the shell or tell the owner.
 
-The hook exits 0 and never blocks. A crash never refuses a call, as advisory hooks stay fail-open
+The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`gate-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
 one home (`building-one-home-per-capability`).
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against six rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label or a Markdown table, and never blocks. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against six rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -27,7 +27,7 @@ first judged rule id the reason names, else `reply-judge`; matched = `stop=<n> <
 advisor reads these at each cull. guard_core loads only on a finding. A failed write is swallowed.
 
 Fail open. Any model error, timeout or odd answer prints one line on stderr, exits 0, and
-blocks nothing. A finding never blocks: the hook runs async, and a finding prints
+refuses nothing. A finding never refuses: the hook runs async, and a finding prints
 `{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": NOTE}}` on stdout, which the
 session reads as a note on the next turn.
 """
@@ -77,7 +77,7 @@ INSTRUCTIONS = (
     "Never flag a pick that cannot be undone, such as a merge, a deploy, a delete with no copy, spend or a message to a person. "
     "Never flag a pick that changes the owner's goal: what to build, a product's scope, or what the owner wants. "
     "Never flag work in another repo. "
-    "Never flag a pick another rule keeps for the owner's word, such as a model switch or a stale decision. "
+    "Never flag a pick another rule keeps for the owner's grant, such as a model switch or a stale decision. "
     "Running background work never makes a reply unfinished. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."

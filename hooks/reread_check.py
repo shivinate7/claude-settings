@@ -4,10 +4,10 @@
 Modes:
 - --post-compact: After compaction, sets the session's flag that its handoff is not read.
 - --pre-read: Before a Read, clears the session's flag that its handoff is not read, when the
-  file is that handoff. Never denies the read. A payload with `agent_id` (the hook
+  file is that handoff. Never refuses the read. A payload with `agent_id` (the hook
   fired inside an agent) clears nothing: only the session's own Read counts.
 - --stop: At Stop, while the session's flag that its handoff is not read is set and the
-  handoff exists, blocks once per turn and names the handoff path.
+  handoff exists, refuses once per turn and names the handoff path.
 
 Spec: docs/decisions/precompact-handoff.md, item 9. One flag file per session,
 <config dir>/state/handoff/<session_id>.reread. Three modes, JSON on stdin:
@@ -15,11 +15,11 @@ Spec: docs/decisions/precompact-handoff.md, item 9. One flag file per session,
   --post-compact (PostCompact)  sets the flag.
   --pre-read (PreToolUse, Read)  clears the flag when file_path is the session's own
       handoff, spelled as a full path, with forward slashes, as a short or long Windows
-      name, or as ~/.claude/.... Never denies the read.
+      name, or as ~/.claude/.... Never refuses the read.
   --stop (Stop)  with the flag set and the handoff file present, prints
       {"decision": "block", "reason": ...} naming the handoff path. Exits quietly on
       stop_hook_active, so it cannot loop. The flag stays set until the handoff is read,
-      so it blocks once per turn. SessionEnd (clear) deletes the flag.
+      so it refuses once per turn. SessionEnd (clear) deletes the flag.
 
 Never exits 2: bad stdin, a failed import of the sibling precompact_handoff, and every
 other failure exit 0.

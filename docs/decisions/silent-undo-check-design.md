@@ -41,7 +41,7 @@ fail by its timestamp, and a commit-count floor read old main work that a branch
 **Required or advisory.** The check is required here, where lanes are short and land through integration
 batches. It is advisory in a repo whose long-lived lanes merge main in and then edit main's lines.
 Advisory means that the check runs and prints its flags. The batch reviewer marks each flag real or
-deliberate, and a real flag blocks the merge. It moves to required when a rule separates a deliberate
+deliberate, and a real flag stops the merge. It moves to required when a rule separates a deliberate
 edit of main's lines from a stale overwrite, with every incident fixture still red.
 
 **The stale green PR.** An older PR overwrites a newer change to the same file. `merge/merge.py` runs the

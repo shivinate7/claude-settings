@@ -16,7 +16,7 @@ agents, and both run Opus.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
   step, after the blind list is complete (`design-skills`).
-- Opus is a standing word for both roles, a class-level exception to `roles-sonnet-is-the-ceiling`,
+- Opus is a standing grant for both roles, a class-level exception to `roles-sonnet-is-the-ceiling`,
   with no proof run first. The model table is in `agent-model-cap`.
 - Deferred: whether the designer runs Claude Code's `/design` canvas itself, or the owner runs it.
   Until the owner rules, the designer draws HTML mockups only.

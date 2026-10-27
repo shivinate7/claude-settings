@@ -19,7 +19,7 @@ Probe run 2026-10-21. Claude Code 2.1.296, Windows 11, NTFS.
 - A suffix pattern, such as `*.md`, matches by suffix. It matches in any folder, and outside the cwd.
 - A suffix pattern is per tool. An `Edit(...)` rule does not fire for Write.
 - A suffix pattern is case-sensitive. `*.md` misses `README.MD`.
-- A missing hook script exits 127. Exit 127 does not block.
+- A missing hook script exits 127. Exit 127 does not refuse.
 
 Kind: process
 Home: settings.json
