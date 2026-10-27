@@ -32,7 +32,7 @@ from guard_env import _substitutions
 #
 # Rule `shared-trees-no-machine-wide-kill`: never kill a process you did not start. A kill BY NAME
 # or BY PATTERN reaches every matching process on the machine, including another agent's dev
-# server, another person's worker, and the editor itself.
+# server, another person's agent, and the editor itself.
 #
 # A KILL BY PID NAMES ONE PROCESS, so the name rules below pass it. It is judged by OWNERSHIP
 # instead: see `foreign_pid_kill`. `taskkill /PID` and `Stop-Process -Id` are the same act under
@@ -583,7 +583,7 @@ def _ps_env_set(tokens, watch) -> str:
 
 
 # Decision playwright-install-once (one Playwright browser install, Node 22 cli.js form, never a
-# subagent). `install` below is "main" or "sub" in install mode: the same walk then runs, with the
+# agent). `install` below is "main" or "sub" in install mode: the same walk then runs, with the
 # install test as its leaf in place of the PLAYWRIGHT_BROWSERS_PATH tests.
 _PW_RUNNERS = ("npx", "pnpm", "yarn", "bunx", "bun", "npm")
 _PW_NAMES = ("playwright", "playwright-core", "@playwright/test")
@@ -815,10 +815,10 @@ GIT_ENV_REASON = (
 )
 
 
-def playwright_install_hit(stripped: str, subagent: bool) -> str:
+def playwright_install_hit(stripped: str, agent: bool) -> str:
     """Judge a command for a Playwright browser install (see playwright-install-once)."""
     for segment in split_segments(stripped):
-        hit = playwright_path_hit(segment, install="sub" if subagent else "main")
+        hit = playwright_path_hit(segment, install="sub" if agent else "main")
         if hit:
             return hit
     return ""
@@ -826,7 +826,7 @@ def playwright_install_hit(stripped: str, subagent: bool) -> str:
 
 PLAYWRIGHT_INSTALL_REASON = (
     "the Playwright browsers are shared in ~/Library/Caches/ms-playwright, and a parallel install "
-    "fights over its lock. A subagent asks the orchestrator for the install. The orchestrator "
+    "fights over its lock. An agent asks the orchestrator for the install. The orchestrator "
     "installs once, with `npx -y node@22 node_modules/playwright/cli.js install`."
 )
 

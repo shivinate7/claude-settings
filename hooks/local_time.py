@@ -8,11 +8,11 @@ Modes:
   A prompt whose first word is `override` also grants a one-act owner override pass, and the rest is the
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
   (decision owner-override-pass; hooks/override_pass.py). It prints one more line.
-- --subagent: At SubagentStart, gives the subagent the time in US Central as context.
+- --agent: At SubagentStart, gives the agent the time in US Central as context.
 
 Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
 Plain stdout is context for UserPromptSubmit. SubagentStart takes context only as JSON, so
-`--subagent` prints `hookSpecificOutput` with `additionalContext` (Claude Code hooks reference).
+`--agent` prints `hookSpecificOutput` with `additionalContext` (Claude Code hooks reference).
 The US rule is coded here, not read from zoneinfo: Windows Python often has no tz database.
 Advisory, fail-open: any error prints one stderr line and exits 0.
 
@@ -32,7 +32,7 @@ While open, each prompt is appended verbatim to <config dir>/handoffs/<session_i
 backtick fence longer than any backtick run in the text. Open state is the marker file
 <session_id>.inbox.open beside it; its text is the time of the last captured message. `is_open` is the
 one home of "is capture open": feedback_gate.py and precompact_handoff.py call it. LOCAL_TIME_NOW
-(ISO-8601 with an offset) replaces the clock; tests set it. `--subagent` never reads stdin and never
+(ISO-8601 with an offset) replaces the clock; tests set it. `--agent` never reads stdin and never
 captures. The gate that reads the inbox is feedback_gate.py.
 """
 import json
@@ -204,15 +204,21 @@ def grant_override(raw, at):
         print("local_time: override pass: %s" % e, file=sys.stderr)
 
 
+OLD_FLAG_ENDS = "2026-11-09"
+
+
 def main(argv):
     try:
         now = clock()
         stamp = text = line(lambda: now)
-        if "--subagent" in argv:
+        # `--subagent` is the flag's old name, kept until OLD_FLAG_ENDS for a session that read its
+        # hook list before the rename. Delete it on that day.
+        agent = "--agent" in argv or "--subagent" in argv
+        if agent:
             text = json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
                                                       "additionalContext": text}})
         print(text)
-        if "--subagent" not in argv:
+        if not agent:
             raw = sys.stdin.buffer.read()
             grant_override(raw, now)
             capture(raw, stamp[len("Local time: "):], now)

@@ -222,5 +222,57 @@ class RepoGlossaryTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
+# o13 lane B retired these names (GLOSSARY.md rows agent, mutation test, red run, command). Claude
+# Code's own names stay: the hook events, `subagent_type`, the CLAUDE_CODE_* settings keys and the
+# `subagents/` transcript folder. Two old names stay readable until their end day, each in one file:
+# the `--subagent` flag of local_time.py and the `_subagentCapUntil` field of config_watch.py.
+RETIRED = (r"(?i)sub-?agent|harness[-_ ]scope|HARNESS_SCOPE|mutation harness|AUTHOR_HARNESS"
+           r"|ask-steps-run-alone|\b(?:ask|count|harmless|background)_steps?\b|\b(?:ask|harmless|chained) steps?\b"
+           r"|roles-one-role-per-worker|output-never-echo-worker-report|worker_transcript"
+           r"|WORKER_FOLDED_KEYS|(?i:red[- ]proof)")
+PLATFORM = (r"SubagentStop|SubagentStart|subagent_type|(?:\\u0043|C)LAUDE_CODE_\w+"
+            r"|[\"'/`]subagents(?=[\"'/`])|subagents/|SUBAGENT_MODEL")
+STAYS = {  # path: the one old name it may still hold, and why
+    "hooks/local_time.py": "--subagent",            # read until OLD_FLAG_ENDS
+    "hooks/config_watch.py": "_subagentCapUntil",   # read until OLD_NAME_ENDS
+    "hooks/test_local_time.py": "--subagent",       # pins the old flag until then
+    "hooks/test_config_watch.py": "_subagentCapUntil",
+    "testing/skip-locally-fail-in-ci.test.mjs": "Red proof",  # header shared with copies in other repos
+    "lint/test_find_copies.py": "Red proof",        # the fixture copy of that header
+    "mods/plain-diff/docs/mockup.html": "red proof",  # sample diff text
+}
+SKIP = ("skills/impeccable/", "lint/test_check_glossary.py", "GLOSSARY.md")  # GLOSSARY names them as "Not"
+
+
+class RepoRetiredNamesTests(unittest.TestCase):
+    def test_no_retired_name_in_tracked_files(self):
+        """Every tracked path and text file: no name o13 lane B retired, outside the platform's own."""
+        import re
+        root = os.path.dirname(HERE)
+        listed = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True,
+                                encoding="utf-8")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        retired, platform = re.compile(RETIRED), re.compile(PLATFORM)
+        found = []
+        for rel in listed.stdout.splitlines():
+            if rel.startswith(SKIP):
+                continue
+            if retired.search(rel):
+                found.append("%s: the path" % rel)
+            try:
+                with open(os.path.join(root, rel), encoding="utf-8") as f:
+                    text = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            text = platform.sub("", text)
+            if rel in STAYS:
+                text = text.replace(STAYS[rel], "")
+            for number, line in enumerate(text.splitlines(), 1):
+                hit = retired.search(line)
+                if hit:
+                    found.append("%s:%d: %s" % (rel, number, hit.group(0)))
+        self.assertEqual(found, [], "\n".join(found[:40]))
+
+
 if __name__ == "__main__":
     unittest.main()

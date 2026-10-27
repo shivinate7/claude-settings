@@ -18,7 +18,7 @@ Contract, from decision gate-hooks-fail-closed:
 - Advisory entries (SessionStart, Stop, PreCompact, SessionEnd, PostToolUse, SubagentStop) exit 0
   when their script is missing, and carry no `onFailure`.
 - CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL in `env`.
-- From decision subagent-model-cap, `env` holds CLAUDE_CODE_SUBAGENT_MODEL = "sonnet" and
+- From decision agent-model-cap, `env` holds CLAUDE_CODE_SUBAGENT_MODEL = "sonnet" and
   CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH = "1", both as strings.
 - Python launcher: every command hook that runs a script through a `g="..."` assignment never
   execs a python candidate whose `command -v` path contains `/WindowsApps/`. The Microsoft Store
@@ -205,11 +205,11 @@ def check_advisory_no_onfailure():
     return not bad, "onFailure on advisory events: %s" % bad
 
 
-def check_env_subagent_model():
+def check_env_agent_model():
     env = load().get("env", {})
     w = env.get("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
     s = env.get("CLAUDE_CODE_SUBAGENT_MODEL")
-    return w is not None and w == s, "workflow=%r subagent=%r" % (w, s)
+    return w is not None and w == s, "workflow=%r agent=%r" % (w, s)
 
 
 def check_env_equals(key, want):
@@ -333,7 +333,7 @@ SPLIT_MUTANT = (
 # POWERSHELL_CALL, judge, mask_script and session_is_live.
 GUARD_NAMES = (
     "CAP_MAX_CHANGE", "CAP_MAX_PATH", "CAP_MAX_VALUE", "PROJECT_FROZEN_FILES", "SHELL_TOOLS",
-    "SUBAGENT_CAP_KEY", "WRITE_TOOLS", "_cap_reading", "_force_utf8_streams", "_resolved",
+    "AGENT_CAP_KEY", "WRITE_TOOLS", "_cap_reading", "_force_utf8_streams", "_resolved",
     "_shell_write_hit", "cap_change", "cap_change_parts", "cap_safe", "config_dir",
     "is_settings_file", "log_path_and_text", "re", "record", "strip_heredoc_bodies",
     "write_content_parts", "CONFIG_FROZEN_DIRS", "is_project_config", "project_config_shell_hit",
@@ -613,7 +613,7 @@ def build_cases():
     cases.append(("launcher alias-only advisory: exit 0, no ALIAS", check_alias_only_advisory))
     cases.append(("no advisory entry carries onFailure", check_advisory_no_onfailure))
     cases.append(("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL",
-                  check_env_subagent_model))
+                  check_env_agent_model))
     cases.append(("CLAUDE_CODE_SUBAGENT_MODEL is \"sonnet\"",
                   check_env_equals("CLAUDE_CODE_SUBAGENT_MODEL", "sonnet")))
     cases.append(("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is \"1\"",

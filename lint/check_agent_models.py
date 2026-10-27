@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails if an agent or skill file sets a Haiku model in its frontmatter.
 
-The guard's subagent-model-floor rule reads the model a spawn names. An agent file's own
+The guard's agent-model-floor rule reads the model a spawn names. An agent file's own
 `model:` key names no model in the tool input, so the guard never sees it. This check reads
 the files instead. Sonnet is the floor, except for the agent files named in
 the guard's HAIKU_ROLES.

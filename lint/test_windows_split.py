@@ -4,12 +4,12 @@
 Proves: (1) each suite command in REQUIRED runs in exactly one `windows-latest` job (none
 dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry those suites.
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
-slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation harness has its own
+slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
 Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag.
 
 Why not rule_audit.py: it reads step names only. This needs job boundaries and `run:` lines.
 Line-based parse, stdlib only, like rule_audit. Only single-line `run: <cmd>` steps count.
-GATES_YML overrides the path (used for red proofs on a scratch copy).
+GATES_YML overrides the path (used for red runs on a scratch copy).
 
 CiCoverage (last class) also proves every test_*.py, test_*.sh and *.test.ps1 file has a run step.
 
@@ -115,7 +115,7 @@ def shard_base(name):
     return m.group(1) if m and m.group(1) in SHARD_VAR else None
 
 
-# The guard mutation harness moves off `gates` (Linux) to its own Linux job (cut F).
+# The guard mutation test moves off `gates` (Linux) to its own Linux job (cut F).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "gates-mutate-guard"
 # The bin/shoot suite and its browser install have their own Linux job, off the `gates` lint job.
@@ -181,7 +181,7 @@ def placement_problems(text):
 
 # Steps whose `shell:` is pinned. Any other REQUIRED step must set none.
 SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_action.sh": "bash"}
-# Steps whose whole `if:` is pinned (the harness must stay off pull_request and on its scope flag).
+# Steps whose whole `if:` is pinned (the mutation test must stay off pull_request and on its scope flag).
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}",
           # The full merge suite runs on every event but pull_request; the slice only on it.
@@ -339,7 +339,7 @@ def guard_problems(text):
 
 
 def mutate_problems(text):
-    """Cut F. The guard mutation harness runs in MUTATE_JOB on Linux, and in no other job."""
+    """Cut F. The guard mutation test runs in MUTATE_JOB on Linux, and in no other job."""
     jobs = all_jobs(text)
     homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == MUTATE_CMD]
     problems = []
@@ -382,8 +382,8 @@ class WindowsSplit(unittest.TestCase):
     def test_each_suite_runs_exactly_once(self):
         bad = [p for p in placement_problems(self.text) if "times" in p]
         self.assertEqual(bad, [])
-        # The mutation harness is placed
-        # once in its own job. Named failure: a harness dropped or doubled, so mutants go unrun.
+        # The mutation test is placed
+        # once in its own job. Named failure: a mutation test dropped or doubled, so mutants go unrun.
         self.assertEqual(mutate_problems(self.text), [])
 
     def test_the_shoot_suite_has_its_own_required_job(self):
@@ -526,7 +526,7 @@ class WindowsSplit(unittest.TestCase):
 
     def test_gates_sets_no_guard_family(self):
         self.assertEqual([p for p in guard_problems(self.text) if "GUARD_FAMILY" in p], [])
-        # The red proof: the checker flags a
+        # The red run: the checker flags a
         # guard family set in gates. Named failure: a guard family runs in gates and CI goes green.
         bad = [p for p in guard_problems(self.text + "\n# GUARD_FAMILY=shared-tree\n") if "GUARD_FAMILY" in p]
         self.assertTrue(bad)

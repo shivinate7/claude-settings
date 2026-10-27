@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for bin/ios-ship, both jobs. CI runs this under /bin/bash (3.2) and under bash on PATH (shell-macos job).
-# IOS_SHIP=PATH picks the script under test; the default is bin/ios-ship in this repo. A red proof points it at a mutant.
+# IOS_SHIP=PATH picks the script under test; the default is bin/ios-ship in this repo. A red run points it at a mutant.
 # Every case builds a throwaway world in one run folder: a bare origin, a clone, a config, and stubs on PATH for
 # xcodebuild, xcodegen, xcrun, osascript, date, cp and git. The tool runs from its own clean repo, away from the fixture.
 # Temp files follow decisions/test-temp-standard.md: one run folder <pid>-<UUID> under one temp root, and the first

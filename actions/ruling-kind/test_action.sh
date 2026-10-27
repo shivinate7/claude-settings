@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Red and green proof for actions/ruling-kind. Each case builds a fixture repo (a bare remote,
+# Red and green runs for actions/ruling-kind. Each case builds a fixture repo (a bare remote,
 # main, and topic branches) and runs check.sh inside it, as action.yml does.
 #  - declared-record-passes: the topic diff holds only the declared record. A pass alone proves
 #    nothing (a lint that read no records also passes), so two sub-checks follow it:

@@ -7,14 +7,17 @@ that the repo has rolled out to the layout. Its "waiting-page" key holds the URL
 waiting page (`waiting_page()`, skill waiting-page).
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
-layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. Cause: each repo moves its own files in its own
-roll-out (owner, Oct 17). The last roll-out deletes "legacy", `legacy()`, `candidates()` and the
-branch in `path()`.
+layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. A kind
+that one repo holds somewhere of its own (q_max's specs/todo.md) sits in "legacy-repos" under the
+repo's GitHub name, rolled out or not, and that repo's extras file may repeat it but not move it.
+Cause: each repo moves its own files in its own roll-out (owner, Oct 17). The last roll-out deletes
+"legacy", "legacy-repos", `legacy()`, `legacy_repos()`, `unmoved()`, `candidates()` and the branches in `path()`.
 
 Standard library only, and safe to import: it reads files only when a function is called.
 """
 import json
 import os
+import re
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.path.basename(LAYOUT_FILE))
@@ -57,6 +60,8 @@ def kinds(root=None):
     found = {name: dict(kind) for name, kind in layout()["kinds"].items()}
     if root is not None and rolled_out(root):
         for name, kind in _read(_extras(root))["kinds"].items():
+            if name in found and kind["path"].strip("/") in _kept(name):
+                continue  # the extras file repeats a place legacy-repos keeps this kind
             if name in found:
                 raise LayoutError("%s: kind %s is in the layout already" % (_extras(root), name))
             _safe(kind["path"], _extras(root))
@@ -70,9 +75,88 @@ def legacy(name):
     return layout().get("legacy", {}).get(found, found)
 
 
+# github.com in https, ssh and scp form, and the /git/<owner>/<name> path of a cloud session's git proxy.
+GITHUB = re.compile(r"(?:^|[/@])github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$|/git/([^/\s]+/[^/\s]+?)(?:\.git)?/*$")
+
+
+def _common_dir(root):
+    """The git folder that holds the config of the checkout at `root`, a linked worktree too, or None."""
+    found = os.path.join(root, ".git")
+    if os.path.isfile(found):
+        with open(found, encoding="utf-8", errors="replace") as handle:
+            line = handle.read().strip()
+        if not line.startswith("gitdir:"):
+            return None
+        found = os.path.join(root, line[len("gitdir:"):].strip())
+        try:
+            with open(os.path.join(found, "commondir"), encoding="utf-8", errors="replace") as handle:
+                found = os.path.join(found, handle.read().strip())
+        except OSError:
+            pass  # a git dir with no commondir file is its own common dir
+    return found if os.path.isdir(found) else None
+
+
+def repo_name(root):
+    """`owner/name` of the GitHub origin of the checkout at `root`, lowercased, from git's config file
+    with no process started. None when it has no git folder, no origin or an origin off GitHub."""
+    try:
+        folder = _common_dir(root)
+        if folder is None:
+            return None
+        with open(os.path.join(folder, "config"), encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except (OSError, ValueError):  # ValueError: a path with a NUL byte
+        return None
+    section = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            section = line
+        elif section == '[remote "origin"]' and re.match(r"url\s*=", line):
+            hit = GITHUB.search(line.split("=", 1)[1].strip())
+            return (hit.group(1) or hit.group(2)).lower() if hit else None
+    return None
+
+
+def legacy_repos():
+    """{owner/name: {kind: path}} from the layout's "legacy-repos", keys lowercased. LayoutError when an
+    entry names a kind the layout has not, or a path outside the repo."""
+    found, names = layout().get("legacy-repos", {}), layout()["kinds"]
+    if not isinstance(found, dict) or not all(isinstance(entry, dict) for entry in found.values()):
+        raise LayoutError("%s: legacy-repos is not {repo: {kind: path}}" % LAYOUT_FILE)
+    for repo, entry in found.items():
+        for name, where in entry.items():
+            if name not in names:
+                raise LayoutError("%s: legacy-repos %s names kind %s, which the layout has not" % (LAYOUT_FILE, repo, name))
+            if not isinstance(where, str) or not where.strip("/"):
+                raise LayoutError("%s: legacy-repos %s kind %s has no path" % (LAYOUT_FILE, repo, name))
+            _safe(where, "%s: legacy-repos %s" % (LAYOUT_FILE, repo))
+    return {repo.lower(): entry for repo, entry in found.items()}
+
+
+def _kept(name):
+    """Every path legacy-repos keeps kind `name` at, in any repo."""
+    return {entry[name].strip("/") for entry in legacy_repos().values() if name in entry}
+
+
+def unmoved(root):
+    """{kind: path} for each kind the repo at `root` still holds where legacy-repos says: by its
+    origin's name, else by its extras file repeating one of those paths (an origin may be unreadable)."""
+    name = repo_name(root)
+    found = {kind: where.strip("/") for kind, where in (legacy_repos().get(name, {}) if name else {}).items()}
+    if rolled_out(root):
+        for kind, entry in _read(_extras(root))["kinds"].items():
+            if kind not in found and isinstance(entry, dict) and entry["path"].strip("/") in _kept(kind):
+                found[kind] = entry["path"].strip("/")
+    return found
+
+
 def path(root, name):
-    """The path of kind `name` in `root`, relative to it, with `/` separators: the layout path in a
-    rolled-out repo, else the legacy path."""
+    """The path of kind `name` in `root`, relative to it, with `/` separators: the repo's legacy-repos
+    path when it has one, else the layout path in a rolled-out repo, else the legacy path."""
+    kept = unmoved(root).get(name)
+    if kept:
+        return kept
     if rolled_out(root):
         return kinds(root)[name]["path"].strip("/")
     return legacy(name)

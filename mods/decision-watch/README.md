@@ -6,7 +6,7 @@ A mod. It runs the decision watch on each completed turn (`turn.complete`) with 
 
 - On each main-loop turn (`turn.complete`), the mod finds the transcript from the session id, read on each turn, and the cwd. The lookup waits at most 0.5 s and runs in the background. A lookup that passes the limit, or an id that cannot be read, logs a SKIP line and judges nothing.
 - It writes one "STOP seen" line to the log. The handler waits at most 500 ms for that line, then returns the turn. The judging runs in the background.
-- A subagent turn (`agentId` set) is skipped. A turn with `isAborted` set, or a reason other than `answer`, is skipped with a SKIP line. A turn with no transcript logs a SKIP line.
+- An agent turn (`agentId` set) is skipped. A turn with `isAborted` set, or a reason other than `answer`, is skipped with a SKIP line. A turn with no transcript logs a SKIP line.
 - One judge runs at a time. A turn that arrives during a judge logs "SKIP busy" and does not judge.
 - The judging uses `hooks/decision_watch.py` in your Claude config folder, in two steps.
   1. `--emit-prompt` runs the cheap path. It prints a prompt only when a model call is due.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fails when docs/decisions/subagent-model-cap.md lacks one row per skill under skills/.
+"""Fails when docs/decisions/agent-model-cap.md lacks one row per skill under skills/.
 
 The model-per-role table has one row per skill, each saying
 "no model pin; runs on the caller's model". A skill is a folder directly under skills/ that
@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 
-RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "subagent-model-cap.md")
+RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
 SKILLS = os.path.join(ROOT, "skills")
 ROW = re.compile(r"^\|\s*skill `([^`]+)`\s*\|")
 FENCE = re.compile(r"^(`{3,}|~{3,})")

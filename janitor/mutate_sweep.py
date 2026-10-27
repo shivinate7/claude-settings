@@ -8,7 +8,7 @@ every mutant below or names the ones it does not.
 
 WHY TWO TARGETS, NOT ONE. janitor/sweep.py holds no code of its own for the ancestor test, the
 `git cherry` patch test, the remote-contains test, or the pid-vs-start-time liveness read: it
-calls hooks/guard.py's own tested primitives for each. A harness that only edited sweep.py
+calls hooks/guard.py's own tested primitives for each. A mutation test that only edited sweep.py
 could touch none of those four protections. So a mutant carries a TARGET ("sweep" or "guard")
 and this file mutates a copy of whichever file holds the line.
 
@@ -21,12 +21,12 @@ arm reads it.
 WHY A SCAFFOLD DIRECTORY, NOT AN ENV VAR. hooks/test_guard.py and hooks/test_config_watch.py
 each read a `*_UNDER_TEST` environment variable naming the copy to import (see
 hooks/mutate_guard.py's own TARGETS table). janitor/test_sweep.py has no such variable. So this
-harness rebuilds the two-directory shape (`hooks/`, `janitor/`) that `janitor/test_sweep.py`
+mutation test rebuilds the two-directory shape (`hooks/`, `janitor/`) that `janitor/test_sweep.py`
 computes its own import path from (`HERE = dirname(test_sweep.py)`, `REPO_ROOT = dirname(HERE)`,
 `sys.path.insert(0, REPO_ROOT/hooks)`) inside a fresh temporary directory per mutant, and
 copies the REAL `janitor/test_sweep.py` into it byte for byte. Running that copy from that
 scaffold makes `import sweep` and `import guard` resolve to whichever copies -- mutated or
-real -- this harness placed next to it. The real `janitor/test_sweep.py` on disk is never
+real -- this mutation test placed next to it. The real `janitor/test_sweep.py` on disk is never
 touched, and nothing is left behind: see `run_mutant` and `main`'s `finally`.
 
 A MUTATION WHOSE ANCHOR TEXT IS NOT FOUND is STALE and fails loudly, the same rule
@@ -1394,7 +1394,7 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     `import session_end_sweep` to the copies placed here (see the module docstring, "WHY A
     SCAFFOLD DIRECTORY"). Exactly one of guard.py / sweep.py / session_end_sweep.py carries
     `mutated_text`; the rest are the real sources, unchanged. Both suites, and settings.json, are
-    always the real sources: this harness never edits a suite or the real settings.json."""
+    always the real sources: this mutation test never edits a suite or the real settings.json."""
     hooks_dir = os.path.join(scaffold, "hooks")
     janitor_dir = os.path.join(scaffold, "janitor")
     os.makedirs(hooks_dir, exist_ok=True)

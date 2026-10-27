@@ -30,7 +30,7 @@ def list_tests_form(body):
 GUARD_SRC = '''
 def dispatch():
     refuse(tool, "deny", "shared-tree", REASON, matched)
-    refuse(tool, "ask", "subagent-model-cap", REASON, matched)
+    refuse(tool, "ask", "agent-model-cap", REASON, matched)
     record(tool, "noted", "merge-main", matched)
 '''
 
@@ -107,7 +107,7 @@ class RuleAuditTests(unittest.TestCase):
         rule_map = {
             "rules": {
                 "shared-trees-no-destructive-git": {
-                    "mechanism": {"kind": "guard", "ref": "subagent-model-cap"}
+                    "mechanism": {"kind": "guard", "ref": "agent-model-cap"}
                 }
             }
         }
@@ -619,7 +619,7 @@ class CitationTests(unittest.TestCase):
 
 
 # The ids hooks/guard.py writes that the old regex reader (a call with the rule third and a plain
-# name first) never saw: ask_step() ids, a record() after a call, and the two tables.
+# name first) never saw: ask_command() ids, a record() after a call, and the two tables.
 GUARD_IDS_THE_REGEX_MISSED = (
     "force-push", "bare-merge", "guard-crash", "builder-test-edit", "test-author-scope",
     "record-writer-scope", "author-diff", "builder-diff", "writer-diff",
@@ -633,8 +633,8 @@ class GuardRuleNamesTests(unittest.TestCase):
 
     def test_each_call_and_table_shape_that_writes_an_id_is_read(self):
         src = (
-            'ask_step("force-push", REASON, "git push", "forced push")\n'
-            'ask_step("bare-merge", REASON, "gh pr merge 1", "bare merge")\n'
+            'ask_command("force-push", REASON, "git push", "forced push")\n'
+            'ask_command("bare-merge", REASON, "gh pr merge 1", "bare merge")\n'
             'record(str(payload.get("tool_name", "")), "crash", "guard-crash", why)\n'
             'record("SubagentStop", "noted", "role-diff-main-checkout", where)\n'
             'record("SubagentStop", "noted", "role-diff-unresolved", found)\n'
@@ -682,7 +682,7 @@ class GuardRuleNamesTests(unittest.TestCase):
 
     def test_a_keyword_rule_id_is_found_or_the_reader_refuses_it(self):
         self.found_or_loud('refuse(tool, "deny", rule="kw-rule", reason=R, matched=m)\n', "kw-rule")
-        self.found_or_loud('ask_step(rule="kw-ask", reason=R)\n', "kw-ask")
+        self.found_or_loud('ask_command(rule="kw-ask", reason=R)\n', "kw-ask")
 
     def test_an_f_string_rule_id_is_found_or_the_reader_refuses_it(self):
         self.found_or_loud('refuse(tool, "deny", f"fs-{n}", R, m)\n', "fs-")
@@ -700,7 +700,7 @@ class EmittedRuleIdsTests(unittest.TestCase):
         refuse = 'refuse(tool, "deny", "%s", REASON, matched)\n'
         return {
             os.path.join("hooks", "guard.py"): refuse % "main-rule",
-            os.path.join("hooks", "guard_x.py"): 'ask_step("sibling-rule", R, "m", "l")\n',
+            os.path.join("hooks", "guard_x.py"): 'ask_command("sibling-rule", R, "m", "l")\n',
             os.path.join("hooks", "test_guard.py"): refuse % "test-only-rule",
             os.path.join("lint", "_transcript.py"): 'X = 1\n',
         }

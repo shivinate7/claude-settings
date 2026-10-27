@@ -10,7 +10,7 @@ The owner declined each candidate below. A session that proposes one again first
 | Sandbox mode | Every network host and tool needs an allow entry. The guard, deny rules and frozen paths give most of the gain. | A guard bypass that deny rules and frozen paths do not cover. |
 | destructive_command_guard (dcg) | Too broad for one developer: a second binary, over 50 rule packs mostly for unused tools, open bypass issues, fails open. | Regular use of Docker, Kubernetes, cloud or database CLIs. Copy those few patterns into the guard. |
 | Status line | It renders in the terminal. The owner works in the desktop app. | Daily terminal use. |
-| Public subagent collections (wshobson/agents, VoltAgent) | Persona prompts with generic checklists, no gating checks. Each agent description costs context in every session. | Evidence that a specialist beats a briefed builder or reviewer. |
+| Public agent collections (wshobson/agents, VoltAgent) | Persona prompts with generic checklists, no gating checks. Each agent description costs context in every session. | Evidence that a specialist beats a briefed builder or reviewer. |
 | adr-tools | It numbers records at creation, so branches collide. | None. |
 | Log4brains | It serves human browsing, which is rare here. Agents read decisions by grep. | The owner browses decisions often enough to want a site. |
 | An AI README generator | Generic prose breaks the fewest-words rule. The fresh-prose skill holds the README procedure. | None. |
