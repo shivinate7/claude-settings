@@ -672,6 +672,12 @@
         "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
       }
     },
+    "style-offer-override-line": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Whether a reply offers the printed override line as a ready answer is a content judgment. No check reads that."
+      }
+    },
     "roles-each-layer-proves-once": {
       "mechanism": {
         "kind": "unmechanized",

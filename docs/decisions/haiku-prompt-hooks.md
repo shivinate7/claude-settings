@@ -4,12 +4,13 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 ## The ruling
 
-**Prompt hooks judge rules that no script can parse.** Each refuses the call when it finds a breach (owner ruling 2026-10-07). A prompt hook cannot warn: it answers `ok` and shows nothing, or refuses with a reason. A refusal returns its reason to the session and the turn goes on (`continueOnBlock`). `settings.json` holds one (counted from its `type: prompt` entries). The AskUserQuestion judge is an Opus agent hook, `question-reviewer-agent-hook`.
+**Prompt hooks judge rules that no script can parse.** Each refuses the call when it finds a breach (owner ruling 2026-10-07). A prompt hook cannot warn: it answers `ok` and shows nothing, or refuses with a reason. A refusal returns its reason to the session and the turn goes on (`continueOnBlock`). `settings.json` holds none (counted from its `type: prompt` entries): the Agent and AskUserQuestion judges are one command hook, so an override can lift them.
 
 | Hook on | Rules it judges |
 |---|---|
-| `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit gate of `agent-model-cap` |
+| `Agent` (`hooks/call_judge.py`) | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit gate of `agent-model-cap` |
 
+- The Agent spawn judge and the AskUserQuestion reviewer are one command hook, `hooks/call_judge.py`, so an override can lift them.
 - The SendMessage wording judge is a command hook, `hooks/sendmessage_state.py`, so an override can lift it. It judges `parallelism-no-mid-task-talk` by wording alone.
 - The Edit and Write judge on `docs/decisions/` is a command hook, `hooks/prose_judge.py`, at Haiku `xhigh`. It judges `speak-rewrite-superseded-in-place` and `rulings-declare-kind`.
 - A prompt hook sees only the event's input, never the chat. So no hook judges `style-question-inside-box` or `roles-one-role-per-agent`.
