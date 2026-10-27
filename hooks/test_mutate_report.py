@@ -94,7 +94,7 @@ def scaffold(files):
 def score(files, tests, target="subject.py", limit=40):
     tmp = scaffold(files)
     try:
-        return mutate_shared.score_target(tmp.name, target, tests, limit=limit, timeout=60, jobs=2, git_init=False)
+        return mutate_shared.score_target(tmp.name, target, tests, limit=limit, timeout=60, jobs=2, repo_init=False)
     finally:
         tmp.cleanup()
 
@@ -183,7 +183,7 @@ class PartsTests(unittest.TestCase):
     def test_ast_mutants_cover_the_named_operators(self):
         text = "def f(a, b):\n    if a == b and not a:\n        return True\n    return a\n"
         kinds = " ".join(label for label, _ in mutate_shared.ast_mutants(text, limit=100))
-        for word in ("==", "and", "not", "True", "return"):
+        for word in ("compare Eq", "bool And", "not dropped", "True -> False", "return dropped", "test negated"):
             self.assertIn(word, kinds)
 
     def test_ast_mutants_of_unparsable_source_raise(self):
@@ -204,6 +204,17 @@ class PartsTests(unittest.TestCase):
         self.assertIn("UNKNOWN", line)
         self.assertNotIn("%", line)
         self.assertIn("test_n.py", text)
+
+
+class CliTests(unittest.TestCase):
+
+    def test_report_flag_prints_a_table_and_exits_zero_whatever_the_score(self):
+        import subprocess
+        done = subprocess.run([sys.executable, os.path.join(HOOKS, "mutate_guard.py"), "--report", "--only", "no-such-file"],
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("mutants", done.stdout)
+        self.assertIn("gold standard: unmeasured", done.stdout)
 
 
 if __name__ == "__main__":

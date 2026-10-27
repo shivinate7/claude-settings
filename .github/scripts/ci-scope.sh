@@ -28,7 +28,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
       install.sh|hooks/test_install_src.sh|hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
       hooks/session_start.sh) on="$on $W $R $X $S code guard " ;;
-      hooks/test_mutate_shared.py) on="$on code guard " ;;
+      hooks/test_mutate_shared.py|hooks/test_mutate_report.py) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
       hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_gate.py|lint/ruling_census.py|lint/test_gates.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)

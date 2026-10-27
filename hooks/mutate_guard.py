@@ -26,6 +26,11 @@ root. The suite itself spawns guard.py once per case, which is where the time go
 
 Run:
     python hooks/mutate_guard.py
+
+REPORT MODE (step c95): `python hooks/mutate_guard.py --report [--limit N] [--jobs N] [--only SUBSTR]`
+scores other verdict-deciding files with mechanical mutants (hooks/mutate_shared.py `score_target`)
+and prints, per file, mutants made, killed, kill rate and the suites that killed none. It reads on
+demand and gates nothing: no timer, no CI job.
 """
 
 import os
@@ -1621,6 +1626,52 @@ MUTATIONS = [
 ]
 
 
+# REPORT MODE. File -> the suites that exercise it or name it. A suite not listed here (hooks/test_guard.py,
+# merge/test_merge.py, lint/test_ci_scope.py) is not run against that file: test_guard.py and test_merge.py
+# take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
+# Add a verdict-deciding file here, with the suites that name it, to put it in the report.
+REPORT_TARGETS = [
+    ("lint/report_gate.py", ["lint/test_gates.py", "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
+                             "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
+    ("hooks/feedback_gate.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
+    ("hooks/stall_watch.py", ["hooks/test_stall_watch.py", "hooks/test_stall_watch_stop.py",
+                              "hooks/test_wrappers.py", "lint/test_hook_platform_exit.py",
+                              "janitor/test_session_end_sweep.py", "lint/test_settings_matcher.py"]),
+    ("lint/check_silent_undo.py", ["lint/test_check_silent_undo.py"]),
+]
+# The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
+# one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
+# fails the CI job), which an ast sample of other files cannot be held against.
+REPORT_GOLD = ("hooks/guard_wsl.py", ["hooks/test_guard.py"])
+REPORT_LIMIT = 10  # mutants per file: the slowest suite (hooks/test_stall_watch.py) takes 150 s a run
+
+
+def report_main(argv) -> int:
+    """Print the per-file score table. Exit 0 whatever the scores: a report is not a gate."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --report")
+    parser.add_argument("--report", action="store_true")
+    parser.add_argument("--limit", type=int, default=REPORT_LIMIT)
+    parser.add_argument("--jobs", type=int, default=None)
+    parser.add_argument("--only", default="", help="run only the targets whose path holds this text")
+    args = parser.parse_args(argv)
+    root = os.path.dirname(HERE)
+    rows = []
+    for target, tests in REPORT_TARGETS + [REPORT_GOLD]:
+        if args.only not in target:
+            continue
+        print("scoring %s against %d suites ..." % (target, len(tests)), flush=True)
+        rows.append(mutate_shared.score_target(root, target, tests, limit=args.limit, jobs=args.jobs))
+    gold = [row for row in rows if row["file"] == REPORT_GOLD[0]]
+    note = "unmeasured (not run)" if not gold else (
+        "UNKNOWN (%s)" % gold[0]["reason"] if gold[0]["status"] != "OK"
+        else "%s kills %d%% of its mutants (%s)" % (gold[0]["file"], round(gold[0]["rate"] * 100),
+                                                     ", ".join(REPORT_GOLD[1])))
+    print()
+    print(mutate_shared.format_report(rows, gold=note))
+    return 0
+
+
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
     """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines)."""
     env = dict(os.environ)
@@ -1734,6 +1785,8 @@ def run_mutant(sources, work: str, entry):
 
 
 def main() -> int:
+    if "--report" in sys.argv[1:]:
+        return report_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
