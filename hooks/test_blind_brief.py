@@ -19,7 +19,7 @@ Contract (the module's own docstring):
   the owner's quoted words), is denied with rule `blind-brief`. Any other spawn passes. Junk input
   passes with no output.
 
-The Duo brief below is the incident of 2026-10-26 22:58 CDT (mailaudit Duo mockups). Its four
+The Duo brief below is the incident of decision blind-briefs-use-a-template. Its four
 sentences are the ones the orchestrator quoted from its own brief. It is the red-first fixture.
 
 Override the module under test with the env var BLIND_BRIEF_UNDER_TEST.

@@ -36,6 +36,10 @@ Give a verdict per screen at each size and theme: pass or fail, never a descript
 `unknown` (`verification-report-unknown-reads`). With no mockup for the step, say so, and judge
 against points 2 and 3 only.
 
+In a Mockup set check (skill `design-review`), your brief names a set of mockups and today's screens
+of the same job. Give each mockup one structure verdict, `same` or `new`, as that section defines, and
+name the parts that decide it. Build no verdict table of sizes and themes for it.
+
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, the first line is PASS, FAIL, or PARTIAL. Then give the verdict table, then each finding with
 the screen, size, theme, what is wrong and what proves it. Under Input Needed, list each clash with
