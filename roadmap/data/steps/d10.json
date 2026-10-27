@@ -1,9 +1,9 @@
 {
   "title": "A design exploration spreads its mockups across blind, informed and directed lanes",
   "phase": "design",
-  "status": "review",
+  "status": "done",
   "order": 215,
   "why": "Your view, Oct 27: \"a lot of design work sometimes prefers a lane or two of totally blank and a lane that gets to see the old and then some in between with directed prompts ... to get a good mix of control and idea between the mockups.\"",
-  "note": "Built on PR #661 (designer lanes, draft, head 24257841), waiting to join the integration batch. New skill design-explore: the orchestrator runs two blind lanes, one informed and two directed per explored screen; each mockup is named and labelled by lane kind; the owner culls, and the kept pair becomes <screen>.html for the builder and design reviewer. The mix is a default a brief may change; a small change gets one informed designer. Blindness rests on the brief: nothing blocks a read. The designer's start-up brief line names the lane kinds (test red then green). Two Sonnet review rounds, no blockers left. Port: yes; the agent and skill install everywhere.",
-  "updatedAt": "2026-10-27T02:10:00Z"
+  "note": "Merged to main on PR #661 (designer lanes), Oct 27. New skill design-explore: the orchestrator runs two blind lanes, one informed and two directed per explored screen; each mockup is named and labelled by lane kind; the owner culls, and the kept pair becomes <screen>.html for the builder and design reviewer. The mix is a default a brief may change; a small change gets one informed designer. Blindness rests on the brief: nothing blocks a read. The designer's start-up brief line names the lane kinds (test red then green). Two Sonnet review rounds, no blockers left. Port: yes; the agent and skill install everywhere.",
+  "updatedAt": "2026-10-27T03:12:00Z"
 }
