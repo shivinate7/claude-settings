@@ -862,3 +862,16 @@ test("a blocked card says it cannot be sent, disables its controls, and Copy ans
   await takePick(page, { id: "good" });
   assert.equal(await page.evaluate(() => answerLine()), "43 a");
 });
+
+test("an item with no id field and a duplicate option key is blocked from Send and Copy, and names the key", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "k50": { ...DECISION_NO_ID, n: 50, options: [opt("x"), opt("x")], pick: "x" },
+    "good": { ...DECISION, id: "good", n: 51 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "k50").textContent(), /share the key x/);
+  await page.evaluate(() => { setDraft(byId("k50"), { choice: "x" }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open for a blocked item");
+  assert.equal(await page.evaluate(() => answerLine()), "");
+});

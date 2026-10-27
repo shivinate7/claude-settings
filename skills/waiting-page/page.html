@@ -391,7 +391,6 @@ function draftReady(it) {
 function problem(it) {
   const okN = typeof it.n === "number" && isFinite(it.n);
   const fix = " Ask the session to fix " + (okN ? "item " + it.n : "this item") + ".";
-  if (it.rawId !== it.id) return { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false };
   if (!okN) return { text: "This item has no number, so it cannot be answered." + fix, blocks: true };
   if (it.kind !== "decision" && it.kind !== "task") return { text: "This item is neither a decision nor a task, so it cannot be answered." + fix, blocks: true };
   if (it.kind === "decision") {
@@ -399,9 +398,12 @@ function problem(it) {
     const ks = (it.options || []).map((o) => o && o.key);
     if (!ks.length) return { text: "This decision has no options, so it cannot be answered." + fix, blocks: true };
     if (ks.some((k) => !k)) return { text: "An option of this decision has no key, so it cannot be answered." + fix, blocks: true };
-    if (new Set(ks).size !== ks.length) return { text: "Two options of this decision share a key, so it cannot be answered." + fix, blocks: true };
+    const dup = ks.find((k, i) => ks.indexOf(k) !== i);
+    if (dup !== undefined) return { text: "Two options of this decision share the key " + dup + ", so it cannot be answered." + fix, blocks: true };
     if (ks.includes(NONE)) return { text: "An option of this decision uses the key none, so it cannot be answered." + fix, blocks: true };
   }
+  // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
+  if (it.rawId !== it.id) return { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false };
   return null;
 }
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
