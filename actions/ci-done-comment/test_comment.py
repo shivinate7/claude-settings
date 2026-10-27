@@ -3,11 +3,13 @@
 
 A run with a red job must post one comment that names each red job. A green run, or one whose
 only non-green jobs were skipped, must post nothing. The gates.yml caller must need every other
-job and run when a job failed, or the comment fires before the run ends or never.
+job and run when a job failed, or the comment fires before the run ends or never. Stdlib only:
+the CI runner has no PyYAML.
 Run: python3 actions/ci-done-comment/test_comment.py
 """
 import json
 import os
+import re
 import subprocess
 import unittest
 
@@ -42,33 +44,70 @@ class Body(unittest.TestCase):
         self.assertEqual(got.strip(), "No red job: no comment.")
 
 
+def gates_jobs(text):
+    """{job name: its block text} for each job under `jobs:` in gates.yml. Stdlib only: CI has no PyYAML."""
+    body = text[re.search(r"^jobs:\s*$", text, re.M).end():]
+    marks = list(re.finditer(r"^  ([\w-]+):\s*$", body, re.M))
+    return {m.group(1): body[m.end():(marks[i + 1].start() if i + 1 < len(marks) else len(body))]
+            for i, m in enumerate(marks)}
+
+
+def ci_done_problems(text):
+    """Each way the ci-done job in gates.yml fails to comment once, after every job, on a red run."""
+    jobs = gates_jobs(text)
+    job = jobs.get("ci-done")
+    if job is None:
+        return ["gates.yml has no ci-done job"]
+    out = []
+    needs = re.search(r"^    needs:\s*\n((?:      - [\w-]+\s*\n)+)", job, re.M)
+    got = sorted(re.findall(r"- ([\w-]+)", needs.group(1))) if needs else []
+    if got != sorted(k for k in jobs if k != "ci-done"):
+        out.append("ci-done must need every other job, as a block list")
+    cond = (re.search(r"^    if:\s*(.*)$", job, re.M) or [None, ""])[1]
+    for part in ("!cancelled()", "github.event_name == 'pull_request'", "!github.event.pull_request.draft"):
+        if part not in cond:
+            out.append("ci-done if lacks " + part)
+    if not re.search(r"^      pull-requests:\s*write\s*$", job, re.M):
+        out.append("ci-done lacks pull-requests: write")
+    if not re.search(r"uses:\s*\$/actions/ci-done-comment\s*\n\s*with:\s*\n\s*needs:\s*\$\{\{ toJSON\(needs\) \}\}", job):
+        out.append("ci-done does not pass toJSON(needs) to actions/ci-done-comment")
+    return out
+
+
+GOOD = """jobs:
+  a:
+    runs-on: x
+  ci-done:
+    needs:
+      - a
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: $/actions/ci-done-comment
+        with:
+          needs: ${{ toJSON(needs) }}
+"""
+
+
 class GatesCaller(unittest.TestCase):
-    def setUp(self):
-        try:
-            import yaml
-        except ImportError:
-            if os.environ.get("CI"):
-                raise
-            self.skipTest("PyYAML not installed")
+    def test_gates_yml_ci_done_job(self):
         with open(GATES, encoding="utf-8") as fh:
-            self.jobs = yaml.safe_load(fh)["jobs"]
+            self.assertEqual(ci_done_problems(fh.read()), [])
 
-    def test_needs_every_other_job(self):
-        job = self.jobs.get("ci-done")
-        self.assertIsNotNone(job, "gates.yml has no ci-done job")
-        others = sorted(k for k in self.jobs if k != "ci-done")
-        self.assertEqual(sorted(job["needs"]), others, "ci-done must need every other job")
-
-    def test_runs_after_a_red_job(self):
-        job = self.jobs["ci-done"]
-        cond = job.get("if", "")
-        self.assertIn("!cancelled()", cond, "without !cancelled() the job skips when a needed job fails")
-        self.assertIn("github.event_name == 'pull_request'", cond)
-        self.assertIn("!github.event.pull_request.draft", cond)
-        self.assertEqual(job.get("permissions", {}).get("pull-requests"), "write")
-        step = next((s for s in job["steps"] if s.get("uses") == "$/actions/ci-done-comment"), None)
-        self.assertIsNotNone(step, "ci-done does not call actions/ci-done-comment")
-        self.assertEqual(step.get("with", {}).get("needs"), "${{ toJSON(needs) }}")
+    def test_detector_goes_red_on_each_defect(self):
+        self.assertEqual(ci_done_problems(GOOD), [])
+        broken = {
+            "missing job": GOOD.replace("  ci-done:", "  other:"),
+            "missed need": GOOD.replace("  a:\n", "  a:\n    runs-on: x\n  b:\n"),
+            "no !cancelled": GOOD.replace("!cancelled() && ", ""),
+            "runs on drafts": GOOD.replace(" && !github.event.pull_request.draft", ""),
+            "read-only token": GOOD.replace("pull-requests: write", "pull-requests: read"),
+            "no needs passed": GOOD.replace("needs: ${{ toJSON(needs) }}", "needs: '{}'"),
+        }
+        for name, text in broken.items():
+            with self.subTest(name):
+                self.assertNotEqual(ci_done_problems(text), [], name)
 
 
 if __name__ == "__main__":
