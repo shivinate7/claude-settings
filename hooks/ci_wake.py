@@ -40,11 +40,10 @@ STATUS_PAUSE = 30         # seconds between two reads in the first BACKOFF_FLAT 
 BACKOFF_FLAT = 240        # seconds the gap stays STATUS_PAUSE
 BACKOFF_CAP = 120         # seconds, the longest gap
 READ_TIMEOUT = 60         # seconds for each gh read
-PR_FIELDS = "number,isDraft,headRefName,headRefOid,state,url"
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
 REPO_FLAGS = ("-R", "--repo")
-PR_URL = re.compile(r"^https?://([^/]+)/([^/]+/[^/]+)/pull/\d+")
+PR_URL = re.compile(r"^https?://([^/]+)/([^/]+/[^/]+)/pull/(\d+)")
 # A word-internal apostrophe (don't) opens no quote. Masked here, so split_segments does not read it as one.
 APOSTROPHE = re.compile(r"(?<=[A-Za-z])'(?=[A-Za-z])")
 HELD = []   # open lock files, kept until the process ends: the OS drops the locks then, kill included
@@ -91,10 +90,11 @@ def gh(args, cwd, timeout=READ_TIMEOUT):
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
-def gh_json(args, cwd):
+def gh_json(args, cwd, gone=""):
+    """-> the JSON gh prints. gone: text in a failed read's output that means the PR does not exist (NoPR)."""
     rc, out, err = gh(args, cwd)
     if rc != 0:
-        if "no pull requests found" in (out + err).lower():
+        if gone and gone in (out + err).lower():
             raise NoPR()
         raise Unknown("gh %s exited %d: %s" % (" ".join(args[:2]), rc, (err or out).strip()))
     try:
@@ -261,6 +261,57 @@ def no_workflows(cwd, repo):
         return False
 
 
+def pr_fields(p):
+    """A REST pull request as the dict the watch reads: number, isDraft, headRefName, headRefOid, state
+    (OPEN, CLOSED, MERGED) and url. The list endpoint has `merged_at` only, so either marks a merge."""
+    return {"number": p["number"], "isDraft": bool(p.get("draft")), "headRefName": p["head"]["ref"],
+            "headRefOid": p["head"]["sha"], "url": p["html_url"],
+            "state": "MERGED" if p.get("merged") or p.get("merged_at") else p["state"].upper()}
+
+
+def current_branch(cwd):
+    """The folder's branch, for `gh pr ready` with no selector. A detached HEAD names none."""
+    try:
+        import _nowindow
+    except ImportError:
+        _nowindow = subprocess
+    exe = shutil.which("git")  # a bare "git" misses a .cmd launcher on Windows, as for gh
+    if exe is None:
+        raise Unknown("git branch read failed: git is not on PATH")
+    try:
+        p = _nowindow.run([exe, "symbolic-ref", "--short", "-q", "HEAD"], cwd=cwd, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=READ_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise Unknown("git branch read failed: %s" % type(e).__name__)
+    if p.returncode != 0 or not p.stdout.strip():
+        raise Unknown("no branch is checked out")
+    return p.stdout.strip()
+
+
+def read_pr(selector, repo, cwd):
+    """The PR a `gh pr ready` selector names, by REST: `gh pr view` is GraphQL, which the cloud proxy
+    refuses. selector: a number, a PR url, a branch, or "" for the folder's branch. repo is
+    [HOST/]OWNER/REPO, else gh fills {owner}/{repo} from the folder. NoPR when none is found."""
+    m = PR_URL.match(selector)
+    if m:
+        repo, selector = repo_of_url(selector), m.group(3)
+    parts = repo.split("/") if repo else []
+    host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
+    tail = ["--hostname", host] if host else []
+    base = "repos/%s/pulls" % slug
+    if selector.isdigit():
+        return pr_fields(gh_json(["api", base + "/" + selector, *tail], cwd, gone="http 404"))
+    head = selector or current_branch(cwd)
+    if ":" not in head:
+        head = slug.split("/")[0] + ":" + head
+    # Fields, not a query string: a `&` in an argument is a command separator to cmd.exe behind a .cmd
+    # launcher. -F fills a {owner} placeholder inside its value; -f does not.
+    found = gh_json(["api", "-X", "GET", base, "-F", "head=" + head, "-f", "state=open", *tail], cwd)
+    if not found:
+        raise NoPR()
+    return pr_fields(found[0])
+
+
 def repo_of_url(url):
     """The `[HOST/]OWNER/REPO` of a pull request url, for -R; "" when the url names none."""
     m = PR_URL.match(url or "")
@@ -271,8 +322,7 @@ def watch_pr(selector, repo, cwd, deadline, lock_dir):
     """-> one output line, or None when no watch starts."""
     ident = "PR" + selector if selector else "PR"
     try:
-        extra = ["-R", repo] if repo else []
-        pr = gh_json(["pr", "view", *([selector] if selector else []), *extra, "--json", PR_FIELDS], cwd)
+        pr = read_pr(selector, repo, cwd)
         ident = pr["headRefOid"][:7]
         repo = repo_of_url(pr.get("url")) or repo   # the PR's own repo, whatever form named it
         if pr.get("isDraft"):

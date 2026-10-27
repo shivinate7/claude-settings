@@ -56,8 +56,9 @@ Seams under test:
 The gh stub: a `gh` launcher in a temp folder, the only PATH entry for these cases, so no real gh
 is ever reached. On Windows the launcher is `gh.cmd`, and a list-form subprocess call of "gh"
 skips a .cmd stand-in (decision list-form-subprocess-ignores-a-path-shim-on-windows). So the hook
-must find gh with shutil.which. The stub answers the --json forms of `pr view <N|branch>`,
-`pr list --head B`, `run list --commit SHA` and `run view <id>` from a JSON fixture. `run view`
+must find gh with shutil.which. The stub answers `gh api repos/O/R/pulls/N` and
+`gh api -X GET repos/O/R/pulls -F head=OWNER:BRANCH -f state=open` (it refuses any argument holding `&`) in the REST field names only (the cloud proxy
+refuses GraphQL: every `gh pr ...` call and `gh api graphql` exit 1 with the proxy's 403 text), and the --json forms of `run list --commit SHA` and `run view <id>` from a JSON fixture. `run view`
 prints only the fields `--json` names. `run watch` exits 1: the hook must never run it. The stub
 writes every call to its own file beside the log (one file per call, so parallel calls never share one).
 A run marked in_progress_at_list reads in progress at `run list` and as its fixture says at
@@ -159,8 +160,20 @@ def strip_repo(args):
             out.append(a)
     return out
 
+def api_repo(args):
+    """The repo in the path of a `gh api repos/OWNER/REPO/...` call, else None. A {owner}/{repo} placeholder
+    names none: gh fills it from the folder."""
+    plain = strip_repo(args)
+    path = next((a for a in plain[1:] if a.startswith("repos/")), "") if plain[:1] == ["api"] else ""
+    parts = path.split("/")
+    if len(parts) > 2 and parts[0] == "repos" and "{" not in parts[1] + parts[2]:
+        return parts[1] + "/" + parts[2].split("?")[0]
+    return None
+
 def repo_of(args):
     """The repo a gh call names with its own flag, in any spelling gh takes, or None."""
+    if api_repo(args):
+        return api_repo(args)
     for i, a in enumerate(args):
         if a in ("-R", "--repo"):
             if i + 1 < len(args):
@@ -172,14 +185,11 @@ def repo_of(args):
     return None
 
 def call_repo(args, fx):
-    """The repo a gh call reaches, as gh picks it: its own -R or --repo, else the repo in a PR URL selector,
+    """The repo a gh call reaches, as gh picks it: its own -R or --repo or the repo in its api path,
     else GH_REPO, else the folder's repo (the fixture's cwd_repo)."""
     named = repo_of(args)
     if named:
         return named
-    plain = strip_repo(args)
-    if len(plain) > 2 and plain[:2] == ["pr", "view"] and plain[2].startswith("https://github.com/"):
-        return "/".join(plain[2].split("/")[3:5])
     return os.environ.get("GH_REPO") or fx.get("cwd_repo", "")
 
 def here(entry, args, fx):
@@ -255,6 +265,41 @@ def ready_ping():
     if port:
         socket.create_connection(("127.0.0.1", int(port)), timeout=10).close()
 
+def rest_pr(p):
+    """One fixture PR as the REST pulls API prints it: REST names only, no GraphQL name."""
+    return {"number": p["number"], "draft": p["isDraft"], "state": p["state"].lower(),
+            "html_url": p["url"], "head": {"ref": p["headRefName"], "sha": p["headRefOid"]},
+            "merged": False, "merged_at": None}
+
+def rest(path, full, args, fx):
+    """The pulls endpoints: `repos/O/R/pulls/N`, and `repos/O/R/pulls` with fields head=OWNER:BRANCH, state=open."""
+    parts = path.split("/")
+    if len(parts) < 4 or parts[0] != "repos" or parts[3] != "pulls":
+        sys.stderr.write("stub gh: unsupported api path: %s\n" % full)
+        return 1
+    mine = [p for p in fx["prs"] if here(p, args, fx)]
+    if len(parts) == 5:
+        hits = [p for p in mine if str(p["number"]) == parts[4]]
+        if not hits:
+            sys.stdout.write('{"message":"Not Found","status":"404"}\n')
+            sys.stderr.write("gh: Not Found (HTTP 404)\n")
+            return 1
+        sys.stdout.write(json.dumps(rest_pr(hits[0])) + "\n")
+        return 0
+    query = {}
+    for i, a in enumerate(args):
+        if a in ("-f", "-F") and i + 1 < len(args) and "=" in args[i + 1]:
+            k, v = args[i + 1].split("=", 1)
+            query[k] = v
+    head = query.get("head", "")
+    owner, _, branch = head.partition(":")
+    # a {owner} placeholder is the folder's owner; the stub holds one repo per entry
+    want = [p for p in mine if p["headRefName"] == branch and query.get("state") == "open"
+            and p["state"] == "OPEN" and (owner.startswith("{") or not call_repo(args, fx)
+                                    or owner == call_repo(args, fx).split("/")[0])]
+    sys.stdout.write(json.dumps([rest_pr(p) for p in want]) + "\n")
+    return 0
+
 def main(args):
     log_call(args)
     with open(os.environ["GH_STUB_FIXTURE"], encoding="utf-8") as f:
@@ -265,23 +310,28 @@ def main(args):
     if fx.get("mode") == "garbage":
         sys.stdout.write("<html>not json</html>\n")
         return 0
+    amp = [a for a in args if "&" in a]
+    if amp:  # cmd.exe behind a .cmd launcher reads `&` as a command separator
+        sys.stderr.write("'state' is not recognized as an internal or external command: %r\n" % amp)
+        return 1
     plain = strip_repo(args)
     obj = plain[0] if plain else ""
     verb = plain[1] if len(plain) > 1 else ""
     key = plain[2] if len(plain) > 2 else ""
-    if obj == "pr" and verb == "view":
-        hits = [p for p in fx["prs"] if here(p, args, fx)
-                and (str(p["number"]) == key or p["headRefName"] == key or p.get("url") == key)]
-        if not hits:
-            sys.stderr.write("no pull requests found\n")
-            return 1
-        sys.stdout.write(json.dumps(hits[0]) + "\n")
-        return 0
-    if obj == "pr" and verb == "list":
-        head = flag(args, "--head")
-        hits = [p for p in fx["prs"] if here(p, args, fx) and (head is None or p["headRefName"] == head)]
-        sys.stdout.write(json.dumps(hits) + "\n")
-        return 0
+    if obj == "pr" or (obj == "api" and verb == "graphql"):
+        # The cloud proxy refuses every GraphQL call: `gh pr view|list|checks|status` and `gh api graphql`.
+        sys.stderr.write("GitHub GraphQL is not available from Claude Code sessions; use the REST API (HTTP 403)\n")
+        return 1
+    if obj == "api":
+        words, skip = [], False
+        for a in plain[1:]:
+            if skip:
+                skip = False
+            elif a in ("-X", "-f", "-F", "--hostname"):
+                skip = True
+            elif not a.startswith("-"):
+                words.append(a)
+        return rest(words[0] if words else "", words[0] if words else "", args, fx)
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
         n = lists_of()
@@ -346,7 +396,20 @@ def write_stub():
         f.write('@echo off\r\n"%s" "%s" %%*\r\n' % (PY, stub_py))
 
 
+def link_git():
+    """The cases run with the stub folder as the only PATH entry, and the empty-selector read runs git.
+    On Windows the launcher is git.cmd, as for gh."""
+    real = shutil.which("git")
+    with open(os.path.join(BIN, "git.cmd"), "w", encoding="utf-8", newline="") as f:
+        f.write('@echo off\r\n"%s" %%*\r\n' % real)
+    launcher = os.path.join(BIN, "git")
+    with open(launcher, "w", encoding="utf-8", newline="\n") as f:
+        f.write('#!/bin/sh\nexec "%s" "$@"\n' % real)
+    os.chmod(launcher, 0o755)
+
+
 write_stub()
+link_git()
 sys.path.insert(0, TMP)
 import gh_stub as GH  # the stand-in's own log reader: one home for the call-file format
 
@@ -1324,8 +1387,8 @@ URL_APP = "https://github.com/%s/pull/214" % REPO_APP
 
 
 def after_pr_view(res):
-    """The gh calls made after the watch's pr view, in order. [] when there is no pr view."""
-    idx = next((i for i, c in enumerate(res.calls) if GH.strip_repo(c)[:2] == ["pr", "view"]), None)
+    """The gh calls made after the watch's PR read (gh api), in order. [] when there is none."""
+    idx = next((i for i, c in enumerate(res.calls) if GH.strip_repo(c)[:1] == ["api"]), None)
     return [] if idx is None else res.calls[idx + 1:]
 
 
@@ -1370,6 +1433,117 @@ def case_folder_without_workflows_still_watches_the_pr_repo():
     label = "folder without workflows, PR repo with a red run"
     expect_verdict(label, res, "red", names_in=["unit", "e2e"])
     expect_watch(label, res, ["902"])
+
+
+def api_reads(res):
+    """The words after `api` of every `gh api` call (path, then fields), in order."""
+    return [" ".join(c[1:]) for c in map(GH.strip_repo, res.calls) if c[:1] == ["api"] and len(c) > 1]
+
+
+def graphql_calls(res):
+    """Every call the proxy refuses: any `gh pr ...` and `gh api graphql`."""
+    return [c for c in map(GH.strip_repo, res.calls) if c[:1] == ["pr"] or c[:2] == ["api", "graphql"]]
+
+
+def case_pr_read_is_rest_for_every_selector():
+    """The PR read goes by `gh api repos/.../pulls`, never `gh pr view`: the cloud proxy refuses GraphQL.
+    Rows: number, url, branch, branch with -R, and the empty selector (the folder's branch). The stub
+    refuses GraphQL and answers REST names only, so a hook on the GraphQL path wakes unknown."""
+    branch = "hook-wave-2"
+    folder = tempfile.mkdtemp(prefix="repo-", dir=TMP)
+    subprocess.run(["git", "init", "-q", "-b", branch], cwd=folder, check=True)
+    rows = (
+        ("number", "gh pr ready 12", "repos/{owner}/{repo}/pulls/12"),
+        ("url", "gh pr ready " + URL_APP, "repos/%s/pulls/214" % REPO_APP),
+        ("branch", "gh pr ready " + branch, "-X GET repos/{owner}/{repo}/pulls -F head={owner}:%s -f state=open" % branch),
+        ("branch with -R", "gh pr ready %s -R %s" % (branch, REPO_APP),
+         "-X GET repos/%s/pulls -F head=%s:%s -f state=open" % (REPO_APP, REPO_APP.split("/")[0], branch)),
+        ("empty selector", "gh pr ready", "-X GET repos/{owner}/{repo}/pulls -F head={owner}:%s -f state=open" % branch),
+    )
+    for name, command, path in rows:
+        label = "REST read, %s selector" % name
+        prs = [pr(214, repo=REPO_APP, branch=branch)] if "214" in path or "-R" in command else [pr(12, branch=branch)]
+        fx = fixture(prs, [in_repo(GREEN, REPO_APP)] if "-R" in command or "214" in path else [GREEN],
+                     cwd_repo=REPO_APP if "214" in path else "", workflows=[wf(repo=REPO_APP)] if "214" in path else None)
+        if fx["workflows"] is None:
+            del fx["workflows"]
+        res = run_hook(dict(bash(command), cwd=folder), fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        expect_verdict(label, res, "green")
+        check("%s: reads %s" % (label, path), api_reads(res)[:1] == [path], "%r; %s" % (api_reads(res), why(res)))
+        check("%s: no gh pr call, no graphql" % label, graphql_calls(res) == [], why(res))
+        expect_watch(label, res, ["901"])
+
+
+def case_draft_and_missing_pr_start_no_watch_by_rest():
+    """A draft PR (REST `draft` true) and a PR that does not exist (404, or an empty branch list) start no
+    watch and print nothing, for each selector form."""
+    branch = "hook-wave-2"
+    folder = tempfile.mkdtemp(prefix="repo-", dir=TMP)
+    subprocess.run(["git", "init", "-q", "-b", branch], cwd=folder, check=True)
+    for selector in ("12", branch, ""):
+        command = "gh pr ready" + (" " + selector if selector else "")
+        label = "REST draft PR, selector %r" % selector
+        res = run_hook(dict(bash(command), cwd=folder), fixture([pr(12, draft=True, branch=branch)], [GREEN]))
+        expect_silent(label, res)
+        expect_no_watch(label, res)
+        check("%s: read by gh api, no run list" % label,
+              len(api_reads(res)) == 1 and count(res, "run", "list") == 0 and graphql_calls(res) == [], why(res))
+    for selector in ("99", "no-such-branch", ""):
+        command = "gh pr ready" + (" " + selector if selector else "")
+        label = "REST no PR, selector %r" % selector
+        res = run_hook(dict(bash(command), cwd=folder), fixture([pr(12, branch="other-branch")], [GREEN]))
+        expect_silent(label, res)
+        expect_no_watch(label, res)
+        check("%s: read by gh api, no run list" % label,
+              len(api_reads(res)) == 1 and count(res, "run", "list") == 0 and graphql_calls(res) == [], why(res))
+
+
+def case_empty_selector_without_a_branch_is_unknown():
+    """`gh pr ready` on a detached HEAD names no branch: unknown, never a guessed PR."""
+    folder = tempfile.mkdtemp(prefix="repo-", dir=TMP)
+    subprocess.run(["git", "init", "-q"], cwd=folder, check=True)
+    with open(os.path.join(folder, "f"), "w") as f:
+        f.write("x")
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "f"], cwd=folder, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"], cwd=folder, check=True)
+    subprocess.run(["git", "checkout", "-q", "--detach"], cwd=folder, check=True)
+    res = run_hook(dict(bash("gh pr ready"), cwd=folder), fixture(READY, [GREEN]))
+    expect_verdict("empty selector on a detached HEAD", res, "unknown")
+    check("empty selector on a detached HEAD: no PR read", api_reads(res) == [], why(res))
+
+
+def load_module():
+    spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def case_read_pr_maps_rest_fields():
+    """read_pr gives the watch the names it reads (number, isDraft, headRefName, headRefOid, state, url)
+    from the REST names (number, draft, head.ref, head.sha, state + merged, html_url). A host-qualified repo
+    reads with --hostname. In process, on a fake gh."""
+    mod = load_module()
+    rest_pr = {"number": 7, "draft": True, "state": "closed", "merged": True, "html_url": "https://github.com/o/r/pull/7",
+               "head": {"ref": "topic", "sha": SHA}}
+    seen = []
+
+    def fake_gh(args, cwd, timeout=None):
+        seen.append(args)
+        return 0, json.dumps(rest_pr), ""
+
+    with mock.patch.object(mod, "gh", fake_gh):
+        got = mod.read_pr("7", "ghe.example.com/o/r", None)
+    check("read_pr maps the REST names",
+          got == {"number": 7, "isDraft": True, "headRefName": "topic", "headRefOid": SHA, "state": "MERGED",
+                  "url": "https://github.com/o/r/pull/7"}, repr(got))
+    check("read_pr: a host-qualified repo reads repos/o/r with --hostname",
+          seen == [["api", "repos/o/r/pulls/7", "--hostname", "ghe.example.com"]], repr(seen))
+    open_pr = dict(rest_pr, draft=False, state="open", merged=False)
+    with mock.patch.object(mod, "gh", lambda a, c, timeout=None: (0, json.dumps([open_pr]), "")):
+        got = mod.read_pr("topic", "o/r", None)
+    check("read_pr: a branch list answers its first PR as OPEN, not a draft",
+          got["state"] == "OPEN" and got["isDraft"] is False and got["headRefOid"] == SHA, repr(got))
 
 
 def main():
@@ -1575,6 +1749,12 @@ def main():
     case_attached_short_repo_flag_pins_pr_repo_on_later_calls()
     case_equals_short_repo_flag_pins_pr_repo_on_later_calls()
     case_folder_without_workflows_still_watches_the_pr_repo()
+
+    # The PR read is REST: the proxy refuses GraphQL.
+    case_pr_read_is_rest_for_every_selector()
+    case_draft_and_missing_pr_start_no_watch_by_rest()
+    case_empty_selector_without_a_branch_is_unknown()
+    case_read_pr_maps_rest_fields()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
