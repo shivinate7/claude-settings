@@ -76,7 +76,7 @@ LIVE_STREAM_REASON = (
 # a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
 # filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
 # incident, because "does this command narrate for minutes" cannot be resolved from the system, and
-# refusing every `| tail` is the cry-wolf guard (decisions/guard-that-cries-wolf-is-spent.md). `tee`
+# refusing every `| tail` is the cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). `tee`
 # keeps every byte, so it is not refused. Only `--confirm` reaches the wait: a bare `merge <pr>` is a
 # preview that returns in seconds, so piping it is allowed.
 NARRATING_COMMANDS = ("merge", "merge.cmd")

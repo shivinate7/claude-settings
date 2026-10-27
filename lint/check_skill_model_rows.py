@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fails when decisions/subagent-model-cap.md lacks one row per skill under skills/.
+"""Fails when docs/decisions/subagent-model-cap.md lacks one row per skill under skills/.
 
 The model-per-role table has one row per skill, each saying
 "no model pin; runs on the caller's model". A skill is a folder directly under skills/ that
@@ -112,7 +112,7 @@ def main():
             problems.append("skill `%s`: row must say \"%s\" and \"%s\"" % ((name,) + PHRASES))
     for name in names:
         if name not in rows:
-            problems.append("skill `%s`: no row in decisions/subagent-model-cap.md" % name)
+            problems.append("skill `%s`: no row in %s" % (name, os.path.relpath(RECORD, ROOT).replace(os.sep, "/")))
     for name, count in sorted(rows.items()):
         if name not in names:
             problems.append("skill `%s`: stale row, no skills/%s/SKILL.md" % (name, name))

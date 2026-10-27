@@ -159,6 +159,9 @@ jobs:
       - name: No-window helper fixture suite
         run: python3 hooks/test_nowindow.py
 
+      - name: Auto-mode allow entry suite
+        run: python3 hooks/test_auto_mode_allow.py
+
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
         run: python3 hooks/test_stall_watch.py
@@ -445,6 +448,13 @@ jobs:
       - name: shoot fixture suite
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
+
+      # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
+      # all-on arm of harness-scope.sh, so a change there runs this job. A red shoot suite above
+      # skips this step; it runs again once that suite is green.
+      - name: waiting page suite
+        shell: bash
+        run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.

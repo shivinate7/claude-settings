@@ -195,7 +195,7 @@ if [ -n "$aw_out" ]; then
 fi
 
 # The SessionEnd sweep is armed. The record is
-# decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md. If the hook goes
+# docs/decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md. If the hook goes
 # missing from the config, this notice says so. It reads the installed config, never a date
 # and never a flag a person must clear, so it stops on its own the day the hook returns.
 #
@@ -209,7 +209,7 @@ if [ -r "$settings_json" ]; then
   grep -q '"SessionEnd"' "$settings_json" 2>/dev/null
   sessionend_rc=$?
   if [ "$sessionend_rc" -eq 1 ]; then
-    printf 'claude-settings: SessionEnd sweep is DISARMED. See decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md\n'
+    printf 'claude-settings: SessionEnd sweep is DISARMED. See docs/decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md\n'
   elif [ "$sessionend_rc" -gt 1 ]; then
     printf 'claude-settings: cannot read %s. SessionEnd sweep state unknown\n' "$settings_json"
   fi

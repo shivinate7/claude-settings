@@ -19,11 +19,11 @@ only when the change cannot move a verdict, one bounded command proves it, and t
 names both. A change that touches a rule's behaviour, a gate's verdict, or product code a
 reviewer must see goes to a lane, at
 any size. Keep a fix under 40 lines, against reading cost alone.<!-- rule:roles-orchestrator-never-builds --> Each worker is one role: builder, reviewer,
-or Explore,
-never two.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
+designer, design reviewer, or Explore, never two. A lane that touches a screen gets a designer before
+the builder and a design reviewer after it.<!-- rule:roles-one-role-per-worker --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `subagent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
-the ceiling, except Plan, the built-in advisor (`advisorModel`), and a builder's third try
-(`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
+the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer,
+and a builder's third try (`roles-third-try-steps-up`), which run Opus. Any other agent runs Opus, or any
 model above Sonnet, only on my word, for the spawn I name, or for a time when I type `opus 2h`
 (`opus builders 2h` for one role).<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
@@ -42,7 +42,7 @@ workflow run, the ultracode path, is a fan-out too. Give each workflow agent tha
 files `isolation: 'worktree'`.<!-- rule:parallelism-each-own-checkout --> A read-only workflow agent shares the caller's checkout.
 Give an isolated workstream its own lane and orchestrator, briefed once.<!-- rule:parallelism-own-lane-orchestrator --> Never let lanes
 talk mid-task. Message a peer only when a branch must hear something that changes its
-work.<!-- rule:parallelism-no-mid-task-talk --> Argue "at max parallelism" by naming the open lanes, never by assuming the claim.<!-- rule:parallelism-argue-max-parallelism --> A brief or plan never caps lanes on its own, by a guessed number such as "one or two at a time" or "at most N lanes". An owner-named cap still holds. The load brake decides when the machine is too loaded.<!-- rule:parallelism-no-guessed-lane-cap --> When a lane ends, start in the same turn each queued item the owner asked for whose questions are all answered. Stop only where a rule here waits for my word, for a test only I can run, or for the load brake.<!-- rule:parallelism-keep-going -->
+work.<!-- rule:parallelism-no-mid-task-talk --> Argue "at max parallelism" by naming the open lanes, never by assuming the claim.<!-- rule:parallelism-argue-max-parallelism --> A brief or plan never caps lanes on its own, by a guessed number such as "one or two at a time" or "at most N lanes". An owner-named cap still holds. The load brake decides when the machine is too loaded.<!-- rule:parallelism-no-guessed-lane-cap --> When a lane ends, start in the same turn each queued item the owner asked for whose questions are all answered. A follow-up the session found is treated as asked when it serves my goal and can be undone, such as an archive push or a CI fix lane. Queue it, start it without asking me, and name it under Done, or under Next while it waits. Ask first for a step that cannot be undone, a change to my goal, or work in a repo other than the one the session started in. A message to a person, spend, a delete with no copy, and a deploy or change to a live system or device cannot be undone. A standing grant for that act still holds. A follow-up never lifts a wait that another rule here makes, such as a merge. Stop only where a rule here waits for my word, for a test only I can run, or for the load brake.<!-- rule:parallelism-keep-going -->
 
 **Shared trees.** No destructive git. Destructive git loses another agent's work in a shared tree.<!-- rule:shared-trees-no-destructive-git --> Push an unmerged branch to `archive/<branch>` on origin, or a new archive name if taken. Once the push succeeds, delete it locally with no question: nothing is lost.<!-- rule:shared-trees-archive-then-delete --> Kill only yours. Others' servers and processes are not yours to stop, unless my override pass covers the stop (`owner-override-pass`, my typed pass).<!-- rule:shared-trees-no-machine-wide-kill --> Give one checkout to each concurrent agent.<!-- rule:shared-trees-one-checkout-per-agent --> A branch switch
 is a whole-tree act. Give each checkout its own ports and data.<!-- rule:shared-trees-own-ports-data --> Confirm which checkout

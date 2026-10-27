@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record each simulator a session call booted (decisions/sweep-shuts-down-idle-simulators.md, ruling 1).
+"""Record each simulator a session call booted (docs/decisions/sweep-shuts-down-idle-simulators.md, ruling 1).
 
 Modes:
 - PreToolUse: Before a Bash call that names simulator tooling (simctl, xcodebuild) and a device,

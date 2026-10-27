@@ -27,7 +27,7 @@ pass lifts first. The reason text of a
 rule is the constant it emits. Its limits are in its decision, or in the comment above its code.
 
 Shell tools (Bash, PowerShell), in judge_shell order:
-  builder-diff, author-diff, writer-diff, role-diff-*
+  builder-diff, author-diff, writer-diff, designer-diff, role-diff-*
                        noted. A builder, test-author or record-writer `git commit` or `git push`.
                        The diff it would send is logged for the reviewer. Never blocks.
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
@@ -82,8 +82,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   subagent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (subagent-model-cap)
-                       Also an Agent or Task spawn that sets model opus, unless Plan, Explore or a
-                       builder `Try 3 of 3` covers it. An override pass lifts the spawn ask only.
+                       Also an Agent or Task spawn that sets model opus, unless Plan, Explore,
+                       designer, design-reviewer or a builder `Try 3 of 3` covers it. An override pass lifts the spawn ask only.
   ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -105,7 +105,7 @@ Other tools, in `judge` order:
   simulator-boot-cap, simulator-boot-twin
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
                        (sweep-shuts-down-idle-simulators)
-  builder-test-edit, test-author-scope, record-writer-scope
+  builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, subagent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
@@ -200,7 +200,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -731,7 +731,7 @@ SILENT_WRITE_QUIET_REASON = (
 #
 # An agent resumed after the harness auto-removed its worktree loses BOTH the folder and the
 # branch, so git alone cannot tell "never had a worktree" from "worktree was removed". A RECORD
-# is needed: decisions/an-agent-outside-its-home-tree-must-stop.md.
+# is needed: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
 #
 # The record lives under the CLONE's git common directory, not inside any one worktree, so it
 # survives that worktree's removal (`git_common_dir` above). Unmeasured: Windows, and the
@@ -1380,6 +1380,10 @@ WRITER_SCOPE_REASON = (
     "A record-writer changes only Markdown (*.md) files. Report the needed change to any other "
     "file in your report. The orchestrator assigns it to a builder."
 )
+DESIGNER_SCOPE_REASON = (
+    "A designer changes only files in the repo's design folder. Report the needed change to any "
+    "other file in your report. The orchestrator assigns it to a builder."
+)
 
 
 def is_test_rel(rel: str) -> bool:
@@ -1401,6 +1405,37 @@ def author_path_ok(rel: str) -> bool:
     and `pyproject.toml` pass here and are read by content in `role_offences`."""
     return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
             or norm(rel).lstrip("/").lower() in AUTHOR_HARNESS)
+
+
+def design_folder():
+    """The repo-relative design folder, lower case, from the `design` kind of lint/layout.json (the
+    file RECORD_LAYOUT_FILE names), or None when no settings clone holds a readable layout. The
+    layout keeps no legacy path for it, so every repo keeps it at the layout path."""
+    if _DESIGN_FOLDER:
+        return _DESIGN_FOLDER[0]
+    for root in settings_roots():
+        try:
+            with open(os.path.join(root, RECORD_LAYOUT_FILE), encoding="utf-8") as handle:
+                found = json.load(handle)["kinds"]["design"]["path"]
+        except Exception:
+            continue
+        if isinstance(found, str) and found.strip("/"):
+            _DESIGN_FOLDER.append(found.strip("/").lower())
+            return _DESIGN_FOLDER[0]
+    return None
+
+
+_DESIGN_FOLDER = []
+
+
+def designer_path_ok(rel: str) -> bool:
+    """True when a repository-relative path sits inside the design folder. The case is folded,
+    because the folder is one folder on a case-insensitive disk. An unread layout allows nothing."""
+    folder = design_folder()
+    parts = [part for part in norm(rel).lower().split("/") if part]
+    if folder is None or ".." in parts:
+        return False
+    return "/".join(parts).startswith(folder + "/")
 
 
 def repo_rel(path: str, cwd: str, outside: bool = True):
@@ -1430,9 +1465,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     rel = repo_rel(target, cwd)
     if rel is None:
         return ""
-    if role == AUTHOR_ROLE:
+    if role in (AUTHOR_ROLE, DESIGNER_ROLE):
         full = _expanded(target, cwd)
-        if author_path_ok(rel) or under_session_scratchpad(full, session_id):
+        ok = author_path_ok if role == AUTHOR_ROLE else designer_path_ok
+        if ok(rel) or under_session_scratchpad(full, session_id):
             return ""
         # `session_id` is the parent's, the same for a subagent (decision
         # an-agent-outside-its-home-tree-must-stop), and so is the id in the scratchpad path.
@@ -1565,6 +1601,8 @@ def role_offences(root: str, top: str, base: str, role: str):
                 bad = not pyproject_author_ok(base_text(root, base, rel), work_text(root, rel))
         elif role == WRITER_ROLE:
             bad = not all(n.lower().endswith(".md") for n in names)
+        elif role == DESIGNER_ROLE:
+            bad = not all(designer_path_ok(n) for n in names)
         else:
             bad = any(is_test_rel(n) for n in names) or (
                 is_test_config_rel(rel) and disabling_added(root, base, rel))
@@ -1591,12 +1629,13 @@ def diff_violation(root: str, role: str):
 
 
 def diff_rule(role: str) -> str:
-    return {AUTHOR_ROLE: "author-diff", WRITER_ROLE: "writer-diff"}.get(role, "builder-diff")
+    return {AUTHOR_ROLE: "author-diff", WRITER_ROLE: "writer-diff",
+            DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
     """Log a role's diff at commit or push for the reviewer. Never blocks: the base can count the
-    parent branch's files as the agent's own (decisions/builders-cannot-edit-tests.md)."""
+    parent branch's files as the agent's own (docs/decisions/builders-cannot-edit-tests.md)."""
     found, _ = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
@@ -1835,15 +1874,16 @@ def load_hit(tool: str, tool_input) -> tuple:
 
 OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for a subagent; Opus runs "
-    "only on the owner's word for this spawn, except Plan, a builder's Try 3 of 3 and Explore "
+    "only on the owner's word for this spawn, except Plan, Explore, the designer, the design "
+    "reviewer and a builder's Try 3 of 3 "
     "(decision subagent-model-cap). Approve it only when the owner asked for Opus here."
 )
-OPUS_STANDING_ROLES = ("Plan", "Explore")
+OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
 
 
 def opus_spawn_hit(tool: str, tool_input) -> str:
     """The model of an Agent or Task spawn that sets Opus with no standing word, or "". A standing word
-    is the role Plan or Explore, or a builder whose brief holds a `Try 3 of 3` line (the same marker
+    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds a `Try 3 of 3` line (the same marker
     step_up_hit reads). A reviewer's spawn is no standing word, so a reviewer on Opus asks. The spawn ask is liftable by an
     override pass, so never_passed does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
@@ -2301,7 +2341,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
 # ------------------------------------------------------------------ impeccable is review-only
 #
-# decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
+# docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
 # (`audit`, `critique`). Its build commands and its settings writers are refused. The reason names
 # no command; the log holds what the call asked for.
 IMPECCABLE_REASON = ("impeccable is for a design review only. Ask for a review of the rendered "
@@ -2389,7 +2429,7 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ simulator boots
 #
-# decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
+# docs/decisions/sweep-shuts-down-idle-simulators.md, rulings 3 and 4. A boot is `simctl boot`, an
 # `xcodebuild -destination` that names a shut-down simulator, or the simulator MCP tool's `launch`
 # naming one. `simctl list` runs only after a call matched as a boot. The idle test is the sweep
 # tier's own (`sweep.sim_keep_code`), imported lazily: janitor/sweep.py imports this file.
@@ -2466,7 +2506,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
-    (decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
     # Rule 0 alone reads a Git Bash `/c/Users/...` cwd in the form the home record is written in. Off
     # Windows `/c/` is a real folder. One reader of the drive spelling: `_expanded`. Every other
     # rule sees `cwd` as main does.
@@ -2607,17 +2647,18 @@ def judge(payload) -> None:
 
     # Every non-empty string path field the call carries is judged, so a decoy in one field hides
     # no denied path, and an ask on one field masks no deny on another: every deny (0b, 5, 7)
-    # runs over all fields, then the 7b notes, then the 8 asks (decisions/builders-cannot-edit-tests.md,
+    # runs over all fields, then the 7b notes, then the 8 asks (docs/decisions/builders-cannot-edit-tests.md,
     # "Judge the result").
     targets = write_targets(tool_input)
     for target in targets:
-        # 0b. The early warning for a builder, test-author or record-writer write (see BUILDER_ROLE). A read is allowed.
+        # 0b. The early warning for a builder, test-author, record-writer or designer write (see BUILDER_ROLE). A read is allowed.
         role = agent_role(payload)
         if role and tool in WRITE_TOOLS:
             matched = role_write_hit(role, tool_input, target, cwd, session_id_of(payload))
             if matched:
                 code, why = {AUTHOR_ROLE: ("test-author-scope", AUTHOR_SCOPE_REASON),
-                             WRITER_ROLE: ("record-writer-scope", WRITER_SCOPE_REASON)}.get(
+                             WRITER_ROLE: ("record-writer-scope", WRITER_SCOPE_REASON),
+                             DESIGNER_ROLE: ("designer-scope", DESIGNER_SCOPE_REASON)}.get(
                     role, ("builder-test-edit", BUILDER_TEST_REASON))
                 refuse(tool, "deny", code, why, matched)
 

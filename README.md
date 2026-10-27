@@ -29,7 +29,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `githooks/` | Git hooks for a repo, such as `main-ref`. |
 | `testing/` | A shared test helper, `skip-locally-fail-in-ci.mjs`. |
 | `tools/` | `mem-monitor.ps1`, a manual Windows memory monitor. No installer lands it, and no hook runs it. |
-| `decisions/`, `debts/`, `plans/` | The records: one file per ruling, known gap or deferred item, and plan. See `debts/README.md`. |
+| `docs/decisions/`, `docs/debts/`, `docs/plans/` | The records: one file per ruling, known gap or deferred item, and plan. See `docs/debts/README.md`. |
 | `docs/` | The generated pages: `records.md` indexes the records, `catalog.md` lists hooks, mods and skills. |
 | `.github/` | `gates.yml`, the CI that checks this repo, and this repo's stamp config. |
 | `.claude/` | Instructions that load only in sessions on this repo. |
@@ -172,9 +172,9 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   Roles section for what each is for.
 * A linter change: edit `lint/`. A guard change: edit `hooks/`. Re-run the installer once
   locally so a new symlink exists.
-* A ruling worth keeping: one new file under `decisions/`, named by slug. Claim its number only
+* A ruling worth keeping: one new file under `docs/decisions/`, named by slug. Claim its number only
   at merge, per CLAUDE.md ("never allocate a numbered record on a branch").
-* An open question, not yet ruled on, or a deferred item: a file under `debts/`.
+* An open question, not yet ruled on, or a deferred item: a file under `docs/debts/`.
 
 ## Troubleshooting
 
@@ -296,7 +296,7 @@ the roster, a brief and a role hand-off note. A repo adopts it only on the owner
 * **The janitor is one machine-wide sweep, not a per-repo tool.** It reaps branches and
   worktrees no session still needs, across every repository on the machine. It can stop one
   kind of process: an orphaned TCP listener it owns. Full contract in `janitor/GUIDE.md`
-  (`decisions/the-janitor-is-one-machine-wide-sweep.md`).
+  (`docs/decisions/the-janitor-is-one-machine-wide-sweep.md`).
 
 ## License
 

@@ -70,7 +70,7 @@ except (TypeError, ValueError):
 #   SESSION_END_CEILING_SECONDS is pinned while settings.json carries the SessionEnd entry
 #   (timeout 55): HookBudgetFitsUnderItsHostCeiling reads that timeout. The hook is armed. If the
 #   entry is ever absent, those arms skip and this number rests on the hand-sync comment alone.
-#   See decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md.
+#   See docs/decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md.
 GUARD_GIT_CALL_TIMEOUT_SECONDS = 10.0
 SESSION_END_CEILING_SECONDS = 55.0
 
