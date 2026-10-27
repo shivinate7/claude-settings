@@ -21,6 +21,11 @@ agents, and both run Opus.
 - Deferred: whether the designer runs Claude Code's `/design` canvas itself, or the owner runs it.
   Until the owner rules, the designer draws HTML mockups only.
 
+Owner, 2026-10-27: "a lane or two of totally blank and a lane that gets to see the old and then some
+in between with directed prompts ... to get a good mix of control and idea between the mockups."
+A design exploration spreads its mockups across blind, informed and directed designer lanes. The
+procedure is `skills/design-explore/SKILL.md`.
+
 ## The guard
 
 Guard rule `designer-scope` (`hooks/guard.py`) refuses a designer's Edit or Write on a repo path
@@ -35,3 +40,4 @@ seen. Reopen when the owner rules on `/design`, or when a design agent's Opus co
 Kind: process
 Home: agents/designer.md
 Home: agents/design-reviewer.md
+Home: skills/design-explore/SKILL.md

@@ -26,15 +26,22 @@ Before you draw, read these:
 - `~/.claude/ux/principles.md`, `~/.claude/ux/layout.md` and `~/.claude/ux/tokens.md`.
 - `GLOSSARY.md` beside the global `CLAUDE.md`, before you name a file or a term.
 
+Lane kinds. Your brief names your lane kind: blind, informed or directed (skill `design-explore`). A
+blind lane gets the screen's job, users, data shapes and the house rules only. In a blind lane, never
+read the current screen, its code, its screenshots, its mockups, or the repo's design spec and
+tokens. An informed lane reads all of them. A directed lane is informed and follows one named
+direction. A brief with no lane kind is an informed lane. In a lane of that skill, name your files
+`<screen>-<kind>-<n>` and print the lane kind, and the direction if any, on the page.
+
 For each screen the brief names, write two files in the design folder:
 
-- `<screen>.html`: one page that opens from disk with no server and no network. Inline its CSS and
+- `<screen>.html`, or `<screen>-<kind>-<n>.html` in a lane of that skill: one page that opens from disk with no server and no network. Inline its CSS and
   script. Draw the screen at every size and theme the repo ships. A theme switch sets
   `data-theme` on the root, and `prefers-color-scheme` sets the default. Give each state a deep
   link in the URL hash (`#s=empty`, `#s=error`, `t=dark`), so a reviewer opens one state with one
   URL. Use the repo's real tokens and real data shapes. Never put a token, password, cookie or
   personal datum in a mockup.
-- `<screen>-notes.md`: one numbered item per design choice. Each item says what it is, the gain, the
+- `<screen>-notes.md`, or `<screen>-<kind>-<n>-notes.md` in such a lane: one numbered item per design choice. Each item says what it is, the gain, the
   loss, and your pick. Mark an item that changes the spec or a ruling `Owner word: yes`. Show every
   option first, and let the owner cull. Give each option a control in the mockup that hides it, so
   one press removes one option.

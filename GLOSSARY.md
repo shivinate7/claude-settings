@@ -37,6 +37,9 @@ one name for each thing, and a list of names to avoid.
 | designer | An agent that draws an HTML mockup of each changed screen before the builder starts. It writes only in the design folder. | `agents/designer.md` | — |
 | design reviewer | An agent that judges built screens against the mockup and the repo's design rules, with a verdict per screen. It is not blind, and it never edits. | `agents/design-reviewer.md` | — |
 | mockup | One HTML page in the design folder that draws a screen at every size and theme, with a notes file beside it. | `agents/designer.md` | — |
+| blind lane | A designer lane whose brief names only the screen's job, users, data shapes and the house UX rules. It never sees the current screen or the repo's design spec. | `skills/design-explore/SKILL.md` | — |
+| informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
+| directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
 
 ## Open: one term, two meanings
 
