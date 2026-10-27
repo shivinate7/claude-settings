@@ -290,6 +290,80 @@ class Cli(unittest.TestCase):
             self.assertEqual(run_cli("--run", folder).returncode, 1)
 
 
+class Devices(unittest.TestCase):
+    """The designer agent, the brief template and the hook read one resolved device list (step c113)."""
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load()
+        spec = importlib.util.spec_from_file_location("layout_for_brief_test",
+                                                      os.path.join(HERE, "..", "lint", "layout.py"))
+        cls.layout = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.layout)
+
+    def repo(self, **keys):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        os.makedirs(os.path.join(folder.name, ".claude"))
+        with open(os.path.join(folder.name, ".claude", "layout-extras.json"), "w", encoding="utf-8") as h:
+            json.dump(dict({"kinds": {}}, **keys), h)
+        return folder.name
+
+    def test_the_hook_reads_the_same_list_as_the_layout(self):
+        root = self.repo(kind="ios")
+        self.assertEqual(self.m.device_names(root), [d["name"] for d in self.layout.devices(root)])
+
+    def test_a_repo_with_no_kind_has_no_device_to_check(self):
+        self.assertIsNone(self.m.device_names(self.repo()))
+        self.assertEqual(self.m.brief_faults(brief(), devices=None), [])
+
+    def test_a_brief_must_draw_the_first_device_first(self):
+        first = self.m.device_names(self.repo(kind="ios"))[0]
+        self.assertIn("device-first", codes(self.m.brief_faults(brief(device="A phone."), devices=[first])))
+        self.assertEqual(self.m.brief_faults(brief(device=DEVICE + " " + first + "."), devices=[first]), [])
+
+    def test_the_hook_judges_a_spawn_by_its_cwd_repo(self):
+        root = self.repo(kind="ios")
+        out = Hook("test_clean_blind_designer_spawn_passes")
+        out.setUp()
+        self.addCleanup(out.tearDown)
+        done = out.hook({"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": "s1", "cwd": root,
+                         "tool_input": {"subagent_type": "designer", "prompt": brief(device="A phone."),
+                                        "description": "lane"}})
+        out.assertRefused(done)
+
+    def test_the_cli_takes_the_repo_root(self):
+        root = self.repo(kind="ios")
+        with tempfile.TemporaryDirectory() as folder:
+            with open(os.path.join(folder, "packages-blind-1.md"), "w", encoding="utf-8") as h:
+                h.write(brief(device="A phone."))
+            done = run_cli("--run", folder, "--root", root)
+            self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+            self.assertIn("device-first", done.stdout)
+
+    def test_paraphrases_of_the_first_device_pass(self):
+        first = "iPhone Duo, folded"
+        for text in ("An iPhone Duo (folded), held like a book.", "Duo folded on a desk.",
+                     "the IPHONE   DUO -- FOLDED pose", "Folded iPhone Duo."):
+            with self.subTest(text=text):
+                self.assertEqual(self.m.brief_faults(brief(device=text), devices=[first]), [])
+
+    def test_a_different_device_first_is_still_refused(self):
+        first = "iPhone Duo, folded"
+        for text in ("iPhone Duo, unfolded, flat on a table.", "A regular iPhone.", "Duo only."):
+            with self.subTest(text=text):
+                self.assertIn("device-first", codes(self.m.brief_faults(brief(device=text), devices=[first])))
+
+    def test_designer_and_template_point_at_the_one_command_and_name_no_device(self):
+        names = [d["name"].lower() for d in self.layout.layout()["devices"].values()]
+        for rel in ("agents/designer.md", "skills/design-explore/blind-brief.md", "skills/design-explore/SKILL.md"):
+            with self.subTest(file=rel):
+                with open(os.path.join(HERE, "..", rel), encoding="utf-8") as h:
+                    text = h.read()
+                self.assertIn("layout.py devices", text)
+                for name in names:
+                    self.assertNotIn(name, text.lower())
+
+
 class Hook(unittest.TestCase):
     def setUp(self):
         self.config = tempfile.TemporaryDirectory()

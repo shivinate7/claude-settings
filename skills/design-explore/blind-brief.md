@@ -5,7 +5,7 @@ Lane: <screen>-blind-<n>
 <Who does the job, and the job itself, in the owner's or the users' own words. Quote them. Say what they hold in their hands, what they must find out, and what done looks like. Then name the things the job handles, in plain words: each thing, its parts, and how many a busy day holds.>
 
 ## Device
-<The device and its sizes. How a person holds it and uses it: the poses, a fold or a second screen, an outer screen, touch or pointer.>
+<The repo's devices, from `python3 ~/.claude/lint/layout.py devices <repo root>`, in that order, first device first. Copy each name and each written size. Write none for a size the command does not give. Then how a person holds each one and uses it: the poses, a fold or a second screen, an outer screen, touch or pointer. When the command prints unknown, ask the orchestrator for the device.>
 
 ## Palette
 <The brand palette only: each colour by its name and hex value. Write none when there is no brand palette.>

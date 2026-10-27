@@ -16,7 +16,10 @@ owner override and the guard.log line, with rule `blind-brief`. Fail open: junk 
 template or an internal error allows the call, with one stderr line for an error. Cost: one python
 start per Agent or Task call, no file written but the guard.log line of a refusal.
 
-CLI: `python3 blind_brief.py --run DIR [--current NAME ...] [--owner-asked-none WORDS]` checks every
+- With a repo that names its app kind (lint/layout.py devices), a blind brief's Device section must name the
+  first resolved device (`device-first`). The hook reads the repo from the payload's `cwd`, the CLI from `--root`.
+
+CLI: `python3 blind_brief.py --run DIR [--root REPO] [--current NAME ...] [--owner-asked-none WORDS]` checks every
 *.md brief in DIR as one explore run (run_faults). `--current` names a view of today's product, refused
 as a whole word in a blind brief. Exit 0 clean, 1 with one line per fault, 2 when DIR cannot be read.
 """
@@ -136,8 +139,33 @@ def template_fixed(path=None):
     return {name: parts.get(name, "") for name in FIXED}
 
 
-def brief_faults(text, current=(), template=None):
-    """Faults of one blind brief, as (code, where, matched) triples. An empty list is a clean brief."""
+def device_names(root):
+    """The names of the repo's resolved devices, first drawn first, or None when the repo names no kind or
+    its layout cannot be read. The list comes from lint/layout.py, the one home of the device list."""
+    try:
+        lint = os.path.join(HERE, "..", "lint")
+        if lint not in sys.path:
+            sys.path.insert(0, lint)
+        import layout
+        found = layout.devices(root)
+    except Exception:  # fail open: no list means no device check
+        return None
+    return [d["name"] for d in found] if found else None
+
+
+def names_device(text, name):
+    """True when `text` holds every word of device `name`, ignoring case, punctuation and spacing, in any
+    order. The word "iphone" is dropped while other words remain, so "Duo folded" names "iPhone Duo, folded"
+    and "unfolded" does not name "folded"."""
+    words = lambda t: re.findall(r"[a-z0-9]+", t.lower())
+    need = words(name)
+    need = [w for w in need if w != "iphone"] or need
+    return set(need) <= set(words(text))
+
+
+def brief_faults(text, current=(), template=None, devices=None):
+    """Faults of one blind brief, as (code, where, matched) triples. An empty list is a clean brief.
+    `devices` is the repo's resolved list (device_names): the Device section must name the first one."""
     faults = []
     header, parts, extra, repeated = sections(text)
     lines = [line.strip() for line in header if line.strip()]
@@ -165,6 +193,8 @@ def brief_faults(text, current=(), template=None):
     for line in lines:
         if PLACEHOLDER.search(line):
             faults.append(("placeholder", "header", PLACEHOLDER.search(line).group(0)))
+    if devices and parts.get("Device") and not names_device(parts["Device"], devices[0]):
+        faults.append(("device-first", "Device", devices[0]))
     for name in FREE:
         body = parts.get(name, "")
         hit = PLACEHOLDER.search(body)
@@ -194,7 +224,7 @@ def blind_lanes_ok(text):
     return bool(OWNER_NONE.match(value))
 
 
-def run_faults(texts, owner_none="", current=(), template=None):
+def run_faults(texts, owner_none="", current=(), template=None, devices=None):
     """Faults of one explore run, as (code, where, matched) triples. `where` is the brief's index."""
     faults, blind = [], 0
     for index, text in enumerate(texts):
@@ -204,7 +234,7 @@ def run_faults(texts, owner_none="", current=(), template=None):
         elif kind == "blind":
             blind += 1
             faults.extend((code, "brief %d, %s" % (index + 1, where), matched)
-                          for code, where, matched in brief_faults(text, current, template))
+                          for code, where, matched in brief_faults(text, current, template, devices))
     if not texts:
         faults.append(("no-brief", "run", ""))
     elif blind == 0 and not owner_none.strip():
@@ -261,7 +291,8 @@ def hook(stdin):
     if kind == "blind":
         if template_fixed() is None:
             print("blind_brief: template unreadable, fixed sections not checked", file=sys.stderr)
-        faults = brief_faults(prompt)
+        cwd = payload.get("cwd")
+        faults = brief_faults(prompt, devices=device_names(cwd) if isinstance(cwd, str) and cwd else None)
         if faults:
             refuse(payload, payload["tool_name"], REFUSE_BLIND % ", ".join(dict.fromkeys(f[0] for f in faults)),
                  describe(faults)[:200])
@@ -273,6 +304,7 @@ def cli(argv):
     parser = argparse.ArgumentParser(description="Check the briefs of one design-explore run.")
     parser.add_argument("--run", required=True, help="the folder of the run's *.md briefs")
     parser.add_argument("--current", action="append", default=[], help="a view of today's product")
+    parser.add_argument("--root", help="the repo whose resolved device list each blind brief's Device section must lead with")
     parser.add_argument("--owner-asked-none", default="", help="the owner's words for a run with no blind lane")
     args = parser.parse_args(argv)
     try:
@@ -284,7 +316,8 @@ def cli(argv):
     except OSError as exc:
         print("blind_brief: cannot read %s: %s" % (args.run, exc), file=sys.stderr)
         return 2
-    faults = run_faults(texts, args.owner_asked_none, args.current)
+    faults = run_faults(texts, args.owner_asked_none, args.current,
+                        devices=device_names(os.path.abspath(args.root)) if args.root else None)
     for code, where, matched in faults:
         where = re.sub(r"^brief (\d+)", lambda m: names[int(m.group(1)) - 1], where)
         print("%s: %s%s" % (code, where, ": " + matched if matched else ""))
