@@ -15,7 +15,6 @@ import importlib.util
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -28,16 +27,6 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 LONG = "a" * 33 + ".md"  # a slug over 32 characters
 EXTRAS = ".claude/layout-extras.json"
-
-
-def rm_tree(path):
-    def clear(func, p, _exc):
-        os.chmod(p, stat.S_IWRITE)
-        func(p)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=clear)
-    else:
-        shutil.rmtree(path, onerror=clear)
 
 
 def load(name, path):
@@ -60,7 +49,7 @@ def run(cmd, cwd):
 class Tree(unittest.TestCase):
     def setUp(self):
         self.tree = tempfile.mkdtemp(prefix="layout_")
-        self.addCleanup(rm_tree, self.tree)
+        self.addCleanup(tracked_tree.rm_tree, self.tree)
 
     def put(self, rel, text="# Record\n"):
         path = os.path.join(self.tree, *rel.split("/"))

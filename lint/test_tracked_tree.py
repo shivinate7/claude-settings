@@ -167,21 +167,21 @@ class RmTree(unittest.TestCase):
         self.assertFalse(os.path.exists(self.tree))
 
     def test_a_file_that_vanishes_mid_delete_does_not_raise(self):
-        real = os.unlink
-        gone = []
-
-        def unlink(p, *a, **kw):
-            if not gone and os.path.basename(p) == "pack":
-                gone.append(p)
-                real(p)  # another process deleted it just before us
-                raise PermissionError(13, "denied", p)
-            return real(p, *a, **kw)
-
-        with open(os.path.join(self.tree, "objects", "pack"), "w") as f:
+        path = os.path.join(self.tree, "objects", "pack")
+        with open(path, "w") as f:
             f.write("x")
-        with mock.patch("os.unlink", unlink), mock.patch("os.remove", unlink):
-            tracked_tree.rm_tree(self.tree)
-        self.assertTrue(gone, "the simulated race never ran")
+        os.unlink(path)  # gone before the handler's chmod
+        tracked_tree.clear_readonly(os.unlink, path, None)  # the retry's own FileNotFoundError also stays quiet
+        real = os.chmod
+        with open(path, "w") as f:
+            f.write("x")
+
+        def vanish(p, mode):
+            os.unlink(p)
+            return real(p, mode)  # raises FileNotFoundError, as chmod does on a file removed under it
+        with mock.patch("os.chmod", vanish):
+            tracked_tree.clear_readonly(os.unlink, path, None)
+        tracked_tree.rm_tree(self.tree)
         self.assertFalse(os.path.exists(self.tree))
 
 

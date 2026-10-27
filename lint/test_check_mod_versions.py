@@ -18,7 +18,6 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -32,16 +31,6 @@ PLUGIN = ".claude-plugin/plugin.json"
 MARKET = ".claude-plugin/marketplace.json"
 PREFIX = "check_mod_versions: FAIL:"
 FAKE = 'Shows "version": "9.9.9", then // and /* and # and a lone quote: Don\'t'
-
-
-def rm_tree(path):
-    def clear(func, p, _exc):
-        os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
-        func(p)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=clear)
-    else:
-        shutil.rmtree(path, onerror=clear)
 
 
 def plugin_json(name, version, description="A test plugin."):
@@ -69,7 +58,7 @@ class ModVersionTests(unittest.TestCase):
 
     def fresh_tree(self):
         self.tree = tempfile.mkdtemp(prefix="mvg_")
-        self.addCleanup(rm_tree, self.tree)
+        self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the check's imports, whatever they become
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_mod_versions.py"))
 
