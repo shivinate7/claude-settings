@@ -112,9 +112,9 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 
 ## The question-box check
 
-AskUserQuestion is refused while an agent or a background command of this session runs. A box stops the session until the owner answers, and the running work goes on with no brake.
+AskUserQuestion is refused while an agent, a background command or a workflow of this session runs. A box stops the session until the owner answers, and the running work goes on with no brake.
 
-- Agents come from the host's agent list, read once per box. Background commands are the ones the mod saw start and not yet end. The engine's list at each turn end resets them.
+- Agents come from the host's agent list, read once per box. Background commands and workflows are the ones the mod saw start and not yet end. A monitor does not count. The engine's list at each turn end resets them.
 - The refusal says to ask in the reply and on the waiting page, then keep working.
 - An unreadable agent list lets the box through, and the debug log and `guard.log` say unknown.
 - Each refusal writes one `guard.log` line through `hooks/guard_core.py`, rule `question-box-while-work`.

@@ -6,7 +6,7 @@ import {
   AGENTS_TIMEOUT_MS, GC_MS, GIT_IDLE_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
   agentRows, configDir, mergeRows, num, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
-  GUARD_PY, QUESTION_RULE, liveAgentCount, questionRefusal, shellTaskIds, taskNotice,
+  GUARD_PY, QUESTION_RULE, liveAgentCount, questionRefusal, trackedTaskIds, taskNotice,
 } from './lib.mjs'
 
 const PANE = 'session-board'
@@ -24,7 +24,7 @@ let gitNextAt = 0 // an idle beat reads git from this time on; every read moves 
 let lastDetail = '' // the detail record as last written, without its stamp
 let board = null // { rows, band, note, now, hidden }
 let view = { id: null, detail: null } // id null: all-sessions view
-const bgShells = new Set() // background command task ids seen to start and not yet seen to end
+const bgTasks = new Set() // background command and workflow task ids seen to start and not yet seen to end
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -100,8 +100,9 @@ export function register(on) {
   on('tool.call', async ($, e, next) => {
     try {
       const result = await next(e)
-      const task = result && result.result && result.result.backgroundTaskId
-      if (e.tool === 'Bash' && typeof task === 'string') bgShells.add(task)
+      const out = result && result.result
+      const task = e.tool === 'Bash' ? out && out.backgroundTaskId : e.tool === 'Workflow' ? out && out.taskId : undefined
+      if (typeof task === 'string') bgTasks.add(task)
       return result
     } finally {
       try { if (tracker.toolCall(e.tool_use_id)) await soon($, flush($, false)) } catch { /* ignore */ }
@@ -109,7 +110,7 @@ export function register(on) {
   }).catch(($, e, next) => next(e))
 
   // The question-box check: refuse AskUserQuestion while this session's agents or background
-  // commands run. Reads the agent list once per box, on demand; no timer, no new process unless it
+  // tasks run. Reads the agent list once per box, on demand; no timer, no new process unless it
   // writes a guard.log line. An unreadable list fails open and says unknown.
   on('tool.check', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const result = await next(e)
@@ -122,9 +123,9 @@ export function register(on) {
       await soon($, guardLog($, 'noted', 'unknown: agent list unreadable'))
       return result
     }
-    const reason = questionRefusal(agents, bgShells.size)
+    const reason = questionRefusal(agents, bgTasks.size)
     if (!reason) return result
-    await soon($, guardLog($, 'deny', `agents=${agents} commands=${bgShells.size}`))
+    await soon($, guardLog($, 'deny', `agents=${agents} tasks=${bgTasks.size}`))
     return { decision: 'deny', reason }
   }).catch(($, e, next) => next(e)) // a failure here lets the box through
 
@@ -133,7 +134,7 @@ export function register(on) {
     try {
       if (e.origin && e.origin.kind === 'task-notification') {
         const t = taskNotice(e.text)
-        if (t && t.status !== 'running') bgShells.delete(t.id)
+        if (t && t.status !== 'running') bgTasks.delete(t.id)
       }
     } catch { /* observing never changes the delivery */ }
     return next(e)
@@ -143,8 +144,8 @@ export function register(on) {
   // set, so a missed notice lasts one turn at most.
   on('classic.Stop', async ($, e, next) => {
     try {
-      const ids = e.agent_id ? null : shellTaskIds(e.background_tasks)
-      if (ids) { bgShells.clear(); for (const id of ids) bgShells.add(id) }
+      const ids = e.agent_id ? null : trackedTaskIds(e.background_tasks)
+      if (ids) { bgTasks.clear(); for (const id of ids) bgTasks.add(id) }
     } catch { /* keep the tracked set */ }
     return next(e)
   }).catch(($, e, next) => next(e))

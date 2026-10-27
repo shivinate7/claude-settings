@@ -1261,7 +1261,7 @@ await test('question box: a live background command refuses it, until its notice
   await bashBackground(h, 'b1', 'task1')
   const r = await askBox(h)
   same(r && r.decision, 'deny', 'verdict while it runs')
-  assert.match(r.reason, /1 background command/, 'the reason counts the commands')
+  assert.match(r.reason, /1 background task/, 'the reason counts the tasks')
   same((await receive(h, notice('task1'))).text, notice('task1'), 'the notice passes on unchanged')
   same((await askBox(h)).decision, 'allow', 'verdict after its notice')
 })
@@ -1276,6 +1276,20 @@ await test('question box: the turn-end list of background work replaces what the
   same((await askBox(h)).decision, 'deny', 'a listed shell task refuses')
   await stopWith(h, [], 'sub1')
   same((await askBox(h)).decision, 'deny', "a subagent's turn end leaves the session's list alone")
+})
+
+await test('question box: a background workflow refuses it, from its start and from the turn-end list', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  const hook = h.hooks.find(x => x.event === 'tool.call')
+  await hook.fn(h.$, { tool: 'Workflow', input: {}, tool_use_id: 'w1' }, async () => ({ result: { status: 'async_launched', taskId: 'wf1' } }))
+  same((await askBox(h)).decision, 'deny', 'verdict after its start')
+  await receive(h, notice('wf1'))
+  same((await askBox(h)).decision, 'allow', 'verdict after its notice')
+  await stopWith(h, [{ id: 'wf2', type: 'workflow', status: 'running', description: 'x' }, { id: 'm1', type: 'monitor', status: 'running', description: 'x' }])
+  const r = await askBox(h)
+  same(r.decision, 'deny', 'a listed workflow refuses')
+  assert.match(r.reason, /1 background task\b/, 'a monitor does not count')
 })
 
 await test('question box: nothing running lets it through', async () => {
@@ -1325,10 +1339,10 @@ await test("question box: GUARD_PY writes one guard.log line through the real gu
   const hooks = fileURLToPath(new URL('../../hooks', import.meta.url))
   const cfg = mkdtempSync(join(tmpdir(), 'sb-guardlog-'))
   try {
-    const r = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-I', '-B', '-c', lib.GUARD_PY, hooks, ID, 'deny', lib.QUESTION_RULE, 'agents=1 commands=0'], { cwd: cfg, env: { ...process.env, CLAUDE_CONFIG_DIR: cfg }, encoding: 'utf8' })
+    const r = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-I', '-B', '-c', lib.GUARD_PY, hooks, ID, 'deny', lib.QUESTION_RULE, 'agents=1 tasks=0'], { cwd: cfg, env: { ...process.env, CLAUDE_CONFIG_DIR: cfg }, encoding: 'utf8' })
     same(r.status, 0, 'python exit: ' + r.stderr)
     const fields = readFileSync(join(cfg, 'guard.log'), 'utf8').trim().split('\t')
-    same(fields.slice(1), ['AskUserQuestion', 'deny', 'question-box-while-work', 'agents=1 commands=0', ID], 'guard.log fields after the time')
+    same(fields.slice(1), ['AskUserQuestion', 'deny', 'question-box-while-work', 'agents=1 tasks=0', ID], 'guard.log fields after the time')
   } finally { rmSync(cfg, { recursive: true, force: true }) }
 })
 

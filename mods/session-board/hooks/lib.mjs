@@ -338,7 +338,7 @@ export function configDir(env, platform) {
 
 // The question-box check (rule questions-go-to-owner). A box stops the session until the owner
 // answers, and running work goes on with no brake. The agent list is the host's; the background
-// commands are the ones this mod saw start and not yet end.
+// tasks (commands and workflows) are the ones this mod saw start and not yet end.
 export const QUESTION_RULE = 'question-box-while-work'
 
 // Python that writes one guard.log line through hooks/guard_core.py's own locked writer.
@@ -364,18 +364,21 @@ export function taskNotice(text) {
   return id ? { id: id[1], status: status ? status[1] : '' } : null
 }
 
-// The shell task ids in a Stop input's background_tasks, or null when it carries no list.
-export function shellTaskIds(tasks) {
+// Background command and workflow ids in a Stop input's background_tasks, or null when it carries
+// no list. A workflow's agents are not in the host's agent list. A monitor is left out: it watches
+// for as long as the session lives and would refuse every box.
+const TRACKED_TASKS = new Set(['shell', 'workflow'])
+export function trackedTaskIds(tasks) {
   if (!Array.isArray(tasks)) return null
-  return tasks.filter(t => t && t.type === 'shell' && typeof t.id === 'string').map(t => t.id)
+  return tasks.filter(t => t && TRACKED_TASKS.has(t.type) && typeof t.id === 'string').map(t => t.id)
 }
 
 const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
 
 // The refusal text, or null when nothing runs.
-export function questionRefusal(agents, commands) {
-  if (!agents && !commands) return null
-  const running = [agents ? plural(agents, 'agent') : '', commands ? plural(commands, 'background command') : ''].filter(Boolean).join(' and ')
+export function questionRefusal(agents, tasks) {
+  if (!agents && !tasks) return null
+  const running = [agents ? plural(agents, 'agent') : '', tasks ? plural(tasks, 'background task') : ''].filter(Boolean).join(' and ')
   return `Question box refused: ${running} of this session still run, and a box stops the session until the owner answers. Ask in your reply and on the waiting page instead, then keep working on what does not depend on the answer (rule questions-go-to-owner).`
 }
 

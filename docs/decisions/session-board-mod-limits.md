@@ -45,16 +45,16 @@ its work. An ask clears when its tool call returns. A git read that began before
 session-board holds one guard: rule `question-box-while-work` refuses AskUserQuestion while this session's own work runs (`questions-go-to-owner`, questions go to the owner). Every other hook in the mod observes only.
 
 - **Agents.** The host's agent list, read once per box. A pending, running or waiting agent counts. The asking loop does not count itself.
-- **Background commands.** A Bash call whose result names a background task adds it. Its task notice removes it. At each main-loop turn end, the engine's own list of work in flight (the Stop input's `background_tasks`) replaces the set, so a missed notice lasts one turn at most.
+- **Background tasks.** A background command or workflow counts. A Bash call whose result names a background task adds it, and a Workflow call adds its task. Its task notice removes it. At each main-loop turn end, the engine's own list of work in flight (the Stop input's `background_tasks`) replaces the set, so a missed notice lasts one turn at most. A monitor does not count: it watches for as long as the session lives.
 - **The refusal** counts what runs and says to ask in the reply and on the waiting page, then keep working.
 - **Unknown.** An agent list that throws or takes over 3 s lets the box through. The debug log and `guard.log` each get one line that says unknown.
-- **Not covered.** An agent that starts in the same response as the box, if the box is checked first. A workflow's agents, which the host's list leaves out. A background command that started before the mod last loaded, until the next turn end.
+- **Not covered.** An agent that starts in the same response as the box, if the box is checked first. A background task that started before the mod last loaded, or that another tool started, until the next turn end.
 
 Why: Oct 26, a UI session waited on a question box while its background agents filled the disk and crashed it.
 
 Risk kind: incident, per `building-guard-needs-incident`. Landed 2026-10-27.
 
-Cost, per `outcomes-mechanize-rules`: process starts, none on an allowed box; one python start per `guard.log` line (a refusal or an unknown). Files written: that one line. How often: once per AskUserQuestion call. No timer and no watcher; the agent list is read inside the check. `mods/session-board/session-board.test.mjs` (the "question box" cases) pins the zero starts on an allowed box and one line per refusal.
+Cost, per `outcomes-mechanize-rules`: process starts, none on a box allowed after a good read; one python start per `guard.log` line (a refusal, or a box allowed because the list was unknown). Files written: that one line. How often: once per AskUserQuestion call. No timer and no watcher; the agent list is read inside the check. `mods/session-board/session-board.test.mjs` (the "question box" cases) pins the zero starts on an allowed box and one line per refusal.
 
 Kind: process
 Home: mods/session-board/hooks/lib.mjs
