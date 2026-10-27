@@ -5,6 +5,7 @@
     python3 lint/compliance_probes.py design  <child root>
     python3 lint/compliance_probes.py lanecap <child root>
     python3 lint/compliance_probes.py playwright <child root>
+    python3 lint/compliance_probes.py ios <child root>
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
 then one verdict line. Exit 0: in shape, not rolled out, or n/a. Exit 1: a gap. Exit 2: the probe
@@ -25,6 +26,9 @@ playwright: a Playwright install that also runs apt (`--with-deps`, `install-dep
   package.json script. The runner image already has the
   browsers' libraries, and that apt step once timed a job out on a slow mirror. The shared
   actions/playwright-setup installs with no apt step. Comments do not count.
+ios: drift from the iOS standard of skills/ios-apps, one item per line: the make targets, the ship
+  path, the project file, the Kit package, Swift 6, the CI runner, the CI checks, slow tests on each
+  pull request, and account IDs in the repo. A repo with no iOS app is n/a. Comments do not count.
 """
 import json
 import os
@@ -42,6 +46,8 @@ from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as f
 SHOOT_CONFIG = ".claude/shoot.json"
 # The pinned CI image of the iOS standard (skills/ios-apps). The starter writes the same name; its test pins the two equal.
 IOS_RUNNER = "macos-26"
+# The account values bin/ios-ship reads from ~/.config/ios-ship/account.json. A test pins them to bin/ios-ship.
+ACCOUNT_KEYS = ("team_id", "device_udid", "asc_key_path", "asc_key_id", "asc_issuer_id")
 # Claude Code's own folders in .claude. Claude Code fixes their names, so no repo chooses them.
 CLAUDE_CODE_DIRS = {"agents", "commands", "hooks", "skills", "output-styles", "worktrees"}
 TOKEN_FILE = re.compile(r"^(design[-_]?)?tokens\.(json|css|scss|ts|js|swift)$", re.I)
@@ -309,7 +315,105 @@ def probe_playwright(root):
     return finish("playwright", [], "in shape - no apt step" if seen else "n/a - no Playwright install", 0)
 
 
-GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright}
+IOS_TARGETS = ("phone", "testflight", "native-check")
+WORKFLOW = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
+PBXPROJ = re.compile(r"(^|/)[^/]+\.xcodeproj/project\.pbxproj$")
+XCODEGEN = re.compile(r"(^|/)project\.yml$")
+SWIFT_VERSION = re.compile(r"\bSWIFT_VERSION\s*[:=]\s*\"?([0-9][0-9.]*)")
+TOOLS_VERSION = re.compile(r"^//\s*swift-tools-version:\s*([0-9][0-9.]*)", re.M)
+MODE_5 = re.compile(r"\bswift(LanguageModes|LanguageVersions)\s*:\s*\[[^\]]*\.v(ersion\(\"?)?5")
+RUNS_ON = re.compile(r"\bruns-on:\s*\[?\s*['\"]?(macos-[\w.-]+)")
+PACKAGE_TESTS = re.compile(r"\bswift\s+test\b|\bmake\s+(\S+\s+)*kit-test\b|\bmake\s+(\S+\s+)*native-check\b")
+APP_COMPILE = re.compile(r"\bxcodebuild\b(?!\s+-version)|\bmake\s+(\S+\s+)*(app-build|native-check)\b")
+UI_ON_PR = re.compile(r"\bxcodebuild\b[^\n]*\stest(?![-\w])")
+DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*\"?[A-Z0-9]")
+
+
+def make_recipes(text):
+    """{target: recipe text} of a Makefile with comments cut."""
+    out, name = {}, None
+    for line in uncommented(text):
+        match = re.match(r"^([\w.-]+)\s*:(?!=)", line)
+        if match:
+            name = match.group(1)
+            out.setdefault(name, "")
+        elif line.startswith("\t") and name:
+            out[name] += line + "\n"
+        elif line.strip():
+            name = None
+    return out
+
+
+def probe_ios(root):
+    files = tracked(root)
+    pbx = [f for f in files if PBXPROJ.search(f)]
+    specs = [f for f in files if XCODEGEN.search(f) and re.search(r"\biOS\b", read(root, f) or "")]
+    if not pbx and not specs:
+        return finish("ios", [], "n/a - no iOS app (no project.yml for iOS, no .xcodeproj)", 0)
+    grades, lines = [], []
+
+    def item(name, grade, why):
+        grades.append(grade)
+        lines.append("  %s: %s - %s" % (name, grade, why))
+
+    text = {f: "\n".join(uncommented(read(root, f) or "")) for f in files
+            if f in pbx or f in specs or WORKFLOW.search(f) or f.endswith("Package.swift") or f == "tools/ios-ship.json"}
+    make = make_recipes(read(root, "Makefile") or "") if "Makefile" in files else None
+    if make is None:
+        item("make targets", "gap", "no Makefile with %s" % ", ".join(IOS_TARGETS))
+        item("ship path", "gap", "no Makefile, so no phone or testflight target")
+    else:
+        missing = [t for t in IOS_TARGETS if t not in make]
+        item("make targets", "gap" if missing else "pass", "Makefile lacks %s" % ", ".join(missing) if missing else "Makefile has %s" % ", ".join(IOS_TARGETS))
+        wrapped = [t for t in ("phone", "testflight") if t in make and not re.search(r"\bios-ship\s+(install|testflight)\b", make[t])]
+        item("ship path", "gap" if wrapped else "pass",
+             "Makefile target does not call ios-ship: %s" % ", ".join(wrapped) if wrapped else "phone and testflight call ios-ship")
+    item("project file", "partial" if pbx else "pass",
+         "%s is tracked; use a project.yml and XcodeGen" % ", ".join(pbx) if pbx else "XcodeGen: %s" % ", ".join(specs))
+    packages = [f for f in files if f == "Package.swift" or f.endswith("/Package.swift")]
+    item("kit package", "pass" if packages else "partial",
+         "in-repo package: %s" % ", ".join(packages) if packages else "no tracked Package.swift; app logic lives in the app target")
+    old = []
+    for f in pbx + specs:
+        old += ["%s: SWIFT_VERSION %s" % (f, v) for v in sorted(set(SWIFT_VERSION.findall(text[f]))) if not v.startswith("6")]
+    for f in packages:
+        tools = TOOLS_VERSION.search(read(root, f) or "")
+        if tools and not tools.group(1).startswith("6"):
+            old.append("%s: swift-tools-version %s" % (f, tools.group(1)))
+        if MODE_5.search(text[f]):
+            old.append("%s: language mode 5" % f)
+    item("swift 6", "gap" if old else "pass", "; ".join(old) if old else "Swift 6 language mode")
+    flows = [f for f in files if WORKFLOW.search(f)]
+    floating = ["%s: %s" % (f, r) for f in flows for r in RUNS_ON.findall(text[f]) if r != IOS_RUNNER]
+    pinned = any(RUNS_ON.search(text[f]) for f in flows)
+    if floating:
+        item("ci runner", "gap", "; ".join(floating) + " (want %s)" % IOS_RUNNER)
+    else:
+        item("ci runner", "pass" if pinned else "gap", IOS_RUNNER if pinned else "no workflow runs on macOS")
+    wants = (("runs the package tests", PACKAGE_TESTS),) * bool(packages) + (("compiles the app", APP_COMPILE),)
+    lacks = [what for what, pattern in wants if not any(pattern.search(text[f]) for f in flows)]
+    item("ci checks", "gap" if lacks else "pass",
+         "; ".join("no workflow " + w for w in lacks) if lacks else "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
+    slow = [f for f in flows if UI_ON_PR.search(text[f])]
+    item("slow tests", "gap" if slow else "pass",
+         "%s runs xcodebuild test; UI tests run once per batch, through sim-test" % ", ".join(slow) if slow else "no UI suite in CI")
+    ids = []
+    if "tools/ios-ship.json" in text:
+        try:
+            config = json.loads(read(root, "tools/ios-ship.json") or "{}")
+        except ValueError:
+            config = {}
+        if isinstance(config, dict):
+            ids += ["tools/ios-ship.json holds %s" % k for k in ACCOUNT_KEYS if k in config]
+    ids += ["%s sets DEVELOPMENT_TEAM" % f for f in specs + pbx if DEV_TEAM.search(text[f])]
+    item("account ids", "gap" if ids else "pass",
+         "; ".join(ids) + "; they live in ~/.config/ios-ship/account.json" if ids else "none in the repo")
+    worst = "out" if "gap" in grades else "partial" if "partial" in grades else "in shape"
+    return finish("ios", lines, worst, 0 if worst == "in shape" else 1)
+
+
+GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
+          "ios": probe_ios}
 
 
 def main(argv):

@@ -210,7 +210,7 @@ class Ios(unittest.TestCase):
         code, out = self.gold().run("ios")
         self.assertEqual(code, 0, out)
         self.assertTrue(out.rstrip().endswith("ios: in shape"), out)
-        self.assertEqual(out.count(": pass"), 8, out)
+        self.assertEqual(out.count(": pass"), 9, out)
 
     def test_no_ios_app_is_na(self):
         code, out = Repo(self).write("Package.swift", "// swift-tools-version: 6.2\n").write("Makefile").run("ios")
@@ -237,7 +237,7 @@ class Ios(unittest.TestCase):
 
     def test_ship_wrapper_is_red(self):
         repo = self.edit(self.gold(), "Makefile", "\tios-ship testflight", "\ttools/testflight")
-        self.red(repo, "ship path: gap - Makefile testflight does not call ios-ship")
+        self.red(repo, "ship path: gap - Makefile target does not call ios-ship: testflight")
 
     def test_hand_kept_project_file_is_partial(self):
         repo = self.gold().write("native/Tally.xcodeproj/project.pbxproj", "SWIFT_VERSION = 6.0;\n")
@@ -246,7 +246,8 @@ class Ios(unittest.TestCase):
     def test_no_kit_package_is_partial(self):
         repo = self.gold()
         subprocess.run(["git", "-C", repo.root, "rm", "-q", "--cached", "native/TallyKit/Package.swift"], check=True)
-        self.red(repo, "kit package: partial - no tracked Package.swift")
+        out = self.red(repo, "kit package: partial - no tracked Package.swift")
+        self.assertIn("ci checks: pass - an app compile on each pull request", out)  # no package, so no package tests to want
 
     def test_ci_without_package_tests_or_app_compile_is_red(self):
         repo = self.edit(self.gold(), ".github/workflows/ios.yml", "run: make kit-test", "run: echo skipped")

@@ -72,6 +72,7 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("fresh-prose"),
     os.path.normcase("design-review"),
     os.path.normcase("impeccable"),
+    os.path.normcase("ios-apps"),
     os.path.normcase("plain-english-map"),
     os.path.normcase("project-ops"),
     os.path.normcase("roadmap"),
