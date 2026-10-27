@@ -176,7 +176,8 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 `live_pages()` in `lint/layout.py`.
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
-   that cannot be read gets an empty `<artifact id>.unreadable`.
+   that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not
+   raw HTML, or that does not name this account a writer, is unreadable too.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
 3. For each `behind` page, republish `page.html` to the same URL with the capabilities `db` and
