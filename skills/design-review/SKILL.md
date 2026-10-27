@@ -1,6 +1,6 @@
 ---
 name: design-review
-description: Use after a change to a screen in a repo that has screens. Runs two blind design reviews of the changed pages, then compares them with the repo's design records. Not for a change that has no screen.
+description: Use after a change to a screen in a repo that has screens. Runs two blind design reviews of the changed pages, then compares them with the repo's design records. Its Mockup set check also flags a set of explore mockups that all keep today's structure. Not for a change that has no screen.
 ---
 
 Run this in the orchestrator. Agents never spawn, so the orchestrator spawns both reviewers.
@@ -24,7 +24,9 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    one at every size and theme it ships in. Use a headless or isolated browser. If a
    page needs the owner's login, use it; otherwise use none
    (`verification-browser-login-only-needed`). Before a window or a screen capture lands on the
-   owner's screen, say so in one line (`verification-announce-own-screen`).
+   owner's screen, say so in one line (`verification-announce-own-screen`). `bin/shoot` also writes
+   each rendered page as `.html`. Run `python3 ~/.claude/lint/label_once.py` on those files, and
+   give its hits to Reviewer A and the design reviewer (`ux-label-once`, a label shows once).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
    screenshots, plus the reviewer's own instructions below. Never give a reviewer the repo's
    design spec, tokens or design decisions.
@@ -68,6 +70,21 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    (verification-screens-verdict: a verdict per screen, never a description). A screen that did
    not render, or has no screenshot, gets `unknown`, never pass or fail
    (`verification-report-unknown-reads`).
+
+## Mockup set check
+
+Skill `design-explore` runs this at its Collect step, on a set of mockups and before the owner culls.
+It is not a review of a built screen.
+
+1. Spawn one design reviewer with agentType `design-reviewer`. Its brief names each mockup of the set
+   and the current screens or routes of the same job. It reads both.
+2. For each mockup, it gives one structure verdict: `same` when the mockup keeps today's views or
+   tabs, today's way to move between them, and today's first screen, with only their layout or
+   style changed; else `new`. It names the parts that decide the verdict.
+3. When every mockup is `same`, the orchestrator puts one flag at the top of the owner's list: the set
+   holds no new structure. It offers one more round of blind lanes, from the template.
+4. When a blind mockup is `same`, the orchestrator reads that lane's brief against the template
+   (`blind_brief.py`) and names any fault beside the verdict.
 
 ## Rules
 

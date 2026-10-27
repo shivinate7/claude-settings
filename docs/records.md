@@ -122,6 +122,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `audit-rework-order` | Owner, 2026-10-16 10:50 CDT. | [`docs/decisions/audit-rework-order.md`](../docs/decisions/audit-rework-order.md) |
 | `background-needs-end-note` | Owner, 2026-10-13 23:41 CDT: "End condition at start." | [`docs/decisions/background-needs-end-note.md`](../docs/decisions/background-needs-end-note.md) |
 | `bare-bash-on-windows-can-resolve-to-the-wsl-stub` | Python code on Windows never hands `subprocess.run` a bare `"bash"` or `"gh"`. | [`docs/decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md`](../docs/decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md) |
+| `blind-briefs-use-a-template` | Owner, 2026-10-26 22:58 CDT, on the mailaudit Duo mockups: "not a single one of them tried to break the mold". | [`docs/decisions/blind-briefs-use-a-template.md`](../docs/decisions/blind-briefs-use-a-template.md) |
 | `browser-prompts-are-the-apps` | Owner, 2026-10-11: claude-settings cannot disable the built-in browser pane's approval prompts on outside sites. | [`docs/decisions/browser-prompts-are-the-apps.md`](../docs/decisions/browser-prompts-are-the-apps.md) |
 | `build-dirs-reaped-at-agent-end` | Owner, 2026-10-11: the agent-end reap also deletes build folders. | [`docs/decisions/build-dirs-reaped-at-agent-end.md`](../docs/decisions/build-dirs-reaped-at-agent-end.md) |
 | `builders-cannot-edit-tests` | A builder that cannot pass a test must not delete, skip or rewrite it. | [`docs/decisions/builders-cannot-edit-tests.md`](../docs/decisions/builders-cannot-edit-tests.md) |
@@ -171,7 +172,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `one-shared-record-stamp` | One shared parser in claude-settings handles every repo's record format. | [`docs/decisions/one-shared-record-stamp.md`](../docs/decisions/one-shared-record-stamp.md) |
 | `opt-in-ci-templates-composite` | Seven templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no CI step. | [`docs/decisions/opt-in-ci-templates-composite.md`](../docs/decisions/opt-in-ci-templates-composite.md) |
 | `opus-grant-expires` | An Opus agent is enabled for one repository, on the owner's grant in chat (`roles-opus-override-guarded`). | [`docs/decisions/opus-grant-expires.md`](../docs/decisions/opus-grant-expires.md) |
-| `owner-feedback-inbox` | When the owner opens a feedback burst, a hook writes each message to a per-session inbox. | [`docs/decisions/owner-feedback-inbox.md`](../docs/decisions/owner-feedback-inbox.md) |
+| `owner-feedback-inbox` | A hook writes every owner message to a per-session inbox. | [`docs/decisions/owner-feedback-inbox.md`](../docs/decisions/owner-feedback-inbox.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |
 | `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`docs/decisions/playwright-browsers-path.md`](../docs/decisions/playwright-browsers-path.md) |
 | `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`docs/decisions/playwright-install-once.md`](../docs/decisions/playwright-install-once.md) |

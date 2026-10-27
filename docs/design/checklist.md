@@ -17,6 +17,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-keep-what-was-made: Is typed input still there after close, back, a tab change and a return?
 - [ ] ux-control-earns-place: Does each control change something, and does each disabled one say why?
 - [ ] ux-one-plain-name: Do the nav label and page title match? Does each act keep one name, each icon one meaning, and each enum value a label?
+- [ ] ux-label-once: Does each label and status word show once, with shape or colour in each other place? Does `label_once.py` print nothing, or only hits that are data?
 - [ ] ux-a11y-floor: Is the `a11y.md` CI check green, and do its hand checks pass?
 - [ ] ux-a11y-floor (touch size): Are touch targets 44 by 44 CSS px on touch screens and 24 by 24 CSS px for a mouse? The axe check covers only 24 px, so 44 px on touch is a hand check.
 - [ ] ux-answer-at-press: Does the answer to each press show at the control that was pressed, or beside it?

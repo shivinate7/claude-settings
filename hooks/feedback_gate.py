@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""At Stop, blocks once when the owner's feedback inbox is malformed or unreadable: a captured message with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, or an open standing item whose id is missing from the handoff.
+"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, or an open standing item whose id is missing from the handoff.
 
-Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes while the owner's
-`fb` capture is open, and the session's handoff beside it. It blocks a turn end in these cases:
-  - a captured message has no item lines under it;
+Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes for every owner message,
+and the session's handoff beside it. A burst is the messages saved since the last Stop when they are
+two or more, or one message of three or more non-blank lines or two or more bullet lines (BULLET).
+Only a burst's messages need items: a lone short message never triggers the gate. The turn state file
+<session_id>.inbox.turns (local_time.inbox_paths) holds how many messages earlier Stops saw and which
+were bursts. Each Stop updates it, even with stop_hook_active, so a message is classed once, in the
+turn it arrived. A missing or damaged state file counts every saved message as this turn's. It blocks
+a turn end in these cases:
+  - a burst's message has no item lines under it;
   - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing;
   - a ruling or task item, open or closed, whose home is not a file under a home of its kind
     (HOME_KINDS, paths from lint/layout.py for the repo of the hook's cwd) that some branch's tree
@@ -13,8 +19,7 @@ Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes wh
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision gate-hooks-fail-closed:
-    `stop_hook_active` true exits at once, so the block costs one turn at most.
-While capture is open, stdout also carries a `systemMessage` that tells the owner to send `fb done`.
+    `stop_hook_active` true exits with no output, so the block costs one turn at most.
 Format: see hooks/test_feedback_inbox.py. Exit 0 always. Any other error goes to stderr and passes.
 """
 import json
@@ -42,8 +47,36 @@ OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
               "task": ("todo", "debts", "debt-notes")}
 FAIL_OPEN = "Feedback gate: ruling and task homes not checked (%s)."
-REMINDER = ("Feedback capture is open. Send `fb done` when the burst is over to close capture. "
-            "It also ends after 10 minutes with no owner message.")
+BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
+
+
+def is_burst(texts):
+    """True when one turn's messages need items: two or more, or one with three or more non-blank
+    lines or two or more bullet lines."""
+    if len(texts) != 1:
+        return len(texts) > 1
+    lines = [ln for ln in (texts[0] or "").split("\n") if ln.strip()]
+    return len(lines) >= 3 or sum(1 for ln in lines if BULLET.match(ln)) >= 2
+
+
+def burst_indexes(blocks, turns):
+    """Classes the messages saved since the last Stop, records them in the turn state file, and
+    returns the indexes of every burst message so far. A write failure goes to stderr: the next
+    Stop then counts these messages again, as part of its own turn."""
+    try:
+        with open(turns, encoding="utf-8") as f:
+            state = json.load(f)
+        seen, burst = min(int(state["seen"]), len(blocks)), {int(i) for i in state["burst"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        seen, burst = 0, set()
+    if is_burst([b["text"] for b in blocks[seen:]]):
+        burst.update(range(seen, len(blocks)))
+    try:
+        with open(turns, "w", encoding="utf-8") as f:
+            json.dump({"seen": len(blocks), "burst": sorted(burst)}, f)
+    except OSError as e:
+        print("feedback_gate: turn state not saved: %s" % e, file=sys.stderr)
+    return burst
 
 
 def parse(text):
@@ -55,8 +88,8 @@ def parse(text):
         if fence is not None:
             if re.fullmatch(r"`+", ln) and len(ln) >= len(fence):
                 fence = None
-            elif blocks[-1]["text"] is None:
-                blocks[-1]["text"] = ln
+            else:
+                blocks[-1]["text"] = ln if blocks[-1]["text"] is None else blocks[-1]["text"] + "\n" + ln
         elif HEADER.match(ln):
             blocks.append({"stamp": ln[4:], "text": None, "items": [], "fenced": False})
         elif blocks and not blocks[-1]["fenced"] and re.fullmatch(r"`{3,}", ln):
@@ -152,11 +185,11 @@ class Homes:
         return None
 
 
-def problems(blocks, handoff, homes=None):
+def problems(blocks, handoff, homes=None, burst=()):
     out = []
-    for b in blocks:
-        if not b["items"]:
-            out.append("the message at %s (%s) has no items" % (b["stamp"], (b["text"] or "")[:40]))
+    for n, b in enumerate(blocks):
+        if not b["items"] and n in burst:
+            out.append("the message at %s (%s) has no items" % (b["stamp"], (b["text"] or "").split("\n")[0][:40]))
         for ln in b["items"]:
             it = item(ln)
             if it is None:
@@ -178,13 +211,24 @@ def main():
     try:
         hook = json.load(sys.stdin)
         paths = local_time.inbox_paths(hook.get("session_id"))
-        if hook.get("stop_hook_active") or paths is None:
+        if paths is None:
             return 0
-        inbox, marker = paths
-        out = {"systemMessage": REMINDER} if local_time.is_open(marker) else {}
+        inbox, turns = paths
+        out = {}
         try:
             with open(inbox, encoding="utf-8") as f:
                 blocks = parse(f.read())
+        except FileNotFoundError:
+            return 0
+        except (OSError, UnicodeDecodeError):
+            blocks = None
+        if blocks is not None:
+            burst = burst_indexes(blocks, turns)
+        if hook.get("stop_hook_active"):
+            return 0
+        if blocks is None:
+            reasons = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
+        else:
             try:
                 with open(precompact_handoff.handoff_path(hook["session_id"]), encoding="utf-8",
                           errors="replace") as f:
@@ -192,18 +236,13 @@ def main():
             except OSError:
                 handoff = ""
             homes = Homes(hook.get("cwd"))
-            reasons = problems(blocks, handoff, homes)
+            reasons = problems(blocks, handoff, homes, burst)
             if homes.skip:
-                note = FAIL_OPEN % homes.skip
-                out["systemMessage"] = (out["systemMessage"] + "\n" + note) if out else note
-        except FileNotFoundError:
-            reasons = []
-        except (OSError, UnicodeDecodeError):
-            reasons = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
+                out["systemMessage"] = FAIL_OPEN % homes.skip
         if reasons:
             out.update(decision="block", reason="Feedback inbox: " + "; ".join(reasons)
-                       + ". Jot each message as `- <id> [kind] -> home` under it, file each ruling and task in its"
-                       " tracked home, and put open standing ids in the handoff.")
+                       + ". Jot each burst message as `- <id> [kind] -> home` under it, file each ruling and task"
+                       " in its tracked home, and put open standing ids in the handoff.")
         if out:
             print(json.dumps(out))
     except Exception as e:  # advisory: a crash passes, and says so on stderr

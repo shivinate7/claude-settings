@@ -5,7 +5,8 @@
 The UX rules that every repo with screens shares, beyond the three third-party sets, live in `docs/design/`. They
 come from the owner's own repos. Each rule cites its repo and record. A rule that no repo shows is left out.
 
-- The house rules are `ux-answer-at-press`, `ux-long-run-stops`, `ux-all-is-well` and `ux-thumb-zone`.
+- The house rules are `ux-answer-at-press`, `ux-long-run-stops`, `ux-all-is-well`, `ux-thumb-zone` and
+  `ux-label-once`.
   Touch size is the Target size row in `docs/design/a11y.md`: 44px on touch, 24px for mouse.
 - House design values are in `docs/design/tokens.md`, and a repo may override them. Motion durations and easing are
   per repo.
@@ -22,8 +23,10 @@ come from the owner's own repos. Each rule cites its repo and record. A rule tha
   - impeccable: critique and polish (error text, empty-state next step, undo before a confirm, one noun
     for one concept).
   - frontend-design: visual direction.
-- "Say it once, in the fewest words" is left out, because impeccable `clarify` and the UI-string clause in
-  `agents/reviewer.md` already hold it.
+- `ux-label-once` holds "say a label once" (owner, Oct 26 20:40 CDT: the waiting page repeated "Blocking",
+  "Upcoming" and "Whenever"). impeccable `clarify` held it as advice, and nothing caught it.
+  `lint/label_once.py` names each repeat in a rendered page. The probe skips controls and table cells. The
+  reviewer judges each other hit.
 - Not house rules: behaviour defaults (dropped); spend shows cost, work-screen head, real photos only and
   phone-first (per repo); letter case (Vercel).
 
