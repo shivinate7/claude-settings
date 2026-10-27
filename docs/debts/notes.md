@@ -566,3 +566,5 @@
 - waiting-opt-shared-slug: two options that share one mockup slug open the first one's sheet and label on "Open full size", as `openDesign` takes the first match (skills/waiting-page/page.html openDesign)
 - waiting-opt-sel-untested: no test asserts the `.sel` class after a pick that keeps the option frames, so a stale highlight from a dropped attribute copy would pass (skills/waiting-page/tests/page.test.mjs)
 - waiting-opt-lone-empty-slot: above 710 px a fourth option alone in a second row still shows an empty mockup slot, as CSS cannot see a card's row (skills/waiting-page/page.html)
+- waiting-opt-id-namespace: the trade-off id `t-<item>-<key>` shares a namespace with the title id `t-<item>`, so items `foo` and `foo-a` would both own `t-foo-a` (skills/waiting-page/page.html optCard)
+- waiting-sheet-brand-border: with a brand colour the Designs sheet's 50% `--on-hdr` button border can fall under 3:1 (about 18% of 648 sampled brands); the ring stays 4.5:1 or better (skills/waiting-page/page.html .dsh-head .btn)
