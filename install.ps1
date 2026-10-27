@@ -623,7 +623,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         # one more skill. Backups go to backups\skills\<name>.<time>; an older installer's
         # skills\<name>.bak.* is moved there too, never deleted.
         $skillBakDir = Join-Path (Join-Path $ClaudeDir 'backups') 'skills'
-        foreach ($old in @(Get-ChildItem -LiteralPath $destDir -Directory -Filter '*.bak.*' -Force -ErrorAction SilentlyContinue)) {
+        foreach ($old in @(Get-ChildItem -LiteralPath $destDir -Directory -Filter '*.bak.*' -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '\.bak\.\d{14}$' -and -not $_.LinkType })) {
             New-Item -ItemType Directory -Force -Path $skillBakDir | Out-Null
             $to = Join-Path $skillBakDir $old.Name
             if (Test-Path -LiteralPath $to) { $to = "$to.$PID" }

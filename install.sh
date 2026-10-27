@@ -465,6 +465,7 @@ SKILL_BAK_DIR="$CLAUDE_DIR/backups/skills"
 SKILL_COPY_DIR="$CLAUDE_DIR/backups/skill-copies"
 
 # Print a hash of a directory tree: every file path and every file content.
+# It covers file names and contents only, so a mode, empty-folder or symlink-only change is replaced with no backup.
 tree_hash() {
   [ -d "$1" ] || return 1
   ( cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do
@@ -486,8 +487,8 @@ backup_skill() {
 
 # An older installer left skills/<name>.bak.<time> folders. Move each out of skills/.
 move_old_skill_baks() {
-  for old in "$DEST_DIR"/*.bak.*; do
-    [ -e "$old" ] || [ -L "$old" ] || continue
+  for old in "$DEST_DIR"/*.bak.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]; do
+    [ -d "$old" ] && [ ! -L "$old" ] || continue
     bn=$(basename "$old")
     mkdir -p "$SKILL_BAK_DIR"
     to="$SKILL_BAK_DIR/$bn"

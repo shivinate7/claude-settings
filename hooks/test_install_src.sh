@@ -1196,6 +1196,18 @@ skills_bak5() {
   rm -rf "$h"
 }
 
+skills_bak6() {
+  name="skills_bak6: a skill folder named x.bak.v2 stays in skills/"
+  skills_bak_setup skills_bak6
+  mkdir -p "$cfg/skills/foo.bak.v2"
+  printf 'mine\n' > "$cfg/skills/foo.bak.v2/SKILL.md"
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ "$(cat "$cfg/skills/foo.bak.v2/SKILL.md" 2>/dev/null)" != "mine" ]; then bad "$name" "foo.bak.v2 was moved out of skills/"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
 # ---- copy-mode case: a fake `ln` that copies instead of linking must not pile up .bak entries
 # across repeated runs. Git Bash's `ln -sfn` on a Windows account without symlink rights makes a
 # real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir() expect a
@@ -2726,6 +2738,7 @@ run skills_bak2
 run skills_bak3
 run skills_bak4
 run skills_bak5
+run skills_bak6
 run copymode_case1
 run backup_case1
 run backup_case2
