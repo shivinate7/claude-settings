@@ -4,12 +4,16 @@ description: Use when a session has a question, a decision or a task for the own
 ---
 
 The waiting page is one private page per repo or project. It holds every item that waits on the
-owner. Only a session that reads its own answers at a wake writes an item. A lane never writes one. A lane is a background
-agent, or a lane session that ends. It puts its question in its report. The orchestrator writes the
-item with itself as `owner`. It routes the answer back to the lane or its next try. Every repo's page is the same template. The page is fixed. All content
-lives in its database, through the ArtifactData tool. The one exception is a design mockup: it is
-stored in the page itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each question
-here. Decision `questions-go-to-owner` holds the rulings.
+owner. Only a session that reads its own answers at a wake writes an item.
+
+A lane never writes an item. A lane is a background agent, or a lane session that ends. It puts its
+question in its report. The orchestrator writes the item with itself as `owner`. It routes the
+answer back to the lane or its next try.
+
+Every repo's page is the same template. The page is fixed. All content lives in its database,
+through the ArtifactData tool. The one exception is a design mockup: it is stored in the page
+itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each
+question here. Decision `questions-go-to-owner` holds the rulings.
 
 ## Find the page
 
@@ -32,6 +36,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
+  - `look: true` marks a question about how something looks. Every option card with no picture then
+    shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question), `pick` (the key you
@@ -46,8 +52,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   stands, write `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
+  On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
   A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
-  deletes `answers/<id>`. Undo (8 seconds after a Send) deletes the
+  deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
+  has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
   records that Send wrote, or puts back the answer they replaced.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows

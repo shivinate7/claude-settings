@@ -452,11 +452,13 @@ function sparkle() {
   b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
   return b;
 }
-const hasPics = (it) => (it.options || []).some((o) => o.design);
+const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design);
 // An option names its picture with `design`, a slug of the item's `designs`. The picture sits at the top of the option card and a tap on it picks the option.
+// A question about how something looks sets `look`: an option card with no picture then shows a warning.
 function optPic(it, o) {
-  if (!o.design) return h("span", { class: "opic" });
-  if (!(it.designs || []).some((d) => d.slug === o.design)) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
+  const has = !!o.design && (it.designs || []).some((d) => d.slug === o.design);
+  if (!has && !it.look) return h("span", { class: "opic" });
+  if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   return h("span", { class: "opic" }, fitFrame(o.design, o.label, true));
 }
 // Designs that no option names show at the front of the item.
@@ -555,16 +557,23 @@ function buildCard(it) {
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
-// Withdraw deletes the saved record of each changed answer left empty. The saved answer stays if the store refuses.
+// Withdraw deletes the saved record of each changed answer left empty. The page cannot pin a delete to a version,
+// so it re-reads the record first and leaves one that is no longer the answer it holds. A refused delete keeps the answer.
 async function withdrawAll() {
+  const done = [];
   for (const it of withdrawn()) {
+    const prior = state.answers[it.id];
     try {
       if (!state.db) throw { code: "no store" };
-      await state.db.collection("answers").doc(it.id).delete();
+      const ref = state.db.collection("answers").doc(it.id), cur = await ref.get();
+      if (cur.exists && (cur.data() || {}).at !== prior.at) { state.notice[it.id] = "This answer changed since this page read it. Reload before you withdraw it."; continue; }
+      await ref.delete();
     } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
     delete state.answers[it.id]; delete state.changing[it.id]; delete state.noteOpen[it.id]; delete state.notice[it.id];
+    done.push({ it, prior, draft: null, changing: false, withdrawn: true });
   }
-  saveDraft(); render();
+  saveDraft();
+  return done;
 }
 
 /* ---------- Painting: a card is rebuilt only when what it shows changed, and a live design preview is never detached ---------- */
@@ -740,9 +749,9 @@ async function sendAll() {
   const st = staged();
   if (!st.length && !withdrawn().length) return;
   state.sending = true; edited(); renderBar();
-  if (withdrawn().length) await withdrawAll();
-  if (!st.length) { state.sending = false; renderBar(); return; }
-  const wrote = [], entries = [];
+  const gone = withdrawn().length ? await withdrawAll() : [];
+  if (!st.length) { if (gone.length) openSent(gone, new Date().toISOString()); render(); state.sending = false; renderBar(); return; }
+  const wrote = [...gone], entries = [];
   try {
     const can = await canTell();
     const at = new Date().toISOString();
@@ -757,7 +766,7 @@ async function sendAll() {
     saveDraft();
     if (wrote.length) openSent(wrote, at);
     render();
-    if (wrote.length) {
+    if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
       setSentStatus(told ? TOLD : NOT_TOLD);
     }
@@ -770,7 +779,7 @@ let undoTimer, closeTimer;
 const undoLeft = (p) => Math.max(0, Math.ceil((Date.parse(p.at) + UNDO_S * 1000 - Date.now()) / 1000));
 function openSent(wrote, at) {
   clearInterval(undoTimer); clearTimeout(closeTimer);
-  state.sentPanel = { wrote, at, status: "Telling Claude…" };
+  state.sentPanel = { wrote, at, status: wrote.some((w) => !w.withdrawn) ? "Telling Claude…" : "" };
   renderSent();
   undoTimer = setInterval(() => { const p = state.sentPanel; if (!p) return clearInterval(undoTimer); if (undoLeft(p) <= 0) clearInterval(undoTimer); renderSent(); }, 1000);
   closeTimer = setTimeout(closeSent, 20000);
@@ -781,13 +790,14 @@ function renderSent() {
   const p = state.sentPanel, box = $("sent");
   box.hidden = !p;
   if (!p) { $("sentIn").replaceChildren(); return; }
-  const n = p.wrote.length, blk = p.wrote.filter((w) => w.it.holds).length;
+  const n = p.wrote.filter((w) => !w.withdrawn).length, wd = p.wrote.length - n, blk = p.wrote.filter((w) => w.it.holds && !w.withdrawn).length;
+  const said = [n ? n + (n === 1 ? " answer sent." : " answers sent.") : "", wd ? wd + (wd === 1 ? " answer withdrawn." : " answers withdrawn.") : ""].filter(Boolean).join(" ") + " ";
   $("sentIn").replaceChildren(
-    h("div", { class: "sent-head" }, h("span", { class: "stamp" }, "Sent", h("small", {}, fmt(p.at, false))),
-      h("div", {}, h("b", {}, n + (n === 1 ? " answer" : " answers") + " sent. "), h("span", { id: "sentStatus" }, p.status),
+    h("div", { class: "sent-head" }, h("span", { class: "stamp" }, n ? "Sent" : "Withdrawn", h("small", {}, fmt(p.at, false))),
+      h("div", {}, h("b", {}, said), h("span", { id: "sentStatus" }, p.status),
         blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null)),
     h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = state.receipts[w.it.id] || {}; return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
-    h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, "Undo send (" + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
+    h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, (n ? "Undo send (" : "Undo withdraw (") + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
 }
 // Undo puts back what each write replaced: the earlier answer, or nothing. The owner's picks come back as drafts.
 async function undoSend() {
@@ -811,9 +821,10 @@ async function undoSend() {
   }
   if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + late.map((n) => "No. " + n).join(" and ") + "."; }
   saveDraft(); closeSent(); render();
-  if (undone.length) {
+  const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
+  if (told.length) {
     const can = await canTell();
-    await notifyClaude(noticeText(undone.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
+    await notifyClaude(noticeText(told.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
   }
 }
 
@@ -911,6 +922,7 @@ document.addEventListener("keydown", (e) => {
 
 function render() {
   renderList(); renderRail(); renderBar(); renderSent();
+  FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
   const nd = allDesigns().length;
   $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => i.designs && i.designs.length);
 }

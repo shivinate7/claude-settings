@@ -81,6 +81,7 @@ INSTRUCTIONS = (
     "Never flag a pick another rule keeps for the owner's grant, such as a model switch or a stale decision. "
     "Also flag an Input Needed item that asks the owner to pick between visual options, a look or a layout, "
     "and only links to them, such as a link to a folder, a repo or a file; each option needs its own picture or design in the item. "
+    "A reply that points to the waiting-page item that carries the designs is fine; never flag it. "
     "Running background work never makes a reply unfinished. "
     "style-limits-kept-silently: flag a reply that narrates a limit it kept or a check that passed, "
     "such as \"staying under the 15-line cap\" or \"rule X holds\". "

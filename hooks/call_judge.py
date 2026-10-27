@@ -39,7 +39,7 @@ SPAWN_PROMPT = (
     "carries the task, the files, governing rulings, and the check that proves done) and "
     "tokens-point-brief-at-files (the brief names files and never pastes their contents). Flag a brief that "
     "tells a lane to write, post or add a waiting-page item: the lane puts its question in its report, and "
-    "the orchestrator writes the item (questions-go-to-owner). Block only on "
+    "the orchestrator writes the item (questions-go-to-owner). A brief that forbids the lane to write a waiting-page item is fine; never flag it. Block only on "
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
     "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
