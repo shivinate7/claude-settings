@@ -31,6 +31,7 @@ $Here   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Repo   = if ($env:REPO_UNDER_TEST) { $env:REPO_UNDER_TEST } else { $Here }
 $GitExe = (Get-Command git -ErrorAction Stop).Source
 $Utf8   = New-Object Text.UTF8Encoding($false)
+. (Join-Path $Here 'testing\SharedRead.ps1')   # Read-Shared: a child's output reads back while a handle holds it
 $Failed = 0
 function Check([string]$name, [bool]$ok, [string]$why = '') {
     if ($ok) { Write-Host "PASS: $name" } else { Write-Host "FAIL: ${name}: $why"; $script:Failed++ }
@@ -88,7 +89,7 @@ function Get-TrackedFiles([string]$Root) {
     $o = Join-Path $Tmp ('ls-' + [guid]::NewGuid().ToString('N'))
     $p = Start-Process -FilePath $GitExe -ArgumentList ('-C "' + $Root + '" ls-files -z') -Wait -PassThru -NoNewWindow `
         -RedirectStandardOutput $o -RedirectStandardError "$o.err"
-    if ($p.ExitCode -ne 0) { throw "git ls-files failed in ${Root}: $([IO.File]::ReadAllText("$o.err"))" }
+    if ($p.ExitCode -ne 0) { throw "git ls-files failed in ${Root}: $(Read-Shared "$o.err")" }
     return @($Utf8.GetString([IO.File]::ReadAllBytes($o)) -split "`0" | Where-Object { $_ -ne '' })
 }
 
