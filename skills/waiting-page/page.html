@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Waiting on you</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -8,7 +9,7 @@
    repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
 :root {
   /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
-  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #6b7480; --line: #d9dee5; --chip: #eef1f4;
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
   --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
   --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
   --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
@@ -85,6 +86,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .nchip:hover { border-color: var(--acc); }
 .nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
 .pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
 .pairchips .nchip { height: 28px; width: 44px; }
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
@@ -339,13 +341,14 @@ function applyIdentity() {
 /* ---------- Time: always US Central, 24-hour, with the zone named ---------- */
 function fmt(iso, withDay = true) {
   const d = new Date(iso);
-  if (isNaN(d)) return String(iso || "");
+  if (isNaN(d)) return "";
   const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(d);
   const g = (t) => (p.find((x) => x.type === t) || {}).value;
   return (withDay ? g("month") + " " + g("day") + ", " : "") + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
 }
 const span = (ms) => { const hrs = Math.round(Math.abs(ms) / 36e5); if (hrs < 1) return "under an hour"; if (hrs < 24) return hrs + (hrs === 1 ? " hour" : " hours"); const d = Math.round(hrs / 24); return d + (d === 1 ? " day" : " days"); };
-const waited = (iso) => span(Date.now() - Date.parse(iso));
+const validT = (iso) => !isNaN(Date.parse(iso));
+const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(iso)) : "");
 
 /* ---------- Tiers: what holds up work, then what has a deadline, then the rest by age ---------- */
 const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
@@ -353,7 +356,7 @@ const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
 const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
 // A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
 const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && (it.options || []).some((o) => o.key === it.pick);
-const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by ? "due" : "calm");
+const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by && validT(it.by) ? "due" : "calm");
 const mates = (it) => (it.group ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
@@ -455,14 +458,14 @@ function designPreview(it) {
 function buildCard(it) {
   const T = tierOf(it), saved = isSaved(it), d = eff(it) || {};
   const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
-  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n), h("span", {}, "waited " + waited(it.added)));
+  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n), h("span", {}, waited(it.added)));
   if (it.minutes) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
   if (saved) { card.append(receipt(it)); return card; }
   if (it.designs && it.designs.length) card.append(designPreview(it));
   if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));
-  if (it.by) {
+  if (it.by && validT(it.by)) {
     const left = Date.parse(it.by) - Date.now();
     card.append(h("p", { class: "stake due" }, glyph("due"), h("span", {}, left >= 0 ? "Answer by " + fmt(it.by) + ", " + span(left) + " from now." : "Answer was due " + fmt(it.by) + ", " + span(left) + " ago.")));
   }
@@ -506,7 +509,7 @@ function buildCard(it) {
     nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
     card.append(nb);
   }
-  card.append(h("p", { class: "dest" }, "Lands in " + it.home + ". Added " + fmt(it.added) + "."));
+  card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
 // Clear drops the draft. On a changed answer it also withdraws the saved record, and the draft stays if the store refuses.
@@ -718,11 +721,13 @@ async function sendAll() {
 
 /* The panel above the bar: stamp, who was told, and 8 seconds to take it back. */
 let undoTimer, closeTimer;
+// The window is read from the clock, so a throttled tab cannot stretch it past what a session waits.
+const undoLeft = (p) => Math.max(0, Math.ceil((Date.parse(p.at) + UNDO_S * 1000 - Date.now()) / 1000));
 function openSent(wrote, at) {
   clearInterval(undoTimer); clearTimeout(closeTimer);
-  state.sentPanel = { wrote, at, status: "Telling Claude…", left: UNDO_S };
+  state.sentPanel = { wrote, at, status: "Telling Claude…" };
   renderSent();
-  undoTimer = setInterval(() => { const p = state.sentPanel; if (!p) return clearInterval(undoTimer); p.left--; if (p.left <= 0) clearInterval(undoTimer); renderSent(); }, 1000);
+  undoTimer = setInterval(() => { const p = state.sentPanel; if (!p) return clearInterval(undoTimer); if (undoLeft(p) <= 0) clearInterval(undoTimer); renderSent(); }, 1000);
   closeTimer = setTimeout(closeSent, 20000);
 }
 function setSentStatus(s) { if (state.sentPanel) { state.sentPanel.status = s; renderSent(); } }
@@ -737,25 +742,29 @@ function renderSent() {
       h("div", {}, h("b", {}, n + (n === 1 ? " answer" : " answers") + " sent. "), h("span", { id: "sentStatus" }, p.status),
         blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null)),
     h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = state.receipts[w.it.id] || {}; return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
-    h("div", { class: "row" }, p.left > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, "Undo send (" + p.left + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
+    h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, "Undo send (" + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
 }
 // Undo puts back what each write replaced: the earlier answer, or nothing. The owner's picks come back as drafts.
 async function undoSend() {
-  const p = state.sentPanel; if (!p || p.left <= 0 || p.busy) return;
+  const p = state.sentPanel; if (!p || p.busy || undoLeft(p) <= 0) return;
   p.busy = true;
-  const can = await canTell();
   const undone = [];
+  // Deletes come first and each one checks the clock, so none runs after the window a session waits out.
   for (const w of p.wrote.slice().reverse()) {
+    if (undoLeft(p) <= 0) { state.barNote = "Too late to undo No. " + w.it.n + "."; break; }
     try {
-      const ref = state.db.collection("answers").doc(w.it.id);
-      if (w.prior) await ref.set(w.prior); else await ref.delete();
+      const col = state.db.collection("answers").doc(w.it.id);
+      if (w.prior) await col.set(w.prior); else { await col.delete(); if (state.receipts[w.it.id]) await state.db.collection("receipts").doc(w.it.id).delete(); }
     } catch (e) { state.barNote = "Undo failed (" + (e && e.code || "error") + ") at No. " + w.it.n + "."; break; }
-    if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
+    if (w.prior) state.answers[w.it.id] = w.prior; else { delete state.answers[w.it.id]; delete state.receipts[w.it.id]; }
     if (w.draft) state.draft[w.it.id] = w.draft; if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
   }
   saveDraft(); closeSent(); render();
-  if (undone.length) await notifyClaude(noticeText(undone.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
+  if (undone.length) {
+    const can = await canTell();
+    await notifyClaude(noticeText(undone.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
+  }
 }
 
 function answerLine() {

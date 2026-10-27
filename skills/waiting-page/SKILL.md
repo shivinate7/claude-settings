@@ -72,7 +72,8 @@ The page hides an item with status `closed`. It shows an item as answered, in pl
      and a one-sentence `why`. Set `group` on both items.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
-     next Send unless the owner chooses another. A question that touches a rule starts blank.
+     next Send unless the owner chooses another. The owner cannot hold a stood pick
+     open: choosing another option is the only way out. A question that touches a rule starts blank.
 3. Ask the owner where the item is seen (ruling 3a, narrowed by ruling 3b):
    - While an agent, a lane or a background command of this session runs, or starts in the same
      response, open no question box. Put the question
@@ -162,6 +163,8 @@ the Designs tab pages through every mockup whose question is open.
    JSON in `<script type="application/json" id="designData">`.
 3. Add `designs: [{slug, label}]` to the item.
 4. Republish the page to the same URL with the same capabilities. The database stays.
+   A republish replaces the whole page, so run this step in one session at a time. A second session
+   that read the page earlier would overwrite the first one's mockups.
 
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
