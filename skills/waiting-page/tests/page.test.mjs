@@ -434,15 +434,82 @@ test("a look question with three options, a GitHub folder link and no designs sh
 const PICS = { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" };
 const picItem = (id, n) => mk(id, n, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })) });
 
-test("each option's picture is inside its own option card, and a tap on the picture picks the option", async (t) => {
+test("each option's picture is inside its own option card; a tap on it opens the viewer and a tap on the card picks", async (t) => {
   const it = picItem("with-pictures", 31);
   const page = await open(t, { items: [it], designData: PICS }); if (!page) return;
   assert.equal(await card(page, it).locator(".dwarn").count(), 0, "a warning shows although every picture is there");
   for (const o of LOOK_OPTS) assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-${o.key}"] .opic iframe.dframe`).count(), 1, "no picture in option " + o.key);
   assert.equal(await card(page, it).locator(".dprev").count(), 0, "a picture named by an option also shows at the front");
-  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
-  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the picture did not pick the option");
+  const pic = card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`);
+  assert.ok((await pic.boundingBox()).height >= 40, "the picture is smaller than a thumb");
+  await pic.click();
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), false, "a tap on the picture picked the option");
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "the viewer did not open");
+  await page.click("#dClose");
+  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .lab`).click();
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the card did not pick the option");
   assert.equal(await card(page, it).locator(".opt iframe.dframe").first().evaluate((f) => getComputedStyle(f).pointerEvents), "none", "the frame swallows the click");
+});
+
+const WIDE = [["a", "Layout A"], ["b", "Layout B"]];
+const viewerItem = () => mk("viewer-q", 50, {
+  pick: "a", options: WIDE.map(([k, l]) => ({ key: k, label: l, how: "h", gain: "g", lose: "l", design: "v-" + k })),
+  designs: [{ slug: "v-a", label: "A phone", width: "Phone" }, { slug: "v-a2", option: "a", label: "A wide", width: "Wide" },
+    { slug: "v-b", label: "B phone", width: "Phone" }, { slug: "v-b2", option: "b", label: "B wide", width: "Wide" }],
+});
+const VIEWER_DATA = { "v-a": "<p>a</p>", "v-a2": "<p>a2</p>", "v-b": "<p>b</p>", "v-b2": "<p>b2</p>" };
+
+test("the viewer counts options times widths, steps with Prev and Next, wraps at the ends, and offers full size", async (t) => {
+  const it = viewerItem();
+  const page = await open(t, { items: [it], designData: VIEWER_DATA }); if (!page) return;
+  await page.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout A (Phone)");
+  assert.equal(await page.locator("#dPos").textContent(), "1 of 4");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout A (Wide)");
+  await page.click("#dNext"); await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout B (Wide)");
+  assert.equal(await page.locator("#dPos").textContent(), "4 of 4");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dPos").textContent(), "1 of 4", "Next does not wrap");
+  await page.click("#dPrev");
+  assert.equal(await page.locator("#dPos").textContent(), "4 of 4", "Prev does not wrap");
+  await page.click("#dFull");
+  assert.equal(await page.evaluate(() => window.__opened.length), 1, "Open full size opened nothing");
+  await page.click("#dClose");
+  assert.equal(await page.locator("#dsheet").isHidden(), true);
+});
+
+for (const width of [390, 1440]) {
+  test(`a design's focus fills the card box whole, never cut, at ${width} wide`, async (t) => {
+    const mock = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>';
+    const it = mk("focus-q", 51, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "f-a" }], designs: [{ slug: "f-a", label: "A", focus: "#panel" }] });
+    const page = await open(t, { items: [it], designData: { "f-a": mock }, viewport: { width, height: 900 } }); if (!page) return;
+    const wrap = card(page, it).locator(".opic .dfitwrap");
+    await page.waitForFunction((id) => { const w = document.querySelector(`#item-${id} .opic .dfitwrap`); return w && w.getBoundingClientRect().height > 0 && w.getBoundingClientRect().height < 400 && getComputedStyle(w.querySelector("iframe")).transform !== "none" && w.querySelector("iframe").style.transform.includes("translate"); }, it.id);
+    const m = await wrap.evaluate((w) => {
+      const f = w.querySelector("iframe"), r = w.getBoundingClientRect(), fr = f.getBoundingClientRect();
+      const sc = fr.width / 390;
+      return { wrapTop: r.top, wrapH: r.height, wrapW: r.width, panelTop: fr.top + 700 * sc, panelH: 200 * sc, panelW: 300 * sc };
+    });
+    assert.ok(Math.abs(m.panelTop - m.wrapTop) < 4, `the focused element starts ${m.panelTop - m.wrapTop}px from the top of the box`);
+    assert.ok(m.panelH <= m.wrapH + 1, "the focused element is cut at the bottom");
+    assert.ok(m.panelW <= m.wrapW + 1, "the focused element is cut at the side");
+    assert.ok(m.wrapH < 260, `the box shows more than the focused element (${m.wrapH}px)`);
+  });
+}
+
+test("SKILL.md and the designer agent carry the mockup convention", async () => {
+  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+  const designer = fs.readFileSync(path.join(HERE, "..", "..", "..", "agents", "designer.md"), "utf8");
+  for (const [name, text] of [["SKILL.md", skill], ["designer.md", designer]]) {
+    assert.match(text, /"Sample" banner/, name + " has no Sample banner line");
+    assert.match(text, /"Today: <part>"/, name + " has no Today label");
+    assert.match(text, /"New: <part>"/, name + " has no New label");
+  }
+  assert.match(skill, /`focus`/);
+  assert.match(skill, /tap on (an option's|the) picture opens the viewer/i);
 });
 
 test("a design that names no option shows at the front of the item, before the options", async (t) => {
