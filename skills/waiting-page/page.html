@@ -748,18 +748,23 @@ function renderSent() {
 async function undoSend() {
   const p = state.sentPanel; if (!p || p.busy || undoLeft(p) <= 0) return;
   p.busy = true;
-  const undone = [];
+  const undone = [], late = [];
   // Deletes come first and each one checks the clock, so none runs after the window a session waits out.
-  for (const w of p.wrote.slice().reverse()) {
-    if (undoLeft(p) <= 0) { state.barNote = "Too late to undo No. " + w.it.n + "."; break; }
+  const todo = p.wrote.slice().reverse();
+  for (let i = 0; i < todo.length; i++) {
+    const w = todo[i];
+    if (undoLeft(p) <= 0) { todo.slice(i).forEach((x) => late.push(x.it.n)); break; }
     try {
-      const col = state.db.collection("answers").doc(w.it.id);
-      if (w.prior) await col.set(w.prior); else { await col.delete(); if (state.receipts[w.it.id]) await state.db.collection("receipts").doc(w.it.id).delete(); }
+      const ref = state.db.collection("answers").doc(w.it.id);
+      if (w.prior) await ref.set(w.prior); else await ref.delete();
     } catch (e) { state.barNote = "Undo failed (" + (e && e.code || "error") + ") at No. " + w.it.n + "."; break; }
-    if (w.prior) state.answers[w.it.id] = w.prior; else { delete state.answers[w.it.id]; delete state.receipts[w.it.id]; }
+    if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
     if (w.draft) state.draft[w.it.id] = w.draft; if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
+    // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else.
+    if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); delete state.receipts[w.it.id]; } catch (e) {} }
   }
+  if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + late.map((n) => "No. " + n).join(" and ") + "."; }
   saveDraft(); closeSent(); render();
   if (undone.length) {
     const can = await canTell();
