@@ -3856,9 +3856,9 @@ sh("rm-var redirect: PowerShell drive root with a redirect to $HOME is refused",
 # under the cd folder. An absolute or variable target, and an rm with no -r, pass.
 sh("rm-var: the 2026-10-27 scratch delete, a cd then a relative glob, is refused",
    "S=/private/tmp/claude-501/w/scratchpad; cd $S; rm -rf dl/*", "deny", "rm-after-cd",
-   cwd=NOGIT, carries=('rm -rf "$S"/dl/*',))
+   cwd=NOGIT, carries=('rm -rf "${S:?}"/dl/*',))
 sh("rm-var: cd and && then a relative target is refused",
-   'cd "$S" && rm -rf dl', "deny", "rm-after-cd", cwd=NOGIT, carries=('rm -rf "$S"/dl',))
+   'cd "$S" && rm -rf dl', "deny", "rm-after-cd", cwd=NOGIT, carries=('rm -rf "${S:?}"/dl',))
 sh("rm-var: a cd to a literal path then a relative target names the joined path",
    "cd /tmp/w && rm -r out/a", "deny", "rm-after-cd", cwd=NOGIT, carries=("rm -r /tmp/w/out/a",))
 sh("rm-var: a cd, another command, then a relative target is refused",
@@ -3871,6 +3871,11 @@ sh("rm-var: a cd and rm in a brace group is refused",
    "{ cd /tmp/w; rm -Rf out; }", "deny", "rm-after-cd", cwd=NOGIT)
 sh("rm-var: a long recursive flag after a cd is refused",
    "cd /tmp/w && rm --recursive --force out", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd to a command substitution prints the DIR placeholder, guarded",
+   "cd $(mktemp -d) && rm -rf out", "deny", "rm-after-cd", cwd=NOGIT,
+   carries=('rm -rf "${DIR:?}"/out',))
+sh("rm-var: a redirect word after the rm is no target",
+   "cd /tmp/w && rm -rf out 2>&1", "deny", "rm-after-cd", cwd=NOGIT, lacks=("2>&1",))
 sh("rm-var: a cd then an absolute target passes",
    "cd /tmp/w && rm -rf /tmp/w/out", "allow", cwd=NOGIT)
 sh("rm-var: a cd then a quoted variable target passes",

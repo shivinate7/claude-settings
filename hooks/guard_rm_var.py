@@ -317,13 +317,15 @@ def _cd_relative(word: str) -> bool:
 
 
 def _cd_remedy(flags, target: str, cd_word: str) -> str:
-    """Return `rm FLAGS <dir>/<target>`: a variable dir is kept quoted, a literal absolute dir as it
-    is, and anything else becomes "$DIR", which the person sets to the full path."""
+    """Return `rm FLAGS <dir>/<target>`: a variable dir is written "${NAME:?}", a literal absolute
+    dir as it is, and anything else "${DIR:?}", which stops the command until the person sets DIR
+    to the full path."""
     base = cd_word.strip("\"'")
-    if re.fullmatch(r"\$\{?\w+\}?", base):
-        base = '"%s"' % base
+    named = re.fullmatch(r"\$(?:\{(\w+)\}|(\w+))", base)
+    if named:
+        base = '"${%s:?}"' % (named.group(1) or named.group(2))
     elif not base.startswith("/") or re.search(r"[\s$`*?\[{}~\\'\"]", base):
-        base = '"$DIR"'
+        base = '"${DIR:?}"'
     target = target[2:] if target.startswith("./") else target
     return " ".join(["rm"] + flags + [base + "/" + target])
 
@@ -344,7 +346,7 @@ def rm_after_cd_hits(text: str) -> list:
         _, _, flags, targets, recursive = call
         targets = [t[:-1] if t.endswith((")", "}")) and not t.endswith(("\\)", "\\}")) else t
                    for t in targets]
-        targets = [t for t in targets if t]
+        targets = [t for t in targets if t and not re.match(r"\d*[<>&|]", t)]   # a redirect word is no target
         if recursive and any(_cd_relative(t) for t in targets):
             found += [_cd_remedy(flags, t, moved) for t in targets if _cd_relative(t)]
     return found
