@@ -1,0 +1,9 @@
+{
+  "title": "A shared Swift package for the iOS apps, only if the copies start to hurt",
+  "phase": "later",
+  "status": "todo",
+  "order": 470,
+  "why": "The iOS kit consultation, Oct 27: keychain wrappers (about 80 to 170 lines) sit in home-app, degen and mailaudit; small WebSocket clients in home-app and mailaudit.",
+  "note": "Deferred (triage, Oct 27): not now. The overlap is small, and mailaudit is public, so a private package would break its CI. Revisit when a fourth app needs the keychain wrapper, or a bug fixed in one copy turns up in another. Port: no. Minor: home-app CI runs on macos-latest; the others pin macos-26. Report: https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq.",
+  "updatedAt": "2026-10-27T00:05:00Z"
+}

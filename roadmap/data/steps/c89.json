@@ -1,0 +1,9 @@
+{
+  "title": "One shared simulator tool, beside ios-ship",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.92,
+  "why": "The iOS kit consultation, Oct 27 (your question: should an iOS kit repo hold all this?): the simulator routine lives only in degen, while home-app and mailaudit restate it in prose.",
+  "note": "Report: https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq (checked claude-settings 54be9f1, home-app 360a31f, degen f0617bd, mailaudit 37d4e7d). degen's tools/sim-test (reuse a booted iPhone, else boot the shared iPhone 18 Pro, test, shut it down) moves to claude-settings beside bin/ios-ship. Part 1, claude-settings, needs no answer: the tool lands with a test. Part 2, deferred (shiv, Oct 27): degen's copy goes, and home-app's CLAUDE.md and mailaudit's decision one-simulator-per-mac point to the tool; waits on your plan check, like c47 part 2. Port: yes, to the four iOS repos only. Placed ahead of c54, after c87 (triage, Oct 27): same iOS cleanup as c47.",
+  "updatedAt": "2026-10-27T00:05:00Z"
+}
