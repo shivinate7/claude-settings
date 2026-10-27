@@ -62,20 +62,34 @@ def main():
         old = merge_pr(d, 9, "batch-old", env=old_env)
         git(d, "revert", "--no-edit", "-m", "1", reverted)
         git(d, "revert", "--no-edit", "-m", "1", old)
-        commit(d, "Fix the batch-beta test that the merge left red")
+        commit(d, "Fix #12 test that the merge left red")
         commit(d, "Unrelated work on batch-clean docs")
         # A fix commit inside the batch it names is no repair: it never reached main before the merge did.
         merge_branch(d, 15, "batch-gamma", ["Fix #15 flake before it lands"])
         # A repair that arrives inside a later batch merge is a second-parent commit, and counts.
         shaky = merge_pr(d, 17, "batch-eps")
         merge_branch(d, 18, "batch-zeta", [], revert_of=shaky)
+        # Not repairs: a commit that only mentions the branch as a bare word, a "revert" in a body only, a Reapply.
+        merge_pr(d, 20, "ios-ship")
+        commit(d, "c48 part 1: review fixes for ios-ship profile")
+        merge_pr(d, 21, "batch-eta")
+        commit(d, "Add a check\n\nThe note for batch #21 says a revert of the old rule is wanted.")
+        theta = merge_pr(d, 22, "batch-theta")
+        theta_work = git(d, "rev-parse", f"{theta}^2")
+        commit(d, f'Reapply "Join #22 fix into the batch"\n\nThis reverts commit {theta_work}.')
+        # A repair: a later merge whose branch name carries a fix word and names the repaired branch.
+        iota = merge_pr(d, 23, "batch-iota")
+        merge_pr(d, 24, "fix-batch-iota")
         r = run_script(d)
         assert r.returncode == 0, r.stderr
         first = r.stdout.splitlines()[0]
-        assert first == "repaired merges in the last 14 days: 3", r.stdout
+        assert first == "repaired merges in the last 14 days: 4", r.stdout
         assert reverted[:7] in r.stdout and "#11" in r.stdout, r.stdout
         assert fixed[:7] in r.stdout and "#12" in r.stdout, r.stdout
         assert shaky[:7] in r.stdout and "#17" in r.stdout, r.stdout
+        assert iota[:7] in r.stdout and "#23" in r.stdout, r.stdout
+        for n in ("#20", "#21", "#22", "#24"):
+            assert n not in r.stdout, (n, r.stdout)
         assert "#15" not in r.stdout and "#18" not in r.stdout, r.stdout
         assert "#13" not in r.stdout and "#9 " not in r.stdout, r.stdout
         print("ok")

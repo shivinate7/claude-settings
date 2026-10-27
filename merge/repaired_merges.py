@@ -6,8 +6,10 @@ Usage: python3 merge/repaired_merges.py [--days N] [--ref main] [--repo DIR]
 A first-parent merge commit on the ref, made in the last N days (default 14), is repaired when a commit
 that landed on the ref in a LATER first-parent step (a later merge brings its second-parent commits with it) either
   (a) says "This reverts commit <sha>" for the merge or for any commit the merge brought in, or
-  (b) names the merge's PR ("#N") or its branch (from "Merge pull request #N from owner/<branch>")
-      on the same line as a fix word (fix, repair, hotfix, broke, revert).
+  (b) has a fix word (fix, repair, hotfix, broke, revert) in its subject line and names the merge's PR
+      ("#N") there, or is a merge whose subject holds the merge's full branch name as a token (from
+      "Merge pull request #N from owner/<branch>"). A bare branch word in a plain commit subject does not count.
+A commit whose subject starts with "Reapply" is skipped: it re-lands work, and the earlier revert was the repair.
 Prints the count, then one line per repaired merge: merge sha, PR, repairing commit sha.
 
 Cost (rule outcomes-mechanize-rules): read on demand, never on a timer. Starts one `git log` plus one
@@ -35,21 +37,28 @@ def git(repo, *args):
     return r.stdout
 
 
-def names(line, pr, branch):
-    """True when the line names the PR number or the branch as a whole token."""
-    pr_hit = re.search(rf"#{pr}(?!\d)", line)
-    branch_hit = re.search(rf"(?<![\w./-]){re.escape(branch)}(?![\w./-])", line)
-    return bool(pr_hit or branch_hit)
+def names_pr(subject, pr):
+    return bool(re.search(rf"(?<![\w/]){'#' + pr}(?!\d)", subject))
+
+
+def names_branch(subject, branch):
+    """The full branch name as a token of a merge subject ("Merge pull request #N from o/fix-<branch>" or
+    "Merge branch '<branch>'"). A bare word in a commit subject does not count."""
+    if not subject.startswith("Merge"):
+        return False
+    return bool(re.search(rf"(?<![A-Za-z0-9._]){re.escape(branch)}(?![A-Za-z0-9._])", subject))
 
 
 def repairing_commit(pr, branch, brought, later):
     """Return the short sha of the first commit that landed after the merge and repairs it, or None.
-    later: (sha, message) of every commit that landed on the ref in a later first-parent step."""
-    for sha, body in later:
-        for rev in REVERTS.findall(body):
-            if any(h.startswith(rev) for h in brought):
-                return sha[:7]
-        if any(FIX.search(line) and names(line, pr, branch) for line in body.splitlines()):
+    later: (sha, subject, body) of every commit that landed on the ref in a later first-parent step.
+    A Reapply re-lands work, so it repairs nothing. The fix word is read in the subject line only."""
+    for sha, subject, body in later:
+        if subject.startswith("Reapply"):
+            continue
+        if any(h.startswith(rev) for rev in REVERTS.findall(body) for h in brought):
+            return sha[:7]
+        if FIX.search(subject) and (names_pr(subject, pr) or names_branch(subject, branch)):
             return sha[:7]
     return None
 
@@ -62,8 +71,8 @@ def landings(repo, ref):
     for row in steps:
         sha, when, parents, subject = row.split("\x00", 3)
         rng = f"{sha}^1..{sha}" if parents else sha
-        log = git(repo, "log", "--format=%H%x00%B%x01", rng)
-        commits = [(c.partition("\x00")[0].strip(), c.partition("\x00")[2]) for c in log.split("\x01") if c.strip()]
+        log = git(repo, "log", "--format=%H%x00%s%x00%b%x01", rng)
+        commits = [tuple(c.strip("\n").split("\x00", 2)) for c in log.split("\x01") if c.strip()]
         out.append((sha, int(when), parents.count(" ") == 1, subject, commits))
     return out
 
@@ -79,7 +88,7 @@ def repaired(repo, ref, days):
         if not (is_merge and m) or when < cutoff:
             continue
         pr, branch = m.group(1), m.group(2)
-        brought = {c for c, _ in commits}
+        brought = {c[0] for c in commits}
         later = [c for step in steps[i + 1:] for c in step[4]]
         fix = repairing_commit(pr, branch, brought, later)
         if fix:
