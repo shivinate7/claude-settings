@@ -882,9 +882,9 @@ def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6)
 def named_log_written_slower_than_the_check_is_no_stall():
     """23b2. a named log written every 1.7 s under a 2 s quiet, with a slow ps and a late sleep, is no
     stall at any phase: the quiet test acts on a fresh sample, not the one from up to a second ago"""
-    stalls = [(ph, ps) for ps in range(0, 400, 3) for ph in range(0, 190, 4)
-              if simulated_watch(ph / 100, ps / 1000, 0.005) == 3]
-    return expect(not stalls, f"{len(stalls)} of 2584 runs reported a STALL, first (phase, ps ms): {stalls[:3]}")
+    grid = [(ph, ps) for ps in range(0, 400, 3) for ph in range(0, 190, 4)]
+    stalls = [(ph, ps) for ph, ps in grid if simulated_watch(ph / 100, ps / 1000, 0.005) == 3]
+    return expect(not stalls, f"{len(stalls)} of {len(grid)} runs reported a STALL, first (phase, ps ms): {stalls[:3]}")
 
 
 @posix_case
