@@ -1,0 +1,9 @@
+{
+  "title": "Lint tests share one folder-removal helper",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3387,
+  "why": "Build advisor, Oct 27 07:10 CDT: five lint tests (check_mod_versions, glossary, hook_stubs, record_slugs, ruling_kind) copy the same rm_tree helper; a git auto-gc race in it turned batch #690 red three times.",
+  "note": "The race itself is fixed in gates.yml's env (gc.auto=0, maintenance.auto=false; lane ci-mod-versions-no-gc, batch #690). Move rm_tree to one shared test helper and call it from all five (building-one-home-per-capability). Needs no answer. Port: no; the tests live in claude-settings. Placed ahead of c123 (triage, Oct 27): small, and it closes a race that cost three CI runs.",
+  "updatedAt": "2026-10-27T14:35:00Z"
+}

@@ -1,0 +1,9 @@
+{
+  "title": "A Mac session can pick up merged claude-settings work without auto mode refusing the reinstall",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3389,
+  "why": "Build advisor finding, Oct 27 04:25 CDT: the Mac's auto mode refused a claude-settings reinstall as \"Self-Modification\", so a Mac session cannot pick up merged work by reinstalling.",
+  "note": "Find the path that needs no manual reinstall: the SessionStart install hook already runs install.sh on Mac (c22); measure whether it picks up a merge at the next session start, and if a mid-session reinstall is still needed, give it a named tool (bin/ entry) with an allow rule, so auto mode reads it as a known command. Needs a Mac session (local liaison). Needs no answer. Port: no; it is claude-settings' own installer. Placed ahead of c107 (triage, Oct 27): every merged fix waits on it to reach your Mac.",
+  "updatedAt": "2026-10-27T14:35:00Z"
+}

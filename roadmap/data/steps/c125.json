@@ -1,0 +1,9 @@
+{
+  "title": "A lane runs every gates lint step before it joins a batch",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3386,
+  "why": "Build advisor, Oct 27: batch #680 went red on test_settings_matcher and #690 on check_comment_narration and the glossary check; each was a lint step the lane never ran.",
+  "note": "One command (for example bin/gates-local) runs every lint step of gates.yml in the lane's checkout; lane briefs name it, and the build advisor's batch-join check reads its verdict. Full suites and mutation tests stay CI's (roles-each-layer-proves-once). Needs no answer. Port: yes; each repo's gates differ, but the rule that a lane runs its repo's lint steps is global. Placed ahead of c124 (triage, Oct 27): three red batches in one day came from skipped lint.",
+  "updatedAt": "2026-10-27T14:35:00Z"
+}

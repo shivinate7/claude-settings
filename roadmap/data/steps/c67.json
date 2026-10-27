@@ -1,10 +1,10 @@
 {
   "title": "The roadmap-refresh routine updates the phase numbers it reads",
   "phase": "cleanup",
-  "status": "active",
+  "status": "done",
   "order": 109.34,
   "why": "A routine that stops the same way every run does no work and hides that it is broken.",
-  "note": "Ruling, Oct 26 (shiv, page item 12, a): the routine edits roadmap/data/meta/phases.json, runs build.py and pushes, with a push grant on the roadmap branch for that; triage still republishes the page. Done Oct 26 17:12 UTC (triage): the old scheduled task could not be edited in place, so it was recreated with the new prompt and the same schedule (daily 08:36 Central), and the old one deleted. Closes when its first run (Oct 27) pushes to the roadmap branch. Finding, Oct 26 (coordinator): the scheduled roadmap-refresh routine (thread \"roadmap refresh\", cmsg_01DoF7thf3iq2Srr1UsfXgh2B4z7bjZH8zcikw5sHVdSp6) stopped with no change: it still reads and writes phase numbers in the page's built-in database, which is off now. Until the rewrite, every run stops the same way. Port: no, the roadmap branch is claude-settings' own (o16 carries the pattern).",
+  "note": "Done: the routine pushed a71514c (Oct 27 09:07 CDT), half an hour after its 08:36 slot; triage's 08:58 check came before it. It flagged three out-of-date tile rules; triage fixed them in phases.json. Ruling, Oct 26 (shiv, page item 12, a): the routine edits roadmap/data/meta/phases.json, runs build.py and pushes, with a push grant on the roadmap branch for that; triage still republishes the page. Done Oct 26 17:12 UTC (triage): the old scheduled task could not be edited in place, so it was recreated with the new prompt and the same schedule (daily 08:36 Central), and the old one deleted. Closes when its first run (Oct 27) pushes to the roadmap branch. Finding, Oct 26 (coordinator): the scheduled roadmap-refresh routine (thread \"roadmap refresh\", cmsg_01DoF7thf3iq2Srr1UsfXgh2B4z7bjZH8zcikw5sHVdSp6) stopped with no change: it still reads and writes phase numbers in the page's built-in database, which is off now. Until the rewrite, every run stops the same way. Port: no, the roadmap branch is claude-settings' own (o16 carries the pattern).",
   "ask": "",
-  "updatedAt": "2026-10-26T17:15:00Z"
+  "updatedAt": "2026-10-27T14:30:00Z"
 }

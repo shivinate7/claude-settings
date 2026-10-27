@@ -1,23 +1,23 @@
 {
   "design": {
-    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423, home 53ca423",
+    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423 (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
         "label": "Repos with a screenshot command",
-        "rule": "Only banchi (make screenshot, scripts/screenshot.sh); none in q_max, home-app, home or claude-settings (d6)",
-        "target": "5 of 5",
-        "value": "1 of 5"
+        "rule": "Only banchi (make screenshot). claude-settings ships bin/shoot on main, but no repo has a .claude/shoot.json yet, so it counts nowhere (d6). home merged into home-app",
+        "target": "4 of 4",
+        "value": "1 of 4"
       },
       {
         "label": "Design agents in place",
-        "rule": "Designer (d1) and design reviewer (d2); agents/ has neither",
+        "rule": "Designer (d1) and design reviewer (d2), both in agents/",
         "target": "2 of 2",
         "value": "2 of 2"
       },
       {
         "label": "Repos with one DESIGN.md",
-        "rule": "banchi has docs/DESIGN.md; q_max has docs/design.md plus specs; home-app has none. home has no UI",
+        "rule": "banchi has docs/DESIGN.md; q_max has docs/design.md plus specs; home-app has none; claude-settings has none. home merged into home-app",
         "target": "4 of 4",
         "value": "1 of 4"
       },
@@ -55,18 +55,18 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423, home 53ca423",
-    "foot": "All five repos measured.",
+    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423 (home merged in)",
+    "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
         "label": "Repos on the shared layout",
         "rule": "One layout for every repo (o2): claude-settings first, then each child in Roll out",
-        "target": "5 of 5",
-        "value": "0 of 5"
+        "target": "4 of 4",
+        "value": "0 of 4"
       },
       {
         "label": "Biggest CLAUDE.md, lines",
-        "rule": "banchi 398 (Oct 25, 9683902), q_max 182, claude-settings 106, home-app 15, home 9",
+        "rule": "banchi 402 (Oct 27, fbb9200), q_max 182, claude-settings 106, home-app 15",
         "target": "200 or fewer",
         "value": 402
       },
@@ -85,8 +85,8 @@
       {
         "label": "Repos with a living roadmap page",
         "rule": "Give every repo a living roadmap page (o8)",
-        "target": "5 of 5",
-        "value": "0 of 5"
+        "target": "4 of 4",
+        "value": "0 of 4"
       }
     ]
   },

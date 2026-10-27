@@ -1,0 +1,9 @@
+{
+  "title": "Each repo's live waiting page is republished on the final look",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3966,
+  "why": "c100 (the waiting page's final look) merged in batch #683; the live pages (home-app, degen, mailaudit) still show the old one. Build advisor, Oct 27 04:25 CDT.",
+  "note": "Deferred (shiv, Oct 27): the live pages belong to a third account; the cloud and the Mac both get 404, so they must be shared with this account or republished by you. Asked: the build advisor's thread, Oct 27 04:25 CDT. Then one repo at a time, home-app first; saved answers survive, since the store keys are unchanged. Brief: briefs/c100-republish-live-pages.md. Port: yes, every repo's page.",
+  "updatedAt": "2026-10-27T14:35:00Z"
+}

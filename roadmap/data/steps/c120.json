@@ -1,0 +1,9 @@
+{
+  "title": "The macOS stall-watch test stops failing at random",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3385,
+  "why": "Build advisor finding, Oct 27 08:10 CDT: hooks/test_stall_watch.py case 23b (a tee job gets a STALL while its log grows) fails intermittently on gates-macos: red on main b031394, green on 2e5fde3, red on #691.",
+  "note": "Find the race and fix the cause, never a retry or a skip; prove it with repeated runs on gates-macos. A flaky required check costs every batch a re-run, and you learn to scroll past red (verification-cry-wolf-guard-is-spent). Needs no answer. Port: no; the test lives in claude-settings. Placed ahead of c107 (triage, Oct 27): the build queue is empty and this taxes every batch.",
+  "updatedAt": "2026-10-27T14:35:00Z"
+}

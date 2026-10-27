@@ -1,0 +1,9 @@
+{
+  "title": "A cloud reinstall stops filling the skill list with backup copies",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3388,
+  "why": "Build advisor finding, Oct 27 08:40 CDT: the cloud refresh hook moves each skill folder to <name>.bak.<time> before a fresh install, and each .bak folder lists as a skill: 11 more entries per install, 33 in one container.",
+  "note": "Fix: skip the backup when the folder is our own install, or keep backups outside skills/. Red first on two installs in a row. Needs no answer. Port: no; it lives in claude-settings' installer. Placed ahead of c119 (triage, Oct 27): every long cloud session pays for it in its skill list.",
+  "updatedAt": "2026-10-27T14:35:00Z"
+}
