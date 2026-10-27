@@ -49,9 +49,9 @@ none of its paths. It never overwrites a file and never runs git.
 python3 scripts/new_app.py <dest> --name Tally --bundle-id dev.example.tally --repo-url https://github.com/<owner>/<repo>.git
 ```
 
-It writes `project.yml`, the Makefile above, the `TallyKit` package with one Swift Testing test,
-one UI test, `tokens/tokens.json` with its generator and the generated `Tokens.swift`, the CI
-workflow and the `tools/ios-ship.json` entry. Then:
+It writes `project.yml`, the Makefile above and the `TallyKit` package with one Swift Testing test.
+It also writes one UI test, `tokens/tokens.json` with its generator and the generated `Tokens.swift`,
+the CI workflow and the `tools/ios-ship.json` entry. Then:
 
 1. Run `make native-check` on the Mac.
 2. Add a 1024 px icon to `native/Tally/Assets.xcassets/AppIcon.appiconset`. App Store Connect
