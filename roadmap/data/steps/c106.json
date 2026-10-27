@@ -1,0 +1,9 @@
+{
+  "title": "A label or status word appears once per screen",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3966,
+  "why": "Your gripe, Oct 26 20:40 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh29zJop1bPGnHHvh3PdBpCpn): \"blocking\", \"upcoming\" and \"whenever\" show 3 or more times on a page; too much verbiage.",
+  "note": "Fixed in the waiting-page mockup (each label once, shapes elsewhere). For every repo: a screen rule in ux/ that a label or status word appears once per screen, and every other place uses its shape or colour; the design reviewer checks it on each screen lane. Needs no answer. Port: yes, every repo with screens. Placed after c105 (triage, Oct 27): it rides with the waiting page's final look.",
+  "updatedAt": "2026-10-27T02:30:00Z"
+}

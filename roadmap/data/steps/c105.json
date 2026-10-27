@@ -1,0 +1,9 @@
+{
+  "title": "One shared colour wheel gives every repo its own colour",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3965,
+  "why": "Your word, Oct 26 20:37 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh28ATeFWrfZMPFYdrqu75pev, waiting-page design thread).",
+  "note": "A repo with no colour of its own gets one drawn from its name: a hue at least 25 degrees from the three state hues (red 5, amber 36, green 145) and at least 30 degrees from every other repo's hue. The same wheel guides a repo that later picks its own scheme. Home in claude-settings: a registry of each repo's colour plus the rule, read by the waiting-page template and any repo's design work. Needs no answer. Rides with c100. Port: yes, that is its point. Placed after c100 (triage, Oct 27): the page's final look reads it.",
+  "updatedAt": "2026-10-27T02:30:00Z"
+}

@@ -1,0 +1,9 @@
+{
+  "title": "A report gate never makes a session send its whole report twice",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.336,
+  "why": "Your gripe, Oct 26 21:12 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2AjLVc1rPD2aAWQzxYqqPyH, a mailaudit session): the full report printed twice, the second copy only to fix \"BUILT\" to \"OTHER\" and add model names.",
+  "note": "A regression of a known cause. Checked main e305bdb: decision reply-judge-samples-never-blocks (Oct 13) made the reply judge a note at the next turn because \"a block came after the owner had read the reply, so the session sent the reply twice\", but kept the report-shape gate blocking. lint/report_gate.py is a Stop hook: it runs after you have seen the reply, and its block (report-shape, model-name, unstarted and cite-gloss gates) makes the session answer again, so it re-sends everything. A Stop hook cannot check a reply before it is shown. Fix, needs no answer: the block text tells the session to post only the corrected lines, never the report again; a test pins that text, and the decision gains one line. Port: yes; the gate is global. Placed ahead of c93 (triage, Oct 27): it doubles every report a gate catches, in every repo.",
+  "updatedAt": "2026-10-27T02:30:00Z"
+}

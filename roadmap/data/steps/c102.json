@@ -1,0 +1,9 @@
+{
+  "title": "A question whose pick can be undone is taken, not asked",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.337,
+  "why": "Coordinator, Oct 27, on the same mailaudit report: Input Needed item 1 (link the waiting page now with a folder move, or later) had a pick, later, that changes nothing and can be undone, yet the session asked.",
+  "note": "Rule parallelism-keep-going (amended by c79, PR 643) covers follow-ups the session found; it does not say a question with a safe, undoable pick should be decided and reported, not asked. Fix, needs no answer: amend questions-go-to-owner in place (take the undoable pick, name it under Done, ask only when the pick cannot be undone or changes your goal), and have the reply judge flag an Input Needed item whose pick it judges undoable. Port: yes; global rule. Unknown: whether that mailaudit session ran a build with c79 installed. Placed ahead of c93, after c101 (triage, Oct 27): the same report, and each needless ask stalls a lane.",
+  "updatedAt": "2026-10-27T02:30:00Z"
+}

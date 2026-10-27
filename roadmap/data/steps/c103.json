@@ -1,0 +1,9 @@
+{
+  "title": "Your feedback is caught with no magic words",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.338,
+  "why": "Your gripe, Oct 26 20:52 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2WqEF4ndJe1iyteivbK1QYm): the fb: and fb done setup is archaic and needs an overhaul. Ruling, Oct 26 20:57 CDT (decision card): A now, C later.",
+  "note": "Today (main e305bdb) a burst needs fb to open and fb done to close, plus a 10-minute timer and a Sonnet judge (hooks local_time.py, feedback_gate.py, feedback_judge.py; decision owner-feedback-inbox; 9 debt notes on close-word edge cases). Build option A, ready: capture every owner message; the Stop jot gate asks for items only on a burst (two or more messages in a turn, or one message of three or more non-blank lines or two or more bullets); delete fb, fb done, the timer and the judge with their tests and debt notes; rewrite decision owner-feedback-inbox in place in the same lane. Brief: the options doc, https://claude.ai/artifact/NGf6aaaVp2bF1i3kyhF5HD. Option C is c104. Touches o15 and c71. Port: yes, through the install. Placed ahead of c93, after c102 (triage, Oct 27): ruled, and it touches every message you send.",
+  "updatedAt": "2026-10-27T02:30:00Z"
+}

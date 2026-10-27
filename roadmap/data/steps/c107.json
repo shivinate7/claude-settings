@@ -1,0 +1,9 @@
+{
+  "title": "An orchestrator starts its lanes with no click from you",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.339,
+  "why": "Your gripe, Oct 26 21:13 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2MqbYDeMhgjWP54XKb1P71s, screenshot): the degen orchestrator on the Mac desktop app needed you to accept each of four sessions it started with start_session, even in Bypass permissions mode.",
+  "note": "Checked main e305bdb: hooks/guard.py matches mcp__ccd_session__start_session, but only denies a Haiku model or a full-load reading; it never asks. So the accept most likely comes from the desktop app itself (unmeasured). Step 1, Mac session: find whether a permissions allow rule (for example mcp__ccd_session__start_session in settings.json) or a desktop setting pre-approves that tool; prove it with one start. Step 2, only if nothing can: orchestrators start lanes as background subagents in their own worktrees, not as separate sessions, and the orchestrate skill says so. Needs no answer. The opening question (\"Start the JD, Duo, Pills and records sessions now?\") is covered by c79 (safe follow-ups start without asking, on main since 2ad85de); the Mac needs a pull and reinstall to get it. Port: yes; global settings. Placed ahead of c93, after c103 (triage, Oct 27): every orchestrator on the Mac hits it.",
+  "updatedAt": "2026-10-27T02:40:00Z"
+}
