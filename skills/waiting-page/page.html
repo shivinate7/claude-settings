@@ -70,7 +70,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
 .ov-prog { display: grid; gap: 8px; }
 .ov-prog .big { font: 700 15px/1.3 var(--body); }
-.ov-prog .big b { font: 700 26px/1 var(--body); font-variant-numeric: tabular-nums; color: var(--acc); margin-right: 4px; }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
 .ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
 .ov-prog .sub.none { visibility: hidden; }
 .ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
@@ -89,6 +89,14 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .nchip.sent::before { content: "\2713"; margin-right: 3px; }
 .pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
 .pairchips .nchip { height: 28px; width: 44px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; align-items: stretch; }
+  .nchip, .pairchips .nchip { width: 100%; height: 30px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
 .list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
@@ -150,7 +158,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .tr .gain .s { color: var(--good); }
 .opt .tr .lose .s { color: var(--holds); }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
-.opt .pick b { font: 700 15px/1.25 var(--body); color: var(--gold-ink); }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
 .opt .nopick { align-self: end; }
 
 .ready { min-height: 1.55em; margin: 0; font-size: 14.5px; color: var(--muted); }
@@ -272,6 +280,10 @@ try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); }
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
 const choiceText = (k) => (k === NONE ? "none of these" : k);
+// The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
+const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
+const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
+const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o ? shorten(String(o.label), 28) : ""; };
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v === true) n.setAttribute(k, ""); else if (v !== false && v != null) n.setAttribute(k, v); }
@@ -432,7 +444,13 @@ function readyText(it) {
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
-  return "Ready to send: " + d.choice.toUpperCase() + (d.auto ? ", my pick." : ", your choice.");
+  return "Ready to send: " + pickName(it, d.choice) + (d.auto ? ", my pick." : ", your choice.");
+}
+// The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
+function sparkle() {
+  const b = h("b", { class: "spark", "aria-label": "My pick", title: "My pick" });
+  b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
+  return b;
 }
 const hasPics = (it) => (it.options || []).some((o) => o.design);
 // An option names its picture with `design`, a slug of the item's `designs`. The picture sits at the top of the option card and a tap on it picks the option.
@@ -449,10 +467,10 @@ function optCard(it, o, chosen) {
     hasPics(it) ? optPic(it, o) : null,
     h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, checked: chosen === o.key, onchange: () => choose(it, o.key),
       onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
-    h("span", { class: "head" }, h("span", { class: "key" }, o.key.toUpperCase()), h("span", { class: "lab" }, o.label)),
+    h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab" }, o.label)),
     h("p", { class: "how" }, o.how),
     h("div", { class: "tr" }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
-    o.key === it.pick ? h("div", { class: "pick" }, h("b", { "aria-label": "My pick", title: "My pick" }, "★"), it.why) : h("span", { class: "nopick" }));
+    o.key === it.pick ? h("div", { class: "pick" }, sparkle(), it.why) : h("span", { class: "nopick" }));
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 function receipt(it) {
@@ -460,7 +478,7 @@ function receipt(it) {
   let what;
   if (it.kind === "task") what = "Marked done";
   else if (sv.choice === NONE) what = "None of these";
-  else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + String(sv.choice || "").toUpperCase() + (o ? ": " + o.label : ""); }
+  else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
   const steps = [["Saved " + fmt(sv.at, false), true], ["Read by " + it.owner + (rc.read ? " " + fmt(rc.read, false) : ""), !!rc.read], ["Filed in " + it.home + (rc.filed ? " " + fmt(rc.filed, false) : ""), !!rc.filed]];
   return h("div", { class: "receipt" },
     h("div", { class: "line" }, glyph("done"), h("b", {}, what + "."), h("span", {}, fmt(sv.at)),
@@ -512,7 +530,7 @@ function buildCard(it) {
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
-        h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + String(it.pick).toUpperCase() + ")")));
+        h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + pickName(it, it.pick) + ")")));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
@@ -641,7 +659,7 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ", sent" : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, String(it.n));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ", sent" : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, it.title));
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
     const open = list.filter((i) => !isSaved(i)).length, row = h("div", { class: "chips-n" }), seen = new Set();

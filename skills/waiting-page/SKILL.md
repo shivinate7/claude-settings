@@ -36,7 +36,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
-    with that key. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
     (a number, or text such as `3 min`).
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
