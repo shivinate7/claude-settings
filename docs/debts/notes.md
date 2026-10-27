@@ -556,3 +556,5 @@
 - playwright-probe-dash-sibling-joins: for `- run: >` the folded block ends at the dash column, so a sibling key such as `env:` joins the command; a hit only if that text names --with-deps (lint/compliance_probes.py folded). Decision: one-browser-setup-no-apt.
 - playwright-probe-folded-prose-hits: a folded `description: >` that names `playwright install --with-deps` is a hit, like a quoted echo (lint/compliance_probes.py). Decision: one-browser-setup-no-apt.
 - playwright-probe-root-devcontainer: a root `.devcontainer.json` is not read; only the `.devcontainer/` folder is (lint/compliance_probes.py PW_FILE). Decision: one-browser-setup-no-apt.
+- blind-brief-word-list-misses: the keep and current word lists miss paraphrases with no sign of today's product, such as "Keep the app's layout", "Match the app" or "Keep the three views"; the spawn hook knows no view names (hooks/blind_brief.py). Decision: blind-briefs-use-a-template.
+- blind-brief-count-unchecked: `Blind lanes: <n>` is the orchestrator's own count, never compared with the blind briefs spawned (hooks/blind_brief.py). Decision: blind-briefs-use-a-template.
