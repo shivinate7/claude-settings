@@ -1526,7 +1526,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             current = holds_base(wt, f"origin/{base}", info["head"])
-            current = current and "BEHIND: " + current + " --confirm refuses it."
+            current = current and ("BEHIND: " if "does not hold" in current else "UNKNOWN: ") + current + " --confirm refuses it."
         except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
             say("BLOCKED: " + " ".join(str(e).splitlines()[:-1]).replace("  ", " ").strip())
             raise
@@ -1572,7 +1572,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
         stale = holds_base(wt, base_ref, info["head"])
         if stale:
-            raise Stop(stale + " Nothing was claimed.")
+            raise Stop(stale + " This run claimed nothing.")
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
