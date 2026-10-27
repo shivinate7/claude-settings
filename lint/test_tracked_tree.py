@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTING = os.path.join(HERE, "..", "testing")
@@ -144,6 +145,44 @@ class PowerShellHelper(Repo):
                               capture_output=True, text=True, env=ENV)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(listing(self.dest), ["lint/" + n for n in self.WANT])
+
+
+class RmTree(unittest.TestCase):
+    """tracked_tree.rm_tree: the one folder-removal helper of every fixture suite."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="rmtree_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tree = os.path.join(self.tmp, "tree")
+        os.makedirs(os.path.join(self.tree, "objects"))
+
+    def test_removes_a_tree_holding_a_read_only_file(self):
+        # Red on the old handler's absence; on Windows the file is why a bare rmtree fails.
+        path = os.path.join(self.tree, "objects", "pack")
+        with open(path, "w") as f:
+            f.write("x")
+        os.chmod(path, stat.S_IREAD)
+        os.chmod(os.path.join(self.tree, "objects"), stat.S_IREAD | stat.S_IEXEC)  # POSIX: unlink needs write here
+        tracked_tree.rm_tree(self.tree)
+        self.assertFalse(os.path.exists(self.tree))
+
+    def test_a_file_that_vanishes_mid_delete_does_not_raise(self):
+        path = os.path.join(self.tree, "objects", "pack")
+        with open(path, "w") as f:
+            f.write("x")
+        os.unlink(path)  # gone before the handler's chmod
+        tracked_tree.clear_readonly(os.unlink, path, None)  # the retry's own FileNotFoundError also stays quiet
+        real = os.chmod
+        with open(path, "w") as f:
+            f.write("x")
+
+        def vanish(p, mode):
+            os.unlink(p)
+            return real(p, mode)  # raises FileNotFoundError, as chmod does on a file removed under it
+        with mock.patch("os.chmod", vanish):
+            tracked_tree.clear_readonly(os.unlink, path, None)
+        tracked_tree.rm_tree(self.tree)
+        self.assertFalse(os.path.exists(self.tree))
 
 
 if __name__ == "__main__":
