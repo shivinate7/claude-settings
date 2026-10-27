@@ -89,7 +89,7 @@ jobs:
       # Ruff, mypy (strict, over the .code-check.json list), ShellCheck and tsc, from the table in
       # actions/code-check/standard.json. Fails on a tracked language with no row. No format step.
       - name: Code check
-        uses: ./actions/code-check
+        uses: ./actions/code-check # zizmor: ignore[self-repository] the `$/` form is unproven on GitHub
         with:
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
 
