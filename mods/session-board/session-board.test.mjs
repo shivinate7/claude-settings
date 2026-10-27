@@ -1275,7 +1275,7 @@ await test('question box: the turn-end list of background work replaces what the
   await stopWith(h, [{ id: 'task9', type: 'shell', status: 'running', description: 'x' }])
   same((await askBox(h)).decision, 'deny', 'a listed shell task refuses')
   await stopWith(h, [], 'sub1')
-  same((await askBox(h)).decision, 'deny', "a subagent's turn end leaves the session's list alone")
+  same((await askBox(h)).decision, 'deny', "an agent's turn end leaves the session's list alone")
 })
 
 await test('question box: a background workflow refuses it, from its start and from the turn-end list', async () => {
