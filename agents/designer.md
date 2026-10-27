@@ -31,7 +31,7 @@ blind lane gets the screen's job, users, data shapes and the house rules only. I
 read the current screen, its code, its screenshots, its mockups, or the repo's design spec and
 tokens. An informed lane reads all of them. A directed lane is informed and follows one named
 direction. A brief with no lane kind is an informed lane. In a lane of that skill, name your files
-`<screen>-<kind>-<n>` and print the lane kind, and the direction if any, on the page.
+`<screen>-<kind>-<n>` and print the lane kind on the page, and the direction in a directed lane.
 
 For each screen the brief names, write two files in the design folder:
 

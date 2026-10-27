@@ -34,7 +34,7 @@ designer.
 2. **Name the files.** Each lane writes `<screen>-<kind>-<n>.html` and
    `<screen>-<kind>-<n>-notes.md` in the design folder. `<kind>` is `blind`, `informed` or
    `directed`. `<n>` counts the lanes of that kind, from 1. So lanes never collide. Each mockup
-   prints its lane kind, and its direction if any, on the page.
+   prints its lane kind on the page. A directed mockup also prints its direction.
 3. **Spawn all lanes together.** The lanes share no input, so they run in parallel. Lanes never talk
    to each other (`parallelism-no-mid-task-talk`).
 4. **Collect.** Read each report, never a transcript. Give the owner one list: each mockup with its
