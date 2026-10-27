@@ -31,9 +31,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `designs` (a list of `{slug, label}`) shows mockups beside the question (see "Add a design").
-  - A decision adds `options` (a list of `{key, label, how, gain, lose}`), `pick` (the key you
-    recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
-    with that key. The page never preselects an option: it stars `pick` and offers "Take my pick".
+  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, each with an optional
+    `design`, a slug), `pick` (the key you recommend) and `why`. Never use the key `none`. The
+    page adds its own "None of these" option with that key. The page never preselects an option: it stars `pick` and offers "Take my pick".
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
     (a number, or text such as `3 min`).
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
@@ -155,13 +155,22 @@ unmeasured.
 
 ## Add a design
 
-An item may carry mockups. The owner sees each one in a sandboxed frame beside the question, and
-the Designs tab pages through every mockup whose question is open.
+An item may carry mockups. The owner sees each one in a sandboxed frame, and the Designs tab pages
+through every mockup whose question is open.
+
+- A decision whose options differ in how something looks carries one mockup per option before it
+  is added: `design` on each option. Its mockup shows inside that option's card. An option with
+  nothing to draw, such as "changes in my note", needs none. A link to a folder, a file or another
+  artifact does not count as a mockup.
+- `designs` on the item holds mockups that belong to the whole question.
+- An option's mockup shows at 4:3. Draw it as one SVG with `viewBox="0 0 400 300"`,
+  `preserveAspectRatio="xMidYMid meet"` and `width:100%;height:100vh`. Crop to the part that shows
+  the difference. The card shows it about 233 px wide, so keep key labels at font size 19 or more.
 
 1. Put the whole mockup in one HTML string. Write `<` as `\u003c`.
 2. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
    JSON in `<script type="application/json" id="designData">`.
-3. Add `designs: [{slug, label}]` to the item.
+3. Add `design: "<slug>"` to its option, or `designs: [{slug, label}]` to the item.
 4. Republish the page to the same URL with the same capabilities. The database stays.
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups.

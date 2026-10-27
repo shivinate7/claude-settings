@@ -108,6 +108,10 @@ const geo = (page) => page.evaluate(() => ({
   cards: [...document.querySelectorAll("article.card")].map((c) => { const r = c.getBoundingClientRect(); return [c.id, Math.round(r.top + scrollY), Math.round(r.height)]; }),
 }));
 const SAVED_A = { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:00:00Z", choice: "a", note: "" } };
+// An option may carry design: "<slug>", and its mockup shows inside that option's card (designData holds the HTML).
+const opt = (key, label, design) => ({ key, label, how: "h", gain: "g", lose: "l", ...(design ? { design } : {}) });
+const DESIGNS = { s1: "<p>one</p>", s2: "<p>two</p>" };
+const optFrame = (it, key) => `label.opt[for="o-${it.id}-${key}"] iframe`;
 
 // ---------------------------------------------------------------- the final design
 
@@ -253,16 +257,25 @@ test("a card becomes a receipt in place, with Change", async (t) => {
   assert.equal(await c.locator(".receipt").count(), 0);
 });
 
-for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
-  test(`nothing moves when an answer is picked or sent, at ${viewport.width} wide`, async (t) => {
+for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
+  test(`nothing moves when an answer is picked or sent, at ${viewport.width} wide${withDesigns ? ", with option designs" : ""}`, async (t) => {
     const items = [
-      mk("first", 1, { context: LONG, holds: "A lane waits." }), mk("second", 2, { context: LONG, stands: true }),
+      mk("first", 1, { context: LONG, holds: "A lane waits.", ...(withDesigns ? { options: [opt("a", "Red", "s1"), opt("b", "Blue", "s2")] } : {}) }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
     ];
-    const page = await open(t, { items, viewport }); if (!page) return;
+    const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
+    // With option designs, the in-card frames must be the same DOM nodes after each pick, so none reloads.
+    let sent = false;
+    if (withDesigns) {
+      assert.equal(await page.locator("#item-first iframe").count(), 2, "the option designs have no frames in their cards");
+      await page.evaluate(() => { window.__of = [...document.querySelectorAll("#item-first iframe")]; });
+    }
     const base = await geo(page);
-    const same = async (what) => assert.deepEqual(await geo(page), base, "the page moved on " + what);
+    const same = async (what) => {
+      assert.deepEqual(await geo(page), base, "the page moved on " + what);
+      if (withDesigns && !sent) assert.equal(await page.evaluate(() => { const now = [...document.querySelectorAll("#item-first iframe")]; return now.length === window.__of.length && now.every((f, n) => f === window.__of[n]); }), true, "an in-card frame was rebuilt on " + what);
+    };
     await choose(page, items[0], "b"); await same("a pick");
     await choose(page, items[0], "a"); await same("a second pick");
     await takePick(page, items[3]); await same("Take my pick");
@@ -270,6 +283,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 
     await card(page, items[4]).getByRole("button", { name: /Take my pick/ }).click();
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
+    sent = true;
     await send(page);
     await page.locator("#sent .stamp").waitFor();
     await page.evaluate(() => new Promise((r) => setTimeout(r, 600)));
@@ -418,6 +432,84 @@ test("a page with no designs has no Designs tab", async (t) => {
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator("#tabD").isHidden(), true);
 });
+
+test("a decision option with a design shows it in a sandboxed frame inside its own card", async (t) => {
+  const it = mk("opt-design", 1, { options: [opt("a", "Red", "s1"), opt("b", "Blue")] });
+  const page = await open(t, { items: [it], designData: DESIGNS }); if (!page) return;
+  const f = page.locator(optFrame(it, "a"));
+  assert.equal(await f.count(), 1, "no frame inside option a's card");
+  assert.equal(await f.getAttribute("sandbox"), "allow-scripts");
+  assert.equal(await f.getAttribute("srcdoc"), "<p>one</p>");
+  assert.equal(await page.locator(optFrame(it, "b")).count(), 0, "option b has no design, so it has no frame");
+});
+
+test("an option whose design is missing from the page says so in its frame", async (t) => {
+  const it = mk("gone-design", 1, { options: [opt("a", "Red", "nope"), opt("b", "Blue")] });
+  const page = await open(t, { items: [it], designData: DESIGNS }); if (!page) return;
+  assert.equal(await page.locator(optFrame(it, "a")).count(), 1, "no frame inside option a's card");
+  await page.frameLocator(optFrame(it, "a")).getByText("This design is missing from the page.").waitFor();
+});
+
+test("an option design counts on the Designs tab, and the sheet pages through the option designs", async (t) => {
+  const it = mk("opt-only", 1, { options: [opt("a", "Red", "s1"), opt("b", "Blue", "s2")] });
+  const page = await open(t, { items: [it], designData: DESIGNS }); if (!page) return;
+  assert.equal(await page.locator("#tabD").isVisible(), true, "the Designs tab is hidden");
+  assert.equal(await page.locator("#dCount").textContent(), "2", "the count leaves out option designs");
+  await page.click("#tabD");
+  await page.locator("#dsheet").waitFor();
+  const shown = () => page.locator("#dStage iframe:not(.off)").getAttribute("srcdoc");
+  assert.equal(await shown(), "<p>one</p>");
+  await page.click("#dNext");
+  assert.equal(await shown(), "<p>two</p>", "Next did not page to the second option design");
+  await page.click("#dClose");
+  assert.equal(await page.locator("#dsheet").isHidden(), true);
+});
+
+test("a tap on an option's picture picks that option, and Open full size opens the sheet without moving the pick", async (t) => {
+  const it = mk("tap-design", 1, { options: [opt("a", "Red", "s1"), opt("b", "Blue", "s2")] });
+  const page = await open(t, { items: [it], designData: DESIGNS }); if (!page) return;
+  const f = page.locator(optFrame(it, "b"));
+  assert.equal(await f.count(), 1, "no frame inside option b's card");
+  await takePick(page, it);
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true);
+  await f.scrollIntoViewIfNeeded();
+  const box = await f.boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the picture did not pick option b");
+  await card(page, it).getByRole("button", { name: "Open full size" }).first().click();
+  await page.locator("#dsheet").waitFor();
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Open full size moved the pick");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "Open full size moved the pick");
+});
+
+test("option rows line up across sibling cards when only one option has a design, at desktop width", async (t) => {
+  const it = mk("rows", 1, { options: [
+    { ...opt("a", "Red", "s1"), how: "A short way to put it." },
+    { ...opt("b", "Blue"), how: "A longer way to put it, which runs onto a second line at desktop width. ".repeat(2) },
+  ] });
+  const page = await open(t, { items: [it], designData: DESIGNS, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  assert.equal(await page.locator(optFrame(it, "a")).count(), 1, "no frame inside option a's card");
+  // The pick box is pinned to the bottom of its row, so the pick row is compared by bottom edge.
+  const rows = await page.evaluate((id) => ["a", "b"].map((k) => {
+    const l = document.querySelector(`label.opt[for="o-${id}-${k}"]`);
+    const top = (sel) => Math.round(l.querySelector(sel).getBoundingClientRect().top);
+    return { how: top(".how"), gain: top(".tr"), pick: Math.round(l.querySelector(".pick, .nopick").getBoundingClientRect().bottom) };
+  }), it.id);
+  for (const row of ["how", "gain", "pick"]) assert.ok(Math.abs(rows[0][row] - rows[1][row]) <= 1, `the ${row} rows are not level: ${rows[0][row]} and ${rows[1][row]}`);
+});
+
+for (const scheme of ["light", "dark"]) {
+  test(`an option design fits a phone with no sideways scroll, ${scheme} scheme`, async (t) => {
+    const it = mk("phone-design", 1, { options: [opt("a", "Red", "s1"), opt("b", "Blue")] });
+    const page = await open(t, { items: [it], designData: DESIGNS, viewport: { width: 375, height: 800 }, scheme }); if (!page) return;
+    const f = page.locator(optFrame(it, "a"));
+    assert.equal(await f.count(), 1, "no frame inside option a's card");
+    await f.scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "the page scrolls sideways");
+    const box = await f.boundingBox();
+    assert.ok(box.x + box.width <= 375, "the option design runs past the phone width");
+  });
+}
 
 // ---------------------------------------------------------------- answers, notes and Clear
 
