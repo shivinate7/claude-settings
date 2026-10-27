@@ -19,6 +19,10 @@ onto main after review. Push record-branch edits to that branch only. Only triag
 
 <The checks that prove the task done, and who reviews the diff.>
 
+Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane joins a batch, run
+`bin/ci-job gates --lint --base origin/main` and report its verdict. It runs the fast lint steps of
+the gates job and no full suite.
+
 ## Report
 
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
