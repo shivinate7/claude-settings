@@ -71,7 +71,8 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 36 min = 2x the slowest green run. A bandaid: suite growth is the cause (debt gates-job-near-timeout).
+    # Cap 36 min. Slowest of 30 runs: 30.4 min with the guard suite, about 19.8 min without it, which moved to
+    # gates-guard (decision ci-job-caps). Not lowered: 2x of 19.8 is above 36.
     timeout-minutes: 36
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -101,10 +102,6 @@ jobs:
 
       - name: Shell lint (ShellCheck), bin/sim-test
         run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck --severity=warning bin/sim-test
-
-      - name: Guard fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}
-        run: python3 hooks/test_guard.py
 
       - name: Action metadata loads
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -432,6 +429,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_cmd.py
 
+      - name: Repaired-merge counter fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_repaired_merges.py
+
       - name: install_from_main suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
@@ -448,6 +449,26 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: bash .github/scripts/mod-tests.sh
+
+  # The guard fixture suite alone: 10.6 min slowest of 30 runs (9.8 median), so the gates job stayed under 80% of its cap
+  # (decision ci-job-caps). Cap 22 min = 2x the slowest, plus setup.
+  gates-guard:
+    runs-on: ubuntu-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Guard fixture suite
+        run: python3 hooks/test_guard.py
 
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
   # `gates` lint job. bin/shoot needs Playwright and Chromium, and this runner has neither. The job
@@ -528,9 +549,9 @@ jobs:
     runs-on: macos-latest
     needs: scope
     if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
-    # Cap 10 min: the ios-ship suite runs twice at about 70 s each on the owner's Mac, and a runner is slower
-    # (figures: debt measured-time-table).
-    timeout-minutes: 10
+    # Cap 18 min = 2x the slowest of 30 runs (9.1 min; median 7.2), which passed 80% of the old 10 min cap
+    # (decision ci-job-caps).
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -731,8 +752,11 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
+      # Own cap: this suite takes 1.5 min at most (28 of 30 runs), and one run hung 23 min until the job cap.
+      # A hang now reads red at this step.
       - name: Record stamp engine fixture suite
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: node actions/stamp/test_stamp.mjs
 
       - name: Record stamp action fixture suite
@@ -1061,19 +1085,18 @@ jobs:
           MERGE_SHARD: 5/5
         run: python merge/test_merge.py
 
-  gates-windows-rest:
+  # The janitor sweep suites, moved out of gates-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
+  # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 40 min = 2x.
+  gates-windows-sweep:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows_rest == 'true' || github.event_name != 'pull_request' }}
-    # About 550 s on push (the sweep mutation test takes about 150 s: runs 37650386161, 37606531387).
-    # About 2x the slowest of the 5 newest green runs (18.8 min, run 39969158671).
-    timeout-minutes: 38
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
-
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
@@ -1086,6 +1109,24 @@ jobs:
       - name: Janitor sweep mutation test
         if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
+
+  gates-windows-rest:
+    runs-on: windows-latest
+    needs: scope
+    if: ${{ needs.scope.outputs.gates_windows_rest == 'true' || github.event_name != 'pull_request' }}
+    # Cap 28 min = about 2x the slowest run without the janitor sweep suites (about 13.3 min of 30 runs; they moved to
+    # gates-windows-sweep, decision ci-job-caps).
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
 
       - name: Config watch fixture suite
         if: ${{ !cancelled() }}
@@ -1203,8 +1244,11 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_install_schtasks.py
 
+      # Own cap: this suite takes 1.5 min at most (28 of 30 runs), and one run hung 23 min until the job cap.
+      # A hang now reads red at this step.
       - name: Record stamp engine fixture suite
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: node actions/stamp/test_stamp.mjs
 
       - name: Record stamp action fixture suite
@@ -1221,6 +1265,7 @@ jobs:
     needs:
       - scope
       - gates
+      - gates-guard
       - gates-shoot
       - pointer-windows
       - shell-macos
@@ -1235,6 +1280,7 @@ jobs:
       - gates-windows-merge-4
       - gates-windows-merge-5
       - gates-windows-rest
+      - gates-windows-sweep
     if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
     timeout-minutes: 5
     permissions:
