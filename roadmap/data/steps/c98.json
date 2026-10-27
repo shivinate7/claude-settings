@@ -1,0 +1,9 @@
+{
+  "title": "Every session sends fewer messages: an outbox, owners read their own answers, the roster is read first",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.31,
+  "why": "Your ruling, Oct 26 19:40 CDT (\"Yes agreed\"), on the 60-an-hour message cap: the fewer-messages rules now sit only in this project's instructions.",
+  "note": "Text: plans/fewer-thread-messages.md in project files. Rules: the waiting page holds every item waiting on you, each names its owning session, and the owner reads its own answers at each wake (nobody relays); non-urgent notes go to an outbox file (roadmap/outbox/<thread>.md here) that triage reads and clears; a role change updates the roster with no broadcast, and a session reads the roster before it sends; send at once only when work is blocked or you asked; times for you in 24-hour US Central. Fix, needs no answer: a home in claude-settings for every session (the questions-go-to-owner rule, the waiting-page skill, the orchestrate skill), not only this project. Port: yes; the rules are global. Placed ahead of c53's slot, after c88 and c97 (triage, Oct 27): every thread hits the cap.",
+  "updatedAt": "2026-10-27T01:08:00Z"
+}

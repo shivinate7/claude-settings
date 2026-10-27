@@ -1,0 +1,9 @@
+{
+  "title": "The waiting page gets its final look, in every repo at once",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.396,
+  "why": "Your worry, Oct 26: \"is it already too late to decide the look ... I realize i allowed a beta to be the final product\". It is not too late: every repo's page comes from one template, skills/waiting-page/page.html.",
+  "note": "Under way (coordinator, Oct 26): five Opus mockup threads redesign the page, three seeded with the current pilot and two blind (mockups in plans/waiting-mockups/ in project files). You pick a look; it replaces skills/waiting-page/page.html; home-app's page and the pilot are republished from it, and every later page follows. Rides with c74 (list what Accept every pick saves) and c99 (a save gets a reply). Port: yes, through the skill. Placed after c99, ahead of c72 (triage, Oct 27).",
+  "updatedAt": "2026-10-27T01:08:00Z"
+}

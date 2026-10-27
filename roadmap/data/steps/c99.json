@@ -1,0 +1,9 @@
+{
+  "title": "Saving an answer on the waiting page gets a visible reply",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.395,
+  "why": "Your gripe, Oct 26 (waiting page): \"would also prefer if there was a way that submitting questions resulted in a reaction\"; today you type \"submitted\" by hand.",
+  "note": "Measured Oct 26 (c71): a page save wakes no session. To check first: whether the page can also send a comment to Claude through the comments capability, which wakes a session watching the page; then the owning session reacts or replies. Needs no answer from you. Port: yes; every repo's page comes from the skill. Placed ahead of c100, after c71's slot (triage, Oct 27).",
+  "updatedAt": "2026-10-27T01:08:00Z"
+}

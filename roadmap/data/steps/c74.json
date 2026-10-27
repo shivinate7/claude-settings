@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 109.36,
   "why": "The waiting page offers one press that accepts every recommended pick; sessions need to know whether that press approves each item, including steps that cannot be undone.",
-  "note": "Deferred (shiv, Oct 26): your answer is needed; ask nothing for now. From c71 (PR #636): rule 2a says your save on a page only you can write counts as your word; not ruled: whether \"Accept every pick\" is your word on every item it accepts. Advisor pick, unruled: yes for items that can be undone, and a separate press for any item that cannot. Until ruled, sessions treat a bulk accept as your word only on reversible items.",
-  "updatedAt": "2026-10-26T20:05:00Z"
+  "note": "Ruled Oct 26 (shiv, waiting page, c): keep \"Accept every pick\", and before it saves, the page lists every pick it will save. Build in skills/waiting-page, needs no answer; it rides with c100 (the waiting page's final look). Rule 2a stands: your save on a page only you can write counts as your word on each item it saves.",
+  "updatedAt": "2026-10-27T01:08:00Z"
 }
