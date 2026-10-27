@@ -95,7 +95,8 @@ spawn reads the fallback. Reason: the flag collapses Claude Code's model order o
 a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
 **The order**, first wins: the spawn's `model` field, then the agent definition's `model:` (a built-in
-definition or a pin in `agents/*.md`, `inherit` included), then the variable, then the parent's model.
+definition or a pin in `agents/*.md`), then the variable, then the parent's model. The Oct 26 cases
+measured `inherit` and the parent step; the Oct 27 cases measured the pin.
 
 MEASURED in a cloud session, 2026-10-26, by each agent transcript's `model` field. The variable
 was `sonnet`, and no `agents/` files were installed. A `general-purpose` spawn with no model ran
@@ -103,7 +104,8 @@ Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus
 
 MEASURED Oct 27, cloud: this repo's `agents/*.md` copied to `~/.claude/agents`, Claude Code 2.1.311,
 each case a fresh headless `claude -p` with a parent model unlike both candidates. The model came from
-the run's `modelUsage` and the agent's own report of its model id. Spawns set no model unless named.
+the run's `modelUsage` and the agent's own report of its model id. Background calls put haiku in every
+`modelUsage`, so each haiku row rests on the agent's report alone. Spawns set no model unless named.
 
 | Agent, pin | Variable | Parent | Observed |
 |---|---|---|---|
