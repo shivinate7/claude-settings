@@ -126,6 +126,9 @@ def added_at():
     return seen
 
 
+READY_FLOOR = 6
+
+
 def upkeep(steps):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
@@ -158,6 +161,15 @@ def upkeep(steps):
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("deferred on shiv with no question", unasked)]
+    # Ready queue for the build advisor: open todo or active steps (not the c52 and c55 frames)
+    # with no deferral, no "Due after" and no "Waits on:" (a Mac check, an owner test).
+    # Floor READY_FLOOR (coordinator, Oct 27, after the queue ran dry 09:25-11:26 CDT).
+    ready = [k for k, d in open_ if d.get("status") in ("todo", "active") and k not in ("c52", "c55")
+             and not DEFERRED_ON_SHIV.search(d.get("note") or "")
+             and not any(m in (d.get("note") or "") for m in ("Due after", "Waits on:"))]
+    if len(ready) < READY_FLOOR:
+        rows.append(("ready todo steps under the floor of %d" % READY_FLOOR, ready or ["none"]))
+    print("ready: %d (floor %d): %s" % (len(ready), READY_FLOOR, ", ".join(ready[:READY_FLOOR + 2])))
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:

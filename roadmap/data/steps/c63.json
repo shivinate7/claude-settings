@@ -4,7 +4,7 @@
   "status": "todo",
   "order": 109.2,
   "why": "A stub is kept only as long as a running session might still call it.",
-  "note": "From c50, Oct 26: lint/ste_gate.py, lint/md_sweep.py and hooks/question_outcome.py came back as exit-0 stubs so that old sessions do not break. lint/check_hook_stubs.py names Nov 6 and goes green for their removal once that date passes. One small cloud lane on or after Nov 6; needs no answer from you. Placed after the Mac checks c29 and c58 (triage, Oct 26): it waits for its date.",
+  "note": "From c50, Oct 26: lint/ste_gate.py, lint/md_sweep.py and hooks/question_outcome.py came back as exit-0 stubs so that old sessions do not break. lint/check_hook_stubs.py names Nov 6 and goes green for their removal once that date passes. One small cloud lane on or after Nov 6; needs no answer from you. Placed after the Mac checks c29 and c58 (triage, Oct 26): it waits for its date. Due after: Nov 6.",
   "ask": "",
-  "updatedAt": "2026-10-26T09:50:00Z"
+  "updatedAt": "2026-10-27T16:45:00Z"
 }
