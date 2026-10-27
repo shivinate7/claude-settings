@@ -12,7 +12,6 @@ the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module 
 """
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -35,21 +34,11 @@ def flagged(out):
             if line.startswith("check_record_slugs: FAIL:")]
 
 
-def rm_tree(path):
-    def clear(func, p, _exc):
-        os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
-        func(p)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=clear)
-    else:
-        shutil.rmtree(path, onerror=clear)
-
-
 class RecordSlugsTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
         self.tree = tempfile.mkdtemp(prefix="rsl_")
-        self.addCleanup(rm_tree, self.tree)
+        self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the layout and the check's imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
 

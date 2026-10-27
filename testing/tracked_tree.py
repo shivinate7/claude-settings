@@ -13,10 +13,12 @@ A folder git cannot list, or that lists nothing, raises: an empty fixture would 
     import tracked_tree
     tracked_tree.copy_tracked(tree, "lint", "hooks")        # tree/lint/..., tree/hooks/...
     tracked_tree.copy_folder("hooks", scratch, skip=("git_reads.py",))   # flat into scratch
+    self.addCleanup(tracked_tree.rm_tree, tree)             # remove it, read-only git objects included
 """
 import functools
 import os
 import shutil
+import stat
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -81,3 +83,21 @@ def read_tracked(*folders, root=REPO):
             with open(os.path.join(root, folder, *rel.split("/")), encoding="utf-8", newline="") as f:
                 texts[folder + "/" + rel] = f.read()
     return texts
+
+
+def clear_readonly(func, path, _exc):
+    """rmtree's error handler: clear the read-only bit on `path`, then retry `func`. A vanished file is done."""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except FileNotFoundError:
+        pass
+
+
+def rm_tree(path):
+    """Remove a fixture tree. Clears the read-only bit and retries, since git objects are read-only on Windows.
+    A file that is already gone is not an error: the tree is what the caller wanted removed."""
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_readonly)
+    else:
+        shutil.rmtree(path, onerror=clear_readonly)

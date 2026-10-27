@@ -13,7 +13,6 @@ CHECK_HOOK_STUBS_UNDER_TEST overrides the module path.
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -39,21 +38,11 @@ def settings(*paths):
     return json.dumps({"hooks": {"PreToolUse": groups}}, indent=2) + "\n"
 
 
-def rm_tree(path):
-    def clear(func, p, _exc):
-        os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
-        func(p)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=clear)
-    else:
-        shutil.rmtree(path, onerror=clear)
-
-
 class HookStubsTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_hook_stubs.py")
         root = tempfile.mkdtemp(prefix="hks_")
-        self.addCleanup(rm_tree, root)
+        self.addCleanup(tracked_tree.rm_tree, root)
         self.tool = os.path.join(root, "tool")  # the script lives outside the repo it checks
         tracked_tree.copy_tracked(self.tool, "lint", "hooks")  # the check's imports, whatever they become
         shutil.copyfile(MODULE, os.path.join(self.tool, "lint", "check_hook_stubs.py"))
