@@ -8,7 +8,7 @@ defect it found. If it may be stale and no ruling covers it, use the protocol
 above.<!-- rule:outcomes-tests-are-claims --> My grant covers the act it names, never a
 variant. My ruling covers each test and path that expects exactly what it ruled out; cite it
 with its time.<!-- rule:outcomes-grant-covers-named-act --> Once ready, turn each rule below
-into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written. A background agent's own write may read the machine load once, inside the guard hook already running for it (decision machine-load-brake).<!-- rule:outcomes-mechanize-rules -->
+into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written. An agent's own write may read the machine load once, inside the guard hook already running for it (decision machine-load-brake).<!-- rule:outcomes-mechanize-rules -->
 
 **Roles, if this session can spawn agents.** Pick solo or orchestrate from my request. Say the
 pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
