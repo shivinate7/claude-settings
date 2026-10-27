@@ -11,7 +11,7 @@
     "step": 37,
     "saturation": 55,
     "lightness": 40,
-    "min_saturation": 0.3,
+    "min_saturation": 0.2,
     "drawn": [
       "ios-adblock",
       "adblock-lists",
@@ -38,8 +38,8 @@
     "degen": "#0b5fff",
     "mailaudit": "#6f5ca6",
     "joyous": "#27553f",
-    "ios-adblock": "#822e9e",
+    "ios-adblock": "#9e2e75",
     "adblock-lists": "#519e2e",
-    "home": "#9e2e7e"
+    "home": "#8f9e2e"
   }
 }

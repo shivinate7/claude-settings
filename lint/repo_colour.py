@@ -16,6 +16,7 @@ Cost: one read of the registry per call. No process, file or log.
 """
 import colorsys
 import json
+import re
 import os
 import sys
 
@@ -33,7 +34,7 @@ def hue_gap(a, b):
     return min(d, 360 - d)
 
 
-def hue_of(hex6, min_saturation=0.3):
+def hue_of(hex6, min_saturation=0.2):
     """The colour's HSL hue in degrees, or None for a grey."""
     r, g, b = (int(hex6[i:i + 2], 16) / 255 for i in (1, 3, 5))
     h, _, s = colorsys.rgb_to_hls(r, g, b)
@@ -68,7 +69,10 @@ def colour_for(repo, registry=REGISTRY):
     rule, repos = data["rule"], data["repos"]
     name = repo.rstrip("/").rsplit("/", 1)[-1]
     if name in repos:
-        return repos[name]
+        hex6 = repos[name]
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", hex6):
+            raise ValueError("%s is not #rrggbb: %r" % (name, hex6))
+        return hex6.lower()
     taken = [h for h in (hue_of(c, rule["min_saturation"]) for c in repos.values()) if h is not None]
     h = draw_hue(name_hue(name), taken, rule)
     r, g, b = colorsys.hls_to_rgb(h / 360, rule["lightness"] / 100, rule["saturation"] / 100)
@@ -90,7 +94,7 @@ def main(argv):
         return 2
     try:
         print(colour_for(args[0], registry))
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         print("repo_colour: registry unreadable, colour unknown: %s" % e, file=sys.stderr)
         return 2
     return 0

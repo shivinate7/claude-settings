@@ -7,6 +7,7 @@ The script gives each repo one colour: the registry's colour when the repo has o
 drawn from the name that keeps clear of the state hues and of every other repo's hue.
 REPO_COLOUR_UNDER_TEST overrides the module path, so the cases run against another copy.
 """
+import colorsys
 import importlib.util
 import json
 import os
@@ -68,13 +69,15 @@ class RepoColour(unittest.TestCase):
     def test_drawn_hue_keeps_the_margins(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self.write_registry(tmp, self.reg["repos"])
-            taken = [h for h in (self.rc.hue_of(c) for c in self.reg["repos"].values()) if h is not None]
+            # Read each hue here, not through hue_of, so a colour hue_of wrongly calls grey still counts.
+            taken = [colorsys.rgb_to_hls(*(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)))[0] * 360
+                     for c in self.reg["repos"].values()]
             for name in ("a", "zz", "new-repo", "shop", "photos", "ledger", "x" * 40, "ü-repo"):
-                h = self.rc.hue_of(self.rc.colour_for(name, registry=path))
+                h = round(self.rc.hue_of(self.rc.colour_for(name, registry=path), 0))
                 for s in self.rule["state_hues"]:
-                    self.assertGreaterEqual(dist(h, s), self.rule["state_gap"] - 1, (name, h, s))
+                    self.assertGreaterEqual(dist(h, s), self.rule["state_gap"], (name, h, s))
                 for t in taken:
-                    self.assertGreaterEqual(dist(h, t), self.rule["repo_gap"] - 1, (name, h, t))
+                    self.assertGreaterEqual(dist(h, t), self.rule["repo_gap"], (name, h, t))
 
     def test_same_name_same_colour(self):
         first = self.rc.colour_for("some-new-repo")
@@ -95,6 +98,32 @@ class RepoColour(unittest.TestCase):
         # A taken hue at 359 blocks 1 through 29 across the wrap.
         h = self.rc.draw_hue(15, [359], dict(rule, state_hues=[]))
         self.assertGreaterEqual(self.rc.hue_gap(h, 359), 30, h)
+
+    def test_drawn_entries_keep_the_margins(self):
+        # Each stored draw keeps its gaps to the state hues and to every other repo, greys aside.
+        def hue(c):
+            h, _, s = colorsys.rgb_to_hls(*(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)))
+            return None if s < 0.1 else h * 360
+        for repo in self.rule["drawn"]:
+            h = round(hue(self.reg["repos"][repo]))
+            for s in self.rule["state_hues"]:
+                self.assertGreaterEqual(dist(h, s), self.rule["state_gap"], (repo, s))
+            for other, c in self.reg["repos"].items():
+                if other != repo and hue(c) is not None:
+                    self.assertGreaterEqual(dist(h, hue(c)), self.rule["repo_gap"], (repo, other))
+
+    def test_bad_registry_value_is_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write_registry(tmp, {"banchi": "red"})
+            out = subprocess.run([sys.executable, MODULE, "banchi", "--registry", path],
+                                 capture_output=True, text=True)
+            self.assertEqual((out.returncode, out.stdout), (2, ""))
+            listed = os.path.join(tmp, "list.json")
+            with open(listed, "w", encoding="utf-8") as f:
+                json.dump([], f)
+            out = subprocess.run([sys.executable, MODULE, "banchi", "--registry", listed],
+                                 capture_output=True, text=True)
+            self.assertEqual((out.returncode, out.stdout), (2, ""))
 
     def test_grey_takes_no_hue(self):
         self.assertIsNone(self.rc.hue_of("#808080"))
