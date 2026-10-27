@@ -7758,6 +7758,7 @@ for _name, _command in (
     ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
     ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
     ("a repo-root record path in parentheses", VCS + ' commit -m "done (' + CITE + ')"'),
+    ("a record path in bold", VCS + ' commit -m "see **docs/decisions/one-shared-record-stamp.md**"'),
     ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
     ("a PR body", 'gh pr create --draft --title t --body "cites ' + CITE + '"'),
     ("a layout-path decision", VCS + ' commit -m "fix, per docs/' + CITE + '"'),
@@ -7791,6 +7792,7 @@ sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CI
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
+    ("a code path in bold", VCS + ' commit -m "guard: fix **hooks/guard.py**"'),
     ("the word decisions", VCS + ' commit -m "decisions: one word, no path"'),
     ("the word debts and a folder", VCS + ' commit -m "move the debts around, see decisions/"'),
     ("an id with a gloss", VCS + ' commit -m "per D12, short titles for records"'),

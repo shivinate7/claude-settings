@@ -1064,7 +1064,8 @@ def record_path_pattern():
     """The pattern for a repo-root record path, or None when the record folders cannot be read.
 
     The folders are the record kinds of lint/layout.json, read from the file. A path counts only at
-    the START of a word: after a space, quote, bracket or `=`, with an optional `./`. A URL and
+    the START of a word: after a space, quote, bracket, `=` or `*` (markdown bold), with an
+    optional `./`. A URL and
     `lint/decisions/x.md` have a `/` or a word before the folder, so they are not repo-root record
     paths and stay allowed. A layout path such as `docs/decisions/0001.md` is a record path.
     """
@@ -1078,7 +1079,7 @@ def record_path_pattern():
             continue
         if names:
             pattern = re.compile(
-                r"(?:^|(?<=[\s\"'`(\[<,;=@]))(?:\./)?(?:" + "|".join(map(re.escape, names))
+                r"(?:^|(?<=[\s\"'`(\[<,;=@*]))(?:\./)?(?:" + "|".join(map(re.escape, names))
                 + r")/[\w.-]+\.md\b")
             _RECORD_PATTERN.append(pattern)
             return pattern
