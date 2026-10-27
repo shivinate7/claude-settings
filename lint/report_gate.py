@@ -471,7 +471,7 @@ def writes_waiting_item(inp):
 
 def pick_has_a_control(records, text, cwd):
     """True when the main session's turn opened the question box, or wrote an item to this repo's
-    waiting page and the reply links it. A subagent's own calls (isSidechain) never count."""
+    waiting page and the reply links it. An agent's own calls (isSidechain) never count."""
     page = None
     for rec in records:
         if rec.get("isSidechain"):
