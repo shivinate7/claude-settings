@@ -115,7 +115,9 @@ test("a rule question starts blank, my pick is starred in its card, and Take my 
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator(`input[name="g-${DECISION.id}"]:checked`).count(), 0, "an option is preselected");
   const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick`);
-  assert.match(await star.textContent(), /★.*Red is bold\./s);
+  assert.match(await star.textContent(), /Red is bold\./);
+  assert.equal(await star.locator("svg").count(), 1, "the pick box holds no inline sparkle icon");
+  assert.doesNotMatch(await star.textContent(), /[★⭐]/, "the pick box still holds a star character");
   assert.equal(await page.locator(`label[for="o-${DECISION.id}-b"] .pick`).count(), 0, "the star sits on a second option");
   assert.equal(await page.locator("#send").isDisabled(), true, "Send is open with nothing answered");
   await takePick(page, DECISION);
@@ -896,3 +898,50 @@ test("a partial Undo names every item that stayed sent", async (t) => {
   });
   await page.locator("#barStatus", { hasText: "Too late to undo No. 1 and No. 2" }).waitFor();
 });
+
+// ---------------------------------------------------------------- option names, counts and the list
+
+const WORDY = [["value", "Value for the card, shown near the feed in a sheet"], ["watch", "Watch"], ["nothing", "Nothing"]]
+  .map(([key, label]) => ({ key, label, how: "h", gain: "g", lose: "l" }));
+
+test("an option chip shows its letter by position, never a raw key longer than one character", async (t) => {
+  const it = mk("long-keys", 40, { options: WORDY, pick: "watch", why: "Watch fits." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const chips = await card(page, it).locator(".opt .key").allTextContents();
+  assert.deepEqual(chips, ["A", "B", "C"]);
+});
+
+test("a pick is named by the option's title, shortened with an ellipsis, never by its raw key", async (t) => {
+  const it = mk("pick-names", 41, { options: WORDY, pick: "value", why: "Value fits." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const take = card(page, it).getByRole("button", { name: /Take my pick/ });
+  const name = await take.textContent();
+  assert.doesNotMatch(name, /VALUE|value\)/, "the button shows the raw key: " + name);
+  assert.match(name, /^Take my pick \(Value for the card.*…\)$/, name);
+  await take.click();
+  const ready = await card(page, it).locator(".ready").textContent();
+  assert.match(ready, /^Ready to send: Value for the card.*…, my pick\.$/, ready);
+  await choose(page, it, "watch");
+  assert.equal(await card(page, it).locator(".ready").textContent(), "Ready to send: Watch, your choice.");
+});
+
+test("the count digit matches the rest of its line", async (t) => {
+  const page = await open(t); if (!page) return;
+  const m = await page.evaluate(() => { const b = document.querySelector(".ov-prog .big b"), l = document.querySelector(".ov-prog .big"); return { b: getComputedStyle(b).fontSize, l: getComputedStyle(l).fontSize, v: getComputedStyle(b).fontVariantNumeric }; });
+  assert.equal(m.b, m.l, "the digit is a different size from its line");
+  assert.doesNotMatch(m.v, /slashed-zero/);
+});
+
+for (const width of [1440, 390]) {
+  test(`each list entry carries its item's title, at ${width} wide`, async (t) => {
+    const items = [mk("first-q", 1, { title: "Where does the price history show" }), { ...TASK, id: "second-q", n: 2, title: "Plug in the Mac" }];
+    const page = await open(t, { items, viewport: { width, height: 900 } }); if (!page) return;
+    for (const it of items) {
+      const chip = page.locator(`#c-${it.id}`);
+      assert.equal(await chip.getAttribute("title"), it.title);
+      assert.ok((await chip.getAttribute("aria-label")).includes(it.title));
+    }
+    const shown = await page.locator("#c-first-q .nt").evaluate((e) => getComputedStyle(e).display !== "none" && e.getBoundingClientRect().width > 0).catch(() => false);
+    assert.equal(shown, width > 960, width > 960 ? "no visible short title in the list" : "the short title crowds a narrow list");
+  });
+}
