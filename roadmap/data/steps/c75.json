@@ -1,9 +1,9 @@
 {
   "title": "A branch delete after its archive push is not re-asked by Claude Code's own auto-mode check",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "done",
   "order": 103.35,
   "why": "Your gripe, Oct 26: sessions keep asking \"push as an archive, then delete?\" when that is always the right move. c70 fixed our guard; the platform's check still asks.",
-  "note": "Finding, Oct 26 (coordinator, from the Mac merge hand): after pushing archive/ copies of the c53 probe branches, the branch deletes were refused by Claude Code's built-in auto-mode safety check (\"Git Destructive\"), not by our guard, so you were asked again. c70 (a refusal with one lossless fix hands the session that fix) and rule shared-trees-archive-then-delete cover only our guard. Fix to find, one cloud lane, needs no answer from you: an allow rule or auto-mode guidance in the installed settings, so a branch delete counts as lossless once an archive/<branch> push at the same tip succeeded, or the branch is contained in main. First check: what auto-mode settings Claude Code reads today (docs, not memory). Port: yes, it ships through the install to every repo. Placed ahead of o13 (triage, Oct 26): the same gripe as c70, and it fires on every Mac cleanup.",
-  "updatedAt": "2026-10-26T20:05:00Z"
+  "note": "Done Oct 27: PR 641 landed in batch #649 (main 2ad85de6, checked by triage). settings.json autoMode.allow keeps \"$defaults\" and adds an \"Archived Branch Delete\" entry; hooks/test_auto_mode_allow.py tests it; decision archived-branch-delete-allowed records it. Owner approved the settings edit by decision card, Oct 26 20:08 UTC. Port: yes, through the install. Note: the reviewer's optional tightening for merged branches (no commit since the merge) was left out, since the guard already refuses that local delete.",
+  "updatedAt": "2026-10-27T00:22:00Z"
 }
