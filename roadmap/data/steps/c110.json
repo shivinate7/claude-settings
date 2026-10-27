@@ -1,9 +1,10 @@
 {
   "title": "A lane dropped from a batch never loses its files when it merges main",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3046,
   "why": "Finding, Oct 27 (c88's lane and the build advisor): batch #663 dropped c88 with a revert of its merge; when the lane later merged main, the revert silently deleted 11 of its 13 files, and only files both sides edited showed as conflicts.",
   "note": "Cause: rule git-integration-branch-merge drops a lane by a removal commit that then lands on main; a lane that merges main (no rebase) takes that removal. The c88 lane re-applied its diff (acd0882). Fixes: (a) drop a lane by rebuilding the batch branch without it, so no removal reaches main (the lane's pick, and mine); (b) the rule tells a dropped lane to re-apply its diff after it merges main and check that every file survives. Home: the rule and the merge tooling. Needs no answer. Port: yes; the rule is global. Placed ahead of c82, after c97 (triage, Oct 27): it recurs on every drop and loses work silently.",
-  "updatedAt": "2026-10-27T04:20:00Z"
+  "updatedAt": "2026-10-27T04:35:00Z",
+  "ask": "Build thread dispatched by build advisor (7), Oct 27; brief briefs/c110-dropped-lane-keeps-files.md on the roadmap branch."
 }
