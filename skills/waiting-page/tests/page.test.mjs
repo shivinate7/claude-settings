@@ -36,7 +36,7 @@ const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, 
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, answers, failDelete, failSet, comments, meta, groups, receipts }) {
+function stubDb({ items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
   const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
   const subs = {}, docSubs = {};
   window.__log = [];
@@ -52,7 +52,7 @@ function stubDb({ items, answers, failDelete, failSet, comments, meta, groups, r
       onSnapshot: (cb) => { (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; },
       doc: (id) => ({
         set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
-        delete: async () => { if (failDelete) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
+        delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
         onSnapshot: (cb) => { (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
     }),
@@ -78,7 +78,7 @@ let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = false, failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
+async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -89,7 +89,7 @@ async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = fa
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
-  await page.addInitScript(stubDb, { items, answers, failDelete, failSet, comments, meta, groups, receipts });
+  await page.addInitScript(stubDb, { items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
@@ -752,4 +752,30 @@ test("an invalid added or by date shows no NaN and no Invalid", async (t) => {
 
 test("the template declares utf-8", () => {
   assert.match(html.slice(0, 200), /<meta charset="utf-8">/i);
+});
+
+// ---------------------------------------------------------------- fix round 2
+
+test("a failed receipt delete does not stop Undo, the page state or the notice", async (t) => {
+  const page = await open(t, { receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } }, failDeleteIn: "receipts" }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await told(page, "Claude was told");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => window.__sent.length === 2);
+  assert.equal(await page.evaluate((id) => id in state.answers, DECISION.id), false, "the page still shows the item as sent");
+  assert.equal(await card(page, DECISION).locator(".receipt").count(), 0);
+});
+
+test("a partial Undo names every item that stayed sent", async (t) => {
+  const items = [mk("d-one", 1), mk("d-two", 2), mk("d-three", 3)];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await page.evaluate(() => {
+    const col = state.db.collection;
+    state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const del = y.delete; y.delete = async () => { await del(); const real = Date.now; Date.now = () => real() + 9000; }; return y; }; return x; };
+    document.getElementById("undoBtn").click();
+  });
+  await page.locator("#barStatus", { hasText: "Too late to undo No. 1 and No. 2" }).waitFor();
 });
