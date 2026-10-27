@@ -27,7 +27,7 @@ Owner ruling 2026-10-21 16:28 CDT. The mod listens on `turn.complete`. It does n
 - Why: the app's sec-default mod sends every `classic.*` event past the user-tier mods (`on('classic.*', ...)` with `next.to(e, 'append')`).
   So the `classic.Stop` handler never ran. sec-default's README lists `turn.*` as events that pass. This is a read of the marketplace copy of
   sec-default. The installed app's copy is unchecked and may differ.
-- A turn with `agentId` set is a subagent turn. The mod skips it, as the session-board mod does.
+- A turn with `agentId` set is an agent turn. The mod skips it, as the session-board mod does.
 - `turn.complete` has no transcript path. The mod finds the transcript from the session id and cwd, the way `/dw` does.
 - One judge runs at a time. A turn that finds one running logs "SKIP busy".
 - The handler returns `next(e)` after at most 500 ms (the wait for the "STOP seen" line). The lookup and the judge run in the background. It
@@ -39,7 +39,7 @@ Owner ruling 2026-10-21 16:28 CDT. The mod listens on `turn.complete`. It does n
 Protected by `mods/decision-watch/decision-watch.test.mjs`, with one test for each of these:
 
 - a main turn starts a judge;
-- a subagent turn (`agentId` set) starts no judge;
+- an agent turn (`agentId` set) starts no judge;
 - `classic.Stop` starts no judge;
 - one judge runs at a time;
 - the handler never refuses the turn;

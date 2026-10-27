@@ -1,6 +1,6 @@
 # Haiku prompt hooks
 
-The model and effort of each hook named here are rows of the model table (decision `subagent-model-cap`, the model per role). This record holds no copy.
+The model and effort of each hook named here are rows of the model table (decision `agent-model-cap`, the model per role). This record holds no copy.
 
 ## The ruling
 
@@ -8,11 +8,11 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 | Hook on | Rules it judges |
 |---|---|
-| `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit gate of `subagent-model-cap` |
+| `Agent` | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit gate of `agent-model-cap` |
 
 - The SendMessage wording judge is a command hook, `hooks/sendmessage_state.py`, so an override can lift it. It judges `parallelism-no-mid-task-talk` by wording alone.
 - The Edit and Write judge on `docs/decisions/` is a command hook, `hooks/prose_judge.py`, at Haiku `xhigh`. It judges `speak-rewrite-superseded-in-place` and `rulings-declare-kind`.
-- A prompt hook sees only the event's input, never the chat. So no hook judges `style-question-inside-box` or `roles-one-role-per-worker`.
+- A prompt hook sees only the event's input, never the chat. So no hook judges `style-question-inside-box` or `roles-one-role-per-agent`.
 - The rules that these hooks read stay `unmechanized` in `lint/rule_mechanisms.json` until a hook catches a real defect.
 - A hook that cries wolf is spent (`verification-cry-wolf-guard-is-spent`). Remove one that refuses good input. The trial review of 2026-10-17 11:33 CDT: the refusing judges stay.
 

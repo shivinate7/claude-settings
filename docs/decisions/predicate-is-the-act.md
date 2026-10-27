@@ -28,7 +28,7 @@ from the Write tool, a `>` redirect, a heredoc, `tee` and `jq ... > file`. It wa
 another file or a script, so no list of write commands closes the gap. `hooks/config_watch.py` hashes
 the file instead.
 
-Measured 2026-09-20: `guard._cap_reading('"_subagentCapUntil": "2026-09-21T00:00:00Z"')` returns `{}`, so
+Measured 2026-09-20: `guard._cap_reading('"_agentCapUntil": "2026-09-21T00:00:00Z"')` returns `{}`, so
 the guard never sees the expiry field and only the watch reads it.
 
 Kind: process

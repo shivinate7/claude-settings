@@ -7,8 +7,8 @@ Three things can drift from it, and this check reads each:
   1. The guard's literal. hooks/guard.py reads the layout file at run time from RECORD_LAYOUT_FILE,
      its own literal. That literal must equal LAYOUT_FILE in lint/layout.py.
   2. A path literal in a reader: any Python file in lint/, hooks/, merge/ or janitor/, tests and
-     mutation harnesses aside. A string constant there may not name a record
-     path: a layout or legacy path of a record or listed kind, followed by `/` or holding one, at
+     mutation tests aside. A string constant there may not name a record
+     path: a layout, legacy or legacy-repos path of a record or listed kind, the notes file or the todo file, followed by `/` or holding one, at
      either end or inside (`decisions/`, `docs/decisions`, `x/decisions/a.md`), or a bare folder
      name passed to a `join` or a `/` (`Path(root) / "decisions"`).
      Any other bare kind name (`"decisions"`) is a key into the layout, not a path, and passes. Docstrings pass. The Python parser reads the code,
@@ -33,7 +33,7 @@ ROOT = os.path.dirname(HERE)
 
 GUARD = "hooks/guard.py"
 GUARD_NAME = "RECORD_LAYOUT_FILE"
-READER_DIRS = ("lint", "hooks", "merge", "janitor")  # every Python file in them, tests and harnesses aside
+READER_DIRS = ("lint", "hooks", "merge", "janitor")  # every Python file in them, tests and mutation tests aside
 NOT_READERS = ("test_", "mutate_", "prove_")
 ACTION_INPUTS = (("actions/ruling-kind/action.yml", "records-dir"), ("actions/ste-lint/action.yml", "decisions-dir"))
 ACTION_SCRIPTS = ("actions/ruling-kind/check.sh", "actions/ste-lint/run.sh")
@@ -45,15 +45,19 @@ def read(rel):
         return handle.read()
 
 
+FILE_KINDS = ("debt-notes", "todo")  # record files that are not a listed folder
+
+
 def record_paths(data):
-    """Every layout and legacy path of a kind marked record or listed, plus the notes file."""
+    """Every layout, legacy and legacy-repos path of a kind marked record or listed, or in FILE_KINDS."""
     paths = set()
     legacy = data.get("legacy", {})
     for name, kind in data["kinds"].items():
-        if kind.get("record") or kind.get("listed") or name == "debt-notes":
+        if kind.get("record") or kind.get("listed") or name in FILE_KINDS:
             paths.add(kind["path"].strip("/"))
             if kind["path"] in legacy:
                 paths.add(legacy[kind["path"]].strip("/"))
+            paths.update(entry[name].strip("/") for entry in data.get("legacy-repos", {}).values() if name in entry)
     return paths
 
 
@@ -107,6 +111,7 @@ def problems():
     layout = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(layout)  # the module under check, from ROOT, never the one beside this file
     data = json.loads(read(layout.LAYOUT_FILE))
+    layout.legacy_repos()  # LayoutError on an entry with an unknown kind or a path outside the repo
     paths = record_paths(data)
     found = []
 

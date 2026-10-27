@@ -5,7 +5,7 @@
 Owner rulings, 2026-10-22 10:18 CDT:
 
 - One agent hook (`type: agent`) on PreToolUse `AskUserQuestion` in `settings.json` reviews each question. It replaces the Sonnet prompt hook and `hooks/question_outcome.py`, with their decisions (`question-outcome-check`, `question-judge-reads-rulings`).
-- The model is a full Opus id, pinned in the hook. Opus runs by the owner's standing grant of 2026-10-21, given at class level for this hook (row in `subagent-model-cap`).
+- The model is a full Opus id, pinned in the hook. Opus runs by the owner's standing grant of 2026-10-21, given at class level for this hook (row in `agent-model-cap`).
 - The rubric is the hook prompt. There is no `agents/` file and no Read allow rule. A question with one option or none passes. Each other question needs:
   - a `Goal:` line first, then a `Problem:` line;
   - one to three `Based on:` lines, each with its source kind;

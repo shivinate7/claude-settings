@@ -20,6 +20,8 @@ per role. Without a project, each role is one Claude Code session, and the owner
   The model adds only the "frozen at <sha>" line on each merge go.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
   briefs and role hand-off notes. It is never merged into main.
+- **The outbox.** `roadmap/outbox/`, one file per thread, for non-urgent notes to triage. Its
+  README gives the format. `templates/operating-model.md` says when to message instead.
 - **Briefs and role hand-offs.** `templates/brief.md` and `templates/role-handoff.md`.
 
 A role hand-off note is not a session handoff. A session handoff is the notes file of one session
@@ -33,7 +35,7 @@ branch's `handoffs/` folder that a standing role writes for its successor.
    `git worktree add --orphan -b <branch> ../<repo>-<branch>` (git 2.42 or later).
 3. **Write the skeleton.** From the repo root of that worktree:
    `python3 ~/.claude/skills/project-ops/scripts/scaffold.py --dest . --repo <owner>/<name> --branch <branch>`.
-   It writes `CLAUDE.md`, `roadmap/README.md` and the empty folders `roadmap/data/steps`,
+   It writes `CLAUDE.md`, `roadmap/README.md`, `roadmap/outbox/README.md` and the empty folders `roadmap/data/steps`,
    `roadmap/data/topics`, `roadmap/data/meta`, `briefs` and `handoffs`. It prints each path it
    writes. It refuses, and writes nothing, when one of those files exists.
 4. **Fill the roles.** Copy `templates/operating-model.md` and `templates/roster.md` into the

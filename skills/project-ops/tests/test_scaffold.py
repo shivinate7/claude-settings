@@ -24,6 +24,7 @@ import scaffold  # noqa: E402
 EXPECTED = [
     "CLAUDE.md",
     "roadmap/README.md",
+    "roadmap/outbox/README.md",
     "roadmap/data/steps/.gitkeep",
     "roadmap/data/topics/.gitkeep",
     "roadmap/data/meta/.gitkeep",

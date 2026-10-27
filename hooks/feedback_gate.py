@@ -39,7 +39,6 @@ JOT = re.compile(r"\[(ruling|task|question|note|standing)\]\s+->\s+\S")
 HEADER = re.compile(r"### \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
-# A task's `todo` key is a repo's own extras key: the layout has no todo kind.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
               "task": ("todo", "debts", "debt-notes")}
 FAIL_OPEN = "Feedback gate: ruling and task homes not checked (%s)."

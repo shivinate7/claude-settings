@@ -1023,6 +1023,19 @@ def records_proof(wt, base_ref):
             git(wt, "reset", "--hard", "-q", "HEAD")  # also ends a merge in progress
             git(wt, "clean", "-fdq")
 
+def holds_base(wt, base_ref, sha):
+    """-> None when sha holds the tip of base_ref, else why not. The checks ran on sha, so a sha without that tip was
+    never tested against the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
+    c, out = git(wt, "merge-base", "--is-ancestor", base_ref, sha)
+    if c == 0:
+        return None
+    if c == 1:
+        tip = git(wt, "rev-parse", "--short=9", base_ref)[1]
+        base = base_ref.split("/", 1)[-1]
+        return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
+                f"Merge {base} into the branch, push, and run again.")
+    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}"
+
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
     c, out = git(wt, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
@@ -1512,6 +1525,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     try:
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
+            current = holds_base(wt, f"origin/{base}", info["head"])
+            current = current and ("BEHIND: " if "does not hold" in current else "UNKNOWN: ") + current + " --confirm refuses it."
         except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
             say("BLOCKED: " + " ".join(str(e).splitlines()[:-1]).replace("  ", " ").strip())
             raise
@@ -1528,6 +1543,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
+        "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
         *([f"  records: {records}"] if records else []),
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
@@ -1554,6 +1570,9 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
+        stale = holds_base(wt, base_ref, info["head"])
+        if stale:
+            raise Stop(stale + " This run claimed nothing.")
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
@@ -1632,13 +1651,19 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if c or "UNKNOWN:" in out:
                     stop(str(stamp_stop("the base moved and the claim is stale, or the check could not read the base", out)))
                 if base != cfg["defaultBranch"]:
-                    return None
-                try:  # the base moved with a record and no rebuild: the merge result would hold a stale page
-                    proof = records_proof(wt, base_ref)
-                except Stop as e:
-                    stop(str(e))
+                    proof = None
+                else:
+                    try:  # the base moved with a record and no rebuild: the merge result would hold a stale page
+                        proof = records_proof(wt, base_ref)
+                    except Stop as e:
+                        stop(str(e))
+                if proof == "healed":  # the merge commit holds the base tip, and its own checks wait next
+                    return proof
                 if proof == "stale":
                     stop(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again.")
+                stale = holds_base(wt, base_ref, sha)  # the base moved during the wait: the green run did not test it
+                if stale:
+                    stop(stale)
                 return proof
 
             if prove(fail) == "healed":  # the page conflicted with the base: the merge commit carries a rebuilt page, so it is pushed and its checks wait

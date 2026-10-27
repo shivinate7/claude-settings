@@ -7,7 +7,7 @@
 gates-windows-merge, gates-windows-rest, gates-macos, shell-macos, pointer-windows, gates-shoot.
 
 - A merge needs a pull request and no approval.
-- `strict` is false: a PR need not carry main's newest commit.
+- `strict` is false: GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base).
 - Admins are included (`enforce_admins`), so the rule binds the owner.
 - Force pushes and branch deletion are blocked. The repo has no rulesets.
 - The contexts copy `stamp.json` `merge.requiredChecks`. Change both when a job is renamed or added.

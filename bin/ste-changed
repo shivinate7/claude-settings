@@ -4,6 +4,10 @@
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
 # Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
 # input default, so an EXCLUDE in the caller's environment is ignored.
+# Pin check: when the repo's CI pins this repo's ste-lint action at a commit whose lint files differ
+# from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves the pin
+# before CI spends a run (decision action-pins-follow-sessions). A pin this clone does not hold is
+# reported as unknown and changes no exit code.
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, shutil, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
@@ -11,10 +15,64 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 ACTION = os.path.join(ROOT, "actions", "ste-lint")
+# Every file of this repo the CI step runs: the action, run.sh's linter, and the linter's own imports.
+LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/ste_lint.py",
+              "lint/layout.py", "lint/layout.json", "lint/ui_suffixes.py")
+PIN = re.compile(r"[\w.-]+/claude-settings/actions/ste-lint@([0-9a-f]{40})")
 
 
 def out(*a):
     return _nowindow.run(["git", *a], capture_output=True, text=True).stdout.strip()
+
+
+def here(*a):
+    p = _nowindow.run(["git", "-C", ROOT, *a], capture_output=True, text=True)
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+def pins():
+    """{sha: first "file:line" that pins it}, from the linted repo's .github/workflows."""
+    top, found = out("rev-parse", "--show-toplevel"), {}
+    wf = os.path.join(top, ".github", "workflows")
+    for name in sorted(os.listdir(wf)) if os.path.isdir(wf) else ():
+        if name.endswith((".yml", ".yaml")):
+            with open(os.path.join(wf, name), encoding="utf-8", errors="replace") as f:
+                for n, line in enumerate(f, 1):
+                    for sha in PIN.findall(line.split("#", 1)[0]):
+                        found.setdefault(sha, ".github/workflows/%s:%d" % (name, n))
+    return found
+
+
+def pin_report():
+    """One stderr line per pinned commit. True when a pin's lint differs from this copy's."""
+    head, drift = here("rev-parse", "HEAD"), False
+    for sha, where in pins().items():
+        if head is None:
+            print("ste-changed: CI pins ste-lint at %s (%s). Unknown whether it matches: this copy is not a git clone."
+                  % (sha[:7], where), file=sys.stderr)
+        elif here("cat-file", "-e", sha + "^{commit}") is None:
+            print("ste-changed: CI pins ste-lint at %s (%s). Unknown whether it matches: this clone does not hold "
+                  "that commit. Fetch claude-settings and run again." % (sha[:7], where), file=sys.stderr)
+        elif _nowindow.run(["git", "-C", ROOT, "diff", "--quiet", sha, "HEAD", "--", *LINT_FILES]).returncode == 0:
+            print("ste-changed: CI pins ste-lint at %s (%s), the same lint as this copy." % (sha[:7], where),
+                  file=sys.stderr)
+        else:
+            drift = True
+            day = here("log", "-1", "--format=%cs", sha)
+            if here("merge-base", "--is-ancestor", sha, "HEAD") is not None:
+                main = here("rev-parse", "origin/main")
+                same = main and _nowindow.run(["git", "-C", ROOT, "diff", "--quiet", main, "HEAD", "--",
+                                               *LINT_FILES]).returncode == 0
+                fix = ("Move the pin to %s, claude-settings main, in a lane of its own, with no question "
+                       "(rule git-integration-branch-merge)." % main if same else
+                       "This copy's lint is not on claude-settings main yet: pin main's newest commit.")
+                print("ste-changed: CI pins ste-lint at %s (%s, %s), older than this copy's lint. A line can pass "
+                      "here and fail CI. %s" % (sha[:7], day, where, fix), file=sys.stderr)
+            else:
+                print("ste-changed: CI pins ste-lint at %s (%s, %s), which this copy does not hold. This copy's lint "
+                      "is older or off main: pull claude-settings and run again." % (sha[:7], day, where),
+                      file=sys.stderr)
+    return drift
 
 
 def default(text, name):
@@ -44,7 +102,9 @@ def main(argv):
                DECISIONS_DIR=default(text, "decisions-dir"))
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
     # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
-    sys.exit(subprocess.run([find_bash(), run], env=env).returncode)
+    rc = subprocess.run([find_bash(), run], env=env).returncode
+    drift = pin_report()
+    sys.exit(rc or (3 if drift else 0))
 
 
 main(sys.argv[1:])

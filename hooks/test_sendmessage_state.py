@@ -518,7 +518,7 @@ def case_model_row_names_the_call():
     # The model-per-role table has one row per model call of this hook; each row's model and effort
     # must equal what the call uses. Busy judge: decision_watch.MODEL at invoke_model's default effort.
     # Wording judge: the hook's WORDING_MODEL, and no --effort (the model's default).
-    record = os.path.join(os.path.dirname(HERE), "docs", "decisions", "subagent-model-cap.md")
+    record = os.path.join(os.path.dirname(HERE), "docs", "decisions", "agent-model-cap.md")
     try:
         with open(record, encoding="utf-8") as f:
             lines = [line for line in f if line.startswith("|")]
@@ -591,10 +591,10 @@ def case_override_lifts_a_deny():
     both = {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG, "wording": FLAG}
     for label, override, inp, kwargs, lifted in (
         ("timed override, both judges FLAG", (SID_A, TIMED), hook_input(), both, True),
-        ("timed override, a subagent's call", (SID_A, TIMED), hook_input(agent="a1"), both, True),
+        ("timed override, an agent's call", (SID_A, TIMED), hook_input(agent="a1"), both, True),
         ("one-act override, wording FLAG", (SID_A, ONCE), hook_input(), {"reader_mode": "idle", "wording": FLAG}, True),
         ("one-act override, busy FLAG", (SID_A, ONCE), hook_input(), {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG}, True),
-        ("one-act override, a subagent's call", (SID_A, ONCE), hook_input(agent="a1"), both, False),
+        ("one-act override, an agent's call", (SID_A, ONCE), hook_input(agent="a1"), both, False),
         ("an ended override", (SID_A, dict(TIMED, until=PAST)), hook_input(), both, False),
         ("another session's override", (SID_B, TIMED), hook_input(), both, False),
         ("a corrupt override file", (SID_A, "{not json"), hook_input(), both, False),

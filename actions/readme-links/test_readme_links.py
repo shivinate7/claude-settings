@@ -1,4 +1,4 @@
-"""Red proof, offline: a dead link exits 1 and is named; a live one exits 0. Local http server."""
+"""Red run, offline: a dead link exits 1 and is named; a live one exits 0. Local http server."""
 import http.server, os, subprocess, sys, tempfile, threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))

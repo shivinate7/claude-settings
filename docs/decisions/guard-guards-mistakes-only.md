@@ -14,7 +14,7 @@ Why: each extra form a check reads costs prompts, refusals and review time on no
 Test a form by one question: could Claude write it by mistake or from a misread task, without meaning to evade?
 
 - In scope (a safety hole): a routine wrapper round a refused step, such as `bash -c '<git write>'` or `x=$(<git write>)`. A python heredoc with an apostrophe in a comment, followed by a git write. ANSI-C quoting (`$'...'`) or an escape such as `\x2f` in a protected path (both stay open).
-- Out of scope (not a safety hole): a PowerShell block with no space that sets `GIT_DIR` inside a group. The form `export GIT_SSH_COMMAND='<cmd>' && <ask step>`.
+- Out of scope (not a safety hole): a PowerShell block with no space that sets `GIT_DIR` inside a group. The form `export GIT_SSH_COMMAND='<cmd>' && <ask command>`.
 
 Same stance: `builders-cannot-edit-tests` (the guard stops accidental test edits) and `wsl-allow-list` (the list stops accidents, not a hostile test).
 

@@ -15,7 +15,7 @@ Contract the builder codes against:
 
     As a script: prints line() once, exits 0 (also when no tz database is present),
     whatever stdin holds. As a UserPromptSubmit hook it also captures owner prompts; those cases
-    are in test_feedback_inbox.py. With --subagent, prints one JSON object:
+    are in test_feedback_inbox.py. With --agent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
     As a UserPromptSubmit hook it also grants the owner override when the prompt starts with the
     word `override` (the rest is the reason, logged to guard.log). The whole-prompt forms
@@ -233,29 +233,29 @@ def case_cli_hook_shape():
           "stderr=%r" % proc.stderr[-300:])
 
 
-def case_cli_subagent():
+def case_cli_agent(flag="--agent"):
     payload = json.dumps({"hook_event_name": "SubagentStart", "agent_type": "test-author",
                           "cwd": HERE})
     try:
-        proc = subprocess.run([sys.executable, MODULE_PATH, "--subagent"], input=payload,
+        proc = subprocess.run([sys.executable, MODULE_PATH, flag], input=payload,
                               capture_output=True, text=True, timeout=20)
     except subprocess.TimeoutExpired:
-        check("CLI --subagent: finishes within 20 s", False, "timed out")
+        check("CLI %s: finishes within 20 s" % flag, False, "timed out")
         return
-    check("CLI --subagent: exit 0", proc.returncode == 0,
+    check("CLI %s: exit 0" % flag, proc.returncode == 0,
           "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
     try:
         hso = json.loads(proc.stdout)["hookSpecificOutput"]
         event, ctx = hso["hookEventName"], hso["additionalContext"]
     except (ValueError, KeyError, TypeError) as e:
-        check("CLI --subagent: stdout is hookSpecificOutput JSON", False,
+        check("CLI %s: stdout is hookSpecificOutput JSON" % flag, False,
               "stdout=%r (%s)" % (proc.stdout[-200:], e))
         return
-    check("CLI --subagent: hookEventName is SubagentStart", event == "SubagentStart",
+    check("CLI %s: hookEventName is SubagentStart" % flag, event == "SubagentStart",
           "got %r" % (event,))
-    check("CLI --subagent: additionalContext starts with 'Local time: '",
+    check("CLI %s: additionalContext starts with 'Local time: '" % flag,
           isinstance(ctx, str) and ctx.startswith("Local time: "), "got %r" % (ctx,))
-    check("CLI --subagent: additionalContext is one Central line",
+    check("CLI %s: additionalContext is one Central line" % flag,
           isinstance(ctx, str) and LINE_FULL.fullmatch(ctx) is not None, "got %r" % (ctx,))
 
 
@@ -618,7 +618,8 @@ def main():
         case_no_tz_database()
         case_machine_zone_is_not_used()
         case_cli_hook_shape()
-        case_cli_subagent()
+        case_cli_agent()
+        case_cli_agent("--subagent")  # the old flag, read until local_time.OLD_FLAG_ENDS
         case_cli_no_tz_database()
         case_override_grants()
         case_override_context_line()

@@ -698,7 +698,7 @@ def case_invoke_model_timeout_is_error():
 
 
 # The one home for the child's isolation flags. Decision reply-judge-samples-never-refuses (the
-# reply judge) and the reply judge row of subagent-model-cap: haiku, xhigh effort, module timeout.
+# reply judge) and the reply judge row of agent-model-cap: haiku, xhigh effort, module timeout.
 def case_invoke_model_argv():
     # Its env checks assume no token file: pin CLAUDE_CONFIG_DIR so a real one on this
     # machine cannot change the child's env.

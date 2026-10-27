@@ -79,27 +79,27 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
-  subagent-model-cap   ask. A write to a settings file that sets or changes
+  agent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
-                       (subagent-model-cap)
+                       (agent-model-cap)
                        Also an Agent or Task spawn that sets model opus, unless Plan, Explore,
                        designer, design-reviewer or a builder `Try 3 of 3` covers it. An override lifts the spawn ask only.
-  ask-alone            deny. An ask step chained with other steps. (ask-steps-run-alone)
+  ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
 Other tools, in `judge` order:
-  worktree-home        deny. A call from a subagent whose shell cwd or write target is outside its
+  worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        (an-agent-outside-its-home-tree-must-stop)
-  subagent-model-floor, roles-third-try-steps-up
+  agent-model-floor, roles-third-try-steps-up
                        deny. A spawn below the model floor, or a round or try on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys in each `agent()` call. A model set through a variable,
                        a spread, an alias, a concatenation, a template `${}`, a ternary, a computed key or a
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
-                       (subagent-model-cap)
+                       (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-cap, simulator-boot-twin
@@ -107,7 +107,7 @@ Other tools, in `judge` order:
                        (sweep-shuts-down-idle-simulators)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
-  env-file, frozen-path, config-edit, subagent-model-cap
+  env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
 
@@ -116,7 +116,7 @@ are not frozen. They are allowed, and the guard logs one `config-edit` line, so 
 Stop hook can show the edit at turn end. `subject-unread` is logged the same way: an allow that a
 person still gets to see.
 
-`subagent-model-cap` asks and never refuses, because that same write is how an Opus worker is
+`agent-model-cap` asks and never refuses, because that same write is how an Opus agent is
 enabled on purpose. It stands after `frozen-path`, so only a project-scoped write reaches it. Its
 ask names the requested value and the file, which is not an exception to the remedy rule below:
 the ask tells the approver what is turned on and where. That text comes from a tool call, so the
@@ -130,7 +130,7 @@ picks a conflict side. It discards no work, so `shared-tree` passes it.
 A read named by argv (`--help`, `-h`, `--dry-run`, `push -n`, `tag -l`) is not a write, and a
 value of `-m` or `-F` is never a flag. A write whose `-C`, `--git-dir`, `cd` or cwd sits under
 the temp folder is a throwaway and passes. `fetch` writes only a `src:dst` whose dst is a
-branch. A redirect named inside quotes is text. The refusal names its step ("step N of M, the
+branch. A redirect named inside quotes is text. The refusal names its command ("command N of M, the
 push").
 
 Every refusal names its rule and says what to do instead. The remedy never names the refused
@@ -141,8 +141,8 @@ An "ask" decision puts the answer in the owner's hands. The one lift is the owne
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
 only the Opus spawn ask. No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
-role and model guards (the settings-write ask of `subagent-model-cap`,
-`subagent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
+role and model guards (the settings-write ask of `agent-model-cap`,
+`agent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list,
 the `bin/rm` and `bin/merge` shims, or any other PreToolUse gate.
 """
@@ -706,14 +706,14 @@ WORKTREE_HAND_MADE_REASON = (
 
 
 SILENT_WRITE_REDIRECT_REASON = (
-    "Rule (Git): step {step} of {total}, the {kind}: a redirect silences this write's own "
+    "Rule (Git): command {command} of {total}, the {kind}: a redirect silences this write's own "
     "output (>/dev/null), so neither a refusal nor the line that proves it landed would reach "
     "the session. "
     "Remedy: run {program} again with its output kept, ending the line with `2>&1 | tail -1`, "
     "and read what it prints before you say it landed."
 )
 SILENT_WRITE_QUIET_REASON = (
-    "Rule (Git): step {step} of {total}, the {kind}: its quiet flag (-q) drops the one line "
+    "Rule (Git): command {command} of {total}, the {kind}: its quiet flag (-q) drops the one line "
     "that told a real update apart from one that moved nothing, so the session cannot read "
     "which one just ran. "
     "Remedy: run {program} again without the quiet flag, ending the line with `2>&1 | tail -1`, "
@@ -721,12 +721,12 @@ SILENT_WRITE_QUIET_REASON = (
 )
 
 
-# ------------------------------------------------------------------ each subagent's own worktree
+# ------------------------------------------------------------------ each agent's own worktree
 #
 # MEASURED 2026-09-27, macOS, one Explore agent with `isolation: 'worktree'`: a PreToolUse payload
-# from a subagent carries `agent_id` (e.g. `a64a7f84210a8721d`) and `agent_type`. The
+# from an agent carries `agent_id` (17 hex characters) and `agent_type`. The
 # orchestrator's own payloads carry no `agent_id`. `session_id` is the SAME for the orchestrator
-# and its agents, so it never tells them apart. The subagent's `cwd` was
+# and its agents, so it never tells them apart. The agent's `cwd` was
 # `<primary>/.claude/worktrees/agent-<agent_id>`, on branch `worktree-agent-<agent_id>`.
 #
 # An agent resumed after the harness auto-removed its worktree loses BOTH the folder and the
@@ -833,14 +833,14 @@ def agent_owned_worktree(root: str):
     return path_is_inside(root, os.path.join(primary, ".claude", "worktrees"))
 
 
-# ------------------------------------------------------------------ the subagent model cap
+# ------------------------------------------------------------------ the agent model cap
 #
-# The owner's user settings cap a subagent's model with `CLAUDE_CODE_SUBAGENT_MODEL` and
+# The owner's user settings cap an agent's model with `CLAUDE_CODE_SUBAGENT_MODEL` and
 # `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. User settings are one layer of the settings stack, and a
 # project's own `.claude/settings.json` and `.claude/settings.local.json` override them. Decision 7
 # allows a write to both, so the write that Decision 7 allows is also the write that lifts the cap.
 #
-# The answer is `ask`, never `deny`. The same write is how an Opus worker gets enabled on purpose,
+# The answer is `ask`, never `deny`. The same write is how an Opus agent gets enabled on purpose,
 # so the owner answers one call at a time. A wall here would only push the work off the guard's
 # path.
 #
@@ -856,8 +856,8 @@ SETTINGS_BASENAMES = ("settings.json", "settings.local.json", "managed-settings.
 # `_FORCE` GREEDILY, so `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` reads as its own key and never as the
 # shorter key followed by stray text. One value pattern covers a JSON pair (`"KEY": "value"`) and a
 # shell assignment (`KEY=value`), because a heredoc body carries either.
-SUBAGENT_CAP_KEY = re.compile(r"CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?")
-SUBAGENT_CAP_ASSIGN = re.compile(
+AGENT_CAP_KEY = re.compile(r"CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?")
+AGENT_CAP_ASSIGN = re.compile(
     r"(CLAUDE_CODE_(?:WORKFLOW_)?SUBAGENT_MODEL(?:_FORCE)?)['\"]?\s*[:=]\s*['\"]?([A-Za-z0-9][A-Za-z0-9._\-]*)"
 )
 
@@ -876,9 +876,9 @@ CAP_MAX_CHANGE = 300
 CAP_MAX_PATH = 200
 
 CAP_ASK_REASON = (
-    "Rule (configuration): this write sets the subagent model cap, which the owner's user settings "
+    "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
-    "subagent started there. Requested: {change}. File: {where}. "
+    "agent started there. Requested: {change}. File: {where}. "
     "Approve it only when a model above Sonnet is wanted for this project."
 )
 
@@ -929,7 +929,7 @@ def json_cap_values(text: str):
         node = stack.pop()
         if isinstance(node, dict):
             for key, value in node.items():
-                if isinstance(key, str) and SUBAGENT_CAP_KEY.fullmatch(key.strip()):
+                if isinstance(key, str) and AGENT_CAP_KEY.fullmatch(key.strip()):
                     found[key.strip()] = _json_value_text(value)
                 if isinstance(value, (dict, list)):
                     stack.append(value)
@@ -962,9 +962,9 @@ def _cap_reading(text: str):
     reading = {}
     if not isinstance(text, str) or not text:
         return reading
-    for found in SUBAGENT_CAP_ASSIGN.finditer(text):
+    for found in AGENT_CAP_ASSIGN.finditer(text):
         reading[found.group(1)] = found.group(2)
-    for found in SUBAGENT_CAP_KEY.finditer(text):
+    for found in AGENT_CAP_KEY.finditer(text):
         reading.setdefault(found.group(0), "")
     for key, value in json_cap_values(text).items():
         if value or key not in reading:
@@ -1045,16 +1045,18 @@ _RECORD_PATTERN = []
 
 def record_folders(text):
     """The record folders a cite may not name, from the text of lint/layout.json: each kind marked
-    `"record": true`, at its legacy path while the layout keeps one. Raises when the text is not
-    a layout, and the caller reads that as unread."""
+    `"record": true`, at its layout path and, when the layout keeps one, its legacy path too (a repo
+    may sit on either). Raises when the text is not a layout, and the caller reads that as unread."""
     data = json.loads(text)
     legacy = data.get("legacy") or {}
     found = []
     for kind in data["kinds"].values():
         if isinstance(kind, dict) and kind.get("record") is True and isinstance(kind.get("path"), str):
-            folder = legacy.get(kind["path"], kind["path"]).strip("/")
-            if folder and re.fullmatch(r"[\w.-]+(?:/[\w.-]+)*", folder):
-                found.append(folder)
+            for folder in (kind["path"], legacy.get(kind["path"], kind["path"])):
+                folder = folder.strip("/")
+                if (folder and folder not in found
+                        and re.fullmatch(r"[\w.-]+(?:/[\w.-]+)*", folder)):
+                    found.append(folder)
     return found
 
 
@@ -1062,9 +1064,10 @@ def record_path_pattern():
     """The pattern for a repo-root record path, or None when the record folders cannot be read.
 
     The folders are the record kinds of lint/layout.json, read from the file. A path counts only at
-    the START of a word: after a space, quote, bracket or `=`, with an optional `./`. A URL,
-    `lint/decisions/x.md` and `docs/decisions/0001.md` have a `/` or a word before the folder, so
-    they are not repo-root record paths and stay allowed.
+    the START of a word: after a space, quote, bracket, `=` or `*` (markdown bold), with an
+    optional `./`. A URL and
+    `lint/decisions/x.md` have a `/` or a word before the folder, so they are not repo-root record
+    paths and stay allowed. A layout path such as `docs/decisions/0001.md` is a record path.
     """
     if _RECORD_PATTERN:
         return _RECORD_PATTERN[0]
@@ -1076,7 +1079,7 @@ def record_path_pattern():
             continue
         if names:
             pattern = re.compile(
-                r"(?:^|(?<=[\s\"'`(\[<,;=@]))(?:\./)?(?:" + "|".join(map(re.escape, names))
+                r"(?:^|(?<=[\s\"'`(\[<,;=@*]))(?:\./)?(?:" + "|".join(map(re.escape, names))
                 + r")/[\w.-]+\.md\b")
             _RECORD_PATTERN.append(pattern)
             return pattern
@@ -1332,9 +1335,9 @@ XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
-# The three mutation harnesses are test code for a test-author, named one by one so a later product
+# The three mutation tests are test code for a test-author, named one by one so a later product
 # mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
-AUTHOR_HARNESS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
+AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -1404,7 +1407,7 @@ def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
     and `pyproject.toml` pass here and are read by content in `role_offences`."""
     return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
-            or norm(rel).lstrip("/").lower() in AUTHOR_HARNESS)
+            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)
 
 
 def design_folder():
@@ -1470,7 +1473,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         ok = author_path_ok if role == AUTHOR_ROLE else designer_path_ok
         if ok(rel) or under_session_scratchpad(full, session_id):
             return ""
-        # `session_id` is the parent's, the same for a subagent (decision
+        # `session_id` is the parent's, the same for an agent (decision
         # an-agent-outside-its-home-tree-must-stop), and so is the id in the scratchpad path.
         # Another session's scratchpad is neither this one's nor "outside a repository".
         if in_any_session_scratchpad(full):
@@ -1671,7 +1674,7 @@ SESSION_TOOL = "mcp__ccd_session__start_session"
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for this role. Start the subagent or session with model sonnet or opus, "
+    "Sonnet is the floor for this role. Start the agent or session with model sonnet or opus, "
     "or name no model and let the default apply."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
@@ -1873,10 +1876,10 @@ def load_hit(tool: str, tool_input) -> tuple:
 
 
 OPUS_SPAWN_REASON = (
-    "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for a subagent; Opus runs "
+    "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for an agent; Opus runs "
     "only on the owner's grant for this spawn, except Plan, Explore, the designer, the design "
     "reviewer and a builder's Try 3 of 3 "
-    "(decision subagent-model-cap). Approve it only when the owner asked for Opus here."
+    "(decision agent-model-cap). Approve it only when the owner asked for Opus here."
 )
 OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
 
@@ -1897,27 +1900,27 @@ def opus_spawn_hit(tool: str, tool_input) -> str:
     return str(tool_input.get("model"))
 
 
-# ASK ALONE (ruling ask-steps-run-alone). A step that would ASK is held, not printed, while the other rules run, so a
-# deny anywhere still wins. At the end, an ask step with any other step in the command (`&&`, `||`,
-# `;`, `|`, a newline) is refused, and the same step alone asks as before, as does one with a named
-# harmless lead or tail (harmless_steps, below). The deny
-# names the step by its kind, never its text. Only the first ask step is held: it is the one that
+# ASK ALONE (ruling ask-commands-run-alone). A command that would ASK is held, not printed, while the other rules run, so a
+# deny anywhere still wins. At the end, an ask command with any other command in the shell call (`&&`, `||`,
+# `;`, `|`, a newline) is refused, and the same command alone asks as before, as does one with a named
+# harmless lead or tail (harmless_commands, below). The deny
+# names the command by its kind, never its text. Only the first ask command is held: it is the one that
 # printed before.
-PENDING_ASK = []   # [(rule, reason, matched, step)], at most one
-ASK_ALONE_REASON = ("this command chains a step that needs the owner's answer (%s) with other "
-                    "steps. Run that step alone, as its own command, or drop it.")
+PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
+ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
+                    "other commands. Run that command alone, in its own call, or drop it.")
 
 
-def ask_step(rule: str, reason: str, matched: str, step: str) -> None:
+def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
     if not PENDING_ASK:
-        PENDING_ASK.append((rule, reason, matched, rule + ", " + step))
+        PENDING_ASK.append((rule, reason, matched, rule + ", " + command))
 
 
-def background_steps(segment: str) -> int:
-    """The steps in one segment once an unquoted single `&` also separates them. `&&` is already
+def background_commands(segment: str) -> int:
+    """The commands in one segment once an unquoted single `&` also separates them. `&&` is already
     split, and a `&` that joins a redirect (`&>`, `>&`, `<&`) is no separator. A `&` with nothing
     before it (PowerShell's call operator, the tail of `|&`) or nothing after it (a trailing job)
-    adds no step. Local to ask-alone: split_segments stays as the other rules read it."""
+    adds no command. Local to ask-alone: split_segments stays as the other rules read it."""
     parts, quote, current, escaped = [], "", [], False
     for index, char in enumerate(segment):
         if escaped:
@@ -1937,29 +1940,29 @@ def background_steps(segment: str) -> int:
     return max(1, sum(1 for part in parts if part.strip()))
 
 
-def count_steps(text: str) -> int:
-    """The steps in a command: its segments, a single `&` as a separator, and the steps inside a
+def count_commands(text: str) -> int:
+    """The commands in a shell call: its segments, a single `&` as a separator, and the commands inside a
     script handed to another interpreter (nested_script: `sh -c`, `cmd /c`, `pwsh -c`, `iex`,
     `env -S`, `eval`), which stand in place of the call that holds them."""
-    steps = 0
+    commands = 0
     for segment in split_segments(text):
         if not segment.strip():
             continue
-        steps += background_steps(segment)
+        commands += background_commands(segment)
         tokens = segment_tokens(segment)
         script = nested_script(tokens) if tokens else ""
         if script:
-            steps += count_steps(script) - 1
-    return steps
+            commands += count_commands(script) - 1
+    return commands
 
 
-# THE HARMLESS ADDITIONS (decision ask-steps-run-alone). Two forms are no
-# extra step beside an ask step. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
+# THE HARMLESS ADDITIONS (decision ask-commands-run-alone). Two forms are no
+# extra command beside an ask command. Before it: `cd X &&`, `export NAME=value &&`, `Set-Location X;`.
 # After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
 # read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
 # and the aliases sl, chdir and Push-Location stay counted. A redirect, a substitution, a `&` or an
-# escaped quote (`\"`, `\'`) in the segment makes it a step. Only a run of them at the head and a run at the tail count.
-UNSAFE_TEXT = re.compile(r"""[<>`&]|\\["']|\$\(|\$\{""")  # an escaped quote may hide a step; a backslash in a path is fine
+# escaped quote (`\"`, `\'`) in the segment makes it a command. Only a run of them at the head and a run at the tail count.
+UNSAFE_TEXT = re.compile(r"""[<>`&]|\\["']|\$\(|\$\{""")  # an escaped quote may hide a command; a backslash in a path is fine
 ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 COUNT_ARG = re.compile(r"^-(?:n)?\d+$|^-n\d+$")
 
@@ -1986,10 +1989,10 @@ def harmless_tail(tokens: list, before: str) -> bool:
     return (word, before) in (("echo", "&&"), ("write-host", ";"))
 
 
-def harmless_steps(text: str) -> int:
-    """How many segments of `text` are a harmless lead or tail around the ask step. A segment that
-    does not read as one form counts as a step, and the first and last are never both read as the
-    ask step, so at least one segment stays."""
+def harmless_commands(text: str) -> int:
+    """How many segments of `text` are a harmless lead or tail around the ask command. A segment
+    that does not read as one form counts as a command, and the first and last are never both read
+    as the ask command, so at least one segment stays."""
     ends = []
     segments = split_segments(text, ends)
     count = len(segments)
@@ -2013,18 +2016,18 @@ def harmless_steps(text: str) -> int:
 def settle_ask(tool: str, raw: str) -> None:
     if not PENDING_ASK:
         return
-    rule, reason, matched, step = PENDING_ASK[0]
-    # An interpreter heredoc (python, node, perl, ruby) is one step: its body is not counted line by line.
+    rule, reason, matched, command = PENDING_ASK[0]
+    # An interpreter heredoc (python, node, perl, ruby) is one command: its body is not counted line by line.
     # Strip the RAW command once. A second strip of stripped text reads a stray delimiter line as a new body.
     text = strip_heredoc_bodies(raw, shells_only=True)
-    if count_steps(text) > 1:
-        if count_steps(text) - harmless_steps(text) > 1:
-            refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % step, matched)
+    if count_commands(text) > 1:
+        if count_commands(text) - harmless_commands(text) > 1:
+            refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % command, matched)
     refuse(tool, "ask", rule, reason, matched)
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
-                transcript: str = "", subagent: bool = False,
+                transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
@@ -2089,7 +2092,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if subcommand == "worktree-remove":
             refuse(tool, "deny", "shared-tree", WORKTREE_REMOVE_DENY_REASON, matched)
         if subcommand == "worktree-prune":
-            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")
+            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")
             continue
         if subcommand == "stash" and stash_takes_the_stack(args):
             refuse(tool, "deny", "shared-tree", STACK_DENY_REASON, matched)
@@ -2111,7 +2114,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # only write this lane's own change to those files, so no ask.
             if names_only_files(subcommand, args, root, segment) and one_place(stripped):
                 continue
-            ask_step("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
+            ask_command("shared-tree", TREE_ASK_REASON, matched, "worktree discard")
             continue
         refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
 
@@ -2144,7 +2147,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
             refuse(tool, "deny", "silent-write",
-                   reason.format(step=live.index(number) + 1, total=len(live), kind=kind,
+                   reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
                                  program=kind if " " in kind else "git " + kind), matched)
 
     # 1c2. A lane worktree made by hand, outside the tool's own folder.
@@ -2191,8 +2194,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         previous = tokens
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        # Every subagent shares the main session's id, so only the main session may own by tag.
-        matched = foreign_pid_kill(tokens, transcript, "" if subagent else session_id)
+        # Every agent shares the main session's id, so only the main session may own by tag.
+        matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
         if matched:
             refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
 
@@ -2235,7 +2238,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "playwright-browsers-path", PLAYWRIGHT_PATH_REASON, matched)
 
-    matched = playwright_install_hit(stripped, subagent)
+    matched = playwright_install_hit(stripped, agent)
     if matched:
         refuse(tool, "deny", "playwright-install", PLAYWRIGHT_INSTALL_REASON, matched)
     # 3d. A recursive delete under an unguarded variable (decision rm-on-a-variable-needs-a-guard).
@@ -2279,7 +2282,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
             if verdict == "ask":
-                ask_step("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
+                ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
 
@@ -2302,7 +2305,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                    "gh pr merge " + merging[0] + " " + verdict)
         # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
         if cite_where and uses_merge_tool(cite_where):
-            ask_step("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
+            ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:
@@ -2325,7 +2328,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         record(tool, "noted", "config-edit", matched)
 
 
-    # 8. The subagent model cap. The PATH comes from the stripped command, the same machinery the
+    # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
     # The CONTENT comes from the RAW command, because a heredoc body is the content being written
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
@@ -2335,7 +2338,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         change = cap_change(raw)
         if change:
-            ask_step("subagent-model-cap", cap_ask_reason(change, matched),
+            ask_command("agent-model-cap", cap_ask_reason(change, matched),
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
@@ -2500,7 +2503,7 @@ def sim_boot_refusal(tool: str, names: list) -> None:
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
-    """Rule 0, worktree-home: return the log detail when a subagent's call reaches outside its own
+    """Rule 0, worktree-home: return the log detail when an agent's call reaches outside its own
     worktree, else ''. `status` is "none" for the orchestrator (no `agent_id`) and for tools this
     rule does not judge; "unknown" when the record could not be read at all, which allows (an
     unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
@@ -2573,16 +2576,16 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
-    # 0. Each subagent stays inside its own worktree.
+    # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
 
-    # 9. The subagent model floor. A spawn that names a Haiku model is refused. The reason names no
+    # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
-        refuse(tool, "deny", "subagent-model-floor", MODEL_FLOOR_REASON, floor_model)
+        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9b. Step-up: reviewer round 2 on Sonnet, round 3 on Sonnet or Opus, builder try 3 on Opus.
     step_up = step_up_hit(tool, tool_input)
@@ -2593,7 +2596,7 @@ def judge(payload) -> None:
     # pass for the spawn's role lifts it. A spawn with no role runs general-purpose.
     opus_model = opus_spawn_hit(tool, tool_input)
     if opus_model:
-        refuse(tool, "ask", "subagent-model-cap", OPUS_SPAWN_REASON, opus_model,
+        refuse(tool, "ask", "agent-model-cap", OPUS_SPAWN_REASON, opus_model,
                spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
 
     # 9d. The machine-load brake: one read on a lane-start call, none on any other call.
@@ -2676,7 +2679,7 @@ def judge(payload) -> None:
         if is_project_config(target, cwd):
             record(tool, "noted", "config-edit", target)
     for target in targets:
-        # 8. The subagent model cap. Rule 7 already refused the config directory's own settings, so
+        # 8. The agent model cap. Rule 7 already refused the config directory's own settings, so
         # only a project-scoped or clone-scoped settings file reaches here. The content read is what
         # the tool would WRITE, so a file that carries the variable name anywhere in that content
         # asks, a permission string or a comment line included. That is an over-ask and it stays:
@@ -2685,7 +2688,7 @@ def judge(payload) -> None:
         if is_settings_file(target, cwd):
             change = cap_change_parts(write_content_parts(tool_input))
             if change:
-                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),
+                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
 
 

@@ -12,7 +12,7 @@ collision that suffix was written to fix could still happen on the janitor side.
 module instead of a second copy is what closes that gap for good, not just for today.
 
 STDLIB ONLY, AND NOTHING RUNS AT IMPORT TIME beyond defining these names. Both callers are
-gates: an import error or a syntax error here takes both harnesses down at once instead of one,
+gates: an import error or a syntax error here takes both mutation tests down at once instead of one,
 so this file stays small, has no side effects on import, and takes on no new dependency.
 
 What stays OUT of this module, and why: `mutation_parts` and `run_mutant` are NOT shared, even

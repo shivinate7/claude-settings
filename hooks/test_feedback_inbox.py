@@ -43,7 +43,7 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
   - Judge: every owner prompt is saved first. While open, each owner prompt that is not a close
     form and not a notice is judged by the detached child hooks/feedback_judge.py, which the hook
     starts and does not wait for. The child calls decision_watch.invoke_model with model
-    claude-sonnet-5-5 (the Sonnet row in decisions/subagent-model-cap.md) and shape
+    claude-sonnet-5-5 (the Sonnet row in decisions/agent-model-cap.md) and shape
     {"feedback": (True, False)}. {"feedback": false} appends a note item,
     `- fb-auto-<time> [note] -> judged not feedback`, under that message and closes capture, but
     only while that message is still the last captured one. {"feedback": true}, a timeout, a
@@ -56,7 +56,7 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     (the replacement character) in its place, or stdout carries a line that says `not saved`.
     Never silent. Capture stays open, and the inbox stays strict UTF-8.
   - State is per session_id and survives across runs. Another session's prompts are never captured.
-  - `--subagent` (a SubagentStart payload) prints the same hookSpecificOutput JSON and never opens,
+  - `--agent` (a SubagentStart payload) prints the same hookSpecificOutput JSON and never opens,
     closes or captures.
   - Fail open: empty stdin, non-JSON stdin, or a payload with no session_id gives exit 0, one
     Central line, and no file written.
@@ -97,7 +97,7 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
   - Tracked homes (decision owner-feedback-inbox, "Kinds and homes"). A ruling or task item, open
     or closed, names a path: relative to the repo of the payload's cwd, or absolute. The file sits
     under a home of its kind in lint/layout.json, read through lint/layout.py: ruling under the
-    keys decisions, rules, claude-md or agents-md; task under todo (a repo's extras key), debts or
+    keys decisions, rules, claude-md or agents-md; task under todo, debts or
     debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
     handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
     names the layout keys, todo first for a task.
@@ -173,7 +173,7 @@ SCANNER = (
     "Unicode: → and ✓ and café"
 )
 BLOCK_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
-JUDGE_MODEL = "claude-sonnet-5-5"  # the Sonnet id in the model table of decisions/subagent-model-cap.md
+JUDGE_MODEL = "claude-sonnet-5-5"  # the Sonnet id in the model table of decisions/agent-model-cap.md
 CLOCK_START = datetime(2026, 10, 14, 18, 0, tzinfo=timezone.utc)  # 13:00 CDT, far from a DST edge
 JUDGE_PATH = os.path.join(HERE, "feedback_judge.py")  # the detached judge child
 SLOW = "2"  # seconds the stub judge takes, in the cases that read the child's outcome
@@ -351,8 +351,8 @@ def judged_notes(items):
 
 
 def sonnet_ids():
-    """The Sonnet model ids in the model table of decisions/subagent-model-cap.md."""
-    text = read_file(os.path.join(REPO, "docs", "decisions", "subagent-model-cap.md"))
+    """The Sonnet model ids in the model table of decisions/agent-model-cap.md."""
+    text = read_file(os.path.join(REPO, "docs", "decisions", "agent-model-cap.md"))
     return re.findall(r"\|\s*(claude-sonnet-[\w-]+)\s*\|", text)
 
 
@@ -767,7 +767,7 @@ def case_lone_surrogate_is_saved_or_said_not_saved():
           % (saved, told, ascii(texts), p.desc()))
 
 
-def subagent_ok(p):
+def agent_ok(p):
     try:
         hso = json.loads(p.out)["hookSpecificOutput"]
     except (ValueError, KeyError, TypeError):
@@ -781,27 +781,27 @@ def sub_payload(sid, prompt, cfg):
                     "agent_type": "test-author", "prompt": prompt, "cwd": cfg})
 
 
-def case_subagent_never_opens_closes_or_captures():
+def case_agent_never_opens_closes_or_captures():
     cfg = new_cfg()
     p0 = capture(cfg, "sub-open", "fb: opened by the owner")
-    check("subagent: owner opener ran", ran_central(p0), p0.desc())
+    check("agent: owner opener ran", ran_central(p0), p0.desc())
     before = read_or_empty(inbox_of(cfg, "sub-open"))
-    p = run(LT_PATH, sub_payload("sub-open", "fb done", cfg), cfg, args=("--subagent",))
-    check("subagent: fb done payload prints the SubagentStart JSON", subagent_ok(p), p.desc())
-    check("subagent: an open inbox is unchanged by a subagent fb done",
+    p = run(LT_PATH, sub_payload("sub-open", "fb done", cfg), cfg, args=("--agent",))
+    check("agent: fb done payload prints the SubagentStart JSON", agent_ok(p), p.desc())
+    check("agent: an open inbox is unchanged by an agent fb done",
           before != "" and read_or_empty(inbox_of(cfg, "sub-open")) == before, "changed")
-    p2 = capture(cfg, "sub-open", "still open after the subagent")
-    check("subagent: next owner prompt ran", ran_central(p2), p2.desc())
-    check("subagent: capture is still open, the next owner prompt is captured",
+    p2 = capture(cfg, "sub-open", "still open after the agent")
+    check("agent: next owner prompt ran", ran_central(p2), p2.desc())
+    check("agent: capture is still open, the next owner prompt is captured",
           captured_texts(cfg, "sub-open") == ["fb: opened by the owner",
-                                              "still open after the subagent"],
+                                              "still open after the agent"],
           captured_texts(cfg, "sub-open"))
-    q = run(LT_PATH, sub_payload("sub-closed", "fb: subagent opener", cfg), cfg,
-            args=("--subagent",))
-    check("subagent: fb: payload prints the SubagentStart JSON", subagent_ok(q), q.desc())
-    p3 = capture(cfg, "sub-closed", "plain owner prompt after a subagent opener")
-    check("subagent: owner prompt after a subagent opener ran", ran_central(p3), p3.desc())
-    check("subagent: a subagent opener does not open capture (no inbox file)",
+    q = run(LT_PATH, sub_payload("sub-closed", "fb: agent opener", cfg), cfg,
+            args=("--agent",))
+    check("agent: fb: payload prints the SubagentStart JSON", agent_ok(q), q.desc())
+    p3 = capture(cfg, "sub-closed", "plain owner prompt after an agent opener")
+    check("agent: owner prompt after an agent opener ran", ran_central(p3), p3.desc())
+    check("agent: an agent opener does not open capture (no inbox file)",
           not os.path.exists(inbox_of(cfg, "sub-closed")), "inbox exists")
 
 
@@ -1116,13 +1116,23 @@ def case_gate_standing_homed_to_handoff_passes():
                         handoff_ids=("fb-7",)))
 
 
-def case_gate_task_home_from_extras_todo_key():
-    extras = json.dumps({"kinds": {"todo": {"path": "specs/todo.md"}}})
-    repo = make_repo("rolled", tracked=("specs/todo.md", "docs/decisions/r.md"), extras=extras)
+def case_gate_task_home_from_the_todo_kind():
+    repo = make_repo("rolled", tracked=("docs/todo.md", "docs/decisions/r.md"), extras='{"kinds": {}}')
     cfg = new_cfg()
-    expect_silent("homes: a task homed to the extras file's todo key passes",
-                  homed(cfg, "t-todo", ("- fb-8 [task] -> specs/todo.md",
+    expect_silent("homes: a task homed to the layout's todo kind passes",
+                  homed(cfg, "t-todo", ("- fb-8 [task] -> docs/todo.md",
                                         "- fb-9 [ruling] -> docs/decisions/r.md"), cwd=repo))
+    kept = make_repo("q_max", tracked=("specs/todo.md",))
+    git(kept, "remote", "add", "origin", "https://github.com/shivinate7/q_max.git")
+    cfg = new_cfg()
+    expect_silent("homes: a task homed to the todo path legacy-repos keeps for its repo passes",
+                  homed(cfg, "t-kept", ("- fb-8 [task] -> specs/todo.md",), cwd=kept))
+    moved = make_repo("extras-todo", tracked=("tasks.md",),
+                      extras=json.dumps({"kinds": {"todo": {"path": "tasks.md"}}}))
+    cfg = new_cfg()
+    p = homed(cfg, "t-moved", ("- fb-8 [task] -> tasks.md",), cwd=moved)
+    check("homes: an extras file that moves the todo kind is a layout fault, so the check stands down",
+          block_reason(p) is None and len(fail_open_line(p)) == 1, p.desc())
     bare = make_repo("no-task-home", tracked=("decisions/r.md",))
     cfg = new_cfg()
     p = homed(cfg, "t-none", ("- fb-8 [task] -> TODO.md",), cwd=bare)
@@ -1460,7 +1470,7 @@ def case_judge_runs_once_per_open_prompt_with_the_sonnet_id():
           len(calls) == 1 and bool(p.loaded), p.desc())
     if calls:
         timeout = calls[0].get("timeout")
-        check("judge: the call uses the Sonnet id from decisions/subagent-model-cap.md",
+        check("judge: the call uses the Sonnet id from decisions/agent-model-cap.md",
               model_of(calls[0]) == JUDGE_MODEL and JUDGE_MODEL in sonnet_ids(), calls[0].get("argv"))
         check("judge: the call is made by feedback_judge.py, the detached child, not by the hook",
               calls[0].get("script") == "feedback_judge.py", calls[0].get("script"))
@@ -1624,7 +1634,7 @@ CASES = (
     case_fail_open_writes_nothing,
     case_capture_write_failure_says_not_saved,
     case_lone_surrogate_is_saved_or_said_not_saved,
-    case_subagent_never_opens_closes_or_captures,
+    case_agent_never_opens_closes_or_captures,
     case_sessions_are_isolated,
     case_gate_no_inbox_and_empty_inbox_pass_silently,
     case_gate_all_jotted_passes_silently,
@@ -1644,7 +1654,7 @@ CASES = (
     case_gate_home_outside_its_kind_blocks,
     case_gate_tracked_homes_pass_without_the_handoff,
     case_gate_standing_homed_to_handoff_passes,
-    case_gate_task_home_from_extras_todo_key,
+    case_gate_task_home_from_the_todo_kind,
     case_gate_unreadable_layout_fails_open_with_one_line,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,

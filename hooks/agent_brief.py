@@ -31,7 +31,9 @@ SCOPE = {
     "reviewer": "Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
     "Explore": "Scope: Explore. Never edit. Read and search only.",
     "record-writer": "Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
-    "designer": "Scope: designer. Edit files in the repo's design folder only. Report any other change needed.",
+    "designer": ("Scope: designer. Edit files in the repo's design folder only. Report any other change needed. "
+                 "Your brief names your lane kind: blind, informed or directed. In a blind lane, never read "
+                 "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens."),
     "design-reviewer": "Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
 }
 GENERAL = ("Scope: do only what your brief names. A builder never edits tests; "

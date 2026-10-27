@@ -6,7 +6,7 @@ Owner, 2026-10-22 10:10 CDT: `settings.json` wires no STE write gate (`ste_gate.
 sweep (`md_sweep.py`). Both scripts are deleted. A hook that rewrites or refuses a write
 sends the writer back for another write, and it starts a process on every Write, Edit and MultiEdit.
 
-- CI's STE lint (`actions/ste-lint`) carries the lint. It fails the step on STE001, STE011 and STE013
+- CI's STE lint (`actions/ste-lint`) carries the lint. It fails the CI step on STE001, STE011 and STE013
   on changed lines (`plain-prose-lint`).
 - The autofix stays a hand tool: `lint/ste_lint.py --fix` rewrites fixed STE011 bloat phrases in
   Markdown. No hook calls it.

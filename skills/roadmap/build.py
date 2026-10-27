@@ -13,6 +13,10 @@ The builder puts a small read-only stand-in for that database (window.ROADMAP_DB
 file, in front of the page's own script, so the same viewer runs from disk and as the published
 artifact. It also writes window.ROADMAP_BUILD: the commit each panel read, or "unknown" and why.
 
+Live work (step o8, option a) comes from --live FILE: the project threads and the open pull requests
+and branches, which the publisher reads with its own tools just before the build. The builder cannot
+reach either itself, so it only checks the file's shape and bakes it in.
+
 After the build it prints an upkeep list for the triage thread (step c55): open-step notes over
 NOTE_WORDS words; in phases that hold an active step, open steps untouched for STALE_DAYS days and
 open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
@@ -42,7 +46,7 @@ SCANNED = ("roadmap", "briefs", "plans", "handoffs")
 OUTPUT = "roadmap/roadmap.html"
 # The layout kinds whose homes the page reads, with the panel name each one gets.
 HOMES = (("decisions", "Decisions"), ("debts", "Debts"), ("debt-notes", "Debt notes"),
-         ("plans", "Plans"), ("specs", "Specs"))
+         ("todo", "To-do"), ("plans", "Plans"), ("specs", "Specs"))
 
 # A merge subject that names its pull request: GitHub's merge commit, or a squash title ending "(#N)".
 PR_SUBJECT = re.compile(r"^Merge pull request #(\d+)\b|\(#(\d+)\)\s*$")
@@ -55,7 +59,10 @@ NEWEST = 5
 EXTRAS = "roadmap/extras.json"
 GITHUB = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$|/git/([^/]+/[^/]+?)(?:\.git)?/?$")
 COMPLIANCE_WHY = "unknown (no home yet: the scorecard lives only in chat until compliance-check writes one)"
-BOARD_WHY = "unknown (Deferred: where live worker state is read from is still open for the owner)"
+BOARD_WHY = ("unknown (session-board's store lives on one machine, so a cloud build cannot read it; "
+             "Live work reads project threads and GitHub instead)")
+# The thread states the publisher's live file may carry, in the order the page lists them.
+STATES = ("blocked", "working", "review_ready", "failed", "stopped", "done")
 
 HEADER = re.compile(r"^@[0-9a-f]{40,64} \S+$")
 
@@ -405,6 +412,61 @@ def health(repo, extra, where, slug, branch):
             {"name": "Session board", "home": None, "read": BOARD_WHY}]
 
 
+def live_work(path, steps):
+    """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
+
+    Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+    "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}]}.
+    A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
+    names that is not an open step is listed in `strays`.
+    """
+    if not path:
+        return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
+    try:
+        raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as err:
+        return {"read": "unknown (the live file could not be read: %s)" % err}
+    if not isinstance(raw, dict):
+        return {"read": "unknown (the live file is not a JSON object)"}
+    read = raw.get("readAt")
+    try:
+        datetime.datetime.fromisoformat(read.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        read = "unknown (the live file's readAt is not an ISO time: %r)" % (read,)
+    missing = [key for key in ("threads", "pulls") if not isinstance(raw.get(key), list)]
+    if missing:
+        return {"read": "unknown (the live file has no %s list)" % " or ".join(missing)}
+    skipped, strays = [], []
+
+    def keep(kind, rows, ok):
+        good = []
+        for n, row in enumerate(rows if isinstance(rows, list) else []):
+            if isinstance(row, dict) and ok(row):
+                good.append(row)
+            else:
+                skipped.append("%s %d" % (kind, n + 1))
+        if not isinstance(rows, list):
+            skipped.append("%s (not a list)" % kind)
+        return good
+
+    text = lambda row, key: isinstance(row.get(key), str) and row[key].strip()
+    threads = keep("thread", raw.get("threads", []), lambda r: text(r, "title") and r.get("state") in STATES
+                   and (r.get("step") is None or isinstance(r["step"], str)))
+    pulls = keep("pull", raw.get("pulls", []),
+                 lambda r: type(r.get("number")) is int and text(r, "title"))
+    branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
+    for row in threads:
+        sid = row.get("step") or None
+        if sid and steps is None:
+            strays = ["unknown (the steps could not be read)"]
+            break
+        if sid and (sid not in steps or steps[sid].get("status") == "done"):
+            strays.append("%s (%s)" % (sid, row["title"]))
+    threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
+    return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
+            "branches": branches, "skipped": skipped, "strays": strays}
+
+
 def build_info(repo, source, why):
     """window.ROADMAP_BUILD: the build time and, per panel, the home it read and the commit it read at."""
     if source is None:
@@ -481,6 +543,7 @@ def main(argv=None):
     ap.add_argument("--repo", default=".", help="the checkout to read (default: the current folder)")
     ap.add_argument("--record-branch", default="roadmap", help="the branch that holds roadmap/data/")
     ap.add_argument("--main-branch", default="main", help="the branch whose merges carry Step: trailers")
+    ap.add_argument("--live", help="the publisher's live-work file: project threads, open pull requests and branches")
     ap.add_argument("--out", help="the page to write; needed unless the checkout stands on the record branch")
     args = ap.parse_args(argv)
     repo = pathlib.Path(args.repo).resolve()
@@ -508,6 +571,9 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
+    info["live"] = live_work(args.live, data["steps"] if data else None)
+    info["panels"].append({"name": "Live work", "home": "project threads and GitHub" if args.live else None,
+                           "read": info["live"]["read"]})
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
                               "read": "unknown (%s)" % unread if unread else short(repo, ref) or "unknown (git could not name the commit)"})
     out.write_text(render(data, info), encoding="utf-8")
@@ -515,7 +581,7 @@ def main(argv=None):
         print(f"{out.name}: steps unknown ({why})")
         return
     print(f"{out.name}: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
-    upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread])
+    upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"])
 
 
 def added_at(source):
@@ -532,7 +598,7 @@ def added_at(source):
     return seen
 
 
-def upkeep(steps, added, marks, strays):
+def upkeep(steps, added, marks, strays, work=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
                    key=lambda kd: kd[1].get("order", 1e9))
@@ -561,7 +627,9 @@ def upkeep(steps, added, marks, strays):
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("landed, waiting for triage to close", ["%s (%s)" % (k, ", ".join(v)) for k, v in sorted(marks.items())]),
-            ("Step trailers naming no step", strays)]
+            ("Step trailers naming no step", strays),
+            ("live threads naming no open step", (work or {}).get("strays", [])),
+            ("live file entries skipped", (work or {}).get("skipped", []))]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:

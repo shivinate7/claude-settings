@@ -73,7 +73,7 @@ Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--att
 
 A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. A repo whose `package.json` defines the script `reap:worktrees` gets `npm run reap:worktrees -- --remove` run in its root instead of this rule. An unreadable `package.json` turns the rule off for that repo.
 
-Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-proof checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it. A checkout with another name under that folder is not covered.
+Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-run checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it. A checkout with another name under that folder is not covered.
 
 Kind: process
 Home: janitor/sweep.py

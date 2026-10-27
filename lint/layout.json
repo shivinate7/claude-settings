@@ -1,5 +1,5 @@
 {
-  "about": "Where each kind of file lives in every repo. Every shared tool reads its paths from this file through lint/layout.py. A repo adds its own kinds in its extras file, and the extras file also marks the repo as rolled out to this layout. Decision one-layout-every-repo.",
+  "about": "Where each kind of file lives in every repo. Every shared tool reads its paths from this file through lint/layout.py. A repo adds its own kinds in its extras file, and the extras file also marks the repo as rolled out to this layout. \"legacy-repos\" keeps a kind where one repo holds it now, keyed by the repo's GitHub name, until that repo moves it. Decision one-layout-every-repo.",
   "extras": ".claude/layout-extras.json",
   "kinds": {
     "claude-md": {
@@ -39,6 +39,10 @@
       "path": "docs/specs",
       "set": "core"
     },
+    "todo": {
+      "path": "docs/todo.md",
+      "set": "core"
+    },
     "records-index": {
       "path": "docs/records.md",
       "set": "core"
@@ -61,5 +65,10 @@
     "docs/debts": "debts",
     "docs/debts/notes.md": "debts/notes.md",
     "docs/plans": "plans"
+  },
+  "legacy-repos": {
+    "shivinate7/q_max": {"todo": "specs/todo.md"},
+    "shivinate7/home": {"todo": "records"},
+    "shivinate7/home-app": {"todo": "records"}
   }
 }

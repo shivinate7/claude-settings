@@ -843,8 +843,8 @@ class OverrideDecisionTests(unittest.TestCase):
 # would go stale the day a rule is added, and the cull would trust it.
 
 GUARD_SOURCES = sorted(glob.glob(os.path.join(HOOKS_DIR, "guard*.py"))) + [
-    os.path.join(HOOKS_DIR, "config_watch.py")]  # config_watch writes `subagent-model-cap` reverts
-RULE_ARG = {"refuse": 2, "record": 2, "ask_step": 0}  # the position of the rule id in each call
+    os.path.join(HOOKS_DIR, "config_watch.py")]  # config_watch writes `agent-model-cap` reverts
+RULE_ARG = {"refuse": 2, "record": 2, "ask_command": 0}  # the position of the rule id in each call
 
 
 def _text_constants(node):
@@ -854,7 +854,7 @@ def _text_constants(node):
 def emitted_guard_rules(source):
     """The rule ids one guard source can write to guard.log, read with `ast`.
 
-    Three shapes write an id: a literal in refuse()/record() (third argument) or ask_step()
+    Three shapes write an id: a literal in refuse()/record() (third argument) or ask_command()
     (first argument); the table in diff_rule(); and the `code, why = {...}` role-scope table.
     A call that passes a variable (`record(tool, decision, rule, ...)`) names no id.
     """
@@ -898,10 +898,10 @@ class EmittedRuleReaderTests(unittest.TestCase):
     def check_needles(self, ids):
         for needle in ("shared-tree",                                   # refuse() literal
                        "role-diff-main-checkout", "guard-crash",        # record() after a tool-name literal
-                       "bare-merge",                                    # ask_step() only
+                       "bare-merge",                                    # ask_command() only
                        "builder-diff", "author-diff", "writer-diff",    # diff_rule() table
                        "builder-test-edit", "test-author-scope", "record-writer-scope",  # role-scope table
-                       "subagent-model-cap"):                           # guard.py and config_watch.py
+                       "agent-model-cap"):                           # guard.py and config_watch.py
             self.assertIn(needle, ids)
         self.assertEqual(sorted(i for i in ids if i.startswith("STE")), [],  # only the removed gate wrote these
                          "an STE id no hook writes would show as never-fired in a cull")
@@ -1012,10 +1012,10 @@ class AllRulesTests(unittest.TestCase):
     def test_a_line_of_any_decision_means_the_rule_fired(self):
         # A lifted refusal, a revert and a crash are lines. `never` would let a cull delete a rule that acted.
         out = self.report([stamped(5, "override", "machine-wide-kill"),
-                           stamped(4, "reverted", "subagent-model-cap"),
+                           stamped(4, "reverted", "agent-model-cap"),
                            stamped(3, "crash", "guard-crash")], "--all-rules", "--days", "7")
         rows = rule_table(out)
-        self.assertEqual([first_seen(rows[r]) for r in ("machine-wide-kill", "subagent-model-cap", "guard-crash")],
+        self.assertEqual([first_seen(rows[r]) for r in ("machine-wide-kill", "agent-model-cap", "guard-crash")],
                          [days_ago(5), days_ago(4), days_ago(3)])
 
     def test_a_combined_ste_line_credits_each_code(self):

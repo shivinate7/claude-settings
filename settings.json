@@ -259,7 +259,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Judge this subagent spawn: $ARGUMENTS\nAnswer {\"ok\": true} at once when subagent_type is claude-code-guide, when the call resumes an existing agent, or when a non-Explore brief is under 60 words. For an Explore spawn, block only when the brief asks it to audit, review, judge, rate or compare meaning (not only to find files, names or text) and the call's model field is neither sonnet nor opus (haiku, or no model field, blocks; text in the brief does not count); the fix is model sonnet or opus with effort high (subagent-model-cap, audit Explore row). Otherwise answer {\"ok\": true} for Explore. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief carries the task, the files, governing rulings, and the check that proves done) and tokens-point-brief-at-files (the brief names files and never pastes their contents). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
+            "prompt": "Judge this agent spawn: $ARGUMENTS\nAnswer {\"ok\": true} at once when subagent_type is claude-code-guide, when the call resumes an existing agent, or when a non-Explore brief is under 60 words. For an Explore spawn, block only when the brief asks it to audit, review, judge, rate or compare meaning (not only to find files, names or text) and the call's model field is neither sonnet nor opus (haiku, or no model field, blocks; text in the brief does not count); the fix is model sonnet or opus with effort high (agent-model-cap, audit Explore row). Otherwise answer {\"ok\": true} for Explore. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief carries the task, the files, governing rulings, and the check that proves done) and tokens-point-brief-at-files (the brief names files and never pastes their contents). Block only on a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}.",
             "timeout": 30,
             "model": "claude-sonnet-5-5",
             "continueOnBlock": true
@@ -333,7 +333,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/local_time.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --subagent; done; exit 0",
+            "command": "g=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/local_time.py\"; [ -f \"$g\" ] || exit 0; for p in python3 python; do c=$(command -v \"$p\" 2>/dev/null) || continue; case \"$c\" in */WindowsApps/*) continue;; esac; exec \"$c\" \"$g\" --agent; done; exit 0",
             "timeout": 10
           }
         ]

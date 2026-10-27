@@ -15,16 +15,16 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `CLAUDE.md` | Global working rules. A one-line `@` import in `~/.claude/CLAUDE.md` loads it. |
 | `settings.json` | Output style, env vars, hooks. It becomes `~/.claude/settings.json`. |
 | `landed-dirs.txt` | The folders that both installers land. |
-| `agents/` | The subagent roles, one file each. |
+| `agents/` | The agent roles, one file each. |
 | `hooks/` | The guard, the watches, and the other hook scripts. |
 | `lint/` | The Simplified Technical English linter, and the gates and checks that CI runs. |
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
-| `ux/` | The house UX rules. |
-| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
+| `docs/design/` | The house UX rules. |
+| `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), `sim-test`, which runs `xcodebuild test` on one phone simulator (see "Simulator tests"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |
-| `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`). Callers pin them by commit SHA. |
+| `actions/` | Composite GitHub Actions this repo publishes (`stamp`, `ste-lint`, `playwright-setup`). Callers pin them by commit SHA. |
 | `mods/`, `.claude-plugin/` | The vendored mods, and the marketplace file that lists them. |
 | `githooks/` | Git hooks for a repo, such as `main-ref`. |
 | `testing/` | A shared test helper, `skip-locally-fail-in-ci.mjs`. |
@@ -95,7 +95,7 @@ with `/<sha>/`, or set `CLAUDE_SETTINGS_REF=<sha>` as an environment variable.
 ## How a change reaches you
 
 Edit a file here, commit, push, open a pull request against `main`. `.github/workflows/gates.yml`
-runs the guard fixture suite, its mutation harness, the STE lint, and the rest of the checks
+runs the guard fixture suite, its mutation test, the STE lint, and the rest of the checks
 named in that file. Merge only when you say so, or under a repo grant, per CLAUDE.md.
 
 Once merged:
@@ -192,7 +192,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   The `SessionStart` hook the setup script installs re-fetches on every session, so this should
   self-heal. When it does not, check the environment's network access is not blocking the three
   hosts above.
-* **The subagent model cap needs a temporary raise.** See CLAUDE.md's Roles section and
+* **The agent model cap needs a temporary raise.** See CLAUDE.md's Roles section and
   `opus-grant-expires` for the guarded override and its required expiry field.
 * **Other repositories cannot use `actions/` after this repository becomes private.** Open
   Settings, then Actions, then General, then Access. Set "Accessible from repositories owned by
@@ -254,6 +254,13 @@ The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 
   also says that the phone may need unlocking or a cable.
 * `--app NAME` limits a run to the named apps. A name that is not in the config exits 2. `profile` needs exactly one.
 
+## Simulator tests
+
+`bin/sim-test` runs `xcodebuild test` on one phone simulator. It runs on macOS only, under `/bin/bash` 3.2.
+Run it from the folder that holds the project: `sim-test <xcodebuild test args without -destination>`.
+It reuses the first booted iPhone. With none booted, it boots the shared iPhone 18 Pro, runs the tests, and shuts that simulator down, also on failure, INT and TERM.
+It never shuts down a simulator it did not boot. The exit code is xcodebuild's. The tool takes no lock and waits for no load.
+
 ## Standing roles and a roadmap record for a repo
 
 The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds four
@@ -283,9 +290,9 @@ the roster, a brief and a role hand-off note. A repo adopts it only on the owner
   and removed each time; install-log lines only on a failure, plus the start and end lines of the
   helper and of the installer when they run. The install log's reader is the owner; no hook reads it. Case 34 of
   `merge/test_install_from_main.sh` proves the no-move cost: no log line, no installer, one fetch.
-* **Why subagents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
-  tool from every subagent, so only the main conversation fans out. A nested child's completion
-  notice can misroute. This stalls the subagent that launched it
+* **Why agents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
+  tool from every agent, so only the main conversation fans out. A nested child's completion
+  notice can misroute. This stalls the agent that launched it
   ([anthropics/claude-code#75043](https://github.com/anthropics/claude-code/issues/75043)). A
   repo that needs nesting raises the depth in its own `.claude/settings.json` and records the
   risk in its CLAUDE.md.

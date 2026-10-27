@@ -137,7 +137,7 @@ ROOT = os.path.dirname(HERE)
 GEN = os.path.join(HERE, "hook_catalog.py")
 INLINE_JSON = os.path.join(HERE, "hook_catalog_inline.json")
 PAGE = os.path.join(ROOT, "docs", "catalog.md")
-TABLE = os.path.join(ROOT, "docs", "decisions", "subagent-model-cap.md")
+TABLE = os.path.join(ROOT, "docs", "decisions", "agent-model-cap.md")
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
 CMD_PATH = re.compile(r"\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([\w./-]+\.(?:py|sh|mjs|js))")
 TABLE_PATH = re.compile(r"`([\w./-]+\.(?:py|sh|mjs|js))`")
@@ -479,7 +479,7 @@ def skill_md(frontmatter, body="Body text.\n"):
 def files(hooks=None, plugins=None, extra=None):
     out = {
         "settings.json": json.dumps({"hooks": hooks or {}, "enabledPlugins": plugins or {}}),
-        "decisions/subagent-model-cap.md": TABLE_TEXT,
+        "decisions/agent-model-cap.md": TABLE_TEXT,
         "skills/alpha/SKILL.md": skill_md("description: Use when testing alpha."),
     }
     out.update(extra or {})
@@ -917,12 +917,12 @@ class RecordsPage(Tree):
         return records_rows(self.records_text(root))
 
     def test_a1_each_record_is_listed_once_under_its_kind(self):
-        # The model table (decisions/subagent-model-cap.md in the fixture) has no Kind line, so it is unsorted.
+        # The model table (decisions/agent-model-cap.md in the fixture) has no Kind line, so it is unsorted.
         self.assertEqual(listed(self.rows()), {
             "Mandates": ["b-one", "b-two", "b-three"],
             "Rulings": ["ruled"],
             "Build designs": ["built"],
-            "Unsorted decisions": ["loose", "subagent-model-cap", "titled"],
+            "Unsorted decisions": ["agent-model-cap", "loose", "titled"],
             "Debts": ["gap-one"],
             "Plans": ["plan-a"],
         })
@@ -960,7 +960,7 @@ class RecordsPage(Tree):
             "debts/z-gap.md": DEBT, "debts/a-gap.md": DEBT,
             "CLAUDE.md": "# R\n\nZ rule.<!-- rule:z-last -->\n\nA rule.<!-- rule:a-first -->\n"}))
         self.assertEqual(got["Mandates"], ["z-last", "a-first"])
-        self.assertEqual(got["Unsorted decisions"], ["alpha", "loose", "mid", "subagent-model-cap", "titled", "zeta"])
+        self.assertEqual(got["Unsorted decisions"], ["agent-model-cap", "alpha", "loose", "mid", "titled", "zeta"])
         self.assertEqual(got["Debts"], ["a-gap", "gap-one", "z-gap"])
 
     def test_a5_a_readme_and_a_non_markdown_file_are_no_records(self):

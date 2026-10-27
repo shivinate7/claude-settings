@@ -624,7 +624,7 @@ TREE_ASK_REASON = (
 # everywhere.
 #
 # THE REMEDY NAMES NO FORBIDDEN COMMAND. It names the two reads, which stay allowed, and the
-# commit that sets work aside on a branch of the caller's own. A worker sent here by the harness
+# commit that sets work aside on a branch of the caller's own. An agent sent here by the harness
 # reminder, which asks for a tagged entry and a later restore, reads what to do instead.
 STACK_DENY_REASON = (
     "Rule (shared trees): this command takes a stash entry, and the stash stack belongs to the "

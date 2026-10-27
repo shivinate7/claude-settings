@@ -3,7 +3,7 @@
 ## The ruling
 
 Six templates any repo can adopt live in one home and one shape: a composite action under
-`actions/<name>/`, or a plain file where the template is no workflow step.
+`actions/<name>/`, or a plain file where the template is no CI step.
 
 | Template | Home |
 | --- | --- |
@@ -17,7 +17,7 @@ Six templates any repo can adopt live in one home and one shape: a composite act
 Why composite, not `workflow_call`:
 
 - `actions/ste-lint` and `actions/stamp` are composite and q_max consumes them with `uses: <repo>/actions/<name>@<sha>`. A second shape would be a second home.
-- The gate must be a step in the caller's own job. Its check name stays fixed, and the caller sets `needs` and `if: always()`. A reusable workflow adds a nested job name and cannot read the caller's `needs`.
+- The gate must be a CI step in the caller's own job. Its check name stays fixed, and the caller sets `needs` and `if: always()`. A reusable workflow adds a nested job name and cannot read the caller's `needs`.
 - The caller keeps the trigger, `permissions`, runner and `timeout-minutes`. A reusable workflow would hide the grant that zizmor should see.
 - Logic lives in a script beside `action.yml`. The test runs that script, so the test and the action cannot drift.
 
