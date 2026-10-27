@@ -14,8 +14,10 @@ worktree (`parallelism-each-own-checkout`).
 
 - **Blind lane.** The brief names only the screen's job, its users, its data shapes and the house
   rules in `~/.claude/ux/`. The brief never gives the current screen, its code, its screenshots, its
-  mockups, or the repo's design spec and tokens. A blind lane shows ideas the repo's habits would
-  hide.
+  mockups, or the repo's design spec and tokens. The brief takes data shapes from the spec's data section or the owner's words, in plain words.
+  Never paste screen code into a blind brief. A blind lane shows ideas the repo's habits would hide.
+  It rests on its brief and its own instruction. Each designer's worktree holds the code, spec,
+  tokens and mockups, and the guard `designer-scope` limits writes only, so nothing blocks the read.
 - **Informed lane.** The brief gives the current screen, its mockups, the spec and the tokens.
 - **Directed lane.** An informed lane plus one named direction, such as denser, phone first, or one
   primary action. The orchestrator picks directions that differ from each other.
@@ -28,20 +30,27 @@ designer.
 
 ## Procedure
 
-1. **Write the briefs.** Use the lane kinds above. Name the lane kind in each brief, and the
-   direction for a directed lane. Point the brief at files; never paste them
+1. **Write the briefs.** Use the lane kinds above. The first line of each brief is
+   `Lane kind: blind|informed|directed`. A directed brief adds its direction. The skill always names
+   the kind; a designer reads a brief with no kind as informed. The brief gives the lane its `<n>`.
+   A blind lane never reads other files in the design folder, sibling lane mockups included. Point the brief at files; never paste them
    (`tokens-point-brief-at-files`).
 2. **Name the files.** Each lane writes `<screen>-<kind>-<n>.html` and
    `<screen>-<kind>-<n>-notes.md` in the design folder. `<kind>` is `blind`, `informed` or
-   `directed`. `<n>` counts the lanes of that kind, from 1. So lanes never collide. Each mockup
+   `directed`. `<n>` counts the lanes of that kind, from 1. The orchestrator assigns it in the brief. So lanes never collide. Each mockup
    prints its lane kind on the page. A directed mockup also prints its direction.
 3. **Spawn all lanes together.** The lanes share no input, so they run in parallel. Lanes never talk
    to each other (`parallelism-no-mid-task-talk`).
 4. **Collect.** Read each report, never a transcript. Give the owner one list: each mockup with its
    path, kind and direction.
-5. **The owner culls** from the whole set. The kept mockup becomes the step's mockup, the one the
-   builder builds to (`agents/builder.md`). The orchestrator removes the other mockups and notes in
-   a PR. Git keeps them.
+5. **Gather.** Each lane pushes its own branch. The orchestrator copies every lane's pair onto the
+   step's design branch, so the owner sees the whole set in one place.
+6. **The owner culls** from the whole set. The orchestrator renames the kept pair to `<screen>.html`
+   and `<screen>-notes.md`, and deletes the rest in the same branch. Git keeps them. It names the
+   kept path in the briefs of the builder and the design reviewer, and the builder builds to it
+   (`agents/builder.md`).
+7. **Clean up.** Push each lane branch to `archive/<branch>`, then delete it locally
+   (`shared-trees-archive-then-delete`).
 
 ## Rules
 
