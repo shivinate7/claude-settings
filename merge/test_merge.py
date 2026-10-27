@@ -1608,16 +1608,20 @@ class CutLanes(Env):
             self.assertNotEqual(self.head(b), "", f"{b} was deleted")
         self.assert_one_lane_line(out, LANE_HEADS_UNREAD)
 
-    def lane_tips_breaks(self, effect):
+    def lane_tips_breaks(self, effect, fail_from=0):
         """Rulings 2 and 3: the read of the lane tips fails before the merge. effect is the (rc, text) git returns, or an
-        exception its read raises. The merge still lands, no lane is deleted, and one line says so."""
+        exception its read raises. The merge still lands, no lane is deleted, and one line says so.
+        c110: the same read runs first for the dropped-lane check, which refuses a failed read. fail_from=1 lets that first
+        read pass, so the cleanup's own read is the one that fails."""
         lane_batch(self, "lane1", "lane2")
-        real = merge.sh
+        real, n = merge.sh, [0]
         def broken(args, *a, **k):
-            if "log" in args and any("%x01" in a for a in args):  # lane_tips' one git log: merges and reverts
-                if isinstance(effect, BaseException):
-                    raise effect
-                return effect
+            if "log" in args and any("%x01" in a for a in args):  # read_lanes' one git log: merges and reverts
+                n[0] += 1
+                if n[0] > fail_from:
+                    if isinstance(effect, BaseException):
+                        raise effect
+                    return effect
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", broken):
             rc, out = self.go()
@@ -1625,19 +1629,52 @@ class CutLanes(Env):
         self.assert_merged()
         for b in ("lane1", "lane2"):
             self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-        # c110: the same read runs once before the claim, for the dropped-lane check. It fails open with its own one line; the cleanup keeps its one line.
-        check = [l for l in out.splitlines() if l.startswith("merge: the dropped-lane check could not run")]
-        self.assertEqual(len(check), 1, out)
-        self.assert_one_lane_line("\n".join(l for l in out.splitlines() if l not in check))
+        self.assert_one_lane_line(out)
+
+    def test_a_failed_dropped_lane_read_refuses_and_claims_nothing(self):
+        # c110: the check that guards the lane's files fails closed.
+        lane_batch(self, "lane1", "lane2")
+        feat, real = self.head("feat"), merge.sh
+        def broken(args, *a, **k):
+            if "log" in args and any("%x01" in a for a in args):
+                return 128, "fatal: bad revision"
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", broken):
+            rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("--undo-check-unknown-ok", out)
+        self.assertNotIn("merged as", out)
+        self.assertEqual(self.claims("feat"), 0)
+        self.assertEqual(self.head("feat"), feat)
+        self.assertFalse(self.lock_ref())
+
+    def test_an_override_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
+        # c110: the cleanup's kept line is the fallback when the owner overrides a failed first read.
+        lane_batch(self, "lane1", "lane2")
+        self.revert_on_batch(self.merge_of("lane1"))
+        real, n = merge.sh, [0]
+        def first_fails(args, *a, **k):
+            if "log" in args and any("%x01" in a for a in args):
+                n[0] += 1
+                if n[0] == 1:
+                    return 128, "fatal: bad revision"
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", first_fails):
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "owner read the batch")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("dropped-lane check UNKNOWN", out)
+        self.assert_merged()
+        self.assertIn("reverted", kept_line(self, out, "lane1"))
+        self.assert_deleted(out, "lane2")
 
     def test_a_failed_git_log_in_lane_tips_prints_one_line_and_deletes_nothing(self):
-        self.lane_tips_breaks((128, "fatal: bad revision"))
+        self.lane_tips_breaks((128, "fatal: bad revision"), fail_from=1)
 
     def test_a_lane_tips_read_that_raises_oserror_still_lands_the_merge(self):
-        self.lane_tips_breaks(OSError("git could not start"))
+        self.lane_tips_breaks(OSError("git could not start"), fail_from=1)
 
     def test_a_lane_tips_read_that_times_out_still_lands_the_merge(self):
-        self.lane_tips_breaks(subprocess.TimeoutExpired(["git", "log"], 5))
+        self.lane_tips_breaks(subprocess.TimeoutExpired(["git", "log"], 5), fail_from=1)
 
     def test_a_merge_commit_that_cannot_be_read_says_the_proof_could_not_run(self):
         # Ruling 5: the merge lands on origin, but the local repo cannot read the commit id host.merge returns.
