@@ -1047,6 +1047,13 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(self.stop(bad, False)["decision"], "block")
         self.assertIsNone(self.stop(bad, True))
 
+    def test_rw_stale_marker_is_cleared_by_a_later_turn(self):
+        # The rewrite never ran, so the marker is stale. A new turn's Stop must clear it.
+        self.missing_report_block()
+        self.assertIsNone(self.stop(self.GOOD, False))
+        bad = "> **Done** BUILT the gate, PR #5\n> **Next** merge"
+        self.assertIsNone(self.stop(bad, True))
+
     def test_rw_feedback_record_counted_as_human_keeps_spawns(self):
         # Assumed shape of the hook's feedback record: a plain user text record after the block.
         self.missing_report_block()

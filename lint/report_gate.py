@@ -578,6 +578,12 @@ def main():
         if reasons:
             print(json.dumps({"decision": "block", "reason": " ".join(reasons) + CORRECTION_TAIL}))
         return
+    # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
+    # straight after a missing-report block may consume one.
+    try:
+        os.remove(_marker_path(hook))
+    except Exception:
+        pass
 
     path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
