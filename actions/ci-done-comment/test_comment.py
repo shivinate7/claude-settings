@@ -47,6 +47,8 @@ class GatesCaller(unittest.TestCase):
         try:
             import yaml
         except ImportError:
+            if os.environ.get("CI"):
+                raise
             self.skipTest("PyYAML not installed")
         with open(GATES, encoding="utf-8") as fh:
             self.jobs = yaml.safe_load(fh)["jobs"]
@@ -61,7 +63,9 @@ class GatesCaller(unittest.TestCase):
         job = self.jobs["ci-done"]
         cond = job.get("if", "")
         self.assertIn("!cancelled()", cond, "without !cancelled() the job skips when a needed job fails")
-        self.assertIn("pull-requests", job.get("permissions", {}))
+        self.assertIn("github.event_name == 'pull_request'", cond)
+        self.assertIn("!github.event.pull_request.draft", cond)
+        self.assertEqual(job.get("permissions", {}).get("pull-requests"), "write")
         step = next((s for s in job["steps"] if s.get("uses") == "$/actions/ci-done-comment"), None)
         self.assertIsNotNone(step, "ci-done does not call actions/ci-done-comment")
         self.assertEqual(step.get("with", {}).get("needs"), "${{ toJSON(needs) }}")
