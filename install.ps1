@@ -606,7 +606,9 @@ function Remove-StaleSets {
     }
 }
 foreach ($sub in (Get-LandedDirs $RepoDir)) {
-    $srcDir  = Join-Path $RepoDir $sub
+    # GetFullPath turns the '/' in a nested name such as docs/design into this system's separator,
+    # so the prune test below compares like with like.
+    $srcDir  = [IO.Path]::GetFullPath((Join-Path $RepoDir $sub))
     $destDir = Join-Path $ClaudeDir $sub
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     if ($sub -eq 'hooks') { Install-GuardSet $srcDir $destDir }

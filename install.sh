@@ -531,8 +531,8 @@ while IFS= read -r sub || [ -n "$sub" ]; do
 done < "$SRC/landed-dirs.txt"
 
 # A folder an earlier install landed and the repo has since moved: ux, now docs/design (decision
-# ux-house-rules). Local mode removes its links with land_dir's prune test, then the folder once it
-# is empty. A person's own file and a cloud copy stay, as land_dir leaves them.
+# ux-house-rules). Local mode removes its dangling links into "$SRC/ux", the same test land_dir
+# prunes with, then the folder once it is empty. A person's own file and a cloud copy stay, as land_dir leaves them.
 for sub in ux; do
   DEST_DIR="$CLAUDE_DIR/$sub"
   [ -d "$DEST_DIR" ] && [ ! -L "$DEST_DIR" ] && [ "$CLOUD" != 1 ] || continue
