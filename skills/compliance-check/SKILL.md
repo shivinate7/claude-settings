@@ -63,7 +63,7 @@ not repeat its steps.
 One line per group, in the order of step 2, then Layout, Design, Copies, iOS and the Caution listing:
 
 ```
-<Group>: <in shape | partial | out | parent-covered | n/a | unknown> - <finding> (<file:line or command>)
+<Group>: <in shape | partial | out | parent-covered | not rolled out | n/a | unknown> - <finding> (<file:line or command>)
 ```
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
@@ -77,7 +77,9 @@ lines into `python3 lint/compliance_probes.py scorecard <child root>`. It rewrit
 on each run. Never write a dated copy beside it. The file holds one table, with the columns
 Group, Score, Gold standard, Gap, Source. Gold standard is `in shape`. The script always adds a row
 `STE lint on UI files`, scored `partial`: the lint does not read UI text, and that is a known gap.
-Report it as a known gap. Do not build a UI linter.
+An indented item line, `- <item>: <score> - <finding> (<source>)`, becomes its own row after its
+group row. The script keeps every other line under Notes and drops none. Report the UI gap as a known
+gap. Do not build a UI linter.
 
 ## 5. Plan
 

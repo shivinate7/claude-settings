@@ -454,6 +454,27 @@ class Scorecard(unittest.TestCase):
         first = self.run_card(repo, self.LINES)[1]
         self.assertEqual(first, self.run_card(repo, self.LINES)[1])
 
+    def test_item_line_becomes_a_row_after_its_group(self):
+        _, body = self.run_card(Repo(self), "Design: partial - two gaps (a)\n  - screens: out - no config (b)\nLayout: in shape - ok (c)\n")
+        rows = [line for line in body.splitlines() if line.startswith("| ")]
+        at = [i for i, line in enumerate(rows) if line.startswith("| Design: screens | out | in shape | no config | b |")]
+        self.assertEqual(len(at), 1, body)
+        self.assertTrue(rows[at[0] - 1].startswith("| Design | partial |"), body)
+
+    def test_other_lines_are_kept_as_notes(self):
+        out, body = self.run_card(Repo(self), "Layout: in shape - ok (c)\nCaution: rule x has no probe\n\n")
+        self.assertIn("## Notes", body)
+        self.assertIn("- Caution: rule x has no probe", body)
+        self.assertEqual(body.count("rule x has no probe"), 1)
+
+    def test_sourceless_line_says_none_cited(self):
+        _, body = self.run_card(Repo(self), "Layout: out - no source here\n")
+        self.assertIn("| Layout | out | in shape | no source here | none cited |", body)
+
+    def test_pipe_is_escaped_and_dash_and_parens_survive(self):
+        _, body = self.run_card(Repo(self), "Layout: out - a | b - c (d) e (src)\n")
+        self.assertIn("| Layout | out | in shape | a \\| b - c (d) e | src |", body)
+
     def test_ui_file_gap_is_a_known_gap_row(self):
         _, body = self.run_card(Repo(self), self.LINES)
         row = next(line for line in body.splitlines() if line.startswith("| STE lint on UI files |"))

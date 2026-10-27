@@ -440,25 +440,34 @@ def probe_ios(root):
 
 
 SCORES = "in shape|partial|out|parent-covered|n/a|unknown|not rolled out"
-GROUP_LINE = re.compile(r"^([^:\s][^:]*): (%s) - (.*?)(?: \(([^()]*)\))?$" % SCORES)
+TAIL = r": (%s) - (.*?)(?: \(([^()]*)\))?$" % SCORES
+GROUP_LINE = re.compile(r"^([^:\s-][^:]*)" + TAIL)
+ITEM_LINE = re.compile(r"^\s+(?:- )?([^:]+)" + TAIL)
 UI_GAP_ROW = ("STE lint on UI files", "partial", "UI text the lint does not read: known gap, no UI linter",
               "lint/ui_suffixes.py")
 
 
 def scorecard(root):
     """Rewrite the one scorecard file from the group lines on stdin."""
-    rows = []
+    rows, notes, group = [], [], None
     for line in sys.stdin.read().splitlines():
         found = GROUP_LINE.match(line)
+        item = None if found else ITEM_LINE.match(line)
         if found:
-            group, score, gap, source = found.groups()
-            rows.append((group, score, gap, source or ""))
+            group = found.group(1)
+            rows.append((group,) + found.groups()[1:])
+        elif item and group:
+            rows.append(("%s: %s" % (group, item.group(1)),) + item.groups()[1:])
+        elif line.strip():
+            notes.append(line.strip())
     rows.append(UI_GAP_ROW)
     text = "# Compliance scorecard\n\nRewritten in place on each run by compliance-check.\n\n"
     text += "| Group | Score | Gold standard | Gap | Source |\n| --- | --- | --- | --- | --- |\n"
-    for group, score, gap, source in rows:
-        cells = [c.replace("|", "\\|") for c in (group, score, "in shape", gap, source)]
+    for name, score, gap, source in rows:
+        cells = [c.replace("|", "\\|") for c in (name, score, "in shape", gap, source or "none cited")]
         text += "| " + " | ".join(cells) + " |\n"
+    if notes:
+        text += "\n## Notes\n\n" + "".join("- %s\n" % n for n in notes)
     folder = os.path.join(root, "docs", "health")
     try:
         os.makedirs(folder, exist_ok=True)
@@ -466,7 +475,7 @@ def scorecard(root):
             handle.write(text)
     except OSError as err:
         raise CannotRun(str(err))
-    return finish("scorecard", [], "wrote docs/health/compliance.md (%d row(s))" % len(rows), 0)
+    return finish("scorecard", [], "wrote docs/health/compliance.md (%d row(s), %d note(s))" % (len(rows), len(notes)), 0)
 
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
