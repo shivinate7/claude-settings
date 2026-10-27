@@ -556,3 +556,6 @@
 - playwright-probe-root-devcontainer: a root `.devcontainer.json` is not read; only the `.devcontainer/` folder is (lint/compliance_probes.py PW_FILE). Decision: one-browser-setup-no-apt.
 - blind-brief-word-list-misses: the keep and current word lists miss paraphrases with no sign of today's product, such as "Keep the app's layout", "Match the app" or "Keep the three views"; the spawn hook knows no view names (hooks/blind_brief.py). Decision: blind-briefs-use-a-template.
 - blind-brief-count-unchecked: `Blind lanes: <n>` is the orchestrator's own count, never compared with the blind briefs spawned (hooks/blind_brief.py). Decision: blind-briefs-use-a-template.
+- ci-wake-rest-404-is-nopr: a mistyped -R repo gives a REST 404, read as no PR, so the watch is silent where it said unknown; `gh pr ready` fails the same way, so the error still shows (hooks/ci_wake.py read_pr)
+- ci-wake-hash-selector-misses: `gh pr ready #12` takes the branch route (`head=owner:#12`) and ends with no watch; fix is to strip `#` before the digit test (hooks/ci_wake.py read_pr)
+- ci-wake-branch-route-narrow: the branch and empty selectors match only open PRs with head `<owner>:<local branch name>`, so a fork head, a branch pushed under another name, or a closed PR gives no watch (hooks/ci_wake.py read_pr)
