@@ -234,12 +234,12 @@ class T(unittest.TestCase):
     ST_FAIL = "\u2718 Test run with 2 tests in 0 suites failed after 0.001 seconds with 1 issue."
 
     def test_swift_testing_pass_on_exit0_is_pass(self):
-        r = run(f"print({self.XCT0!r})\nprint({self.ST_PASS!r})")
+        r = run(f"print({self.XCT0!r})\nprint({ascii(self.ST_PASS)})")
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
     def test_swift_testing_failure_on_exit0_is_fail_even_with_xctest_tests(self):
-        r = run(f"print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint({self.ST_FAIL!r})")
+        r = run(f"print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint({ascii(self.ST_FAIL)})")
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("runner failure marker", r.stdout.splitlines()[0])
 
@@ -250,7 +250,7 @@ class T(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout)
 
     def test_swift_testing_zero_tests_on_exit0_is_fail_no_tests_ran(self):
-        r = run(f"print({self.XCT0!r})\nprint('\u2714 Test run with 0 tests in 0 suites passed after 0.001 seconds.')")
+        r = run(f"print({self.XCT0!r})\nprint('\\u2714 Test run with 0 tests in 0 suites passed after 0.001 seconds.')")
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("no tests ran", r.stdout.splitlines()[0])
 
