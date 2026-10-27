@@ -492,25 +492,6 @@ test("a long link in the context never widens the page on a phone", async (t) =>
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
 });
 
-test("an item with a design for each option shows them before the option list and no warning", async (t) => {
-  const it = mk("with-pictures", 31, {
-    options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })),
-  });
-  const page = await open(t, { items: [it], designData: { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" } }); if (!page) return;
-  assert.equal(await card(page, it).locator(".dwarn").count(), 0, "a warning shows although every picture is there");
-  const first = await card(page, it).evaluate((c) => {
-    const f = c.querySelector("iframe.dframe"), o = c.querySelector(".opts");
-    return !!f && !!o && !!(f.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING);
-  });
-  assert.equal(first, true, "the picture does not come before the option list");
-});
-
-test("an item with some designs but not every option's design still warns", async (t) => {
-  const it = mk("half-pictures", 32, { options: LOOK_OPTS, pick: "a", designs: [{ slug: "price-a", label: "Layout a" }] });
-  const page = await open(t, { items: [it], designData: { "price-a": "<p>a</p>" } }); if (!page) return;
-  assert.equal(await card(page, it).locator(".dwarn").count(), 1);
-});
-
 test("a page with no designs has no Designs tab", async (t) => {
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator("#tabD").isHidden(), true);

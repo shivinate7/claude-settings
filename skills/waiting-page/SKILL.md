@@ -32,8 +32,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
-  - `designs` (a list of `{slug, label}`) shows mockups at the front of the card, before the options
-    (see "Add a design"). An option names its picture with `design` (a slug in `designs`).
+  - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
+    and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
     with that key. The page never preselects an option: it stars `pick` and offers "Take my pick".
@@ -164,12 +164,14 @@ unmeasured.
 ## Add a design
 
 A question about how something looks carries one design per option. The owner picks by looking, so
-a link to a folder, a repo or a file is never enough. The page shows the designs at the front of the
-card, before the options. An option that names a design (`design`) which the item does not carry
-shows a warning line in place of the picture.
+a link to a folder, a repo or a file is never enough. Each option's picture sits at the top of its
+own option card, and a tap on it picks the option. A design that no option names shows at the front
+of the item, before the options. An option that names a design (`design`) which the item does not
+carry shows a warning line in its card in place of the picture.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
-   phone width for a web app. The full mockup stays one tap away ("Open full size").
+   phone width for a web app. Draw it 390 wide. The page scales it to the card and shows all of it,
+   never cropped. The full mockup stays one tap away ("Open full size").
 2. Put the whole mockup in one HTML string. Write `<` as `\u003c`.
 3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
    JSON in `<script type="application/json" id="designData">`.
