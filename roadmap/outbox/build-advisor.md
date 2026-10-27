@@ -16,3 +16,4 @@
 - 2026-10-27 04:30 CDT: c116 green and reviewed (#684, head 8316987). Joined integration branch batch-oct27m; the batch PR opens when more lanes arrive.
 - 2026-10-27 04:30 CDT: c114 green and reviewed (#685, head 6fd0a4b). Joined batch-oct27m.
 - 2026-10-27 04:32 CDT: c113+c115 (#686, 044eb71) and c118 (#687, 8f0e026) joined batch-oct27m (head 73c54cf; docs/debts/notes.md conflict resolved as a union of both lanes' notes). Lane tests, rule_audit, hook_catalog, settings_matcher and test_gates green on the combined tree. Waiting on c117, then the batch PR opens.
+- 2026-10-27 05:20 CDT: batch #689 (batch-oct27n, from main b031394) is ready with c116 #684, c114 #685, c113+c115 #686, c118 #687, c117 #688. Two form fixes on lane branches: c117's record slug was over 32 characters; c114 had one long note sentence. batch-oct27m is a dead first build of this batch; its force-push was refused, so it stays on origin until the merge cleanup.
