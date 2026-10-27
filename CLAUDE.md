@@ -51,7 +51,7 @@ incident.<!-- rule:shared-trees-reverify-after-incident -->
 
 **Git, if this repo uses pull requests.** Move main only by pull request, merged only
 when I name the act, or under a repo grant.<!-- rule:git-main-only-by-pr -->
-Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> A session that waits on CI sets a timed check-in when it starts to wait, and again after each red job, each wider apart. A run with a red job sends no "all checks done" wake.<!-- rule:git-ci-wait-checks-in --> A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`).<!-- rule:git-ci-done-comment-wakes --> Keep command output. Discarded output hides failures from the reader.<!-- rule:git-never-discard-output --> A refusal's printed remedy
+Never merge failing CI.<!-- rule:git-never-merge-failing-ci --> Keep command output. Discarded output hides failures from the reader.<!-- rule:git-never-discard-output --> A refusal's printed remedy
 never names the forbidden target.<!-- rule:git-remedy-never-names-target --> Never allocate a numbered record on a branch.
 Write a slug of 32 characters or fewer. Claim the number at merge. Name a lane by its branch slug, never by a session number.<!-- rule:git-slug-then-claim-number --> Ids, not paths. A path breaks when its file moves.<!-- rule:git-cite-by-id --> Give each record its
 own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> One entry per question. When its ruling changes, rewrite the entry in place. Open an entry only for a new question.<!-- rule:git-one-entry-per-question --> Batch lane PRs that pass their local checks into one integration branch. Keep

@@ -24,13 +24,5 @@ A PostToolUse hook on Bash and PowerShell (`hooks/ci_wake.py`) starts an `asyncR
 
 Why: sessions waited for CI with long background commands that ran on for hours.
 
-### The cloud wake
-
-A cloud session has no `gh` and no PostToolUse hook, so it waits through the PR subscription. A watched PR wakes its session on a new comment, a review, and a run whose jobs all passed. A run with a red job sends no "all checks done" wake, and a green job alone wakes nobody. Batch 649's macOS job went red while its other jobs ran on. The build advisor set no check-in, so no session moved for about 2.5 hours (owner gripe, 2026-10-26, step c88).
-
-- `gates.yml`'s last job, `ci-done`, needs every other job and runs when no run was cancelled. When a job ended `failure` or `cancelled`, it posts one PR comment: the head, each red job and the run link. A green run posts nothing. A superseded run posts nothing. `actions/ci-done-comment` holds the script, and other repos call it.
-- Unmeasured: that a comment by `github-actions[bot]` wakes a subscribed session. The first red batch run after this lands measures it.
-- The fallback: a session that waits on CI sets a `send_later` check-in when it starts to wait, and again after each red job, each wider apart (rule `git-ci-wait-checks-in`). A check-in costs one read, and it catches a lost wake.
-
 Kind: build
 Plan: docs/decisions/ci-wait-reads-run-status.md#the-ruling (all)
