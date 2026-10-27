@@ -11,13 +11,14 @@ The CheckShRecordsDir cases run check.sh itself in a fixture repo, with RECORDS_
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 ACTION = os.path.join(HERE, "ruling-kind")
 ACTION_YML = os.path.join(ACTION, "action.yml")
 CHECK_SH = os.path.join(ACTION, "check.sh")
@@ -77,23 +78,13 @@ GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "-c",
 BASH = shutil.which("bash")
 
 
-def rm_tree(path):
-    def clear(func, p, _exc):
-        os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
-        func(p)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=clear)
-    else:
-        shutil.rmtree(path, onerror=clear)
-
-
 @unittest.skipUnless(BASH, "needs bash to run check.sh")
 class CheckShRecordsDir(unittest.TestCase):
     """check.sh names the records folder through RECORDS_DIR. A bad folder is red, never green."""
 
     def setUp(self):
         self.tree = tempfile.mkdtemp(prefix="rdir_")
-        self.addCleanup(rm_tree, self.tree)
+        self.addCleanup(tracked_tree.rm_tree, self.tree)
         self.put("README.md", "# Home\n")  # the Home of the valid record below
         self.put("decisions/base-ruling.md", "Old ruling, no kind line. Not in the diff.\n")
         self.git("init", "-q", "-b", "main")
