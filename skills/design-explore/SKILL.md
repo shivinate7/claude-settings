@@ -14,7 +14,8 @@ worktree (`parallelism-each-own-checkout`).
 
 - **Blind lane.** The brief names only the screen's job, its users, its data shapes and the house
   rules in `~/.claude/ux/`. The brief never gives the current screen, its code, its screenshots, its
-  mockups, or the repo's design spec and tokens. The brief takes data shapes from the spec's data section or the owner's words, in plain words.
+  mockups, or the repo's design spec and tokens. The orchestrator reads the data shapes from the spec's data section or
+  the owner's words, and writes them into the brief in plain words. The brief never names the spec.
   Never paste screen code into a blind brief. A blind lane shows ideas the repo's habits would hide.
   It rests on its brief and its own instruction. Each designer's worktree holds the code, spec,
   tokens and mockups, and the guard `designer-scope` limits writes only, so nothing blocks the read.
