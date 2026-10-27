@@ -1,0 +1,9 @@
+{
+  "title": "The local gates run is green on clean main in a cloud container",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33898,
+  "why": "Coordinator, Oct 27 12:38 CDT: at least five lanes today saw the silent-undo fixture suite fail on clean main in the cloud (the gitlink fixture, plus shallow history), after c129 fixed one case, so every lane explains away a red local run.",
+  "note": "Measured by triage, Oct 27 12:45 CDT: python3 -m unittest lint.test_check_silent_undo on main 9264397 passes in this container (git 2.43, 100 tests, 1 skip for missing ssh-keygen) from a fresh clone at depth 50 and at depth 1. So the red comes from something lanes have that a fresh clone lacks: a worktree, the session's own checkout, another runner of the local gates, or pytest; unmeasured. Next cloud lane: take one failing lane's command and output (the build advisor's lanes have them), reproduce it red in a cloud container, fix the cause in the fixture or the tool, and add that container shape to the test; red first on that shape. A cry-wolf guard is spent, so this ranks ahead of new checks. Needs no answer. Port: no; it lives in claude-settings. Placed ahead of c107 (triage, Oct 27): every lane pays for it today.",
+  "updatedAt": "2026-10-27T17:46:00Z"
+}
