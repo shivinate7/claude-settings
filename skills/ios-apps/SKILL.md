@@ -1,6 +1,6 @@
 ---
 name: ios-apps
-description: Use in any repo that ships an iPhone app, before you change its build, tests, CI or shipping, or when the owner asks for a new iOS app. Holds the one iOS standard every app follows, and a starter that writes a new app at that standard.
+description: Use in any repo that ships an iPhone app, before you change its build, tests, CI or shipping, when the owner asks for a new iOS app, or before you fold or unfold an iPhone Duo simulator. Holds the one iOS standard every app follows, and a starter that writes a new app at that standard.
 ---
 
 Every iOS app of the owner works the same way: the same build, tests, phone install and TestFlight
@@ -39,6 +39,23 @@ this repo (the `compliance-check` skill runs it). A row checked by hand is read 
 | `native-check` | all four checks above, once per batch | Mac |
 | `phone` | `ios-ship install`: a Release build on the phone | Mac |
 | `testflight` | `ios-ship testflight`: archive and upload | Mac |
+
+## Folding the iPhone Duo simulator
+
+`simctl` cannot fold a simulator, and this Xcode has no Simulator app. Use the `hinge` command
+(artemnovichkov/hinge at commit `abd539d6`, at `~/.local/bin/hinge`, owner choice 2026-10-25). It
+opens no window. Never drive Device Hub to fold.
+
+- `hinge -d <udid> open|close|half|<degrees>|get|posture`. Run it outside the sandbox. When
+  `-t 6` times out, read `posture`: the angle may be set already.
+- Name the screen in each screenshot: `simctl io <udid> screenshot --display=LCD` for the outer
+  screen, `--display=LCD-1` for the inner one. The default screen changes between runs.
+- After the first `close`, the outer screen may not update. Open and close again, and check an
+  outer screenshot shows the app before tests run.
+- UI tests anchor taps and drags on the app's window, not on `app`. With the phone open, `app`
+  coordinates land on the dark outer screen.
+- `hinge` uses private Apple APIs, so an Xcode update can break it. Then the owner folds by hand:
+  Xcode > Open Developer Tool > Device Hub has Closed, Partial and Open buttons.
 
 ## A new app
 
