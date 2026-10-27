@@ -300,7 +300,7 @@ test("the receipt trail lights Read and Filed from receipts and shows only Saved
 });
 
 test("times are 24-hour Chicago time with the zone named", async (t) => {
-  const page = await open(t, { items: [mk("timed", 1, { by: "2026-10-27T14:45:00Z" })] }); if (!page) return;
+  const page = await open(t, { items: [mk("timed", 1, { by: "2099-10-27T14:45:00Z" })] }); if (!page) return;
   const f = await page.evaluate(() => [fmt("2026-10-26T20:00:00-05:00"), fmt("2026-12-01T06:05:00Z"), fmt("2026-10-27T05:07:00Z", false)]);
   assert.deepEqual(f, ["Oct 26, 20:00 CDT", "Dec 1, 00:05 CST", "00:07 CDT"]);
   const text = await card(page, { id: "timed" }).textContent();
