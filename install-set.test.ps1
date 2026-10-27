@@ -66,7 +66,8 @@ print("\n".join(sorted(ids)))
 [IO.File]::WriteAllText($ProbePy, ($ProbeText -replace "`r", ''), $Utf8)
 
 # Reads a file with read, write and delete sharing, so an installer rename is never refused by a
-# sampler. A missing or unreadable file throws; the callers catch it.
+# sampler, and a child's output file reads back while a process it left still holds it open for
+# write. A missing or unreadable file throws.
 function Read-Shared([string]$Path) {
     $share = [IO.FileShare]([int][IO.FileShare]::ReadWrite -bor [int][IO.FileShare]::Delete)
     $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
@@ -92,7 +93,7 @@ function Get-LoadedId([string]$Cfg) {
             -RedirectStandardOutput "$o.out" -RedirectStandardError "$o.err"
     } finally { foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) } }
     if ($p.ExitCode -ne 0 -or -not (Test-Path -LiteralPath "$o.out")) { return '' }
-    $ids = @([IO.File]::ReadAllText("$o.out") -split '\r?\n' | Where-Object { $_ -ne '' } | Select-Object -Unique)
+    $ids = @((Read-Shared "$o.out") -split '\r?\n' | Where-Object { $_ -ne '' } | Select-Object -Unique)
     if ($ids.Count -eq 1 -and $ids[0] -notlike '(*') { return $ids[0] }
     return ''
 }
@@ -194,7 +195,7 @@ function Invoke-Guard([string]$Cfg, [string]$Tag) {
             -ArgumentList @(('"' + (Join-Path $Cfg 'hooks\guard.py') + '"')) `
             -RedirectStandardInput $in -RedirectStandardOutput "$in.out" -RedirectStandardError "$in.err"
     } finally { Restore-Env $saved }
-    $text = if (Test-Path -LiteralPath "$in.out") { [IO.File]::ReadAllText("$in.out").Trim() } else { '' }
+    $text = if (Test-Path -LiteralPath "$in.out") { (Read-Shared "$in.out").Trim() } else { '' }
     return @{ Exit = $p.ExitCode; Text = $text }
 }
 
@@ -246,7 +247,7 @@ function Wait-Bounded($Process, [int]$Seconds) {
 # The text of a run's stdout and stderr files.
 function Get-RunText([string]$Out) {
     $parts = @()
-    foreach ($f in @("$Out.out.txt", "$Out.err.txt")) { if (Test-Path -LiteralPath $f) { $parts += [IO.File]::ReadAllText($f) } }
+    foreach ($f in @("$Out.out.txt", "$Out.err.txt")) { if (Test-Path -LiteralPath $f) { $parts += Read-Shared $f } }
     return ($parts -join "`n")
 }
 
