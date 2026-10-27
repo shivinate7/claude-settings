@@ -4495,12 +4495,31 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(wt)
         self.hold_cwd(os.path.join(wt, "DerivedData"))
         self.run_hook("bdrA", wt)
-        with self.subTest(control="native/build and DegenKit/.build"):
-            self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
-            self.assertFalse(os.path.exists(os.path.join(wt, "DegenKit", ".build")))
+        with self.subTest(sibling="native/build and DegenKit/.build: a kept process keeps the worktree's builds"):
+            self.assertTrue(os.path.isdir(os.path.join(wt, "native", "build")))
+            self.assertTrue(os.path.isdir(os.path.join(wt, "DegenKit", ".build")))
         with self.subTest(arm="DerivedData with a live cwd"):
             self.assertTrue(os.path.isdir(os.path.join(wt, "DerivedData")),
                             "DerivedData with a live process inside was removed")
+
+    def test_a_live_build_with_its_cwd_at_the_worktree_root_keeps_every_build_folder(self):
+        # xcodebuild and swift build run from the worktree root and write into DerivedData or
+        # .build, so no process cwd sits inside the folder they are writing.
+        primary = self.make_primary("rootcwd")
+        busy = self.add_agent(primary, "bdrBusy")
+        idle = self.add_agent(primary, "bdrIdle")
+        self.fill(busy)
+        self.fill(idle)
+        self.hold_cwd(busy)
+        self.run_hook("bdrBusy", busy)
+        self.run_hook("bdrIdle", idle)
+        with self.subTest(control="agent-bdrIdle with no process inside"):
+            for rel in BUILD_DIRS:
+                self.assertFalse(os.path.exists(os.path.join(idle, rel)), "%s not reaped" % rel)
+        with self.subTest(arm="agent-bdrBusy with a live process at its root"):
+            for rel in BUILD_DIRS:
+                self.assertTrue(os.path.isdir(os.path.join(busy, rel)),
+                                "%s removed while a live process ran in the worktree" % rel)
 
     def test_a_live_session_inside_the_worktree_keeps_everything(self):
         primary = self.make_primary("live")
@@ -4617,8 +4636,8 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(os.path.dirname(live), (os.path.basename(live),))
         self.hold_cwd(live)
         self.run_hook("bdrT", wt)
-        with self.subTest(control="leftover trash with no process"):
-            self.assertTrue(self.wait_gone(free), "a leftover trash name was left on disk")
+        with self.subTest(sibling="leftover trash: a kept process keeps the worktree's trash"):
+            self.assertTrue(os.path.isdir(free), "trash was deleted while a process ran in the worktree")
         with self.subTest(arm="leftover trash with a live cwd"):
             self.assertTrue(os.path.isdir(live), "a trash name with a live process inside was deleted")
 
