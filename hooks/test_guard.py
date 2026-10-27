@@ -11917,6 +11917,7 @@ add("ceiling: Agent builder Try 3 of 3 on line two after a lone quote and commen
 # A marker the role does not own, or one that is only prose, earns no grant.
 for _role, _brief in (
         ("reviewer", "Try 3 of 3. Finish the fix."),
+        ("reviewer", "Round 3 of 3. Finish the fix."),
         ("general-purpose", "Try 3 of 3. Finish the fix."),
         ("test-author", "Try 3 of 3. Finish the fix."),
         ("general-purpose", "Round 3 of 3. Finish the fix."),

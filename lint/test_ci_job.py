@@ -293,6 +293,46 @@ class RealChecks(unittest.TestCase):
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
 
 
+STAMP = os.path.join(HERE, "..", ".github", "stamp.json")
+
+
+def job_names(text):
+    """The job names under `jobs:` in a workflow text: keys at two spaces, until the next top-level key."""
+    names, inside = [], False
+    for line in text.splitlines():
+        if re.match(r"^jobs:\s*$", line):
+            inside = True
+        elif inside and re.match(r"^\S", line):
+            inside = False
+        elif inside:
+            m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if m:
+                names.append(m.group(1))
+    return names
+
+
+def missing_required(required, jobs):
+    """The required check names no job carries. merge.py waits forever on such a name."""
+    return [name for name in required if name not in jobs]
+
+
+class RequiredChecks(unittest.TestCase):
+    def test_every_required_check_in_stamp_json_is_a_job_of_checks_yml(self):
+        import json
+        with open(STAMP, encoding="utf-8") as f:
+            required = json.load(f)["merge"]["requiredChecks"]
+        with open(CHECKS, encoding="utf-8") as f:
+            jobs = job_names(f.read())
+        self.assertGreater(len(jobs), 10, jobs)
+        self.assertEqual(missing_required(required, jobs), [])
+
+    def test_a_required_name_that_no_job_carries_is_named(self):
+        # The red case: the old job name after a rename. The check must name it.
+        jobs = job_names("name: t\njobs:\n  scope:\n    runs-on: x\n  checks:\n    runs-on: x\non: push\n")
+        self.assertEqual(jobs, ["scope", "checks"])
+        self.assertEqual(missing_required(["scope", "gates", "checks"], jobs), ["gates"])
+
+
 def plan_lint(root, wf_text, extra=()):
     """Lines of `ci-job lane --lint --plan` over a workflow text."""
     path = os.path.join(root, "wf.yml")

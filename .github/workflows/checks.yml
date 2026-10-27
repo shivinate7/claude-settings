@@ -189,13 +189,13 @@ jobs:
       - name: Simulator boot-record fixture suite
         run: python3 hooks/test_sim_boot_record.py
 
-      - name: Check wrappers fixture suite
+      - name: Guard wrappers fixture suite
         run: python3 hooks/test_wrappers.py
 
       - name: Session start notice suite
         run: python3 hooks/test_session_start.py
 
-      - name: Stop-hook check fixture suite
+      - name: Stop-hook guard fixture suite
         run: python3 lint/test_report_guard.py
 
       - name: STE auto-fix fixture suite
@@ -691,7 +691,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_sim_boot_record.py
 
-      - name: Check wrappers fixture suite
+      - name: Guard wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_wrappers.py
 
@@ -699,7 +699,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_session_start.py
 
-      - name: Stop-hook check fixture suite
+      - name: Stop-hook guard fixture suite
         if: ${{ !cancelled() }}
         run: python3 lint/test_report_guard.py
 
@@ -1159,7 +1159,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: python hooks/test_daily_note.py
 
-      - name: Check wrappers fixture suite
+      - name: Guard wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_wrappers.py
 
@@ -1167,7 +1167,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: python hooks/test_session_start.py
 
-      - name: Stop-hook check fixture suite
+      - name: Stop-hook guard fixture suite
         if: ${{ !cancelled() }}
         run: python lint/test_report_guard.py
 

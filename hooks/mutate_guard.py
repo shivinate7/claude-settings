@@ -806,7 +806,7 @@ MUTATIONS = [
     ("ceiling: a Round 3 of 3 line earns the standing grant for any role, so a reviewer passes unasked",
      'if role == "builder" and isinstance(brief, str) and any(',
      'if isinstance(brief, str) and any(', "guard",
-     "ceiling: Agent reviewer on opus with the brief 'Round 3 of 3. Finish the f' asks"),
+     "ceiling: Agent reviewer on opus with the brief 'Round 3 of 3. Finish the' asks"),
     ("frozen-path: the config-watch baseline store is not frozen",
      '    os.path.normcase("state"),',
      '    os.path.normcase("state_unfrozen"),', "guard", 'frozen: Write of the config-watch baseline store'),

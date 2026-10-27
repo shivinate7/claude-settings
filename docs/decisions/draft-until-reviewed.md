@@ -4,7 +4,7 @@
 
 Owner, 2026-10-10 and 2026-10-13: every PR opens as a draft, and CI skips draft PRs. Lane PRs stay drafts. Only one integration PR per batch goes ready, and its run is the batch's only CI run (`git-integration-branch-merge`).
 
-- Guard guard `draft-pr` refuses `gh pr create` without `--draft` or `-d`. It reads `sh -c` scripts, command substitutions and subshells. The last `--draft`, `-d` or `--draft=X` wins. A value is true only in gh's ParseBool true set (1, t, T, TRUE, true, True).
+- Guard `draft-pr` refuses `gh pr create` without `--draft` or `-d`. It reads `sh -c` scripts, command substitutions and subshells. The last `--draft`, `-d` or `--draft=X` wins. A value is true only in gh's ParseBool true set (1, t, T, TRUE, true, True).
 - The guard also refuses the MCP tool `mcp__github__create_pull_request` unless its input has `draft: true`.
 - `checks.yml` runs on `opened`, `synchronize`, `reopened` and `ready_for_review`. The `scope` job skips when the PR is a draft. Each other job needs `scope`, so each skips too. Push to main, schedule and manual runs are unchanged.
 - The `concurrency` group holds the PR draft state (`format('{0}-{1}', github.ref, github.event.pull_request.draft)`), so a draft run replaces only draft runs and a ready run only ready runs. Turning off cancel for drafts is not enough: GitHub keeps one pending run per group and replaces it even with `cancel-in-progress: false`. Snippet 4 of skill ci-hygiene carries the same expression.

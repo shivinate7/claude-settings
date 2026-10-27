@@ -17,7 +17,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `landed-dirs.txt` | The folders that both installers land. |
 | `agents/` | The agent roles, one file each. |
 | `hooks/` | The guard, the watches, and the other hook scripts. |
-| `lint/` | The Simplified Technical English linter, and the checks and checks that CI runs. |
+| `lint/` | The Simplified Technical English linter, and the checks that CI runs. |
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
 | `docs/design/` | The house UX rules. |
@@ -182,7 +182,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   PATH. Hook commands run under `sh` on Windows, so put Python on Git Bash's own PATH there.
   Python 3 ships with the Command Line Tools on macOS. When it is missing, run
   `xcode-select --install`. When Python is missing, the hook command exits silently, so a
-  machine without it just runs without the checks.
+  machine without it just runs without the guards.
 * **A symlink did not take on Windows.** Enable Developer Mode. Re-run `install.ps1` once, to
   replace the copies with real symlinks.
 * **An existing `~/.claude/CLAUDE.md` or `settings.json` had content you wanted to keep.** Both

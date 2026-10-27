@@ -4091,7 +4091,7 @@ class RestRoutes(Env):
 
     def test_two_pages_of_check_runs_with_the_red_one_on_page_two_is_red(self):
         self.set(page_cap=2, checks_seq=[[("lint", "pass", ""), ("checks", "pass", ""), ("e2e", "fail", "https://x/e2e")]])
-        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["e2e", "checks", "lint"])
+        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["checks", "e2e", "lint"])
         verdict, detail = self.gh_host().head_read(7)
         self.assertEqual(verdict, "red", detail)
         self.assertIn("e2e", detail)

@@ -20,7 +20,7 @@ gh api /users/<owner>/settings/billing/usage --jq '.usageItems[] | select(.produ
 No template: a workflow token cannot read this endpoint, so an alarm would need a stored
 personal token. Set the budget alarm in the billing settings (Budgets and alerts) instead.
 
-## 3a. Check a slow check on its inputs
+## 3a. Run a slow check only when its inputs change
 
 ```yaml
 on:
@@ -182,7 +182,7 @@ cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
 pipx run zizmor==1.30.1 .github/ actions/   # must exit non-zero
 ```
 
-Check a commit on the check's own exit code. A pipe takes the exit code of its last command:
+Let the check's own exit code decide a commit. A pipe takes the exit code of its last command:
 
 ```sh
 # Wrong: tail's exit code is the pipe's. A red check still commits.

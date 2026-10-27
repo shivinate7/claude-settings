@@ -21,7 +21,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    one taken on a quiet machine.
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    CI step may already run in parallel, or be cached.
-3. **Check slow checks on their inputs.** Run a slow check after a change to the files it reads.
+3. **Run a slow check only when its inputs change.** Run a slow check after a change to the files it reads.
    Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
    trigger. If detection cannot read the diff, run the check (fail safe). A check that cannot
    read its own input exits non-zero in CI, never 0: CI reads an exit code as a verdict.
@@ -67,7 +67,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 10. **Prove each new check red once.** Break the check's target on a scratch copy. Watch the check
    fail. Restore the target. A check you did not see go red is not proven.
    A pipe hides a check's exit code. `lint | tail -1` exits 0 when lint fails, so a commit after
-   it runs on a red check. Check on the command's own exit code. See `snippets.md`, section 10.
+   it runs on a red check. Read the command's own exit code. See `snippets.md`, section 10.
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
     `ready_for_review`. Skip every job while the PR is a draft, the required check included. Work
     in a draft. Only the integration PR goes ready, once (step 8). A draft cannot merge, so it

@@ -8,7 +8,7 @@ CI_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot checks the whole checks-shoot job)
+  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot selects the whole checks-shoot job)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -230,7 +230,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p])), {"checks_windows", "checks_macos", "shell_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows", "checks_macos", "code", "guard"})
 
-    # Mod and map-skill tests run as a step of the checks, checks-windows and checks-macos jobs, checked on the
+    # Mod and map-skill tests run as a step of the checks, checks-windows and checks-macos jobs, selected by the
     # `mods` flag. A job runs on its own flag, so a path that turns on `mods` must turn on checks_windows and
     # checks_macos too, or a mod-only pull request starts neither job and the step never runs there.
     # `mods` is in ALL, so every fail-safe case in the Scope class carries the mods check.
