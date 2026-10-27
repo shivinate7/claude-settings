@@ -1071,6 +1071,10 @@ def case_prompt_spares_irreversible_and_goal_picks():
           has_pin(sentences, ("never flag",), ("cannot be undone",)), sentences)
     check("prompt: never flag a pick that changes the owner's goal",
           has_pin(sentences, ("never flag",), ("goal",)), sentences)
+    check("prompt: never flag work in another repo",
+          has_pin(sentences, ("never flag",), ("another repo", "other repo")), sentences)
+    check("prompt: never flag a pick another rule keeps for the owner's word",
+          has_pin(sentences, ("never flag",), ("rule",), ("word",)), sentences)
 
 
 def case_undoable_pick_finding_logs_its_rule():
