@@ -310,6 +310,12 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
+    # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship.
+    def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
+        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
     # bin/shoot's suite installs a browser, so only its own paths turn `shoot` on. An edit sets `code` and `shoot`
     # and no other flag; an unrelated code change leaves `shoot` off.
     def test_shoot_edit_turns_on_only_the_shoot_suite(self):

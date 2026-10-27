@@ -42,6 +42,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ci-job) on="$on code " ;;
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
+      # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job.
+      bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it. gates-shoot
       # is the one caller of actions/playwright-setup in this repo, so it also proves that action.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs|.github/shoot/*|actions/playwright-setup/*) on="$on code shoot " ;;
