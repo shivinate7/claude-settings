@@ -1251,3 +1251,17 @@ test("an item with no id field and a duplicate option key is blocked from Send a
   assert.equal(await page.locator("#send").isDisabled(), true, "Send is open for a blocked item");
   assert.equal(await page.evaluate(() => answerLine()), "");
 });
+
+for (const width of [390, 1440]) {
+  test(`the viewer is fitted the moment it opens, not after a later resize callback, at ${width} wide`, async (t) => {
+    const it = viewerItem();
+    const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 } }); if (!page) return;
+    const m = await page.evaluate((id) => {
+      document.querySelector(`#item-${id} label.opt .opic`).click();
+      const f = document.querySelector("#dStage iframe").getBoundingClientRect();
+      return { left: f.left, right: f.right, vw: innerWidth };
+    }, it.id);
+    assert.ok(m.right <= m.vw + 0.5 && m.left >= -0.5, `cut on open: ${m.left} to ${m.right}`);
+    if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "not centered on open");
+  });
+}
