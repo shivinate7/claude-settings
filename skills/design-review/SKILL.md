@@ -24,7 +24,9 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
    one at every size and theme it ships in. Use a headless or isolated browser. If a
    page needs the owner's login, use it; otherwise use none
    (`verification-browser-login-only-needed`). Before a window or a screen capture lands on the
-   owner's screen, say so in one line (`verification-announce-own-screen`).
+   owner's screen, say so in one line (`verification-announce-own-screen`). `bin/shoot` also writes
+   each rendered page as `.html`. Run `python3 ~/.claude/lint/label_once.py` on those files, and
+   give its hits to Reviewer A and the design reviewer (`ux-label-once`, a label shows once).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
    screenshots, plus the reviewer's own instructions below. Never give a reviewer the repo's
    design spec, tokens or design decisions.
