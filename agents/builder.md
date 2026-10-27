@@ -48,12 +48,6 @@ split you propose. Never review your own work. The orchestrator sends a reviewer
 Prove your change once: show the test-author's new cases green on your code. Run only the
 suites your change touches. Never run the full suites locally. When your lane changes a file a
 mutation test targets, run that mutation test once through `verdict` before pushing.
-One exception: in claude-settings, when your head touches lint/, hooks/ or actions/, fetch
-origin/main and run `ci-job gates --base origin/main` once before you report. This one full run
-replaces the touched-suites runs for that head, because another suite's fixture can copy the file
-you changed. It runs every step of the Linux gates job, each through `verdict`, and prints one
-verdict per step. The Windows and macOS jobs stay with CI. Report each FAIL and each unknown step.
-Never report an unknown step as a pass.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
