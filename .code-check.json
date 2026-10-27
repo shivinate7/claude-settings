@@ -1,0 +1,4 @@
+{
+  "exclude": ["skills/impeccable/"],
+  "mypy_modules": ["hooks/shared_names.py", "lint/check_claude_md_size.py"]
+}
