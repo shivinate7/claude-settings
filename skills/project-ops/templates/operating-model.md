@@ -10,7 +10,7 @@ hand-off rule below.
 
 - **Triage.** The gatekeeper of the roadmap. Only triage writes a new step, merges two steps,
   changes the work order, or closes a step. Only triage publishes the roadmap page, from the head
-  of the record branch. Triage reviews the whole roadmap at each batch merge and when the owner asks.
+  of the record branch, with `--live` at each publish (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner asks.
 - **Build advisor.** Keeps about <4 to 6> build threads running, in roadmap order. Owns the build
   order, the merge queue and the integration branch. Dispatches no deferred step.
 - **Local liaison.** Writes briefs for work that needs a local machine, and reads back the
