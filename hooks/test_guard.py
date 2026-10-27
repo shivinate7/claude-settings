@@ -14477,6 +14477,126 @@ for _act in OV_ACTS:
             LOG_CHECKS_EXTRA.append((_label, ov_act_check(_act, _is_timed)))
 
 
+# A refusal ends with the line an owner types to lift it (step c80 of decision owner-override), or
+# says that no override lifts it. The line is read through hooks/override.py, its one home, so these
+# checks pin that the refusal carries it, not its exact wording. The typed words are pinned too.
+try:
+    import override as _override_home
+except ImportError:
+    _override_home = None
+OV_NO_OVERRIDE_PHRASE = "no override"  # stable words of the vetoed sentence, for a path that cannot import override
+
+
+def ov_home(name):
+    """override.<name>, or None while the name is missing (the check then fails on its own line)."""
+    return getattr(_override_home, name, None)
+
+
+def ov_offer_check(kind):
+    """A liftable refusal ends with the override line: the main session names `override` and `override 15m`,
+    an agent's call names `override 15m`, and the Opus spawn ask names `opus 2h`."""
+    def check():
+        config, session = ov_config("offer-" + kind), "ov-offer-" + kind
+        if kind == "opus":
+            got, reason = ov_call("Agent", dict(OV_OPUS_SPAWN), NOGIT, config, session, 0)
+            want, rule, words = "ask", "agent-model-cap", ("opus 2h",)
+            expected = ov_home("offer")
+            expected = expected(rule, spawn_role="general-purpose") if expected else None
+        else:
+            agent = OV_AGENT if kind == "agent" else None
+            got, reason = ov_kill(config, session, 0, agent)
+            want, rule, words = "deny", "machine-wide-kill", ("override 15m",)
+            expected = ov_home("offer")
+            expected = expected(rule, agent_id=agent) if expected else None
+        if got != want:
+            return False, "got %s (%s), want %s" % (got, reason[:70], want)
+        for word in words:
+            if word not in reason:
+                return False, "the refusal does not name %r: %s" % (word, reason[-120:])
+        if kind == "main" and reason.count("override") < 2:
+            return False, "the main session's refusal names one override word, want `override` and `override 15m`"
+        if not expected:
+            return False, "override.offer is missing, so the line cannot be read from its home"
+        if not reason.rstrip().endswith(expected.strip()):
+            return False, "the override line is not last: %s" % reason[-120:]
+        return True, "the refusal ends with the %s override line" % kind
+    return check
+
+
+def ov_vetoed_check(label, call):
+    """A refusal no override lifts ends with override.NO_OVERRIDE and offers no typed word."""
+    def check():
+        config, session = ov_config("veto-" + label), "ov-veto-" + label
+        got, reason = call(config, session)
+        if got != "deny":
+            return False, "got %s (%s), want deny" % (got, reason[:70])
+        constant = ov_home("NO_OVERRIDE")
+        if not constant:
+            return False, "override.NO_OVERRIDE is missing"
+        if constant.strip() not in reason:
+            return False, "the refusal lacks the no-override line: %s" % reason[-120:]
+        if "override 15m" in reason:
+            return False, "the refusal offers an override that cannot lift it: %s" % reason[-120:]
+        return True, "the refusal says that no override lifts it"
+    return check
+
+
+for _kind in ("main", "agent", "opus"):
+    LOG_CHECKS_EXTRA.append(("override: a refusal an override lifts ends with the %s override line" % _kind,
+                             ov_offer_check(_kind)))
+LOG_CHECKS_EXTRA.append((
+    "override: a kill of pid 1 ends with the no-override line",
+    ov_vetoed_check("kill-init", lambda config, session: ov_call(
+        "Bash", {"command": "kill 1"}, NOGIT, config, session, 0))))
+LOG_CHECKS_EXTRA.append((
+    "override: a write of the config settings ends with the no-override line",
+    ov_vetoed_check("frozen", lambda config, session: ov_call(
+        "Write", {"file_path": slash(os.path.join(config, "settings.json")), "content": "{}"}, NOGIT,
+        config, session, 0))))
+
+
+def ov_fail_closed_says_no_override():
+    """The deny for a missing sibling module cannot check the acts no override lifts, so no override lifts
+    it. That path imports no other module, so the sentence sits inline in guard.py."""
+    drop = "guard_kill"
+    run = _run_copy(_guard_copy("no-override-" + drop, drop + ".py"), FAILCLOSED_CALL, "no-override-" + drop)
+    decision, reason = _decision(run)
+    if decision != "deny":
+        return False, "the call is %r with %s missing, want deny" % (decision, drop)
+    if OV_NO_OVERRIDE_PHRASE not in reason.lower():
+        return False, "the reason does not say that no override lifts it: %r" % reason[-120:]
+    return True, "the missing-module deny says that no override lifts it"
+
+
+LOG_CHECKS_EXTRA.append(("override: a missing-module deny says that no override lifts it",
+                         ov_fail_closed_says_no_override))
+
+
+# pkill and killall are refused by guard_kill through refuse(), which an override lifts. The settings.json
+# deny entries for them are checked before the hook runs, so no override reached them.
+OV_ACTS_BY_NAME = (
+    ("pkill-name", "a pkill by name", "pkill node", NOGIT, "deny", "machine-wide-kill", None),
+    ("killall-name", "a killall by name", "killall node", NOGIT, "deny", "machine-wide-kill", None),
+)
+for _act in OV_ACTS_BY_NAME:
+    LOG_CHECKS_EXTRA.append(("override: a one-act override lets through %s once, then it is refused again" % _act[1],
+                             ov_act_check(_act, False)))
+
+
+def settings_denies_no_name_kill():
+    """settings.json holds no deny entry for pkill or killall: such an entry refuses before the hook
+    runs, so an owner override cannot lift it."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        deny = json.load(handle).get("permissions", {}).get("deny", [])
+    held = [entry for entry in deny if re.match(r"Bash\((pkill|killall)\b", entry)]
+    if held:
+        return False, "the deny list still holds %s" % held
+    return True, "no deny entry for pkill or killall"
+
+
+LOG_CHECKS_EXTRA.append(("override: settings.json denies neither pkill nor killall", settings_denies_no_name_kill))
+
+
 # The ask on an Opus spawn is liftable (an override lifts it like any other ask), while the
 # same rule's ask on a settings write stays outside every override (ov_role_acts and ov_cap_shell_acts
 # below). Each story first wants the ask with no override.

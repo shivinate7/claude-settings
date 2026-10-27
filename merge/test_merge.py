@@ -452,6 +452,15 @@ class Flow(Env):
         self.assertEqual(self.head(), before)
         self.assertFalse(self.lock_ref())
 
+    def test_a_refusal_says_that_no_override_lifts_it(self):
+        # merge.py runs as a command, after the guard's gate, so an owner override cannot reach a Stop
+        # (decision owner-override). The printed refusal says so.
+        self.host.mergeable = "CONFLICTING"
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("CONFLICTING", out)
+        self.assertIn("no override", out.lower())
+
     def test_a_closed_or_merged_pr_is_refused_before_any_claim(self):
         before = self.head()
         for state in ("CLOSED", "MERGED"):

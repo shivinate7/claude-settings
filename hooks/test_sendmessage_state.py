@@ -616,11 +616,23 @@ def case_override_lifts_a_deny():
     check("one-act override: an allowed send leaves it unspent", r.out == "" and claims(r) == [], detail(r))
 
 
+def case_deny_ends_with_the_override_line():
+    # step c80 of decision owner-override: a refusal an override can lift names the typed word.
+    r = run_hook(hook_input(), reader_mode="idle", wording=FLAG)
+    d = r.deny() or {}
+    check("a deny names `override 15m` for the main session", d.get("permissionDecision") == "deny"
+          and "override 15m" in d.get("permissionDecisionReason", ""), detail(r))
+    r = run_hook(hook_input(agent="a1"), reader_mode="idle", wording=FLAG)
+    reason = (r.deny() or {}).get("permissionDecisionReason", "")
+    check("a deny for an agent's call names `override 15m`", "override 15m" in reason, detail(r))
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
                  case_wording_judge_denies_any_receiver,
                  case_override_lifts_a_deny,
+                 case_deny_ends_with_the_override_line,
                  case_idle_and_waiting_allow_with_no_model_call,
                  case_busy_flag_rows,
                  case_busy_allows_when_the_model_does_not_flag,
