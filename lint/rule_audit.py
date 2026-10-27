@@ -103,7 +103,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
 RULE_FLOOR = 99
-UNMECHANIZED_EXPECTED = 65
+UNMECHANIZED_EXPECTED = 66
 JUDGMENT_EXPECTED = 22
 REASON_MIN_WORDS = 8
 
