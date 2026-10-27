@@ -63,6 +63,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
+  rm-after-cd          deny. A recursive delete of a relative target after a cd.
+                       (rm-after-cd-names-an-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder or a folder above it, in either shell.
@@ -265,7 +267,7 @@ while True:
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
-            rm_var_hits, rm_var_reason,
+            rm_after_cd_hits, rm_after_cd_reason, rm_var_hits, rm_var_reason,
         )
         _loading = "guard_mask_script"
         from guard_mask_script import (
@@ -2250,6 +2252,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_var_hits(stripped, cwd)
     if hits:
         refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))
+    # 3d2. A recursive delete of a relative target after a cd (decision rm-after-cd-names-an-absolute-path).
+    hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
+    if hits:
+        refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
 
     # 3b. A trap ported from banchi's `scripts/guard-shell.py`: `ln -s` onto a directory that is
     # already there. It reads the segment's own command word, never a substring, and reads the

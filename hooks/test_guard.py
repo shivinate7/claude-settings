@@ -3850,6 +3850,50 @@ sh("rm-var redirect: PowerShell drive root with a redirect to $HOME is refused",
    "Remove-Item -Recurse -Force C:\\ > $HOME\\log", "deny", "destructive-delete",
    tool="PowerShell", cwd=NOGIT)
 
+# A DELETE AFTER A CD. Decision rm-after-cd-names-an-absolute-path (likely risk, seen 2026-10-27):
+# `cd X; rm -r.. <relative target>` is refused, because Claude Code's own critical-path prompt cannot
+# follow the cd, and a failed cd runs the rm in the working folder. The remedy names the target
+# under the cd folder. An absolute or variable target, and an rm with no -r, pass.
+sh("rm-var: the 2026-10-27 scratch delete, a cd then a relative glob, is refused",
+   "S=/private/tmp/claude-501/w/scratchpad; cd $S; rm -rf dl/*", "deny", "rm-after-cd",
+   cwd=NOGIT, carries=('rm -rf "$S"/dl/*',))
+sh("rm-var: cd and && then a relative target is refused",
+   'cd "$S" && rm -rf dl', "deny", "rm-after-cd", cwd=NOGIT, carries=('rm -rf "$S"/dl',))
+sh("rm-var: a cd to a literal path then a relative target names the joined path",
+   "cd /tmp/w && rm -r out/a", "deny", "rm-after-cd", cwd=NOGIT, carries=("rm -r /tmp/w/out/a",))
+sh("rm-var: a cd, another command, then a relative target is refused",
+   "cd /tmp/w; ls; rm -rf out", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd and rm in a subshell is refused",
+   "(cd /tmp/w && rm -rf out)", "deny", "rm-after-cd", cwd=NOGIT, carries=("rm -rf /tmp/w/out",))
+sh("rm-var: a cd and rm after set -e is refused",
+   "set -e; cd /tmp/w; rm -rf out", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd and rm in a brace group is refused",
+   "{ cd /tmp/w; rm -Rf out; }", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a long recursive flag after a cd is refused",
+   "cd /tmp/w && rm --recursive --force out", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd then an absolute target passes",
+   "cd /tmp/w && rm -rf /tmp/w/out", "allow", cwd=NOGIT)
+sh("rm-var: a cd then a quoted variable target passes",
+   'cd "$S"; rm -rf "$S"/dl', "allow", cwd=NOGIT)
+sh("rm-var: the remedy form passes",
+   'S=/tmp/w; rm -rf "$S"/dl/a', "allow", cwd=NOGIT)
+sh("rm-var: a cd then an rm with no -r passes",
+   "cd /tmp/w && rm out/a.txt", "allow", cwd=NOGIT)
+sh("rm-var: a cd then rm -f with no -r passes",
+   "cd /tmp/w; rm -f out/a.txt", "allow", cwd=NOGIT)
+sh("rm-var: a relative recursive delete with no cd passes",
+   "rm -rf out", "allow", cwd=NOGIT)
+sh("rm-var: an rm inside a quoted string after a cd passes",
+   'cd /tmp/w && echo "rm -rf out"', "allow", cwd=NOGIT)
+sh("rm-var: a semicolon and rm inside a quote after a cd pass",
+   "cd /tmp/w && echo \"don't; rm -rf out\"", "allow", cwd=NOGIT)
+sh("rm-var: an rm after a comment opener on the cd line passes",
+   "cd /tmp/w # it's; rm -rf out", "allow", cwd=NOGIT)
+sh("rm-var: a hash inside a word is no comment, the delete after a cd is refused",
+   "cd /tmp/w; rm -rf fix#3", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: an apostrophe in a comment after the rm does not hide it",
+   "cd /tmp/w; rm -rf out # the driver's shape", "deny", "rm-after-cd", cwd=NOGIT)
+
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
 # False alarms: each one only reads or writes a note, so each is allowed.
