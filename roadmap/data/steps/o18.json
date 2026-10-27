@@ -4,6 +4,6 @@
   "status": "review",
   "order": 110.5,
   "why": "Left out of o2's lane 2 (Oct 26): the rest of claude-settings' records moved under docs/, but ux/ did not.",
-  "note": "PR #658 (move the house UX rules to docs/design/), head 309887d, is reviewed (Sonnet round 1 CLEAR; its one low Windows prune finding is fixed) and sent to the build advisor for the next batch. The guard now matches a frozen dir as a path prefix, because docs/design is two levels deep. New guard cases fail on main (3) and pass on the branch. Both installers remove the old ~/.claude/ux links and folder. The agents' read paths stay paths (~/.claude/docs/design/...), because docs/decisions is not installed and a slug cite would not resolve in other repos. Full guard suite: 1 of 3974 fails (load-brake probe counts 2 child processes), on main too in the cloud container, so not this PR's. No conflict with PR #657. Port: no; child repos follow o2's roll-out.",
-  "updatedAt": "2026-10-27T01:35:00Z"
+  "note": "PR #658 (move the house UX rules to docs/design/) merged to main on Oct 26 22:09 CDT. ux/ is now docs/design/, installed and frozen there, and both installers remove the old ~/.claude/ux. Ready for triage to close. Port: no; child repos follow o2's roll-out.",
+  "updatedAt": "2026-10-27T03:10:00Z"
 }
