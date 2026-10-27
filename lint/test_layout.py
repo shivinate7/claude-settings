@@ -258,7 +258,7 @@ class Readers(Tree):
         guard = load("guard_under_test", os.path.join(REPO, "hooks", "guard.py"))
         with open(os.path.join(LINT, "layout.json"), encoding="utf-8") as f:
             data = json.load(f)
-        self.assertEqual(guard.record_folders(json.dumps(data)), ["decisions", "debts"])
+        self.assertEqual(guard.record_folders(json.dumps(data)), ["docs/decisions", "decisions", "docs/debts", "debts"])
         data.pop("legacy")
         self.assertEqual(guard.record_folders(json.dumps(data)), ["docs/decisions", "docs/debts"])
         with self.assertRaises(ValueError):
