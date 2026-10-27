@@ -18,8 +18,8 @@ The layout:
 
 - Core, every repo: `CLAUDE.md`; `AGENTS.md`, a symlink to `CLAUDE.md`; `.claude/rules/`;
   `docs/decisions/`; `docs/debts/` with `README.md` and `notes.md`; `docs/plans/`, each plan deleted
-  when its work ships; `docs/specs/`, how a shipped feature works now; `docs/todo.md`, the tasks a
-  session catches; `docs/records.md`, generated.
+  when its work ships; `docs/specs/`, how a shipped feature works now; `docs/records.md`, generated.
+  Also `docs/todo.md`, the tasks a session catches.
 - Repos with screens add: `docs/design/` (`DESIGN.md`, `mockups/`, `reference/`); `tokens/tokens.json`;
   `shots/`, ignored by git.
 - A repo names its own extra kinds (home's `records/`) in its extras file, `.claude/layout-extras.json`.
@@ -27,8 +27,8 @@ The layout:
 
 A repo that has not rolled out is read at its legacy folders, the ones each tool read before the
 layout. So no tool changes its verdict on a repo before that repo moves its own files. A kind that one
-repo keeps in a place of its own (q_max's `specs/todo.md`) is read there through the layout's
-`legacy-repos` map, keyed by the repo's GitHub name, until that repo moves it. A rolled-out repo's extras
+repo keeps in a place of its own (q_max's `specs/todo.md`) is read there until that repo moves it.
+The layout's `legacy-repos` map holds that place, keyed by the repo's GitHub name. A rolled-out repo's extras
 file may repeat a path that map keeps for the kind, never name another. The last roll-out deletes both legacy maps.
 
 - Owner ruling, 2026-10-22: the same folders in every repo, not a per-repo declaration.
