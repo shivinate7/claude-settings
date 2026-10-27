@@ -1190,7 +1190,13 @@ def read_lanes(wt, base_ref, sha):
             seen.add(h)
             h, n = undone[h], n + 1
         return n % 2 == 1
-    tips = [t for t in took if git(wt, "merge-base", "--is-ancestor", t, base_ref)[0]]
+    tips = []
+    for t in took:
+        c, out = git(wt, "merge-base", "--is-ancestor", t, base_ref)
+        if c not in (0, 1):  # 1 is "not an ancestor"; any other code is a failed read
+            raise ValueError(f"git merge-base failed on {t[:9]}: " + (out.splitlines() or ["?"])[-1])
+        if c:
+            tips.append(t)
     return tips, {t for t in tips if all(reverted(h) for h in took[t])}
 
 def lane_tips(wt, base_ref, sha):
