@@ -39,7 +39,9 @@ designer.
    the kind; a designer reads a brief with no kind as informed. The brief gives the lane its `<n>`.
    A blind lane never reads other files in the design folder, sibling lane mockups included. Point the brief at files; never paste them
    (`tokens-point-brief-at-files`). Write each brief to `<scratchpad>/design-explore/<screen>/<screen>-<kind>-<n>.md`.
-2. **Check the briefs.** Run `python3 ~/.claude/hooks/blind_brief.py --run <that folder>`. Add one
+   The Device section comes from `python3 ~/.claude/lint/layout.py devices <repo root>`: the repo's devices in
+   order, first device first. Do not type a device list of your own. A mockup draws the first device only; the rest come on request, or when the layout breaks between them.
+2. **Check the briefs.** Run `python3 ~/.claude/hooks/blind_brief.py --run <that folder> --root <repo root>`. Add one
    `--current <view>` per view name of today's product that is not a plain word of the job. If the
    owner asked for no blind lane, add `--owner-asked-none "<words>"`. Exit 0 is clean. On exit 1,
    rewrite each brief it names and run it again. The same check runs at each designer spawn

@@ -33,6 +33,10 @@ tokens. An informed lane reads all of them. A directed lane is informed and foll
 direction. The first line of your brief is `Lane kind: blind|informed|directed`, and a directed lane adds its direction. Treat a brief that names no kind as an informed lane. The brief gives your `<n>`. In a blind lane, follow your brief's House rules: type and spacing from `~/.claude/docs/design/tokens.md`, and colour from the brief's Palette section, or from `tokens.md` when it says none. Use the repo's real tokens in the other lanes. In a lane of that skill, name your files
 `<screen>-<kind>-<n>` and print the lane kind on the page, and the direction in a directed lane.
 
+Devices. Run `python3 ~/.claude/lint/layout.py devices <repo root>` for the repo's device list. Draw the first
+device only. Draw the others when the brief or the owner asks, or when the layout breaks between them. Never
+invent a size: a device with no written size is drawn at the brief's size, and you say so in your notes.
+
 For each screen the brief names, write two files in the design folder:
 
 - `<screen>.html`, or `<screen>-<kind>-<n>.html` in a lane of that skill: one page that opens from disk with no server and no network. Inline its CSS and

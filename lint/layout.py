@@ -194,6 +194,73 @@ def waiting_page(root):
     return found
 
 
+def _repo_keys(root):
+    """The extras file of `root` as a dict, or {} when the repo has none."""
+    return _read(_extras(root)) if rolled_out(root) else {}
+
+
+def _named(root, key, table):
+    """The value of extras key `key` when it names an entry of layout table `table`, None when unset.
+    LayoutError when it names no entry."""
+    found = _repo_keys(root).get(key)
+    if found is None:
+        return None
+    if not isinstance(found, str) or found not in layout().get(table, {}):
+        raise LayoutError("%s: %s %r is not one of %s" % (_extras(root), key, found, ", ".join(layout().get(table, {}))))
+    return found
+
+
+def devices(root):
+    """[{id, name, size}] for the repo at `root`, first device first: the repo's own "devices" list, else
+    the default order of its "kind". None (printed as `unknown`) when the repo names neither. A size is
+    None until a written source gives it (lint/layout.json, "devices"): no size is ever guessed."""
+    keys, table = _repo_keys(root), layout().get("devices", {})
+    listed = keys.get("devices")
+    kind = _named(root, "kind", "app-kinds")
+    if listed is None:
+        if kind is None:
+            return None
+        listed = layout()["app-kinds"][kind]["devices"]
+    if not isinstance(listed, list) or not listed or any(item not in table for item in listed):
+        raise LayoutError("%s: devices is not a list of %s" % (_extras(root), ", ".join(table)))
+    return [dict(table[item], id=item) for item in listed]
+
+
+def caution(root):
+    """{level, facts, acts} for the repo at `root`: its "caution" key, else the level its "visibility"
+    key maps to, else the layout's default (public). The visibility source is a key in the extras file,
+    so it reads offline."""
+    level = _named(root, "caution", "cautions")
+    if level is None:
+        by, seen = layout().get("visibility-caution", {}), _repo_keys(root).get("visibility")
+        level = by.get(seen, by["default"]) if isinstance(seen, str) and seen != "default" else by["default"]
+        if level not in layout().get("cautions", {}):
+            raise LayoutError("%s: visibility-caution maps to no caution level" % LAYOUT_FILE)
+    found = layout()["cautions"][level]
+    return {"level": level, "facts": list(found["facts"]), "acts": list(found["acts"])}
+
+
+def describe_devices(root):
+    """The text `layout.py devices` prints: one device per line, the first one drawn first."""
+    found = devices(root)
+    if found is None:
+        return "unknown"
+    return "\n".join("%s: %s; size %s" % (d["id"], d["name"], _size(d.get("size"))) for d in found)
+
+
+def _size(size):
+    if size is None:
+        return "not written"
+    return "%s (%s)" % (size.get("text", ""), size["source"])
+
+
+def describe_caution(root):
+    """The text `layout.py caution` prints, and session start prints: the level, its facts, its acts."""
+    found = caution(root)
+    return "\n".join(["caution: " + found["level"]] + ["fact: " + f for f in found["facts"]]
+                      + ["act: " + a for a in found["acts"]])
+
+
 def folders(root, flag):
     """The paths in `root` of each kind whose `flag` (record, listed) is true, in layout order."""
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
@@ -203,12 +270,20 @@ if __name__ == "__main__":
     import sys
     # python3 lint/layout.py path <root> <kind>: one path, for a shell step.
     # python3 lint/layout.py waiting-page <root>: the page URL, or "unknown".
-    if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] == WAITING_PAGE):
-        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page <root>")
+    # python3 lint/layout.py devices <root>: the repo's devices, first drawn first, or "unknown".
+    # python3 lint/layout.py caution <root>: the repo's caution level with its facts and acts.
+    ROOT_VERBS = (WAITING_PAGE, "devices", "caution")
+    if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] in ROOT_VERBS):
+        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution <root>")
     try:
+        here = os.path.abspath(sys.argv[2])
         if sys.argv[1] == WAITING_PAGE:
-            print(waiting_page(os.path.abspath(sys.argv[2])))
+            print(waiting_page(here))
+        elif sys.argv[1] == "devices":
+            print(describe_devices(here))
+        elif sys.argv[1] == "caution":
+            print(describe_caution(here))
         else:
-            print(path(os.path.abspath(sys.argv[2]), sys.argv[3]))
+            print(path(here, sys.argv[3]))
     except (LayoutError, KeyError) as err:
         sys.exit("layout: %s" % err)
