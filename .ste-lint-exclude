@@ -1,3 +1,3 @@
 # One git pathspec per line, left out of the STE lint (CI step and bin/ste-changed).
-# Third-party prose, pinned (decisions/design-skills.md).
+# Third-party prose, pinned (docs/decisions/design-skills.md).
 skills/impeccable/**

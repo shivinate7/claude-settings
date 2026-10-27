@@ -27,7 +27,7 @@ from guard_core import (
 # against the home directory. It reads the file with `utf-8-sig`, because the Windows installer
 # writes that file and a byte order mark there would hide the first line from a `^@` match.
 #
-# THE PREDICATE IS THE ACT, NOT THE SPELLING (decisions/predicate-is-the-act.md, judge the act).
+# THE PREDICATE IS THE ACT, NOT THE SPELLING (docs/decisions/predicate-is-the-act.md, judge the act).
 # The act is "HEAD in that one checkout stops naming `main`". `checkout` and `switch` are the two
 # subcommands that take it.
 #

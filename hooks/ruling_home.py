@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """At Stop, blocks once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost.
 
-`decisions/memory-is-never-a-rulings-only-home.md`, "The mechanism", names the defect this
+`docs/decisions/memory-is-never-a-rulings-only-home.md`, "The mechanism", names the defect this
 closes: an orchestrator's auto-memory can hold an owner ruling that reaches no tracked file in
 the repo. This hook is that mechanism. It matches that section's 9 numbered items exactly.
 
 WHAT IT CHECKS. The memory folder is `<dirname(transcript_path)>/memory`. If that folder does
 not exist, this hook does nothing. It keys on an ACT, not on prose
-(`decisions/predicate-is-the-act.md`): a `.md` file in the folder (`MEMORY.md`, the index,
+(`docs/decisions/predicate-is-the-act.md`): a `.md` file in the folder (`MEMORY.md`, the index,
 excepted) counts as written THIS SESSION when a `Write`, `Edit`, or `MultiEdit` tool use since
 the last human message names it, OR a `Bash` tool use since the last human message names the
 memory folder in its command text (item 1). All sessions of one project share the memory
@@ -32,7 +32,7 @@ remote branch's tree holds a BLOB (never a tree) at that path right now (item 6)
 not count: this hook only ever looks inside THIS repository's own tree (item 7). The hook
 checks only that the value RESOLVES, never comparing text, so a paraphrase of an
 already-recorded ruling cannot make it cry wolf (item 8;
-`decisions/guard-that-cries-wolf-is-spent.md`): "A guard that goes red when nothing is wrong is
+`docs/decisions/guard-that-cries-wolf-is-spent.md`): "A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it."
 
 RESOLUTION, ONE GIT PROCESS PER VALUE. `git for-each-ref` lists every `refs/heads` and
@@ -51,7 +51,7 @@ FAIL OPEN, NARROWLY (item 9). `stop_hook_active` set means this Stop firing is a
 rewrite, so the hook stays quiet. Otherwise it stands down (exit 0, no block) only for an
 unreadable transcript, a missing `git` binary, a `git` call that times out, or a repository git
 itself cannot read (`for-each-ref` exiting non-zero, e.g. a `.git` file pointing at a missing
-gitdir): per `decisions/recovery-must-not-gate-on-its-own-state.md`, a recovery control (here,
+gitdir): per `docs/decisions/recovery-must-not-gate-on-its-own-state.md`, a recovery control (here,
 the owner's own path to seeing a ruling was not filed) must not depend on the very state it is
 meant to recover from. It never stands down over one value's own git answer (`cat-file
 --batch-check` exiting non-zero, or simply answering "not a blob"): that value alone does not
