@@ -559,3 +559,5 @@
 - ci-wake-rest-404-is-nopr: a mistyped -R repo gives a REST 404, read as no PR. So the watch is silent where it said unknown. `gh pr ready` fails the same way, so the error still shows (hooks/ci_wake.py read_pr)
 - ci-wake-hash-selector-misses: `gh pr ready #12` takes the branch route (`head=owner:#12`) and ends with no watch; fix is to strip `#` before the digit test (hooks/ci_wake.py read_pr)
 - ci-wake-branch-route-narrow: the branch and empty selectors match only open PRs with head `<owner>:<local branch name>`, so a fork head, a branch pushed under another name, or a closed PR gives no watch (hooks/ci_wake.py read_pr)
+- pick-gate-drive-letters: a drive name such as "the A: drive and the B: drive" in an Input Needed item reads as two lettered options (lint/report_gate.py OPTION_INLINE_RE). Decision: decisions-reach-a-clickable-pick.
+- pick-gate-way-word: a plain ask with an inline numbered list and the word "way", "option" or "choose", such as "Is there a way to run 1. tests 2. lint?", reads as a pick (lint/report_gate.py PICK_WORD_RE). Decision: decisions-reach-a-clickable-pick.
