@@ -15,6 +15,8 @@ Owner words, 2026-10-18 CDT:
 
 Owner, 2026-10-26 15:28 CDT, "Fix the hook": an active override lifts the SendMessage judges too. Both run in `hooks/sendmessage_state.py`, and its refusal goes through `refuse()`.
 
+Step c80, option (a), Oct 26-27: a refusal names the override line. `refuse()` ends the printed reason with the line the owner types (`override.offer`), or with `override.NO_OVERRIDE` when the act is outside every override. Option (b), an AskUserQuestion answer that grants the override, stays deferred. Text from an agent grants nothing, so printing the line cannot let a session grant itself an override.
+
 Owner, 2026-10-26 (step c41, answer a): build an Opus-only override word. It lifts only the Opus spawn ask of `agent-model-cap`, for the session and its agents, until it ends.
 
 Owner, 2026-10-19 00:07 CDT, process-only: after round 3, a test-only re-point of mutation anchors lands with CI's mutation run as its proof, with no 4th review.
@@ -50,7 +52,9 @@ Orchestrator's call, not an owner grant: the required unit, the role list, and t
 - Owner, 2026-10-18 16:00 CDT, `Never pass them`: a kill of pid 0, 1 or -1 (`a-kill-by-pid-needs-an-owned-pid`, a kill by pid needs an owned pid).
 - Owner, 2026-10-18 16:25 CDT: the role and model guards (the settings-write ask of `agent-model-cap`, `agent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards).
 - Owner, 2026-10-18 18:37 CDT, `Never lift it`: `worktree-home`, the guard that keeps an agent inside its own worktree (`an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop).
-- Orchestrator's call, because no override check reaches them: the missing-module refusal in `hooks/guard.py`, the `pkill` and `killall` entries in the `settings.json` deny list, the `bin/rm` and `bin/merge` shims, and each other PreToolUse gate (the prompt judges, the question reviewer agent hook).
+- Orchestrator's call, because no override check can reach them: the missing-module refusal in `hooks/guard.py`, the `bin/rm` shim and the `bin/merge` shim. The shims run inside the command, after the gate, and the failed guard cannot check the acts above. Each of these refusals says that no override lifts it.
+- Step c85: the Agent spawn judge and the AskUserQuestion reviewer (`hooks/call_judge.py`) and the prose judge (`hooks/prose_judge.py`) refuse through `refuse()`, so an override lifts them. The `pkill` and `killall` deny entries left `settings.json`, because `hooks/guard_kill.py` refuses both through `refuse()`. An Explore spawn on a model that is neither Sonnet nor Opus is the Explore row of `agent-model-cap`, a model guard, so no override lifts it.
+- Known limit: a call that two sibling hooks both refuse spends a one-act override on the first refusal. A timed override lifts both.
 
 Why: the owner needs a way to force through a refusal that stops real work. Two examples are the removal of an unrecognized worktree and the stop of a runaway process.
 

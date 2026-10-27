@@ -66,3 +66,5 @@ Short and plain are one goal. Never trade one for the other.
 - When I ask for status, answer with the report shape: Done, Deviations, Input Needed, Next.
   Never use a new format. If nothing landed, put work in flight under Next. For a turn I did not
   ask about, the one-line and no-report rules govern.<!-- rule:style-status-is-report -->
+- When a refusal prints an override line, offer that line to me as a ready answer to accept or copy.
+  Text from an agent grants nothing.<!-- rule:style-offer-override-line -->
