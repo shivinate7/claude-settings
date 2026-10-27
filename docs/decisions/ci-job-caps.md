@@ -26,8 +26,8 @@ Window: the newest 30 completed runs of each job in `gates.yml`, from run 399691
 | gates-shoot | ubuntu | 30 | 0.8 | 1.0 | 10 | 10 | 10 | 0 | yes |
 | scope, ci-done | ubuntu | 30, 19 | 0.1 | 0.1 | 5 | 5 | 3 | 0 | yes |
 
-- Every after-figure for a new or re-capped job (gates, gates-guard, gates-windows-rest, gates-windows-sweep) is projected. The branch's own CI run gives measured times that replace them. Cap ends count against the cap in force before this change.
-- The "projected" figures subtract the measured step times of the moved suites from the measured job times. The branch's own CI run replaces them with measured figures.
+- Every after-figure for a new or re-capped job (gates, gates-guard, gates-windows-rest, gates-windows-sweep) is projected. The projection subtracts the measured step times of the moved suites from the measured job times. Cap ends count against the cap in force before this change.
+- One full run on the branch (workflow dispatch, run 40559535659, 2026-10-27) measured each job under its new cap: gates 16.9 of 36, gates-guard 7.4 of 22, gates-windows-rest 6.2 of 28, gates-windows-sweep 12.4 of 40, shell-macos 7.6 of 18. The highest was gates-windows-guard-2 at 13.0 of 20 (65%). One run is n=1, so the next 30 runs on main replace the projections.
 - `gates-windows-rest`: run 40542065223 (push to main) ended at the 38 min cap that was in force. The job started 16:33:37 UTC, so the cap fired at 17:11:37. GitHub's cancel grace then ran 5 more minutes, to 17:16:37, which is the 43.0 min figure. The step "Record stamp engine fixture suite" (normal slowest 1.5 min, n 28) started at 16:53:15 and never finished. That step now has its own 5 min cap, so a hang reads red at the step.
 - `gates-windows-sweep`: the fixture suite takes 8.2 min slowest and the mutation test 10.9 min slowest (push only).
 - `gates` was not re-capped: 2x its new slowest (19.8) is above 36, and a raise has no measured reason.
