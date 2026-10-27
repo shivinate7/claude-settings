@@ -1,8 +1,8 @@
-# Lanes start as subagents, not sessions
+# Lanes start as agents, not sessions
 
 ## The ruling
 
-Roadmap step c107 (an orchestrator starts its lanes with no click from the owner), 2026-10-27: an orchestrator starts each lane as a background subagent. It starts a separate session only when the owner asked for one in words.
+Roadmap step c107 (an orchestrator starts its lanes with no click from the owner), 2026-10-27: an orchestrator starts each lane as a background agent. It starts a separate session only when the owner asked for one in words.
 
 - **A lane is an Agent spawn.** The orchestrator starts each lane with the Agent tool, with `isolation: 'worktree'` (`lanes-start-in-tool-worktrees`, lanes start only in the tool's own worktrees). This needs no click from the owner. The call leaves `run_in_background` out: the tool runs it in the background by default, and the load brake refuses a present value at busy (`machine-load-brake`).
 - **A session needs the owner's words.** The orchestrator calls `start_session` only when the owner's own message, on the current turn, asked for a separate session in words. Then the kind is `user_asked`. It never uses `user_asked` for work the owner did not ask for. It never starts a session on a turn that another session's message started.
