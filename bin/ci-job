@@ -20,6 +20,9 @@
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
+# CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
+# runs `git fetch --unshallow` once (--plan only says so); a failed fetch is one unknown line. Cost: one git fetch,
+# only when shallow.
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process.
 import os, re, shutil, sys, tempfile
 BIN = os.path.dirname(os.path.realpath(__file__))
@@ -41,6 +44,26 @@ SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo",
 def git(*args, cwd=None):
     done = _nowindow.run(["git", *args], cwd=cwd, capture_output=True, text=True)
     return done.stdout.strip() if done.returncode == 0 else None
+
+
+def unshallow(block, top, dry, tally):
+    """Fetch full history when CI's checkout does (fetch-depth: 0) and this clone is shallow. A failed fetch is unknown."""
+    full = any((step_key(st, "uses") or "").startswith("actions/checkout") and
+               re.search(r"^          fetch-depth:[ \t]*0[ \t]*$", st, re.M) for st in step_blocks(block))
+    if not full or git("rev-parse", "--is-shallow-repository", cwd=top) != "true":
+        return
+    if dry:
+        print("%-15s the clone is shallow and CI checks out full history: git fetch --unshallow" % "would fetch")
+        return
+    remotes = (git("remote", cwd=top) or "").split()
+    done = _nowindow.run(["git", "fetch", "--unshallow", *(["origin"] if "origin" in remotes else remotes[:1])],
+                         cwd=top, capture_output=True, text=True)
+    if done.returncode == 0:
+        print("%-15s the clone was shallow and CI checks out full history: ran git fetch --unshallow" % "fetched")
+    else:
+        tally["unknown"] += 1
+        print("unknown         the clone is shallow and git fetch --unshallow failed: %s" %
+              ((done.stderr.strip().splitlines() or ["no message"])[-1]))
 
 
 def condition(text, pr):
@@ -208,6 +231,7 @@ def main(argv):
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
         os.close(fd)
     tally = {"FAIL": 0, "unknown": 0}
+    unshallow(block, top, dry, tally)
     for n, step in enumerate(step_blocks(block), 1):
         if lint and not is_lint(step):
             continue
