@@ -7,7 +7,7 @@ Each file under templates/ lands at the same path under <dest>, with its `.tmpl`
 `__APP__` in the path and the text filled, and `.gitignore.tmpl` as `.gitignore`. The starter then
 writes the Kit package's Tokens.swift with the generated tools/gen-tokens.py. It prints each path it
 writes. When any target path exists, it prints each one, writes nothing, and exits 1. A write that
-fails midway removes the files this run wrote, and exits 1. A bad argument exits 2.
+fails midway removes the files and folders this run made, and exits 1. A bad argument exits 2.
 
 <dest> may be an empty folder or a repo that has none of these paths. The starter never runs git.
 """
@@ -24,7 +24,9 @@ from compliance_probes import IOS_RUNNER  # noqa: E402  the probe and the starte
 
 NAME_RE = re.compile(r"^[A-Z][A-Za-z0-9]{0,39}$")
 BUNDLE_RE = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")
-URL_RE = re.compile(r"^https://[^\s/]+/\S+$")
+URL_RE = re.compile(r"^https://[^\s/\"\\]+/[^\s\"\\]+$")  # no quote or backslash: it lands in a JSON string
+# Modules every app imports. An app or Kit of the same name shadows them.
+TAKEN_NAMES = {"SwiftUI", "Foundation", "UIKit", "Combine", "Observation", "XCTest", "Testing", "Swift"}
 GEN_TOKENS = "tools/gen-tokens.py"
 TOKENS = "tokens/tokens.json"
 
@@ -62,6 +64,9 @@ def main(argv):
         args = parser.parse_args(argv)
     except SystemExit as stop:
         return stop.code
+    if args.name in TAKEN_NAMES:
+        print("new_app: --name: %s is a system module" % args.name, file=sys.stderr)
+        return 2
     for value, pattern, what in ((args.name, NAME_RE, "--name: a Swift type name, such as Tally"),
                                  (args.bundle_id, BUNDLE_RE, "--bundle-id: lower-case reverse DNS, such as dev.example.tally"),
                                  (args.repo_url, URL_RE, "--repo-url: an https URL")):
@@ -74,22 +79,28 @@ def main(argv):
         for rel in taken:
             print("new_app: exists, not overwritten: %s" % rel, file=sys.stderr)
         return 1
-    wrote = []
+    wrote, made = [], []
     try:
         for rel, text in files:
             path = os.path.join(args.dest, *rel.split("/"))
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            missing, folder = [], os.path.dirname(path)
+            while not os.path.isdir(folder):
+                missing.append(folder)
+                folder = os.path.dirname(folder)
+            for folder in reversed(missing):
+                os.mkdir(folder)
+                made.append(folder)
             with open(path, "x", encoding="utf-8", newline="\n") as f:
                 wrote.append(path)
                 f.write(text)
             print(rel)
     except OSError as err:
-        for path in wrote:
+        for path in wrote + made[::-1]:
             try:
-                os.remove(path)
+                (os.rmdir if path in made else os.remove)(path)
             except OSError:
                 pass
-        print("new_app: write failed, removed this run's files: %s" % err, file=sys.stderr)
+        print("new_app: write failed, removed this run's files and folders: %s" % err, file=sys.stderr)
         return 1
     return 0
 

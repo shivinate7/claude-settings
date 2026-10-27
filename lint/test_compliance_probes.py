@@ -258,13 +258,45 @@ class Ios(unittest.TestCase):
     def test_ui_tests_on_each_pull_request_are_red(self):
         repo = self.edit(self.gold(), ".github/workflows/ios.yml", "run: make app-build",
                          "run: xcodebuild test -project native/Tally.xcodeproj -scheme Tally")
-        self.red(repo, "slow tests: gap - .github/workflows/ios.yml runs xcodebuild test")
+        self.red(repo, "slow tests: gap - .github/workflows/ios.yml runs UI tests")
 
     def test_account_ids_in_the_repo_are_red(self):
         repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')
-        self.red(repo, "account ids: gap - tools/ios-ship.json holds team_id")
+        self.red(repo, "account ids: partial - tools/ios-ship.json overrides team_id")
         repo = self.edit(self.gold(), "native/project.yml", "CODE_SIGN_STYLE: Automatic", "CODE_SIGN_STYLE: Automatic\n    DEVELOPMENT_TEAM: FAKE000000")
         self.red(repo, "account ids: gap - native/project.yml sets DEVELOPMENT_TEAM")
+
+    def test_review_round_1_bypasses_are_red(self):
+        flow = ".github/workflows/ios.yml"
+        for new in ("run: xcodebuild test-without-building -scheme Tally", "run: make native-check", "run: make ui-test",
+                    "run: cd native && sim-test -scheme Tally"):
+            repo = self.edit(self.gold(), flow, "run: make app-build", "run: make app-build\n      - " + new)
+            self.red(repo, "slow tests: gap - " + flow)
+        repo = self.edit(self.gold(), "native/project.yml", '    SWIFT_VERSION: "6.0"\n', "")
+        self.red(repo, "swift 6: gap - native/project.yml: no SWIFT_VERSION")
+        repo = self.edit(self.gold(), "native/TallyKit/Package.swift", '.target(name: "TallyKit")',
+                         '.target(name: "TallyKit", swiftSettings: [.swiftLanguageMode(.v5)])')
+        self.red(repo, "swift 6: gap - native/TallyKit/Package.swift: language mode 5")
+        repo = self.edit(self.gold(), flow, "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", "")
+        self.red(repo, "ci checks: gap - no pull_request workflow")
+        repo = self.edit(self.gold(), "Makefile", "\tios-ship install", "\tios-ship testflight")
+        self.red(repo, "ship path: gap - Makefile target does not call ios-ship: phone")
+        repo = self.edit(self.gold(), "Makefile", "app-build: project", "app-build: project\n\tDEVELOPMENT_TEAM=FAKE000000 true")
+        self.red(repo, "account ids: gap - Makefile sets DEVELOPMENT_TEAM")
+        repo = self.edit(self.gold(), flow, "runs-on: macos-26", "runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [macos-latest]")
+        self.red(repo, "ci runner: gap - .github/workflows/ios.yml: macos-latest")
+
+    def test_review_round_1_false_reds_pass(self):
+        flow = ".github/workflows/ios.yml"
+        repo = self.edit(self.gold(), flow, "run: make app-build", "run: make app-build | tee test.log")
+        repo = self.edit(repo, flow, "runs-on: macos-26", "runs-on: macos-26-xlarge")
+        repo = self.edit(repo, "Makefile", "phone:\n\tios-ship install\n", "SHIP := ios-ship\nphone: ; $(SHIP) install\n")
+        code, out = repo.run("ios")
+        self.assertEqual(code, 0, out)
+
+    def test_repo_config_override_is_partial(self):
+        repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')
+        self.red(repo, "account ids: partial - tools/ios-ship.json overrides team_id")
 
     def test_comments_do_not_count(self):
         repo = self.gold()

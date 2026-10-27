@@ -2,6 +2,7 @@
 # CI runs tokens-check, kit-test and app-build on each pull request. native-check runs them all,
 # plus the slow UI tests, once per batch on the Mac. phone, then testflight if phone fails.
 # ios-ship and sim-test are claude-settings commands, on PATH from ~/.claude/bin.
+# sim-test lands with claude-settings roadmap step c89; until then, ui-test fails.
 APP := __APP__
 NATIVE := native
 

@@ -167,13 +167,31 @@ class Starter(unittest.TestCase):
         self.assertEqual(sorted(tree(self.dest)), ["tools/ios-ship.json"])
 
     def test_refuses_bad_arguments(self):
-        for bad in (["--name", "tally"], ["--name", "Tal ly"], ["--bundle-id", "tally"], ["--repo-url", "nope"]):
+        for bad in (["--name", "tally"], ["--name", "Tal ly"], ["--name", "SwiftUI"], ["--bundle-id", "tally"],
+                    ["--repo-url", "nope"], ["--repo-url", 'https://github.com/e/t".git'], ["--repo-url", "https://github.com/e\\t"]):
             args = list(ARGS)
             i = args.index(bad[0])
             args[i + 1] = bad[1]
             code, _, _ = run(self.dest, *args)
             self.assertEqual(code, 2, bad)
         self.assertEqual(tree(self.dest), {})
+
+    def test_a_failed_write_removes_what_it_made(self):
+        real, calls = open, []
+
+        def failing(path, mode="r", *args, **kwargs):
+            if "x" in mode:
+                calls.append(path)
+                if len(calls) == 5:
+                    raise OSError("disk full")
+            return real(path, mode, *args, **kwargs)
+
+        new_app.open = failing
+        self.addCleanup(delattr, new_app, "open")
+        code, _, err = run(os.path.join(self.dest, "app"), *ARGS)
+        self.assertEqual(code, 1)
+        self.assertIn("disk full", err)
+        self.assertEqual(os.listdir(self.dest), [])
 
 
 if __name__ == "__main__":
