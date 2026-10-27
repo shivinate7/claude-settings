@@ -1,0 +1,1 @@
+- 2026-10-27 09:20 CDT: briefed c120, c125, c124, c123 and asked for build threads (dispatches 6-9). c119 goes to the local liaison (needs a Mac). c107 step 1 also needs a Mac; it follows c119 there.

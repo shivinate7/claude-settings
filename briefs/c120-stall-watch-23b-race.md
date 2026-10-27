@@ -1,0 +1,22 @@
+# Brief: c120, the macOS stall-watch test stops failing at random
+
+Repo: shivinate7/claude-settings, from main d4e1b86. One lane: builder (sonnet), then reviewer (sonnet).
+
+## Task
+`hooks/test_stall_watch.py` case 23b ("a relative `> F`, a `| tee -a F` and a `--log F` name a log the watcher reads: no STALL") fails some runs on gates-macos: the tee job gets exit 3 and a STALL report while its log grows. Seen red on main b031394 (job 122105728260) and #691 (job 122197016707); green on 2e5fde3 and on the #691 re-run.
+- Find the race (likely tee's buffering or the watcher's read timing against the log's growth on macOS) and fix the cause in `hooks/stall_watch.py` or the test's fixture, whichever holds the defect.
+- Never a retry, a longer sleep as the fix, or a skip.
+
+## Rulings
+- verification-cry-wolf-guard-is-spent: a required check that fails at random teaches you to scroll past red.
+- building-fix-cause-not-symptom.
+
+## Failure classes
+- A fix that only widens a timing margin (name it a bandaid if nothing else works, with the cause in docs/debts).
+- A fix that hides a real stall (a job whose log stops growing must still get STALL).
+
+## Check that proves it done
+Reproduce first: run case 23b in a loop until it fails, on macOS if the lane can (`gh workflow run gates.yml --ref <branch>` and read gates-macos), and record the failure rate. Then the same loop shows zero failures across at least 3 gates-macos runs. Also run `python3 bin/ci-job gates --base origin/main` lint steps that touch hooks, lint/hook_catalog.py --check, bin/ste-changed origin/main.
+
+## Report
+At most 15 lines: PR, head, the cause in one sentence, failure rate before and after with run ids, review verdict. Send the green, reviewed head to the build advisor. Do not rebase onto main and do not merge.
