@@ -45,7 +45,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   time), `note`, and `choice` (a decision) or `done: true` (a task). "Take my pick", and a pick that
   stands, write `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
-  instead. Change then Clear deletes `answers/<id>`. Undo (8 seconds after a Send) deletes the
+  instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
+  A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
+  deletes `answers/<id>`. Undo (8 seconds after a Send) deletes the
   records that Send wrote, or puts back the answer they replaced.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
@@ -112,14 +114,14 @@ relays an answer. An answer typed in the chat counts the same.
 - An answer saved on the page counts as the owner's grant for the item it names, and only for that
   item (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
   the later one wins: compare the answer's `at` with the time of the terminal answer.
-- A cleared answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
-  the owner cleared it: the item is still open, and nothing is ruled.
+- A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
+  the owner withdrew it: the item is still open, and nothing is ruled.
 - `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
   answer for item 27.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
   later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
-- Never write `answers/`. Only the owner's Send, Undo or Clear changes it. A session that writes it forges the
+- Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
 

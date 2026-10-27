@@ -535,7 +535,7 @@ test("a changed answer left empty makes Send withdraw it", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
-  assert.equal(await page.locator("#send").textContent(), "Send answers", "withdraw is offered with the draft in place");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "withdraw is offered with the draft in place");
   await choose(page, DECISION, "a");
   assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
   assert.equal(await page.locator("#send").isDisabled(), false);

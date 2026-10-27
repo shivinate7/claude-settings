@@ -377,23 +377,32 @@ function sorted() {
 const byId = (id) => state.items.find((i) => i.id === id);
 const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
 // The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
-const eff = (it) => state.draft[it.id] || (standsOk(it) && !state.answers[it.id] ? { choice: it.pick, auto: true, stood: true } : undefined);
+const stoodNow = (it) => standsOk(it) && !state.answers[it.id];
+const eff = (it) => {
+  const d = state.draft[it.id];
+  if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: it.pick, auto: true, stood: true };
+  return d || (stoodNow(it) ? { choice: it.pick, auto: true, stood: true } : undefined);
+};
 function draftReady(it) {
   const d = eff(it); if (!d) return false;
   if (it.kind === "task") return !!d.done;
-  if (d.choice === NONE) return !!(d.note || "").trim();
+  if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
   return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
 }
 const staged = () => state.items.filter((it) => !isSaved(it) && draftReady(it));
+// A changed answer whose draft the owner emptied: Send withdraws the saved record.
+const withdrawing = (it) => !!state.answers[it.id] && !!state.changing[it.id] && !state.draft[it.id];
+const withdrawn = () => state.items.filter(withdrawing);
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
-  if (!next.choice && !next.done && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
+  if (!next.choice && !next.done && !next.unstood && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
   saveDraft();
 }
 function choose(it, key) {
   const cur = state.draft[it.id] || {};
   // A "none" note says what the owner wants instead. It does not carry over to an option.
   const patch = { choice: key, auto: false };
+  if (key === null && stoodNow(it)) patch.unstood = true; // else my pick would stand again
   if (cur.choice === NONE && key !== NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
   if (key === NONE) { const t = $("n-" + it.id); if (t) t.focus(); }
@@ -401,7 +410,7 @@ function choose(it, key) {
 function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
-  if (it.kind === "decision") body.choice = d.choice; else body.done = true;
+  if (it.kind === "decision") body.choice = d.choice || NONE; else body.done = true;
   return body;
 }
 const edited = () => { state.barNote = ""; state.copyOffer = false; };
@@ -413,14 +422,15 @@ function readyText(it) {
   const d = eff(it) || {};
   if (it.kind === "task") return d.done ? "Ready to send: done." : "";
   if (d.stood) return "My pick goes with your next Send.";
-  if (!d.choice) return "";
+  if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   return "Ready to send: " + d.choice.toUpperCase() + (d.auto ? ", my pick." : ", your choice.");
 }
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key;
   return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
-    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, checked: chosen === o.key, onchange: () => choose(it, o.key) }),
+    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, checked: chosen === o.key, onchange: () => choose(it, o.key),
+      onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
     h("span", { class: "head" }, h("span", { class: "key" }, o.key.toUpperCase()), h("span", { class: "lab" }, o.label)),
     h("p", { class: "how" }, o.how),
     h("div", { class: "tr" }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
@@ -482,9 +492,7 @@ function buildCard(it) {
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
   const noteShown = !!(state.noteOpen[it.id] || d.choice === NONE || d.note);
-  const clearable = !!(d.choice || d.done || d.note || state.changing[it.id]) && !d.stood;
   const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
-  const clear = h("button", { class: "btn quiet clearbtn" + (clearable ? "" : " gone"), type: "button", id: "b-clear-" + it.id, onclick: () => clearItem(it) }, "Clear");
   const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   if (it.kind === "decision") {
     const opts = h("div", { class: "opts", role: "radiogroup", "aria-label": "Options for No. " + it.n });
@@ -492,14 +500,14 @@ function buildCard(it) {
     card.append(opts, ready,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
-        addNote, h("span", { class: "sp" }), clear,
+        addNote,
         h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + String(it.pick).toUpperCase() + ")")));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
     card.append(ready, h("div", { class: "alts" },
       h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),
-      addNote, h("span", { class: "sp" }), clear));
+      addNote));
   }
   if (noteShown) {
     const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
@@ -510,7 +518,6 @@ function buildCard(it) {
       nb.classList.toggle("need", need && !ta.value.trim());
       const dd = eff(it) || {}, rd = ta.closest(".card").querySelector(".ready");
       rd.textContent = readyText(it); rd.classList.toggle("on", draftReady(it));
-      clear.classList.toggle("gone", !((dd.choice || dd.done || dd.note || state.changing[it.id]) && !dd.stood));
       renderRail(); renderBar();
     });
     nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
@@ -519,18 +526,16 @@ function buildCard(it) {
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
-// Clear drops the draft. On a changed answer it also withdraws the saved record, and the draft stays if the store refuses.
-async function clearItem(it) {
-  delete state.notice[it.id]; edited();
-  if (state.answers[it.id]) {
+// Withdraw deletes the saved record of each changed answer left empty. The saved answer stays if the store refuses.
+async function withdrawAll() {
+  for (const it of withdrawn()) {
     try {
       if (!state.db) throw { code: "no store" };
       await state.db.collection("answers").doc(it.id).delete();
-      delete state.answers[it.id];
-    } catch (e) { state.notice[it.id] = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; repaint(it); return; }
+    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
+    delete state.answers[it.id]; delete state.changing[it.id]; delete state.noteOpen[it.id]; delete state.notice[it.id];
   }
-  delete state.changing[it.id]; delete state.draft[it.id]; delete state.noteOpen[it.id]; saveDraft();
-  repaint(it);
+  saveDraft(); render();
 }
 
 /* ---------- Painting: a card is rebuilt only when what it shows changed, and a live design preview is never detached ---------- */
@@ -653,8 +658,9 @@ function renderBar() {
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
   $("barStatus").replaceChildren(...parts);
-  sa.disabled = !state.db || state.sending || !st.length;
-  sa.textContent = st.length ? "Send " + st.length + (st.length === 1 ? " answer" : " answers") : "Send answers";
+  const wd = withdrawn().length;
+  sa.disabled = !state.db || state.sending || !(st.length || wd);
+  sa.textContent = !st.length && wd ? (wd === 1 ? "Withdraw answer" : "Withdraw " + wd + " answers") : st.length ? "Send " + st.length + (st.length === 1 ? " answer" : " answers") : "Send answers";
   $("copy").hidden = !(state.db === false || state.copyOffer);
 }
 
@@ -702,8 +708,11 @@ async function notifyClaude(text, can) {
 
 async function sendAll() {
   if (!state.db || state.sending) return;
-  const st = staged(); if (!st.length) return;
+  const st = staged();
+  if (!st.length && !withdrawn().length) return;
   state.sending = true; edited(); renderBar();
+  if (withdrawn().length) await withdrawAll();
+  if (!st.length) { state.sending = false; renderBar(); return; }
   const wrote = [], entries = [];
   try {
     const can = await canTell();
