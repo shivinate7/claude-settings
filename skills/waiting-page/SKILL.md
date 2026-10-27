@@ -173,17 +173,30 @@ unmeasured.
 
 A question about how something looks carries one design per option. The owner picks by looking, so
 a link to a folder, a repo or a file is never enough. Each option's picture sits at the top of its
-own option card, and a tap on it picks the option. A design that no option names shows at the front
+own option card. A tap on an option's picture opens the viewer. A tap on the rest of the card
+picks the option. The picture carries a small "View" control, and the picture is 40px or more
+high. A design that no option names shows at the front
 of the item, before the options. An option that names a design (`design`) which the item does not
 carry shows a warning line in its card in place of the picture.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
    phone width for a web app. Draw it 390 wide. The page scales it to the card and shows all of it,
    never cropped. The full mockup stays one tap away ("Open full size").
-2. Put the whole mockup in one HTML string. Write `<` as `\u003c`.
+2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
+   what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
+   Put the whole mockup in one HTML string. Write `<` as `\u003c`.
 3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
    JSON in `<script type="application/json" id="designData">`.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
+   - A design may carry `focus`, a selector of an element inside the mockup. The option card then
+     shows that element whole, scaled to fit the card, so the part being decided is in frame.
+     Without `focus` the card shows the whole mockup.
+   - A design may carry `option` (an option's `key`) and `width` (a name such as `Wide`). Each extra
+     width of an option is one more design with that `option`. The first design of an option is its
+     picture on the card.
+   - The viewer lists every option's designs at every width, in option order. Its label reads
+     "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
+     wrap at the ends. A width with no name reads `Phone`.
 5. Republish the page to the same URL with the same capabilities. The database stays.
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:

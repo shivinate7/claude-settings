@@ -144,7 +144,8 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
 .key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
 .opt .lab { min-width: 0; overflow-wrap: anywhere; }
-.opt .opic { display: block; }
+.opt .opic { display: block; position: relative; cursor: zoom-in; min-height: 40px; }
+.opt .opic .view { position: absolute; right: 8px; bottom: 8px; padding: 4px 10px; min-height: 28px; display: inline-flex; align-items: center; border-radius: 99px; background: var(--hdr); color: var(--on-hdr); font: 600 13px var(--body); opacity: .92; }
 .opts.pics { grid-auto-rows: auto; }
 .opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
 @supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
@@ -266,6 +267,7 @@ body.sheet-open { overflow: hidden; }
     <h2 id="dTitle"></h2><span id="dPos"></span>
     <button class="btn quiet" type="button" id="dPrev">Prev</button><button class="btn quiet" type="button" id="dNext">Next</button>
     <button class="btn quiet" type="button" id="dBack"></button>
+    <button class="btn quiet" type="button" id="dFull">Open full size</button>
     <button class="btn" type="button" id="dClose">Close</button>
   </div></div>
   <div class="dsh-body" id="dStage"></div>
@@ -455,11 +457,14 @@ function sparkle() {
 const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design);
 // An option names its picture with `design`, a slug of the item's `designs`. The picture sits at the top of the option card and a tap on it picks the option.
 // A question about how something looks sets `look`: an option card with no picture then shows a warning.
+const optionDesigns = (it, o) => { const all = it.designs || [], first = all.filter((d) => d.slug === o.design), more = all.filter((d) => d.option === o.key && d.slug !== o.design); return [...first, ...more]; };
 function optPic(it, o) {
-  const has = !!o.design && (it.designs || []).some((d) => d.slug === o.design);
+  const mine = optionDesigns(it, o), has = mine.length > 0;
   if (!has && !it.look) return h("span", { class: "opic" });
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
-  return h("span", { class: "opic" }, fitFrame(o.design, o.label, true));
+  const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
+  return h("span", { class: "opic", role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen", onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
+    fitFrame(mine[0].slug, o.label, true, mine[0].focus), h("span", { class: "view", "aria-hidden": "true" }, "View"));
 }
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return (it.designs || []).filter((d) => !named.has(d.slug)); };
@@ -853,14 +858,19 @@ const allDesigns = () => state.items.filter((it) => it.designs && !isSaved(it)).
 // A mockup is drawn 390 wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const FIT_W = 390, FIT_H = {};
 let FITS = [];
-const FIT_JS = '<script>(function(){function s(){parent.postMessage({dfit:1,h:Math.ceil(document.documentElement.scrollHeight)},"*")}addEventListener("load",s);if(window.ResizeObserver)new ResizeObserver(s).observe(document.documentElement)})()<\/script>';
-function fitFrame(slug, title, inert) {
+const FIT_F = {};
+// The mockup reports its height and, when a `focus` selector names an element, that element's box.
+const fitScript = (focus) => '<script>(function(){var F=' + JSON.stringify(focus || "").replace(/</g, "\\u003c") + ';function s(){var f=null;try{var e=F&&document.querySelector(F);if(e){var r=e.getBoundingClientRect();f={x:r.left+scrollX,y:r.top+scrollY,w:r.width,h:r.height}}}catch(x){}parent.postMessage({dfit:1,h:Math.ceil(document.documentElement.scrollHeight),f:f},"*")}addEventListener("load",s);if(window.ResizeObserver)new ResizeObserver(s).observe(document.documentElement)})()<\/script>';
+function fitFrame(slug, title, inert, focus) {
   const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
-  f.srcdoc = (DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>") + FIT_JS;
+  f.srcdoc = (DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>") + fitScript(focus);
   const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
   const fit = () => {
-    const sc = Math.min(1, (wrap.clientWidth || FIT_W) / FIT_W), ht = FIT_H[slug] || 200;
-    f.style.transform = "scale(" + sc + ")"; f.style.height = ht + "px"; wrap.style.height = Math.ceil(ht * sc) + "px";
+    const box = focus && FIT_F[slug], ww = wrap.clientWidth || FIT_W, ht = FIT_H[slug] || 200;
+    const sc = Math.min(1, ww / (box ? Math.max(box.w, 1) : FIT_W));
+    f.style.height = ht + "px";
+    f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
+    wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px";
   };
   FITS.push({ f, slug, fit });
   if (window.ResizeObserver) new ResizeObserver(fit).observe(wrap);
@@ -870,7 +880,7 @@ window.addEventListener("message", (e) => {
   const d = e.data; if (!d || d.dfit !== 1 || typeof d.h !== "number") return;
   FITS = FITS.filter((x) => x.f.isConnected);
   const m = FITS.find((x) => x.f.contentWindow === e.source); if (!m) return;
-  FIT_H[m.slug] = Math.max(40, Math.min(d.h, 20000));
+  FIT_H[m.slug] = Math.max(40, Math.min(d.h, 20000)); FIT_F[m.slug] = d.f && typeof d.f.w === "number" ? d.f : null;
   FITS.filter((x) => x.slug === m.slug).forEach((x) => x.fit());
 });
 function frame(slug, title) {
@@ -889,10 +899,20 @@ function showDesign(i) {
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
 }
-function openDesign(slug) {
-  dList = allDesigns(); if (!dList.length) return;
+// The viewer of one item: every option's design at every width the item carries, in option order.
+function openViewer(it, o) {
+  const list = (it.options || []).flatMap((x) => optionDesigns(it, x).map((d) => ({ ...d, label: x.label + " (" + (d.width || "Phone") + ")", it })));
+  const at = list.findIndex((d) => d.slug === (optionDesigns(it, o)[0] || {}).slug);
+  openDesign(null, list, Math.max(0, at));
+}
+$("dFull").onclick = () => {
+  const d = dList[dAt]; if (!d) return;
+  try { window.open(URL.createObjectURL(new Blob([DESIGN_HTML[d.slug] || ""], { type: "text/html" })), "_blank", "noopener"); } catch (e) {}
+};
+function openDesign(slug, list, at) {
+  dList = list || allDesigns(); if (!dList.length) return;
   dFrom = document.activeElement; dY = scrollY; document.body.classList.add("sheet-open"); $("dsheet").hidden = false;
-  showDesign(Math.max(0, dList.findIndex((d) => d.slug === slug))); $("dClose").focus();
+  showDesign(at != null ? at : Math.max(0, dList.findIndex((d) => d.slug === slug))); $("dClose").focus();
 }
 function closeDesign(toItem) {
   $("dsheet").hidden = true; document.body.classList.remove("sheet-open");
