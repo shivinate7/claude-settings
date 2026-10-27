@@ -636,6 +636,12 @@
         "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check."
       }
     },
+    "style-table-gold-column": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a table compares, and whether a column states the gold standard or target, is a judgment on the reply. Code in hooks/reply_judge.py finds a Markdown table and sends that Stop to the reply judge (a model, never blocks) off-sample; the model flags a comparison table with no such column, and a finding writes one guard.log line. It moves to a mechanism after the hook makes a real catch."
+      }
+    },
     "style-option-says-effect": {
       "mechanism": {
         "kind": "unmechanized",
