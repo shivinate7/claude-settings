@@ -13,7 +13,7 @@ cannot run, so the group is unknown.
 layout: lint/layout.json through lint/layout.py, plus the child's extras file. It names each
   folder that is neither a layout kind nor an extra, and each core kind the child lacks. A child
   with no extras file is "not rolled out": it exits 0, and lists the same findings as a preview.
-design: screen readiness against ux/. The shoot config names the screens, sizes and themes. The
+design: screen readiness against docs/design/. The shoot config names the screens, sizes and themes. The
   shared `bin/shoot` is the screenshot command, and a config it would refuse is a gap. One token
   file: a `tokens.*` file (the layout's tokens path is one), tests and generated files aside. Each item
   has its own grade.
@@ -96,9 +96,10 @@ def probe_layout(root):
         rolled = layout.rolled_out(root)
         kinds = layout.kinds(root)
         extras = layout.layout().get("extras", "")
+        kept = layout.unmoved(root)  # a kind legacy-repos keeps where this repo holds it now
     except layout.LayoutError as err:
         raise CannotRun(str(err))
-    homes = {k["path"].strip("/") for k in kinds.values()}
+    homes = {k["path"].strip("/") for k in kinds.values()} | set(kept.values())
     above = {h.rsplit("/", i)[0] for h in homes for i in range(1, h.count("/") + 1)}
     legacy = {layout.legacy(n): n for n in kinds if kinds[n].get("set") != "extra" and layout.legacy(n) not in homes}
 
@@ -127,7 +128,7 @@ def probe_layout(root):
         note = " (legacy home of %s, moves to %s)" % (legacy[folder], kinds[legacy[folder]]["path"]) if folder in legacy else ""
         lines.append("  folder %s/: neither a layout kind nor an extra%s" % (folder, note))
     for name, kind in kinds.items():
-        home = kind["path"].strip("/")
+        home = kept.get(name, kind["path"].strip("/"))
         if kind.get("set") == "core" and not any(f == home or f.startswith(home + "/") for f in files):
             lines.append("  missing core kind %s: %s" % (name, kind["path"]))
     if not rolled:

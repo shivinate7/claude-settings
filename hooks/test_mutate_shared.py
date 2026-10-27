@@ -3,7 +3,7 @@
 
     python3 hooks/test_mutate_shared.py
 
-`report_verdict` is the line every mutation harness trusts to say a guard went red on the defect
+`report_verdict` is the line every mutation test trusts to say a guard went red on the defect
 it guards (CLAUDE.md: trust a guard only once it goes red on the defect). It is tested here with
 one known-bad input per wrong verdict: a mutant the suite did not catch must read "survived",
 and a red suite that never names the case must read "wrong_cause", never "killed".
@@ -155,7 +155,7 @@ class GuardTreeTests(unittest.TestCase):
 
 
 class GuardTreeImportsTests(unittest.TestCase):
-    """The copy a harness runs must import: config_watch.py and guard_core.py need shared_names,
+    """The copy a mutation test runs must import: config_watch.py and guard_core.py need shared_names,
     and a copy without it dies on the import, a kill with no bearing on the mutation."""
 
     def test_copied_guard_and_watch_import_from_the_tree_alone(self):

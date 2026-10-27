@@ -14,7 +14,7 @@ Run it from the repository root:
     python3 lint/ruling_census.py --json
     python3 lint/ruling_census.py --sample 20 --seed 1
 
-Columns: project, sessions, worker transcripts, answers, memory writes, scratchpad writes,
+Columns: project, sessions, agent transcripts, answers, memory writes, scratchpad writes,
 "ruling" lines, process-only lines, reach found, reach not found, unknown.
 
 `--sample N` prints N AskUserQuestion answers as JSON Lines instead of the table, for a judge
@@ -22,7 +22,7 @@ to read whether each ruling reached a tracked file. One line per answer: project
 transcript's `cwd`), remote (`git -C <cwd> remote get-url origin`, or null when unknown),
 session (the transcript's file name), timestamp (the record's own `timestamp`, or null),
 question, and answer. The pick spreads across projects (round-robin by project, in random
-order under `--seed`, default 0, so a run repeats) and includes worker transcripts. Each text
+order under `--seed`, default 0, so a run repeats) and includes agent transcripts. Each text
 field is capped at 2,000 characters, with a cut marked ` [cut]`. `--sample` writes no file.
 Its own git call is `git remote get-url origin`, a read of local config, never the network.
 
@@ -31,14 +31,14 @@ and is a readable git repo (`git -C <cwd> rev-parse --git-dir` succeeds), for a 
 holds only some of the repos. It prints how many candidate answers it skipped as not present
 to stderr, as its last line. Without the flag, `--sample` behaves as documented above.
 
-A "session" is one `*.jsonl` file directly inside a project folder. A "worker transcript" is
+A "session" is one `*.jsonl` file directly inside a project folder. An "agent transcript" is
 a `*.jsonl` file under that session's own `subagents/` folder
-(`<project>/<session-id>/subagents/*.jsonl`), one per sub-agent the session spawned. A worker
+(`<project>/<session-id>/subagents/*.jsonl`), one per agent the session spawned. An agent
 transcript's memory writes, scratchpad writes and answers are folded into its project's own
 counts (with their own reach-test verdicts, since that test runs wherever a memory write or
 an answer does). Its `sessions` and `"ruling" lines` are not: sessions stays a count of
 top-level transcripts, and "ruling" is read as a note to the person a session answers to, a
-frame a worker's own transcript does not carry the same way.
+frame an agent's own transcript does not carry the same way.
 
 The reach test takes each memory-write line and each AskUserQuestion answer with 8 or more
 words, collapses its whitespace, and asks `git log --all -S<text>` in the transcript's own
@@ -99,17 +99,17 @@ PROCESS_ONLY = "process-only"
 FENCE_PAIRS = (("`", "`"), ('"', '"'), ("'", "'"))
 
 COLUMNS = (
-    "project", "sessions", "worker transcripts", "answers", "memory writes",
+    "project", "sessions", "agent transcripts", "answers", "memory writes",
     "scratchpad writes", '"ruling" lines', "process-only lines", "reach found",
     "reach not found", "unknown",
 )
 COUNT_KEYS = (
-    "sessions", "worker_transcripts", "answers", "memory_writes", "scratchpad_writes",
+    "sessions", "agent_transcripts", "answers", "memory_writes", "scratchpad_writes",
     "ruling_lines", "process_only_lines", "reach_found", "reach_not_found", "unknown",
 )
-# Fields folded into a project's totals from a worker transcript's own counts. Not
+# Fields folded into a project's totals from an agent transcript's own counts. Not
 # "sessions" (stays top-level only) and not "ruling_lines" (see the module docstring).
-WORKER_FOLDED_KEYS = (
+AGENT_FOLDED_KEYS = (
     "answers", "memory_writes", "scratchpad_writes",
     "reach_found", "reach_not_found", "unknown",
 )
@@ -402,7 +402,7 @@ def scan_transcript(path, project_dir, timeouts):
     return counts
 
 
-def worker_transcript_paths(project_dir, session_stem):
+def agent_transcript_paths(project_dir, session_stem):
     """`*.jsonl` files directly under a session's own subagents/ folder."""
     subdir = os.path.join(project_dir, session_stem, "subagents")
     if not os.path.isdir(subdir):
@@ -443,11 +443,11 @@ def run_census(root, since, timeouts):
             add_counts(counts, scan_transcript(path, project_dir, timeouts))
 
             session_stem = entry[:-len(".jsonl")]
-            for worker_path in worker_transcript_paths(project_dir, session_stem):
-                counts["worker_transcripts"] += 1
-                worker_counts = scan_transcript(worker_path, project_dir, timeouts)
-                for key in WORKER_FOLDED_KEYS:
-                    counts[key] += worker_counts[key]
+            for agent_path in agent_transcript_paths(project_dir, session_stem):
+                counts["agent_transcripts"] += 1
+                agent_counts = scan_transcript(agent_path, project_dir, timeouts)
+                for key in AGENT_FOLDED_KEYS:
+                    counts[key] += agent_counts[key]
         process_only, mem_unknown = scan_memory_folder(project_dir)
         counts["process_only_lines"] = process_only
         counts["unknown"] += mem_unknown
@@ -539,7 +539,7 @@ def collect_transcript_answers(path, items, remote_cache):
 
 def collect_sample_pools(root):
     """Return {project folder name: [answer dict, ...]}, in the same project and session
-    order `run_census` walks, folder names with no answer left out. Worker transcripts'
+    order `run_census` walks, folder names with no answer left out. Agent transcripts'
     answers are folded into their own project's list, same as their other counts.
     """
     pools = {}
@@ -559,8 +559,8 @@ def collect_sample_pools(root):
                 continue
             collect_transcript_answers(path, items, remote_cache)
             session_stem = entry[:-len(".jsonl")]
-            for worker_path in worker_transcript_paths(project_dir, session_stem):
-                collect_transcript_answers(worker_path, items, remote_cache)
+            for agent_path in agent_transcript_paths(project_dir, session_stem):
+                collect_transcript_answers(agent_path, items, remote_cache)
         if items:
             pools[name] = items
     return pools

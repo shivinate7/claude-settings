@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The PreToolUse matcher that routes to hooks/guard.py must cover every tool the guard judges.
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
-the guard's subagent-model-floor never sees those calls.
+the guard's agent-model-floor never sees those calls.
 """
 import json, os, re, subprocess, sys, unittest
 
@@ -75,7 +75,7 @@ class ProseJudgeRow(unittest.TestCase):
         return " ".join(hooks[0]["prompt"].split())
 
     def test_explore_rule_passes_sonnet_and_opus(self):
-        # The floor is Sonnet; the owner's "use opus" must pass (subagent-model-cap, audit Explore row).
+        # The floor is Sonnet; the owner's "use opus" must pass (agent-model-cap, audit Explore row).
         # A word pin ("opus" appears) also holds for a reversed clause, so the pin is the whole clause.
         self.assertIn(EXPLORE_CLAUSE, self.agent_prompt(),
                       "the Agent judge's Explore clause is not the pinned text: opus or sonnet may block")
@@ -363,8 +363,8 @@ class SendMessageJudge(unittest.TestCase):
 
 
 # Every prompt or agent judge in settings.json must have a row in the model-per-role table
-# (docs/decisions/subagent-model-cap.md), and that row's model must equal the hook's model.
-RECORD = os.path.join(os.path.dirname(SETTINGS), "docs", "decisions", "subagent-model-cap.md")
+# (docs/decisions/agent-model-cap.md), and that row's model must equal the hook's model.
+RECORD = os.path.join(os.path.dirname(SETTINGS), "docs", "decisions", "agent-model-cap.md")
 JUDGE_ROW = "prompt-hook judges"
 
 

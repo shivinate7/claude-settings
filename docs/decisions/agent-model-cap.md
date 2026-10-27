@@ -1,4 +1,4 @@
-# Subagent model cap
+# Agent model cap
 
 ## The ruling
 
@@ -42,6 +42,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | skill `ci-hygiene` | no model pin; runs on the caller's model | none |
 | skill `compliance-check` | no model pin; runs on the caller's model | none |
 | skill `design-review` | no model pin; runs on the caller's model | none |
+| skill `design-explore` | no model pin; runs on the caller's model | none |
 | skill `fresh-prose` | no model pin; runs on the caller's model | none |
 | skill `impeccable` | no model pin; runs on the caller's model | none |
 | skill `plain-english-map` | no model pin; runs on the caller's model | none |
@@ -79,7 +80,7 @@ list (`building-allow-list-is-the-constant`) and goes stale the day a model ship
 cannot time out, so the guard allows Opus at round 3 and the owner's word stays prose.
 
 **The floor.** Every role but the five Haiku roles has Sonnet as the floor. `HAIKU_ROLES` in
-`hooks/guard.py` is the one list. Guard rule `subagent-model-floor` denies an `Agent`, `Task`, `Workflow`
+`hooks/guard.py` is the one list. Guard rule `agent-model-floor` denies an `Agent`, `Task`, `Workflow`
 `agent()` or `start_session` call whose `model` holds "haiku", unless the role is a Haiku role.
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
@@ -93,7 +94,7 @@ model and whose definition names no model. `agents/builder.md` carries no `model
 spawn reads the fallback. Reason: the flag collapses Claude Code's model order onto the variable. That is
 a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
-MEASURED in a cloud session, 2026-10-26, by each subagent transcript's `model` field. The variable
+MEASURED in a cloud session, 2026-10-26, by each agent transcript's `model` field. The variable
 was `sonnet`, and no `agents/` files were installed. A `general-purpose` spawn with no model ran
 Sonnet. Built-in `Plan` and `Explore` spawns with no model ran the parent's Opus. An `Explore` spawn that set model `haiku` ran Haiku, so the call's `model` beats both. So a definition that
 names a model, `inherit` included, beats the variable. In cloud, an Explore search runs Opus, not
@@ -101,7 +102,7 @@ Haiku. Unknown: the same order for a pin in this repo's `agents/*.md`, because c
 
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's word, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
-`subagent-model-cap`, unless a standing word covers it. A standing word is one of: the role Plan, the role Explore (the
+`agent-model-cap`, unless a standing word covers it. A standing word is one of: the role Plan, the role Explore (the
 class-level word above), the role designer or design-reviewer (the 2026-10-26 word above), or a builder whose brief has a `Try 3 of 3` line. A reviewer's round 3 is no standing word, so
 it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override pass
 lifts the spawn ask like any other ask (`owner-override-pass`); the ask on a settings write under the same
@@ -114,7 +115,7 @@ Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'}
 through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
-Before a rename or a move, find every reader: search for `subagent-model-cap`.
+Before a rename or a move, find every reader: search for `agent-model-cap`.
 
 Kind: process
 Home: lint/check_agent_models.py

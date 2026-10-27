@@ -16,4 +16,4 @@ janitor
 output-styles
 skills
 bin
-ux
+docs/design

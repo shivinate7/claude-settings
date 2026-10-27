@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ci-job <job> [--workflow <file>] [--base <ref>] [--plan]: run every step of one workflow job here,
-# each through bin/verdict, and print one verdict per step. A lane runs `ci-job gates --base origin/main`
-# before it sends a head that touches lint/, hooks/ or actions/ (agents/builder.md).
+# each through bin/verdict, and print one verdict per step. It runs on demand only: a lane never runs a full
+# job, because the batch CI run is the only full run (lanes-run-no-full-ci-job).
 # Workflow: .github/workflows/gates.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.

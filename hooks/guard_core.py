@@ -817,7 +817,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 # heredoc_delimiter reads those words right, so _drop_heredoc_bodies walks the command as the lane reads it and
 # as main read it, and keeps a line when either walk keeps it: every drop, the unconditional one too, sees what main saw,
 # also for two heredocs where main's early close at a line of the second body leaves its payload outside every body.
-# The cost: for those words an interpreter body counts each line, as on main (ruling ask-steps-run-alone).
+# The cost: for those words an interpreter body counts each line, as on main (ruling ask-commands-run-alone).
 # Retire it when each run path reads its body.
 _MAIN_HEADER = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
@@ -1455,7 +1455,7 @@ _pass_who = ("", None)  # (session id, agent id) of the call this process judges
 
 
 def set_pass_context(session_id, agent_id) -> None:
-    """Name the session and subagent whose call this process judges, for the owner override pass."""
+    """Name the session and agent whose call this process judges, for the owner override pass."""
     global _pass_who
     _pass_who = (session_id, agent_id or None)
 
@@ -1514,7 +1514,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 # the agent's branch was created from, plus untracked files, with every path normalised for
 # backslashes and resolved through symlinks.
 #
-# THE ROLE is read from the payload: it carries an `agent_id` (a subagent) and an `agent_type`.
+# THE ROLE is read from the payload: it carries an `agent_id` (an agent) and an `agent_type`.
 # The main session, a reviewer, an Explore agent, and a session started with `--agent builder` (no
 # `agent_id`; unmeasured, so it stays allowed) pass untouched. `test-author` is the inverse: it may
 # change ONLY test paths and test config, never product code (agents/test-author.md).
@@ -1540,7 +1540,7 @@ DESIGNER_ROLE = "designer"
 
 
 def agent_role(payload) -> str:
-    """BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE or DESIGNER_ROLE for a subagent of that type, else ''."""
+    """BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE or DESIGNER_ROLE for an agent of that type, else ''."""
     role = payload.get("agent_type")
     if not payload.get("agent_id") or not isinstance(role, str):
         return ""

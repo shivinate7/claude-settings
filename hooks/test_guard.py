@@ -90,12 +90,12 @@ FAMILIES = {
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
-    "model-cap": "the subagent model cap",
-    "ask-alone": "an ask step chained with other steps denies, except a leading cd, export or an output tail; a lone ask step still asks",
+    "model-cap": "the agent model cap",
+    "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
-    "rule9": "rule 9, the subagent model floor",
+    "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
@@ -256,7 +256,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
     no case can widen it by itself.
 
     `agent_id`, when given, rides on the payload the same way the harness sends it for a
-    subagent's own tool call: alongside `tool_name` and `tool_input`, never inside either.
+    agent's own tool call: alongside `tool_name` and `tool_input`, never inside either.
     """
     CASES.append({
         "name": name,
@@ -272,7 +272,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # The config directory the case runs against. It decides where the global rules file is
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
-        # The payload's `transcript_path`, when a case names one: the subagents of the session
+        # The payload's `transcript_path`, when a case names one: the agents of the session
         # are the folder beside it, `<session>/subagents/agent-<id>.jsonl`.
         "transcript": transcript,
         "agent_id": agent_id,
@@ -303,22 +303,22 @@ def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None,
         carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
 
 
-# ASK ALONE. A command that holds a step
-# the guard would ASK on, chained with other steps by `&&`, `||`, `;`, `|` or a newline, is DENIED to
-# the agent, and the remedy says to run that step alone or drop it. A lone ask step still asks, and a
-# deny anywhere in the command still wins. Owner ruling 2026-10-15 (decision ask-steps-run-alone): a
+# ASK ALONE. A shell call that holds a command
+# the guard would ASK on, chained with other commands by `&&`, `||`, `;`, `|` or a newline, is DENIED to
+# the agent, and the remedy says to run that command alone or drop it. A lone ask command still asks, and a
+# deny anywhere in the call still wins. Decision ask-commands-run-alone: a
 # leading `cd X &&`, `Set-Location X;` or `export NAME=value &&`, and an output tail (`| tail -N`,
-# `| head -N`, `| Out-Null`, `&& echo done`, `; Write-Host done`), are no second step, so that command
-# asks once. Any other chained step still denies. CHAIN_ASK is the rule id the deny prints (the lane slug;
+# `| head -N`, `| Out-Null`, `&& echo done`, `; Write-Host done`), are no second command, so that call
+# asks once. Any other chained command still denies. CHAIN_ASK is the rule id the deny prints (the lane slug;
 # the cases below pin it, so one edit re-points them all). ALONE is the one word the remedy must
 # carry. Each ask rule's own id is NOT in REASON_MAY_NAME for this rule, so a reason that names an
-# ask step must still avoid every FORBIDDEN_IN_A_REASON fragment.
+# ask command must still avoid every FORBIDDEN_IN_A_REASON fragment.
 CHAIN_ASK = "ask-alone"
 ALONE = "alone"
 
 
 def chained_ask(name, command, **kw):
-    """One case: `command` holds an ask step chained with other steps, so it denies, never asks."""
+    """One case: `command` holds an ask command chained with other commands, so it denies, never asks."""
     more = kw.pop("carries", ())
     carries = (ALONE,) + ((more,) if isinstance(more, str) else tuple(more))
     sh(name, command, "deny", CHAIN_ASK, carries=carries, **kw)
@@ -499,7 +499,7 @@ WTLIVECFG = os.path.join(ROOT, "wtlivecfg")
 WTDEADCFG = os.path.join(ROOT, "wtdeadcfg")
 WTSTALESTARTCFG = os.path.join(ROOT, "wtstalestartcfg")
 
-# SYMLINK WORKTREES (owner ruling 2026-10-11, the feed-build incident). A worker linked
+# SYMLINK WORKTREES (the feed-build incident). An agent linked
 # `app/node_modules` to another worktree's packages. Git lists an untracked symlink as a FILE
 # (`?? app/node_modules`), and removing the link deletes only the link, never its target. So an
 # untracked entry that is a symlink is not work. LINKMAIN is its own repository with NO
@@ -2158,7 +2158,7 @@ sh("worktree: the same reset inside a worktree asks", VCS + " reset --hard", "as
    "shared-tree", cwd=GITWT)
 sh("worktree: -C naming the worktree asks, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "ask", "shared-tree", cwd=GITMAIN)
-# A leading cd is no second step (owner ruling 2026-10-15, ask-steps-run-alone): the reset asks, once.
+# A leading cd is no second command (ask-commands-run-alone): the reset asks, once.
 # The reset alone, by -C, is the line above.
 sh("worktree: a cd into the worktree, then the reset, asks, from the shared checkout",
    "cd " + slash(GITWT) + " && " + VCS + " reset --hard", "ask", "shared-tree", cwd=GITMAIN,
@@ -2186,10 +2186,10 @@ sh("per-file allow: restore of one modified file", VCS + " restore f.txt", "allo
 sh("per-file allow: restore --staged --worktree of one modified file",
    VCS + " restore --staged --worktree f.txt", "allow", cwd=GITWT)
 # one_place (guard.py): a cd anywhere in the command keeps the ask, because a cd can hide the shared
-# checkout behind the lane. Chained with the cd and the python, that ask step still denies (ask-alone):
-# the python is a second real step.
-# The ask reason is not pinned to the -C form: the deny sends the agent to the lone step, whose own ask names it.
-chained_ask("per-file ask: the incident form, a cd into the worktree, one file, then python, denies as a chained ask step",
+# checkout behind the lane. Chained with the cd and the python, that ask command still denies (ask-alone):
+# the python is a second real command.
+# The ask reason is not pinned to the -C form: the deny sends the agent to the lone command, whose own ask names it.
+chained_ask("per-file ask: the incident form, a cd into the worktree, one file, then python, denies as a chained ask command",
             "cd " + slash(GITWT) + " && " + VCS + " checkout fixtures/media-players.json && python3 x.py",
             cwd=GITMAIN)
 
@@ -2412,25 +2412,25 @@ sh("per-file deny: python heredoc, a lone double quote in the body, then cd shar
 # SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the
 # segments, every later segment is judged as the shared checkout, so a later discard of a dirty
 # file is denied. Both arms start in the lane, but the restore runs after `cd` into the shared
-# checkout. Limit: as above, a cd keeps the ask in a worktree, so the two cases below hold an ask step, not a
-# deny step. Each is chained, so each denies as a chained ask step (ask-alone).
-chained_ask("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last, denies as a chained ask step",
+# checkout. Limit: as above, a cd keeps the ask in a worktree, so the two cases below hold an ask command, not a
+# deny command. Each is chained, so each denies as a chained ask command (ask-alone).
+chained_ask("per-file ask: two heredocs with lone apostrophes, then cd shared and restore f.txt, cd lane last, denies as a chained ask command",
             "cd " + slash(GITMAIN) + " && node <<'EOF'\nit's\nEOF\ncat <<EOF2\nwe're\nEOF2\n"
             + VCS + " restore f.txt\ncd " + slash(GITWT), cwd=GITWT)
-chained_ask("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore, denies as a chained ask step",
+chained_ask("per-file ask: the node lone-apostrophe case with && cd lane appended after the shared restore, denies as a chained ask command",
             "node <<'EOF'\n// don't\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt && cd "
             + slash(GITWT), cwd=GITWT)
-# CONTROL. No heredoc, so the walk stays in sync, and the cd keeps the ask step. A leading cd is no
-# second step (ask-steps-run-alone), so this asks. The case name keeps the first words that
+# CONTROL. No heredoc, so the walk stays in sync, and the cd keeps the ask command. A leading cd is no
+# second command (ask-commands-run-alone), so this asks. The case name keeps the first words that
 # hooks/mutate_guard.py names for this case.
-sh("per-file ask: cd lane && restore f.txt with no heredoc asks, the leading cd is no second step",
+sh("per-file ask: cd lane && restore f.txt with no heredoc asks, the leading cd is no second command",
    "cd " + slash(GITWT) + " && " + VCS + " restore f.txt", "ask", "shared-tree", cwd=NOGIT,
    lacks=(CHAIN_ASK,))
 # TWO -C TARGETS (one_place, `len(targets) <= 1`). No cd, both calls are per-file forms in a linked
 # worktree, but they name two different trees (lane, and FARWT, a second linked worktree). One
-# verdict cannot cover two trees, so the step is an ask step, and chained it denies. FARWT holds
+# verdict cannot cover two trees, so the command is an ask command, and chained it denies. FARWT holds
 # b.txt dirty (the fixtures have no g.txt).
-chained_ask("per-file ask: two -C targets, lane then a second linked worktree, both per-file restores, denies as a chained ask step",
+chained_ask("per-file ask: two -C targets, lane then a second linked worktree, both per-file restores, denies as a chained ask command",
             VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(FARWT)
             + " restore b.txt", cwd=GITWT)
 # CONTROL. One -C target, repeated, no cd: the per-file allow stands.
@@ -2453,21 +2453,21 @@ sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a w
 GIT_ENV_RULE = "git-env-set"
 # 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
 # restore runs in the shared checkout whichever side the lane's -C status stands on. main asks the
-# step; chained with the status, it denies as a chained ask step (ask-alone).
-chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout, denies as a chained ask step",
+# command; chained with the status, it denies as a chained ask command (ask-alone).
+chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout, denies as a chained ask command",
             VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
-chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask step",
+chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask command",
             VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
 # 4. A PowerShell Set-Location into the shared checkout. Set-Location is a move, read as a cd
-# (ask-steps-run-alone, guard_core _segment_cd_target), so the restore is judged in the shared checkout
+# (ask-commands-run-alone, guard_core _segment_cd_target), so the restore is judged in the shared checkout
 # and denies. The bash cd form pins the same deny: the nearest rows are the incident form (cd shared
 # && checkout, from a worktree) and the heredoc cd shared && restore, both shared-tree deny. The
-# aliases and Push-Location are not moves, so they keep the deny as a chained ask step (ask-alone).
+# aliases and Push-Location are not moves, so they keep the deny as a chained ask command (ask-alone).
 sh("per-file deny: PowerShell Set-Location into the shared checkout, then restore f.txt, from a worktree",
    "Set-Location " + slash(GITMAIN) + "; " + VCS + " restore f.txt", "deny", "shared-tree",
    tool="PowerShell", cwd=GITWT, lacks=(CHAIN_ASK,))
 for _cd in ("sl", "chdir", "Push-Location"):
-    chained_ask("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies as a chained ask step"
+    chained_ask("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies as a chained ask command"
                 % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
                 tool="PowerShell", cwd=GITWT)
 # 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
@@ -3252,7 +3252,7 @@ def tag_orphan(env_entries=(), argv_extra=()):
 def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
              **who):
     """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped. `who`
-    is agent_id and agent_type, the payload fields that mark a subagent call."""
+    is agent_id and agent_type, the payload fields that mark an agent call."""
     pid = tag_orphan(env_entries, argv_extra) if ORPHAN_CASES else None
     if pid is None:
         skip_case(name, NO_ORPHAN)
@@ -3265,13 +3265,13 @@ def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION,
 
 TAG_LEADER = tag_case("kill: a PPID-1 pid whose environment holds this session's id", "allow",
                       env_entries=[TAG + "=" + SUB_SESSION])
-# Every subagent shares the main session's id, so the tag owns a pid for the main session only
+# Every agent shares the main session's id, so the tag owns a pid for the main session only
 # (decision a-kill-by-pid-needs-an-owned-pid). A truthy agent_id or agent_type
-# marks a subagent call, which keeps the agent-worktree rule alone.
+# marks an agent call, which keeps the agent-worktree rule alone.
 for _who, _kw in (("agent_id and agent_type", dict(agent_id="tag-sub1", agent_type="general-purpose")),
                   ("agent_id only", dict(agent_id="tag-sub1")),
                   ("agent_type only", dict(agent_type="general-purpose"))):
-    tag_case("kill: a PPID-1 pid with this session's id, called by a subagent (%s)" % _who, "deny",
+    tag_case("kill: a PPID-1 pid with this session's id, called by an agent (%s)" % _who, "deny",
              env_entries=[TAG + "=" + SUB_SESSION], carries="did not start", **_kw)
 tag_case("kill: a PPID-1 pid whose environment holds another session's id", "deny",
          env_entries=[TAG + "=" + OTHER_SESSION], carries="did not start")
@@ -3904,9 +3904,9 @@ sh("playwright: the setter text is only a gh comment body inside pwsh -c, allowe
    r'''pwsh -c "gh pr comment 314 --body 'Do not set \$env:PLAYWRIGHT_BROWSERS_PATH = x'"''',
    "allow", cwd=NOGIT)
 
-# THE PLAYWRIGHT BROWSER INSTALL. Owner ruling: a subagent never runs a Playwright browser install.
+# THE PLAYWRIGHT BROWSER INSTALL. An agent never runs a Playwright browser install.
 # A main-session install runs only as the Node 22 cli.js form. INCIDENT 2026-10-11 (feed-build):
-# three test-author subagents ran `npx playwright install chromium` at once under the Mac default
+# three test-author agents ran `npx playwright install chromium` at once under the Mac default
 # Node 26.11. The install hangs while it unpacks (measured, see decision playwright-browsers-path).
 # One hung 20 minutes, and they fought over the shared ~/Library/Caches/ms-playwright/__dirlock.
 # The main-session forms below are denied. Each one runs an install under the default Node.
@@ -3983,17 +3983,17 @@ sh("playwright-install: grep for the install text in a README is allowed",
    'grep "playwright install" README.md', "allow", cwd=NOGIT)
 sh("playwright-install: echo of the install text is allowed", "echo npx playwright install",
    "allow", cwd=NOGIT)
-# Rule 1: a subagent call that runs an install is denied whatever the form, including the Node 22
-# cli.js form, and whatever the role the subagent carries. The switch reads agent_id or agent_type
+# Rule 1: an agent call that runs an install is denied whatever the form, including the Node 22
+# cli.js form, and whatever the role the agent carries. The switch reads agent_id or agent_type
 # (guard.py passes bool of either), so one row per outcome pins it: a plain install and the Node 22
 # cli.js form denied, and a test run allowed.
-sh("playwright-install: a subagent install is denied",
+sh("playwright-install: an agent install is denied",
    "npx playwright install chromium", "deny", "playwright-install", cwd=NOGIT,
    agent_id="pw-sub1", agent_type="builder")
-sh("playwright-install: a subagent Node 22 cli.js install is denied, rule 1 wins",
+sh("playwright-install: an agent Node 22 cli.js install is denied, rule 1 wins",
    "npx -y node@22 node_modules/playwright/cli.js install chromium", "deny",
    "playwright-install", cwd=NOGIT, agent_id="pw-sub1", agent_type="test-author")
-sh("playwright-install: a subagent test run is allowed", "npx playwright test", "allow",
+sh("playwright-install: an agent test run is allowed", "npx playwright test", "allow",
    cwd=NOGIT, agent_id="pw-sub1")
 # False alarm: the Node 22 cli.js form with a ./ path is the allowed form.
 sh("playwright-install: the Node 22 cli.js form with a ./ path is allowed in the main session",
@@ -4058,7 +4058,7 @@ sh("kill: a pkill inside an if's then-block, MEASURED wrongly allowed",
 
 # =========================================================================== 2b. detached launches
 #
-# MEASURED 2026-09-23 (macOS): a subagent ran `(python3 -m http.server 8000
+# On macOS an agent ran `(python3 -m http.server 8000
 # >/tmp/http_server_wtweb.log 2>&1 &)`. The subshell exited at once, pid 1 adopted the server,
 # the harness never tracked it, and no pid was kept, so rule 2's own remedy had no pid to name.
 
@@ -4176,7 +4176,7 @@ sh("kill: a bash backslash before ; makes taskkill an argument of cd, allowed",
 
 
 # A MACHINE-WIDE KILL IN A ONE-COMMAND PYTHON BODY STILL DENIES (owner ruling 2026-10-14 22:25): the
-# body is one step, and the kill is a deny, which wins over any ask step in the same command.
+# body is one command, and the kill is a deny, which wins over any ask command in the same command.
 sh("heredoc: a machine-wide kill in a python body still denies, in one command",
    "python3 - <<'PY'\npkill -f node\nPY", "deny", "machine-wide-kill", cwd=PROJ)
 
@@ -4303,12 +4303,12 @@ for _name, _command in (
     ("grep for tail with -F after the pattern", "grep -rn tail -F hooks/"),
 ):
     sh("stream: false alarm: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
-# A follow behind a wrapper, a path or a later step stays refused (`bash -c` and `ssh host` forms are not pinned).
+# A follow behind a wrapper, a path or a later command stays refused (`bash -c` and `ssh host` forms are not pinned).
 for _name, _command in (
     ("behind sudo", "sudo tail -f app.log"),
     ("behind env and an assignment", "env X=1 tail -f app.log"),
     ("by absolute path", "/usr/bin/tail -f app.log"),
-    ("as the second step", "cd logs && tail -f app.log"),
+    ("as the second command", "cd logs && tail -f app.log"),
 ):
     sh("stream: tail -f " + _name + " still denies", _command, "deny", "live-stream", cwd=NOGIT)
 
@@ -4863,7 +4863,7 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 FAMILY = "wsl"
 #
 WSL_RULE = "wsl-allow-list"
-SUBAGENT_ID = "a64a7f84210a8721d"
+SAMPLE_AGENT_ID = "a64a7f84210a8721d"
 
 sh("wsl: a node test file under mods, main session",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT)
@@ -4911,21 +4911,21 @@ sh("wsl: a plain node test path that is absolute",
    "wsl -e node /tmp/evil.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 
 # The same allowed call from each role: "allowed (any role)".
-sh("wsl: an allowed test call from a builder subagent",
+sh("wsl: an allowed test call from a builder agent",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
-   agent_id=SUBAGENT_ID, agent_type="builder")
-sh("wsl: an allowed test call from a test-author subagent",
+   agent_id=SAMPLE_AGENT_ID, agent_type="builder")
+sh("wsl: an allowed test call from a test-author agent",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
-   agent_id=SUBAGENT_ID, agent_type="test-author")
-sh("wsl: an allowed test call from a record-writer subagent",
+   agent_id=SAMPLE_AGENT_ID, agent_type="test-author")
+sh("wsl: an allowed test call from a record-writer agent",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
-   agent_id=SUBAGENT_ID, agent_type="record-writer")
-sh("wsl: an allowed test call from an Explore subagent",
+   agent_id=SAMPLE_AGENT_ID, agent_type="record-writer")
+sh("wsl: an allowed test call from an Explore agent",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
-   agent_id=SUBAGENT_ID, agent_type="Explore")
-sh("wsl: an allowed test call from a reviewer subagent",
+   agent_id=SAMPLE_AGENT_ID, agent_type="Explore")
+sh("wsl: an allowed test call from a reviewer agent",
    "wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT,
-   agent_id=SUBAGENT_ID, agent_type="reviewer")
+   agent_id=SAMPLE_AGENT_ID, agent_type="reviewer")
 
 # Quoted and commented text runs nothing, and a comment hides nothing that follows it.
 sh("wsl: a refused form in single quotes runs nothing",
@@ -5521,20 +5521,20 @@ sh("silent-write fetch: one dst under refs/heads makes the whole fetch a write",
 sh("silent-write fetch: a bare quiet fetch is a read",
    VCS + " fetch -q origin main", "allow", cwd=GITMAIN)
 
-# (4) The refusal names its step by kind and position, the flag it hit, and one loud form.
-sh("silent-write reason: a quiet push names step 3 of 4, the push, the flag, and the loud form",
+# (4) The refusal names its command by kind and position, the flag it hit, and one loud form.
+sh("silent-write reason: a quiet push names command 3 of 4, the push, the flag, and the loud form",
    "echo a && " + VCS + " status && " + VCS + " push -q origin zz9 && echo done",
    "deny", "silent-write",
-   carries=("step 3 of 4", "the push", "-q", "2>&1 | tail -1"),
+   carries=("command 3 of 4", "the push", "-q", "2>&1 | tail -1"),
    lacks=("zz9", VCS + " push -q", "echo done"), cwd=GITMAIN)
-sh("silent-write reason: a discarded commit names step 2 of 2, the commit, the redirect, "
+sh("silent-write reason: a discarded commit names command 2 of 2, the commit, the redirect, "
    "and the loud form",
    VCS + " add zz9 && " + VCS + " commit -m qq7 2>/dev/null", "deny", "silent-write",
-   carries=("step 2 of 2", "the commit", ">/dev/null", "2>&1 | tail -1"),
+   carries=("command 2 of 2", "the commit", ">/dev/null", "2>&1 | tail -1"),
    lacks=("qq7", "zz9", VCS + " commit -m"), cwd=GITMAIN)
-sh("silent-write reason: a piped discard counts the pipe's stages as steps",
+sh("silent-write reason: a piped discard counts the pipe's stages as commands",
    VCS + " commit -m qq7 2>&1 | cat >/dev/null", "deny", "silent-write",
-   carries=("step 1 of 2", "the commit"), lacks=("qq7", "cat >/dev/null"), cwd=GITMAIN)
+   carries=("command 1 of 2", "the commit"), lacks=("qq7", "cat >/dev/null"), cwd=GITMAIN)
 
 # Scanner (building-scanner-respects-strings): a quote or a comment opener changes nothing outside
 # its own quotes, and a comment hides nothing from a real write before it.
@@ -5646,10 +5646,10 @@ sh("silent-write remedy: a silenced gh pr merge names gh pr merge, not the git m
    "gh pr merge 5 --merge >/dev/null", "deny", "silent-write", carries="gh pr merge",
    lacks=VCS + " merge 2>&1", cwd=NOGIT)
 
-# (f) Hold: a single command is step 1 of 1, pinned so the step count cannot drift.
-sh("silent-write step: a single silenced commit says step 1 of 1",
-   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="step 1 of 1",
-   lacks="step 1 of 2", cwd=GITMAIN)
+# (f) Hold: a single command is command 1 of 1, pinned so the command count cannot drift.
+sh("silent-write command: a single silenced commit says command 1 of 1",
+   VCS + " commit -m x 2>/dev/null", "deny", "silent-write", carries="command 1 of 1",
+   lacks="command 1 of 2", cwd=GITMAIN)
 
 # (g) Scanner cases for the quote walk: a multi-line message that names a discard as text, then a
 # backtick inside a quoted message.
@@ -5942,7 +5942,7 @@ sh("push: lease with git -C naming a feature checkout allows from the main check
 sh("push: a git -C on another call is not the push's directory",
    VCS + " -C " + slash(PUSHMAIN) + " status && " + VCS + " push " + LE.strip(), "allow",
    cwd=PUSHFEAT)
-sh("push: lease after cd into the default branch's checkout asks, the leading cd is no second step",
+sh("push: lease after cd into the default branch's checkout asks, the leading cd is no second command",
    "cd " + slash(PUSHMAIN) + " && " + VCS + " push " + LE.strip(), "ask", "force-push",
    cwd=PUSHFEAT, lacks=(CHAIN_ASK,))
 sh("push: lease after cd into a feature checkout allows from the main checkout",
@@ -6410,10 +6410,10 @@ for _prefix in ("echo it\\'s", 'echo "a\\"b"', "echo $'it\\'s'"):
                   "%s && rm -rf %s" % (_prefix, _target))
 
 # A `git rm` IS NOT `rm`. It drops tracked files from the index, so `-r .` there names no wide
-# delete. Main allows each of these. A real `rm -rf .` after a `git` step is still refused.
+# delete. Main allows each of these. A real `rm -rf .` after a `git` command is still refused.
 for _command in (VCS + " rm -r --cached .", VCS + " rm -r .", VCS + " rm -r --cached .."):
     rm_parent("allows " + _command, _command, "allow")
-rm_parent("a real rm -rf . after a git step", VCS + " status && rm -rf .")
+rm_parent("a real rm -rf . after a git command", VCS + " status && rm -rf .")
 
 # KNOWN OPEN. A shell operator glued to the target (`..&`, `..>x`, `.>/dev/null`) leaves the target
 # unread by both the token read and the raw read. These cases record today's verdict and are not a
@@ -7758,8 +7758,14 @@ for _name, _command in (
     ("a backslash path", VCS + ' commit -m "cites decisions\\one-shared-record-stamp.md"'),
     ("an attached -m value", VCS + ' commit -m"cites ' + CITE + '"'),
     ("a repo-root record path in parentheses", VCS + ' commit -m "done (' + CITE + ')"'),
+    ("a record path in bold", VCS + ' commit -m "see **docs/decisions/one-shared-record-stamp.md**"'),
     ("a dot-slash record path", VCS + ' commit -m "cites ./' + CITE + '"'),
     ("a PR body", 'gh pr create --draft --title t --body "cites ' + CITE + '"'),
+    ("a layout-path decision", VCS + ' commit -m "fix, per docs/' + CITE + '"'),
+    ("a layout-path debt", VCS + ' commit -m "see docs/debts/later-item.md"'),
+    ("a numbered record path under docs", VCS + ' commit -m "see docs/decisions/0001.md"'),
+    ("a layout-path decision in a PR body",
+     'gh pr create --draft --title t --body "cites docs/' + CITE + '"'),
     ("a PR body file", "gh pr edit 3 --body-file " + slash(MSG_BAD)),
 ):
     sh("cite-by-id: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT, config=MERGECFG)
@@ -7786,6 +7792,7 @@ sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CI
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
+    ("a code path in bold", VCS + ' commit -m "guard: fix **hooks/guard.py**"'),
     ("the word decisions", VCS + ' commit -m "decisions: one word, no path"'),
     ("the word debts and a folder", VCS + ' commit -m "move the debts around, see decisions/"'),
     ("an id with a gloss", VCS + ' commit -m "per D12, short titles for records"'),
@@ -7798,7 +7805,7 @@ for _name, _command in (
     ("a URL that holds a record path",
      VCS + ' commit -m "see https://github.com/o/r/blob/main/' + CITE + '"'),
     ("a record path under another folder", VCS + ' commit -m "see lint/' + CITE + '"'),
-    ("a numbered record path under docs", VCS + ' commit -m "see docs/decisions/0001.md"'),
+    ("a code path under lint", VCS + ' commit -m "see lint/layout.py and hooks/guard.py"'),
     ("a message file that cites an id", VCS + " commit -F " + slash(MSG_OK)),
     ("a PR body with an id", 'gh pr create --draft --title t --body "per D12, short titles for records"'),
 ):
@@ -7841,6 +7848,9 @@ sh("cite-by-id: Drops-lines trailer in a commit -m body is allowed",
    VCS + ' commit -m "' + DROPS_BODY + '"', "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: Drops-lines trailer in a heredoc -F - body is allowed",
    VCS + " commit -F - <<'EOF'\n" + DROPS_BODY + "\nEOF", "allow", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: a Drops-lines trailer naming a layout-path debt is allowed",
+   VCS + ' commit -m "title\n\nbody\n\nDrops-lines: docs/debts/a.md -- replaced by a decision"',
+   "allow", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: two Drops-lines trailers with two paths are allowed",
    VCS + ' commit -m "title\n\nDrops-lines: debts/a.md -- replaced by a decision\n'
    'Drops-lines: debts/b.md -- folded into a decision"', "allow", cwd=NOGIT, config=MERGECFG)
@@ -8556,15 +8566,22 @@ add("frozen: Write of a config lint script", "deny", "frozen-path", tool="Write"
     file_path=CFG_LINT)
 add("frozen: Write of a config agent file", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_AGENT)
-# ux/ holds the house rules (decision ux-house-rules). A session that could rewrite them could loosen
-# its own review bar, so it is frozen like agents/ and output-styles/. A product repo's own ux/ is not.
-CFG_UX = slash(os.path.join(CFG, "ux", "principles.md"))
-PROJ_UX = slash(os.path.join(PROJ, "ux", "principles.md"))
+# docs/design/ holds the house rules (decision ux-house-rules). A session that could rewrite them could
+# loosen its own review bar, so it is frozen like agents/ and output-styles/. It is two levels deep, so
+# its siblings under docs/, a name that only starts with "design", and a product repo's own copy stay open.
+CFG_DESIGN = slash(os.path.join(CFG, "docs", "design", "principles.md"))
+PROJ_DESIGN = slash(os.path.join(PROJ, "docs", "design", "principles.md"))
 for tool in ("Write", "Edit"):
-    add("frozen: " + tool + " of the config ux house rules", "deny", "frozen-path", tool=tool,
-        cwd=NOGIT, file_path=CFG_UX)
-add("frozen: Edit of a product repo's own ux/principles.md is allowed", "allow", tool="Edit",
-    cwd=PROJ, file_path=PROJ_UX)
+    add("frozen: " + tool + " of the config docs/design house rules", "deny", "frozen-path", tool=tool,
+        cwd=NOGIT, file_path=CFG_DESIGN)
+add("frozen: Write under the config docs/ beside docs/design is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(CFG, "docs", "notes.md")))
+add("frozen: Write under a config docs/designer folder is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(CFG, "docs", "designer", "a.md")))
+add("frozen: Write of the retired config ux folder is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(CFG, "ux", "principles.md")))
+add("frozen: Edit of a product repo's own docs/design/principles.md is allowed", "allow", tool="Edit",
+    cwd=PROJ, file_path=PROJ_DESIGN)
 add("frozen: Write of a skill this repo ships", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_SKILL)
 add("frozen: Write of a skill this repo does not ship is allowed", "allow", tool="Write",
@@ -9211,8 +9228,8 @@ sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask
 FAMILY = "model-cap"
 #
 # Rule 8. A project settings file overrides the owner's user settings, so a write there can lift
-# the subagent model cap the user settings hold. The decision is `ask`, never `deny`: the same
-# write is how an Opus worker gets enabled on purpose.
+# the agent model cap the user settings hold. The decision is `ask`, never `deny`: the same
+# write is how an Opus agent gets enabled on purpose.
 #
 # THE ASK NAMES THE VALUE AND THE FILE. `REASON_MAY_NAME` holds that exemption, keyed by this
 # rule's name and no case's say-so, and each ask case pins the fragment the approver must read
@@ -9239,45 +9256,45 @@ def cap_settings(model=OPUS, force="1", compact=False):
 
 
 add("cap: Write of a project local settings file setting an opus model asks", "ask",
-    "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
+    "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
     carries=(OPUS, "settings.local.json"))
 add("cap: Write of a project settings file setting an opus model asks", "ask",
-    "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS, content=cap_settings(),
+    "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS, content=cap_settings(),
     carries=(OPUS, "settings.json"))
 add("cap: a relative project settings path setting an opus model asks", "ask",
-    "subagent-model-cap", tool="Write", cwd=PROJ, file_path=".claude/settings.local.json",
+    "agent-model-cap", tool="Write", cwd=PROJ, file_path=".claude/settings.local.json",
     content=cap_settings(), carries=(OPUS,))
-add("cap: Edit turning the force flag off asks", "ask", "subagent-model-cap", tool="Edit",
+add("cap: Edit turning the force flag off asks", "ask", "agent-model-cap", tool="Edit",
     cwd=NOGIT, file_path=PROJ_SETTINGS,
     old_string='"' + CAP_FORCE + '": "1"', new_string='"' + CAP_FORCE + '": "0"',
     carries=(CAP_FORCE + " = 0",))
-add("cap: Edit naming the model variable with no value asks", "ask", "subagent-model-cap",
+add("cap: Edit naming the model variable with no value asks", "ask", "agent-model-cap",
     tool="Edit", cwd=NOGIT, file_path=PROJ_LOCAL,
     old_string='"' + CAP_KEY + '": "sonnet",', new_string="",
     carries=(CAP_KEY + " = sonnet",))
-add("cap: MultiEdit reaching an opus model asks", "ask", "subagent-model-cap", tool="MultiEdit",
+add("cap: MultiEdit reaching an opus model asks", "ask", "agent-model-cap", tool="MultiEdit",
     cwd=NOGIT, file_path=PROJ_LOCAL,
     edits=[{"old_string": '"' + CAP_KEY + '": "sonnet"',
             "new_string": '"' + CAP_KEY + '": "' + OPUS + '"'}],
     carries=(OPUS,))
-add("cap: a managed settings file is a settings file", "ask", "subagent-model-cap", tool="Write",
+add("cap: a managed settings file is a settings file", "ask", "agent-model-cap", tool="Write",
     cwd=NOGIT, file_path=MANAGED_SETTINGS, content=cap_settings(), carries=(OPUS,))
-# The workflow subagent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
+# The workflow agent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
 for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE"):
     add("cap: Write of a project settings file setting %s to opus asks" % _key, "ask",
-        "subagent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+        "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
         content=json.dumps({"env": {_key: "opus"}}), carries=(_key + " = opus",))
 
 # THE EDIT LIST IS READ WHOLE, not the first 200 edits: the lift after 200 no-op edits still asks. This
 # case pins that boundary, so a count bound cannot come back unseen.
 CAP_NOOP_EDITS = [{"old_string": "line %d" % index, "new_string": "row %d" % index}
                   for index in range(200)]
-add("cap: 200 no-op edits ahead of the lift still asks", "ask", "subagent-model-cap",
+add("cap: 200 no-op edits ahead of the lift still asks", "ask", "agent-model-cap",
     tool="MultiEdit", cwd=NOGIT, file_path=PROJ_SETTINGS,
     edits=CAP_NOOP_EDITS + [{"old_string": '"' + CAP_KEY + '": "sonnet"',
                              "new_string": '"' + CAP_KEY + '": "' + OPUS + '"'}],
     carries=(OPUS,))
-add("cap: the lift in the last of 400 edits still asks", "ask", "subagent-model-cap",
+add("cap: the lift in the last of 400 edits still asks", "ask", "agent-model-cap",
     tool="MultiEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
     edits=(CAP_NOOP_EDITS * 2) + [{"old_string": '"' + CAP_FORCE + '": "1"',
                                    "new_string": '"' + CAP_FORCE + '": "0"'}],
@@ -9293,7 +9310,7 @@ try:
 except Exception:
     CAP_ALIAS_MADE = False
 add("cap: a symlink to a project settings file resolves and asks [resolve-branch proof]",
-    "ask" if CAP_ALIAS_MADE else "allow", "subagent-model-cap" if CAP_ALIAS_MADE else None,
+    "ask" if CAP_ALIAS_MADE else "allow", "agent-model-cap" if CAP_ALIAS_MADE else None,
     tool="Write", cwd=NOGIT, file_path=CAP_ALIAS, content=cap_settings(),
     carries=(OPUS,) if CAP_ALIAS_MADE else ())
 
@@ -9325,99 +9342,99 @@ add("cap: a symlink to a project settings file resolves and asks [resolve-branch
 # platform, whichever spelling gets there.
 CAP_TRAILING_DOT = slash(os.path.join(PROJ, ".claude", "settings.json."))
 add("cap: a trailing-dot spelling resolves to the real settings file and asks [resolve-branch proof]",
-    "ask" if os.name == "nt" else "allow", "subagent-model-cap" if os.name == "nt" else None,
+    "ask" if os.name == "nt" else "allow", "agent-model-cap" if os.name == "nt" else None,
     tool="Write", cwd=NOGIT, file_path=CAP_TRAILING_DOT, content=cap_settings(),
     carries=(OPUS,) if os.name == "nt" else ())
 
 # A JSON ESCAPE IN THE KEY. The text pattern reads no key here, so the JSON walk is what answers.
 CAP_ESCAPED_KEY = '\\u0043LAUDE_CODE_SUBAGENT_MODEL'
-add("cap: a JSON-escaped key in the content asks", "ask", "subagent-model-cap", tool="Write",
+add("cap: a JSON-escaped key in the content asks", "ask", "agent-model-cap", tool="Write",
     cwd=NOGIT, file_path=PROJ_LOCAL,
     content='{\n  "env": {\n    "' + CAP_ESCAPED_KEY + '": "' + OPUS + '"\n  }\n}\n',
     carries=(CAP_KEY + " = " + OPUS,))
-add("cap: a JSON number value is read, not guessed", "ask", "subagent-model-cap", tool="Write",
+add("cap: a JSON number value is read, not guessed", "ask", "agent-model-cap", tool="Write",
     cwd=NOGIT, file_path=PROJ_SETTINGS,
     content=json.dumps({"env": {CAP_FORCE: 0}}), carries=(CAP_FORCE + " = 0",))
 
 # THE BARE-KEY PASS is what answers when neither the value pattern nor a JSON parse can. Both cases
 # below reach the rule through that pass alone.
-add("cap: a value the pattern cannot read still asks", "ask", "subagent-model-cap", tool="Edit",
+add("cap: a value the pattern cannot read still asks", "ask", "agent-model-cap", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL,
     old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "$OPUS_ID"',
     carries=(CAP_KEY + " = (value unread)",))
 sh("cap: a shell variable as the model value still asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n{\"env\": {\"" + CAP_KEY + "\": \"$OPUS_ID\"}}\nJSON",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = (value unread)",))
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = (value unread)",))
 sh("cap: an object as the model value still asks",
    "cat <<'JSON' > " + PROJ_SETTINGS + "\n{\"env\": {\"" + CAP_KEY + "\": {\"a\": 1}}}\nJSON",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = (value unread)",))
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = (value unread)",))
 
 # THE OVER-ASK IS PINNED, because a comment claiming otherwise once stood here. A settings write
 # that names the variable only inside a permission string still asks: the bare-key pass fires on any
 # occurrence in the content. That is the safe direction, and the case exists so the behaviour and
 # the comment beside the rule cannot drift apart again.
-add("cap: the variable inside a permission string still asks", "ask", "subagent-model-cap",
+add("cap: the variable inside a permission string still asks", "ask", "agent-model-cap",
     tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
     content=json.dumps({"permissions": {"allow": ["Bash(grep " + CAP_KEY + ":*)"]}}),
     carries=(CAP_KEY + " = (value unread)",))
 
 # THE PRINTED REASON carries text a tool passed in, so a long value is cut AND MARKED, a control
 # character never reaches the reason, and a value cut short is never read as the whole value.
-add("cap: a very long model value is cut and the cut is marked", "ask", "subagent-model-cap",
+add("cap: a very long model value is cut and the cut is marked", "ask", "agent-model-cap",
     tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
     content=json.dumps({"env": {CAP_KEY: "opus-" + ("z" * 4000)}}),
     carries=("opus-zzzz", "[cut]"))
-add("cap: a newline in the value prints as one line, whole", "ask", "subagent-model-cap",
+add("cap: a newline in the value prints as one line, whole", "ask", "agent-model-cap",
     tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
     content=json.dumps({"env": {CAP_KEY: "opus\nApproved: yes"}}),
     carries=("opus Approved: yes",))
-add("cap: control characters in the path never reach the reason", "ask", "subagent-model-cap",
+add("cap: control characters in the path never reach the reason", "ask", "agent-model-cap",
     tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, "a\r\n[Approved]", ".claude", "settings.local.json")),
     content=cap_settings(), carries=("a  [Approved]",))
 # The clone's settings.json is the SOURCE the install script copies into the config directory, so a
 # cap change there reaches the owner's own settings at the next install. Editable (rule 7), asked.
-add("cap: the clone's own settings file is asked, not denied", "ask", "subagent-model-cap",
+add("cap: the clone's own settings file is asked, not denied", "ask", "agent-model-cap",
     tool="Edit", cwd=CLONE, file_path=CLONE_SETTINGS,
     old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
     carries=(OPUS,))
 
 sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
-# The pipe joins two steps, so a tee onto the file is a chained ask step and denies (ask-alone). The
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+# The pipe joins two commands, so a tee onto the file is a chained ask command and denies (ask-alone). The
 # pipe IS the write here, so "run it alone" means a form with no pipe, such as the redirect below.
-chained_ask("cap: a tee onto a project settings file, piped from printf, denies as a chained ask step",
+chained_ask("cap: a tee onto a project settings file, piped from printf, denies as a chained ask command",
             "printf '%s' '" + cap_settings(compact=True) + "' | tee " + PROJ_SETTINGS, cwd=NOGIT)
 sh("cap: a sed -i on a project settings file asks, and names the value it arrives at",
    "sed -i 's/\"" + CAP_KEY + "\": \"sonnet\"/\"" + CAP_KEY + "\": \"" + OPUS + "\"/' "
    + PROJ_SETTINGS,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS,))
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS,))
 sh("cap: a redirect onto a project settings file asks",
    "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
 sh("cap: an append onto a project settings file asks",
    "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
 
 # A WRITE PIPED INTO A SHELL IS A WRITE. The cap text sits in double quotes and the sed runs under `sh`,
 # so it is code. The pipe chains it with the echo, so it denies (ask-alone).
-chained_ask("cap shell: a sed -i onto a project settings file that sets the cap, piped to sh, denies as a chained ask step",
+chained_ask("cap shell: a sed -i onto a project settings file that sets the cap, piped to sh, denies as a chained ask command",
    'echo "sed -i s/' + CAP_KEY + '=sonnet/' + CAP_KEY + '=' + OPUS + '/ ' + PROJ_SETTINGS + '" | sh',
-   cwd=NOGIT, carries=("subagent-model-cap",))
+   cwd=NOGIT, carries=("agent-model-cap",))
 
 # A COMMENT OPENER OR A LONE QUOTE INSIDE A STRING does not hide the real write after it. The scanner
 # must still reach the redirect, and the multi-line quoted string is the multi-line shape of the same
 # (rule building-scanner-respects-strings).
-chained_ask("cap: a comment opener inside double quotes does not hide a redirect that writes the cap, denies as a chained ask step",
+chained_ask("cap: a comment opener inside double quotes does not hide a redirect that writes the cap, denies as a chained ask command",
    "echo \"# keep this line\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   cwd=NOGIT, carries=("subagent-model-cap",))
+   cwd=NOGIT, carries=("agent-model-cap",))
 sh("cap: a lone apostrophe inside double quotes does not hide a redirect that writes the cap",
    "printf \"it's %s\" '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
 sh("cap: a comment opener in a multi-line quoted string does not hide a redirect that writes the cap",
    "printf '%s\n# keep' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
 
 # RULE ORDER. The config directory's own settings keep rule 7's deny, which stands ahead of rule 8,
 # so the cap content never turns that wall into a prompt.
@@ -9434,7 +9451,7 @@ add("cap: a project settings write touching neither variable is allowed", "allow
     content=json.dumps({"env": {"TZ": "UTC"}, "permissions": {"allow": ["Bash(ls:*)"]}}, indent=2))
 add("cap: prose naming the variable in a README is allowed", "allow", tool="Write", cwd=NOGIT,
     file_path=PROJ_README,
-    content="Set " + CAP_KEY + " to sonnet, with " + CAP_FORCE + " at 1, to cap every worker.\n")
+    content="Set " + CAP_KEY + " to sonnet, with " + CAP_FORCE + " at 1, to cap every agent.\n")
 add("cap: an ordinary source file naming the variable is allowed", "allow", tool="Edit", cwd=NOGIT,
     file_path=slash(os.path.join(PROJ, "src", "env.py")),
     old_string="x = 1", new_string='CAP = os.environ["' + CAP_KEY + '"]')
@@ -9456,79 +9473,79 @@ sh("cap data: a grep naming a cat-write onto a settings file with the cap key al
    "grep -n \"cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" docs/notes.md", "allow", cwd=NOGIT)
 sh("cap data: an echo naming a tee onto a settings file, piped to wc, allows",
    "echo 'tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | wc -l", "allow", cwd=NOGIT)
-chained_ask("cap data: an && inside double quotes naming a cat-write, piped to python, denies as a chained ask step "
+chained_ask("cap data: an && inside double quotes naming a cat-write, piped to python, denies as a chained ask command "
    "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "echo \"ok && cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", cwd=NOGIT,
-   carries=("subagent-model-cap",))
+   carries=("agent-model-cap",))
 chained_ask("cap data: a comment opener inside double quotes naming a cat-write, piped to python, denies as a "
-   "chained ask step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "chained ask command [cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "echo \"# cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | python hooks/guard.py", cwd=NOGIT,
-   carries=("subagent-model-cap",))
+   carries=("agent-model-cap",))
 sh("cap data: a lone apostrophe inside double quotes naming a cat-write, piped to jq, allows",
    "echo \"don't cat > " + PROJ_LOCAL + " " + CAP_KEY + "\" | jq .", "allow", cwd=NOGIT)
 chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to python, denies as a chained ask "
-   "step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "command [cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
-   carries=("subagent-model-cap",))
+   carries=("agent-model-cap",))
 sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
    "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
-   + CAP_KEY + "\"}}\nPAYLOAD", "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+   + CAP_KEY + "\"}}\nPAYLOAD", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
    "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
-chained_ask("cap data: a JSON tool-call sample holding the cap write, piped to python, denies as a chained ask step "
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+chained_ask("cap data: a JSON tool-call sample holding the cap write, piped to python, denies as a chained ask command "
    "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' '" + json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat > " + PROJ_LOCAL
    + " <<JSON\n" + cap_settings() + "\nJSON"}}) + "' | python hooks/guard.py", cwd=NOGIT,
-   carries=("subagent-model-cap",))
+   carries=("agent-model-cap",))
 chained_ask("cap data: a JSON payload naming a sed -i on a settings file with the cap key, piped to python, "
-   "denies as a chained ask step [cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "denies as a chained ask command [cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
-   + CAP_KEY}}) + "' | python hooks/guard.py", cwd=NOGIT, carries=("subagent-model-cap",))
+   + CAP_KEY}}) + "' | python hooks/guard.py", cwd=NOGIT, carries=("agent-model-cap",))
 
 # A quoted project settings path with a space asks. Ask-alone chains the tee, cp and Out-File forms
-# with a step, so those deny. The lone Set-Content asks. Rule 8 reads the whole command for the cap
+# with a command, so those deny. The lone Set-Content asks. Rule 8 reads the whole command for the cap
 # key, so each write names it on its line. Only the value is pinned.
 CAP_SPACED = slash(os.path.join(ROOT, "my proj", ".claude", "settings.json"))
-chained_ask("cap: a tee onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
+chained_ask("cap: a tee onto a quoted project settings path with a space denies as a chained ask command [r1 red]",
    "printf '%s' '" + cap_settings(compact=True) + "' | tee \"" + CAP_SPACED + "\"",
-   cwd=NOGIT, carries=("subagent-model-cap",))
-chained_ask("cap: a cp onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
+   cwd=NOGIT, carries=("agent-model-cap",))
+chained_ask("cap: a cp onto a quoted project settings path with a space denies as a chained ask command [r1 red]",
    "printf '%s' '" + cap_settings(compact=True) + "' > /tmp/cap.json && cp /tmp/cap.json \""
    + CAP_SPACED + "\"",
-   cwd=NOGIT, carries=("subagent-model-cap",))
+   cwd=NOGIT, carries=("agent-model-cap",))
 sh("cap: a PowerShell Set-Content onto a quoted project settings path with a space asks [r1 red]",
    "Set-Content -Path \"" + CAP_SPACED + "\" -Value '" + cap_settings(compact=True) + "'",
-   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT, carries=(OPUS,))
-chained_ask("cap: a PowerShell Out-File onto a quoted project settings path with a space denies as a chained ask step [r1 red]",
+   "ask", "agent-model-cap", tool="PowerShell", cwd=NOGIT, carries=(OPUS,))
+chained_ask("cap: a PowerShell Out-File onto a quoted project settings path with a space denies as a chained ask command [r1 red]",
    "'" + cap_settings(compact=True) + "' | Out-File -FilePath \"" + CAP_SPACED + "\"",
-   tool="PowerShell", cwd=NOGIT, carries=("subagent-model-cap",))
+   tool="PowerShell", cwd=NOGIT, carries=("agent-model-cap",))
 
 # COVERAGE. On the cap side too: a comment opener, a multi-line quoted
 # string or a lone apostrophe must neither hide a redirect that writes the cap, nor turn quoted text that
 # names a write into one.
-chained_ask("cap: a /* in double quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
+chained_ask("cap: a /* in double quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask command",
    "echo \"/* keep\" && printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   cwd=NOGIT, carries=("subagent-model-cap",))
-chained_ask("cap: a // in single quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
+   cwd=NOGIT, carries=("agent-model-cap",))
+chained_ask("cap: a // in single quotes does not hide a redirect that writes the cap [r1 cov], denies as a chained ask command",
    "echo '// keep' ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   cwd=NOGIT, carries=("subagent-model-cap",))
+   cwd=NOGIT, carries=("agent-model-cap",))
 sh("cap: a /* in a multi-line quoted string does not hide a redirect that writes the cap [r1 cov]",
    "printf '%s\n/* keep' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   "ask", "subagent-model-cap", cwd=NOGIT, carries=(OPUS,))
-chained_ask("cap: a lone apostrophe in text does not hide a redirect that writes the cap [r1 cov], denies as a chained ask step",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+chained_ask("cap: a lone apostrophe in text does not hide a redirect that writes the cap [r1 cov], denies as a chained ask command",
    "echo don't ; printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL,
-   cwd=NOGIT, carries=("subagent-model-cap",))
-chained_ask("cap data: a /* in double quotes naming a cat-write, piped to python, denies as a chained ask step "
+   cwd=NOGIT, carries=("agent-model-cap",))
+chained_ask("cap data: a /* in double quotes naming a cat-write, piped to python, denies as a chained ask command "
    "[r1 cov, cap-ask-fix r1: a pipe into an interpreter fails closed]",
    'echo "/* cat > ' + PROJ_LOCAL + ' ' + CAP_KEY + '" | python hooks/guard.py', cwd=NOGIT,
-   carries=("subagent-model-cap",))
+   carries=("agent-model-cap",))
 sh("cap data: a // in single quotes naming a tee onto a settings file, piped to jq, allows [r1 cov]",
    "echo '// tee " + PROJ_SETTINGS + " " + CAP_KEY + "' | jq .", "allow", cwd=NOGIT)
 chained_ask("cap data: a // in a multi-line quoted string naming a cat-write, piped to python, denies as a chained "
-   "ask step [r1 cov, cap-ask-fix r1: a pipe into an interpreter fails closed]",
+   "ask command [r1 cov, cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf 'a note\n// cat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
-   carries=("subagent-model-cap",))
+   carries=("agent-model-cap",))
 
 # FAILING OPEN, this rule's own shapes. A content field of the wrong type, an edit list of the
 # wrong type, and a payload with no tool name at all: each allows the call.
@@ -9553,13 +9570,13 @@ for _n, _c in (
     ("a process substitution that runs the write", "cat <(sh -c \"echo " + _CAP_WRITE + "\")"),
 ):
     sh("cap shell: r2, " + _n + ", writes the cap to a project settings file, asks [r2 red]", _c, "ask",
-       "subagent-model-cap", cwd=NOGIT)
+       "agent-model-cap", cwd=NOGIT)
 sh("cap shell: r2, a PowerShell iex inside Write-Output sets the cap in a project settings file, asks "
    "[r2 red]",
    "Write-Output (iex \"Set-Content -Path " + PROJ_LOCAL + " -Value " + CAP_KEY + "=" + OPUS + "\")",
-   "ask", "subagent-model-cap", tool="PowerShell", cwd=NOGIT)
+   "ask", "agent-model-cap", tool="PowerShell", cwd=NOGIT)
 sh("cap shell: r2, a # in a quoted git argument does not hide a cap write run by sh -c, asks [r2 red]",
-   "git submodule foreach \"echo '# keep' && echo " + _CAP_WRITE + "\"", "ask", "subagent-model-cap",
+   "git submodule foreach \"echo '# keep' && echo " + _CAP_WRITE + "\"", "ask", "agent-model-cap",
    cwd=NOGIT)
 
 # The cap key named inside a message flag or a pure printer is data.
@@ -9577,94 +9594,94 @@ sh("cap data: r2, a heredoc to notes.md naming the cap key and a cat-write, allo
    "cat > notes.md <<'DOC'\n" + CAP_KEY + ", cat > " + PROJ_LOCAL + "\nDOC", "allow", cwd=NOGIT)
 
 # COVERAGE. A comment opener or an apostrophe in a message flag must not hide a cap write after it.
-chained_ask("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, denies as a chained ask step [r2 cov]",
-   VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, cwd=NOGIT, carries=("subagent-model-cap",))
+chained_ask("cap shell: r2 cov, a /* and an apostrophe in a commit message before a cap write, denies as a chained ask command [r2 cov]",
+   VCS + " commit -m \"don't /* stop\" && echo " + _CAP_WRITE, cwd=NOGIT, carries=("agent-model-cap",))
 
 # THE CAP-KEY TWINS of H2 and H3. The same shapes, with a cap write held as text.
-# Each shape chains the write with a second step, so the guard DENIES it as ask-alone, never asks.
+# Each shape chains the write with a second command, so the guard DENIES it as ask-alone, never asks.
 R2_CAP_WRITE = "echo " + CAP_KEY + "=" + OPUS + " > " + PROJ_SETTINGS
 R2_CAP_PS = "Set-Content -Path " + PROJ_LOCAL + " -Value " + CAP_KEY + "=" + OPUS
 for _how, _command in r2_printf_forms(R2_CAP_WRITE):
     chained_ask("cap shell: fix H2, printf stores a cap write and " + _how + " runs it, denies as a chained "
-                "ask step [cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("subagent-model-cap",))
+                "ask command [cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("agent-model-cap",))
 for _how, _command in r2_function_forms(R2_CAP_WRITE):
-    chained_ask("cap shell: fix H3, " + _how + " takes the piped cap write, denies as a chained ask step "
-                "[cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("subagent-model-cap",))
+    chained_ask("cap shell: fix H3, " + _how + " takes the piped cap write, denies as a chained ask command "
+                "[cap-ask-fix r2 red]", _command, cwd=NOGIT, carries=("agent-model-cap",))
 chained_ask("cap shell: fix H3, Set-Alias maps echo to iex, a Set-Content of the cap into a project local "
-            "settings file denies as a chained ask step [cap-ask-fix r2 red]",
+            "settings file denies as a chained ask command [cap-ask-fix r2 red]",
             "Set-Alias echo iex; echo '" + R2_CAP_PS + "'", tool="PowerShell", cwd=NOGIT,
-            carries=("subagent-model-cap",))
+            carries=("agent-model-cap",))
 
 # A shell wrapper (bash -c, sh -c, eval) that writes the cap to a project local settings file through an
 # ANSI-C quoted ($'...') path asks; with a quote pair ahead of the write it denies as a chained ask
-# step. The key and the path are built from pieces here.
+# command. The key and the path are built from pieces here.
 R3_CAP_LINE = CAP_KEY + "=" + OPUS + " > $'" + PROJ_LOCAL + "'"
 for _n in ("bash -c", "sh -c", "eval"):
     sh("cap shell: hole r3, " + _n + " writes the cap to a project local settings file by an ANSI-C path, asks "
-       "[cap-ask-hole r3 red]", _n + " \"echo " + R3_CAP_LINE + "\"", "ask", "subagent-model-cap",
+       "[cap-ask-hole r3 red]", _n + " \"echo " + R3_CAP_LINE + "\"", "ask", "agent-model-cap",
        cwd=NOGIT, carries=(OPUS,))
     chained_ask("cap shell: hole r3, " + _n + " runs a quote pair then the cap write to an ANSI-C path, "
-                "denies as a chained ask step [cap-ask-hole r3 red]",
+                "denies as a chained ask command [cap-ask-hole r3 red]",
                 _n + " \"echo 'ok'; echo " + R3_CAP_LINE + "\"", cwd=NOGIT,
-                carries=("subagent-model-cap",))
+                carries=("agent-model-cap",))
 
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
 #
-# A step the guard would ASK on, chained with other steps (`&&`, `||`, `;`, `|`, newline), denies to
-# the agent, and the remedy says to run that step alone or drop it (CHAIN_ASK and ALONE, near sh()).
-# A lone ask step still asks. A deny anywhere in the command still wins. The ask steps, one case
+# A command the guard would ASK on, chained with other commands (`&&`, `||`, `;`, `|`, newline), denies to
+# the agent, and the remedy says to run that command alone or drop it (CHAIN_ASK and ALONE, near sh()).
+# A lone ask command still asks. A deny anywhere in the command still wins. The ask commands, one case
 # each below, are the four shell routes that print an "ask" (guard.py, judge_shell):
 #   rule 1  `git worktree prune`, with a stale record to drop        (WORKTREE_PRUNE_ASK_REASON)
 #   rule 1  a discard in a linked worktree: reset --hard, restore .  (TREE_ASK_REASON)
 #   rule 4  a forced push that may reach the default branch          (PUSH_ASK_REASON)
 #   rule 8  a shell write of a settings file that names the cap key  (CAP_ASK_REASON)
 # The fifth route, rule 8 on a Write/Edit/MultiEdit call, holds one tool call and no chain, so it has
-# no chained form. The re-pointed cases above (named "denies as a chained ask step") cover the
+# no chained form. The re-pointed cases above (named "denies as a chained ask command") cover the
 # cd, export, PowerShell, pipe and `-C` shapes of the same rules.
 
 PRUNE = VCS + " worktree prune"
 
 
 def chained_prune(name, command, **kw):
-    """A chained prune: a deny that names the prune step and says to run it alone."""
+    """A chained prune: a deny that names the prune command and says to run it alone."""
     chained_ask(name, command, cwd=WTPRUNE, carries=("worktree prune",), **kw)
 
 
-# (a) THE INCIDENT, then every chain operator, a step before the prune, the PowerShell tool, a
-# subagent, and two ask steps in one command.
+# (a) THE INCIDENT, then every chain operator, a command before the prune, the PowerShell tool, a
+# agent, and two ask commands in one command.
 chained_prune("ask-alone: the incident, prune then worktree add then grep, denies and names the prune",
               PRUNE + " && " + VCS + ' worktree add -b x "$TEMP/wt-x" origin/y && grep -c x README.md')
 for _label, _tail in (("||", " || echo x"), (";", "; echo x"),
                       ("a pipe", " | cat"), ("a newline", "\necho x")):
-    chained_prune("ask-alone: a prune joined to another step by %s denies" % _label, PRUNE + _tail)
-# An output tail is no second step (ask-steps-run-alone): the echo after `&&` is the named tail form.
-sh("ask-alone: a prune with an && echo tail asks, the echo is no second step", PRUNE + " && echo x",
+    chained_prune("ask-alone: a prune joined to another command by %s denies" % _label, PRUNE + _tail)
+# An output tail is no second command (ask-commands-run-alone): the echo after `&&` is the named tail form.
+sh("ask-alone: a prune with an && echo tail asks, the echo is no second command", PRUNE + " && echo x",
    "ask", "shared-tree", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
-chained_prune("ask-alone: a step before the prune denies", "echo x && " + PRUNE)
+chained_prune("ask-alone: a command before the prune denies", "echo x && " + PRUNE)
 chained_prune("ask-alone: a line before the prune denies", "echo x\n" + PRUNE)
 chained_prune("ask-alone: two prunes in one command deny", PRUNE + " && " + PRUNE)
 chained_prune("ask-alone: a prune chained in the PowerShell tool denies", PRUNE + "; Write-Output x",
               tool="PowerShell")
-chained_prune("ask-alone: a subagent's chained prune denies the same way", PRUNE + "; echo x",
+chained_prune("ask-alone: an agent's chained prune denies the same way", PRUNE + "; echo x",
               agent_id="agent-ask-alone")
 
-# STRINGS AND COMMENTS (building-scanner-respects-strings). The count of steps comes from the shell's
-# own quoting: a comment opener inside a string hides no step, a newline inside a string adds none,
+# STRINGS AND COMMENTS (building-scanner-respects-strings). The count of commands comes from the shell's
+# own quoting: a comment opener inside a string hides no command, a newline inside a string adds none,
 # a lone quote in a comment or a heredoc body swallows none, and a separator inside a string,
 # a comment or a heredoc body is no chain.
-chained_prune("ask-alone: a # inside a quoted argument does not hide the step after it",
+chained_prune("ask-alone: a # inside a quoted argument does not hide the command after it",
               PRUNE + ' --expire "a # b"; echo x')
-chained_prune("ask-alone: a /* inside a quoted argument does not hide the step after it",
+chained_prune("ask-alone: a /* inside a quoted argument does not hide the command after it",
               PRUNE + " --expire '/* x'; echo x")
 chained_prune("ask-alone: a // inside a quoted argument before the prune does not hide it",
               "echo 'http://x' && " + PRUNE)
-chained_prune("ask-alone: a newline inside a quoted argument adds no step, the step after it does",
+chained_prune("ask-alone: a newline inside a quoted argument adds no command, the command after it does",
               PRUNE + ' --expire "a\nb"; echo x')
 chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after the prune, denies",
               PRUNE + "\ncat <<'EOF'\ndon't\nEOF")
 
-# (b) A LONE ASK STEP STILL ASKS, whatever its text holds: a trailing newline, a comment line, a
+# (b) A LONE ASK COMMAND STILL ASKS, whatever its text holds: a trailing newline, a comment line, a
 # trailing comment with && and a lone quote, a flag, a quoted flag value full of separators and
 # comment openers, a multi-line quoted flag value, and heredoc bodies with separators or a lone quote.
 sh("ask-alone: a prune alone in the PowerShell tool still asks", PRUNE, "ask", "shared-tree",
@@ -9686,9 +9703,9 @@ sh("ask-alone: a heredoc body holding && and ; is no chain",
 sh("ask-alone: a heredoc body holding a lone apostrophe is no chain",
    PRUNE + " <<'EOF'\ndon't && stop\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
 
-# (c) THE OTHER ASK STEPS, each alone (still asks) and chained with an echo (denies, except the named
-# `&& echo done` tail, which asks: ask-steps-run-alone). The reason
-# names the step by its own text or by the rule that asked for it, and says to run it alone.
+# (c) THE OTHER ASK COMMANDS, each alone (still asks) and chained with an echo (denies, except the named
+# `&& echo done` tail, which asks: ask-commands-run-alone). The reason
+# names the command by its own text or by the rule that asked for it, and says to run it alone.
 sh("ask-alone: a whole-tree restore alone in a worktree still asks, and names the -C form",
    VCS + " restore .", "ask", "shared-tree", cwd=GITWT, carries="git -C <lane> restore <file>")
 sh("ask-alone: a hard reset in a worktree with an && echo done tail asks",
@@ -9698,12 +9715,12 @@ sh("ask-alone: a forced push to the default branch with an && echo done tail ask
    lacks=(CHAIN_ASK,))
 CHAIN_CAP_WRITE = "printf '%s' '" + cap_settings(compact=True) + "' > settings.local.json"
 sh("ask-alone: a cap write alone to a settings file still asks", CHAIN_CAP_WRITE, "ask",
-   "subagent-model-cap", cwd=PROJ)
+   "agent-model-cap", cwd=PROJ)
 chained_ask("ask-alone: a cap write to a settings file chained after an echo denies",
             "echo done && " + CHAIN_CAP_WRITE, cwd=PROJ,
-            carries=((CAP_KEY, "settings.local.json", "subagent-model-cap"),))
+            carries=((CAP_KEY, "settings.local.json", "agent-model-cap"),))
 
-# (d) NO ASK STEP, NO DENY. A chain that holds no ask step keeps its old answer, so the new deny
+# (d) NO ASK COMMAND, NO DENY. A chain that holds no ask command keeps its old answer, so the new deny
 # cannot turn an ordinary chain, a read, or a noted discard into a refusal.
 sh("ask-alone: a dry-run prune chained with an echo allows", PRUNE + " -n && echo x", "allow",
    cwd=WTPRUNE)
@@ -9745,18 +9762,18 @@ deny_beats("ask-alone: a stash push before a hard reset in a worktree denies as 
 deny_beats("ask-alone: a kill before a cap write still denies as a kill",
            "pkill -f node && " + CHAIN_CAP_WRITE, "machine-wide-kill", cwd=PROJ)
 
-# (f) A SINGLE `&` IS A CHAIN, AND A STEP HIDDEN IN AN INLINE SCRIPT, A COMMAND SUBSTITUTION, A LOOP
+# (f) A SINGLE `&` IS A CHAIN, AND A COMMAND HIDDEN IN AN INLINE SCRIPT, A COMMAND SUBSTITUTION, A LOOP
 # OR A PIPE TO Out-Null STILL COUNTS. W is the cap write with no quote in it, so it
 # nests inside `bash -c "..."`, `$( )` and a loop: `echo <key>=<value> > settings.local.json`. A
-# redirect that holds a `&` (`&>`, `>&`) is one step, never a chain, so W with either still asks.
+# redirect that holds a `&` (`&>`, `>&`) is one command, never a chain, so W with either still asks.
 CAP_PLAIN = "echo " + CAP_KEY + "=" + OPUS + " > settings.local.json"
-CAP_STEP = (("subagent-model-cap", "settings.local.json"),)
+CAP_STEP = (("agent-model-cap", "settings.local.json"),)
 
-sh("ask-alone: W alone still asks", CAP_PLAIN, "ask", "subagent-model-cap", cwd=PROJ)
-sh("ask-alone: W with an &> redirect is one step, so it asks", CAP_PLAIN + " &> log", "ask",
-   "subagent-model-cap", cwd=PROJ)
-sh("ask-alone: W with a >& redirect is one step, so it asks", CAP_PLAIN + " >& log", "ask",
-   "subagent-model-cap", cwd=PROJ)
+sh("ask-alone: W alone still asks", CAP_PLAIN, "ask", "agent-model-cap", cwd=PROJ)
+sh("ask-alone: W with an &> redirect is one command, so it asks", CAP_PLAIN + " &> log", "ask",
+   "agent-model-cap", cwd=PROJ)
+sh("ask-alone: W with a >& redirect is one command, so it asks", CAP_PLAIN + " >& log", "ask",
+   "agent-model-cap", cwd=PROJ)
 chained_ask("ask-alone: W sent to the background, then echo $! to a file, denies",
             CAP_PLAIN + " & echo $! > pid.txt", cwd=PROJ, carries=CAP_STEP)
 chained_ask("ask-alone: W sent to the background, then P=$!, denies",
@@ -9765,18 +9782,18 @@ chained_ask("ask-alone: W after echo inside bash -c with double quotes denies",
             'bash -c "echo hi; ' + CAP_PLAIN + '"', cwd=PROJ, carries=CAP_STEP)
 chained_ask("ask-alone: W after echo inside bash -c with single quotes denies",
             "bash -c 'echo hi; " + CAP_PLAIN + "'", cwd=PROJ, carries=CAP_STEP)
-chained_ask("ask-alone: W inside a command substitution, after another step, denies",
+chained_ask("ask-alone: W inside a command substitution, after another command, denies",
             "echo hi; echo $( " + CAP_PLAIN + " )", cwd=PROJ, carries=CAP_STEP)
-chained_ask("ask-alone: a for loop holding W and another step denies",
+chained_ask("ask-alone: a for loop holding W and another command denies",
             "for f in a b; do " + CAP_PLAIN + "; echo $f; done", cwd=PROJ, carries=CAP_STEP)
 sh("ask-alone: W piped to Out-Null in the PowerShell tool asks",
-   CAP_PLAIN + " | Out-Null", "ask", "subagent-model-cap", tool="PowerShell", cwd=PROJ,
+   CAP_PLAIN + " | Out-Null", "ask", "agent-model-cap", tool="PowerShell", cwd=PROJ,
    lacks=(CHAIN_ASK,))
 
 # (g) A CHAIN HIDDEN IN ANOTHER INTERPRETER'S SCRIPT. Each wrapper runs its argument
-# as a script, so an echo and an ask step inside it are a chain and deny. `bash -o pipefail -c` hides
+# as a script, so an echo and an ask command inside it are a chain and deny. `bash -o pipefail -c` hides
 # its script behind a flag, and `eval` is no wrapper at all. The lone forms, with no echo, must still
-# ask: the wrapper's own step is counted once, never twice.
+# ask: the wrapper's own command is counted once, never twice.
 NESTED_FORMS = (
     ("pwsh -Command", 'pwsh -Command "%s"', "; "),
     ("powershell -c", 'powershell -c "%s"', "; "),
@@ -9788,34 +9805,34 @@ NESTED_FORMS = (
     ("eval", 'eval "%s"', "; "),
 )
 for _label, _form, _sep in NESTED_FORMS:
-    chained_ask("ask-alone: an ask step after echo inside %s denies" % _label,
+    chained_ask("ask-alone: an ask command after echo inside %s denies" % _label,
                 _form % ("echo hi" + _sep + CAP_PLAIN), cwd=PROJ, carries=CAP_STEP)
-    sh("ask-alone: an ask step alone inside %s still asks" % _label, _form % CAP_PLAIN,
-       "ask", "subagent-model-cap", cwd=PROJ)
+    sh("ask-alone: an ask command alone inside %s still asks" % _label, _form % CAP_PLAIN,
+       "ask", "agent-model-cap", cwd=PROJ)
 
-# (h) AN EMPTY OR COMMENT-ONLY SCRIPT ADDS NO STEP. One ask step with an empty `bash -c` script is one
-# step, so it asks. A script that holds no step must never lower the count below the ask step's own.
-sh("ask-alone: an ask step then an empty bash -c script is one step, so it asks",
-   CAP_PLAIN + '; bash -c " "', "ask", "subagent-model-cap", cwd=PROJ)
-sh("ask-alone: an ask step then a bash -c script of one comment is one step, so it asks",
-   CAP_PLAIN + '; bash -c "# x"', "ask", "subagent-model-cap", cwd=PROJ)
+# (h) AN EMPTY OR COMMENT-ONLY SCRIPT ADDS NO COMMAND. One ask command with an empty `bash -c` script is one
+# command, so it asks. A script that holds no command must never lower the count below the ask command's own.
+sh("ask-alone: an ask command then an empty bash -c script is one command, so it asks",
+   CAP_PLAIN + '; bash -c " "', "ask", "agent-model-cap", cwd=PROJ)
+sh("ask-alone: an ask command then a bash -c script of one comment is one command, so it asks",
+   CAP_PLAIN + '; bash -c "# x"', "ask", "agent-model-cap", cwd=PROJ)
 
 # (i) A SINGLE `&` INSIDE QUOTES IS NO CHAIN. An ampersand in a quoted cap value, in a quoted URL beside
-# the cap write, or beside an escaped double quote is part of one word: each cap write stays one step
+# the cap write, or beside an escaped double quote is part of one word: each cap write stays one command
 # and asks.
-sh("ask-alone: a single & inside a quoted cap value is one step, so it asks",
-   'echo "' + CAP_KEY + '=' + OPUS + ' a & b" > settings.local.json', "ask", "subagent-model-cap",
+sh("ask-alone: a single & inside a quoted cap value is one command, so it asks",
+   'echo "' + CAP_KEY + '=' + OPUS + ' a & b" > settings.local.json', "ask", "agent-model-cap",
    cwd=PROJ)
-sh("ask-alone: a single & inside a quoted URL beside the cap write is one step, so it asks",
+sh("ask-alone: a single & inside a quoted URL beside the cap write is one command, so it asks",
    "echo " + CAP_KEY + "=" + OPUS + " 'https://x.test/?a=1&b=2' > settings.local.json",
-   "ask", "subagent-model-cap", cwd=PROJ)
-sh("ask-alone: an escaped double quote around a single & is one step, so it asks",
-   'echo "' + CAP_KEY + '=v \\" & \\"" > settings.local.json', "ask", "subagent-model-cap", cwd=PROJ)
+   "ask", "agent-model-cap", cwd=PROJ)
+sh("ask-alone: an escaped double quote around a single & is one command, so it asks",
+   'echo "' + CAP_KEY + '=v \\" & \\"" > settings.local.json', "ask", "agent-model-cap", cwd=PROJ)
 
-# (j) THE NAMED HARMLESS FORMS (owner ruling 2026-10-15, decision ask-steps-run-alone). Before the ask
-# step: a move into a folder (`cd X &&`, PowerShell `Set-Location X;`) or an export (`export NAME=value
+# (j) THE NAMED HARMLESS FORMS (decision ask-commands-run-alone). Before the ask
+# command: a move into a folder (`cd X &&`, PowerShell `Set-Location X;`) or an export (`export NAME=value
 # &&`). After it: an output tail (`| tail -N`, `| head -N`, `| Out-Null`, `&& echo done`, PowerShell
-# `; Write-Host done`). One case per form. The ask steps rotate through the four kinds, and each is
+# `; Write-Host done`). One case per form. The ask commands rotate through the four kinds, and each is
 # built from pieces, so no ask text sits on a shell command line.
 ASK_PRUNE = PRUNE
 ASK_DISCARD = VCS + " reset --hard"
@@ -9824,7 +9841,7 @@ ASK_CAP = CAP_PLAIN
 
 
 def asks_alone(name, command, rule, **kw):
-    """One case: `command` holds a harmless lead or tail around one ask step, so it asks, once."""
+    """One case: `command` holds a harmless lead or tail around one ask command, so it asks, once."""
     sh(name, command, "ask", rule, lacks=(CHAIN_ASK,), **kw)
 
 
@@ -9837,13 +9854,13 @@ asks_alone("ask-alone: a Set-Location to the lane's own folder, then the reset, 
            "Set-Location " + slash(GITWT) + "; " + ASK_DISCARD, "shared-tree", tool="PowerShell",
            cwd=GITWT)
 asks_alone("ask-alone: an export before the cap write asks",
-           "export LANE_NOTE=ask && " + ASK_CAP, "subagent-model-cap", cwd=PROJ)
-# A Windows path is no escaped quote, so its backslashes do not make the lead a step (ruling 2026-10-15
-# 12:00). The paths are raw strings, so `\U` and `\x` reach the guard as typed.
+           "export LANE_NOTE=ask && " + ASK_CAP, "agent-model-cap", cwd=PROJ)
+# A Windows path is no escaped quote, so its backslashes do not make the lead a command
+# (ask-commands-run-alone). The paths are raw strings, so `\U` and `\x` reach the guard as typed.
 asks_alone("ask-alone: a cd to a Windows path, then the cap write, asks",
-           r"cd C:\Users\x\repo && " + ASK_CAP, "subagent-model-cap", cwd=PROJ)
+           r"cd C:\Users\x\repo && " + ASK_CAP, "agent-model-cap", cwd=PROJ)
 asks_alone("ask-alone: a PowerShell Set-Location to a Windows path, then the cap write, asks",
-           r"Set-Location C:\Users\x\repo; " + ASK_CAP, "subagent-model-cap", tool="PowerShell", cwd=PROJ)
+           r"Set-Location C:\Users\x\repo; " + ASK_CAP, "agent-model-cap", tool="PowerShell", cwd=PROJ)
 
 # The output tails: tail, head, Out-Null, && echo done, and PowerShell ; Write-Host done.
 asks_alone("ask-alone: the lease push to the default branch, piped to tail, asks",
@@ -9853,16 +9870,16 @@ asks_alone("ask-alone: the reset in a worktree, piped to head, asks",
 asks_alone("ask-alone: the prune piped to Out-Null in the PowerShell tool asks",
            ASK_PRUNE + " | Out-Null", "shared-tree", tool="PowerShell", cwd=WTPRUNE)
 asks_alone("ask-alone: the cap write with an && echo done tail asks",
-           ASK_CAP + " && echo done", "subagent-model-cap", cwd=PROJ)
+           ASK_CAP + " && echo done", "agent-model-cap", cwd=PROJ)
 asks_alone("ask-alone: the lease push to the default branch, then Write-Host done in the PowerShell tool asks",
            ASK_LEASE + "; Write-Host done", "force-push", tool="PowerShell", cwd=PUSHFEAT)
 
-# Both harmless forms in one command are still one step.
+# Both harmless forms in one shell call still add no command.
 asks_alone("ask-alone: a cd, the prune, then an && echo done tail, asks",
            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && echo done", "shared-tree", cwd=NOGIT)
 
 # DENY CONTROLS. A tail that is a command with effects, and a real
-# second step, are not harmless, so the chain still denies as a chained ask step.
+# second command, are not harmless, so the chain still denies as a chained ask command.
 chained_ask("ask-alone: the discard piped to tee, a command with effects, still denies",
             ASK_DISCARD + " | tee lane.log", cwd=GITWT)
 chained_ask("ask-alone: the prune piped to sh, a command with effects, still denies",
@@ -9871,22 +9888,22 @@ chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
             "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf y", cwd=NOGIT)
 
 # TWO HOLES (owner review, 2026-10-15). Both must DENY. The first: the `\"` inside the echo is an
-# escaped quote, so the `; rm -rf y` after it is a real step. The second: `cd -` moves to the previous
+# escaped quote, so the `; rm -rf y` after it is a real command. The second: `cd -` moves to the previous
 # folder, which no path in the command names, so it is no harmless lead, and the prune after it is a
-# chained ask step.
+# chained ask command.
 chained_prune("ask-alone: an escaped quote in an echo tail does not hide a removal after it, the prune denies",
               ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y')
 chained_prune("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
               "cd - && " + ASK_PRUNE)
 
 
-# =========================================================================== 6d. an interpreter heredoc is one step
+# =========================================================================== 6d. an interpreter heredoc is one command
 FAMILY = "ask-alone"
 #
 # OWNER RULING (2026-10-14 22:25): an inline interpreter script, a `python - <<PY`, `node`, `perl` or
-# `ruby` heredoc, is ONE step, so one command holding an ask step asks once, as a lone ask step does.
+# `ruby` heredoc, is ONE command, so one shell call holding an ask command asks once, as a lone ask command does.
 # A chain before or after the heredoc, a pipe after the header, two
-# interpreter heredocs, and a bash or `ssh host "bash -s"` body still count more than one step. A deny
+# interpreter heredocs, and a bash or `ssh host "bash -s"` body still count more than one command. A deny
 # in a body still wins (the shared-tree and kill sections hold those cases).
 LANE_STASH = VCS + " stash push -u -m lane"
 FORCE_PUSH = VCS + " push --force origin HEAD:main"
@@ -9906,10 +9923,10 @@ sh("ask-alone: a one-command python heredoc holding a forced push asks, not deni
 sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
    "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
 sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
-   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "subagent-model-cap", cwd=PROJ)
+   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "agent-model-cap", cwd=PROJ)
 
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
-# multi-line template literal inside the body. None of them hides the prune or adds a step.
+# multi-line template literal inside the body. None of them hides the prune or adds a command.
 sh("ask-alone: a # line with a lone apostrophe in a python body holds no quote, so the prune asks",
    "python3 - <<'PY'\n# don't\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
 sh("ask-alone: a // line with a lone apostrophe in a python body holds no quote, so the prune asks",
@@ -9920,7 +9937,7 @@ sh("ask-alone: a lone apostrophe in plain python body text, then the prune, asks
    "python3 - <<'PY'\ndon't stop\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
 sh("ask-alone: a prune inside a multi-line node template literal asks, not denies",
    "node <<'JS'\nconst s = `\n" + PRUNE + "\n`;\nJS", "ask", "shared-tree", cwd=WTPRUNE)
-sh("ask-alone: a python body that holds a shell prune only as a # comment is no step, so it allows",
+sh("ask-alone: a python body that holds a shell prune only as a # comment is no command, so it allows",
    "python3 - <<'PY'\n# " + PRUNE + "\nPY", "allow", cwd=WTPRUNE)
 
 # The delimiter `E-F` is read as the whole word.
@@ -9929,7 +9946,7 @@ sh("ask-alone: a one-command python heredoc with the delimiter E-F, holding a pr
 chained_prune("ask-alone: a whole-word delimiter E-F, a python body, then a prune, still denies",
               "python3 - <<E-F\nprint(1)\nE-F\n" + PRUNE)
 
-# Each is more than one step, so the prune denies as a chained ask step.
+# Each is more than one command, so the prune denies as a chained ask command.
 chained_prune("ask-alone: a chain before a python heredoc holding a prune still denies",
               "echo hi && python3 - <<'PY'\n" + PRUNE + "\nPY")
 chained_prune("ask-alone: a python heredoc holding a prune, then echo, still denies",
@@ -9940,7 +9957,7 @@ chained_prune("ask-alone: a bash heredoc body holding a prune still counts each 
               "bash <<'SH'\n" + PRUNE + "\nSH")
 chained_prune("ask-alone: an ssh bash -s heredoc body holding a prune still counts each line",
               'ssh host "bash -s" <<\'SH\'\n' + PRUNE + "\nSH")
-chained_prune("ask-alone: two python heredocs, a prune in the first, still deny as two steps",
+chained_prune("ask-alone: two python heredocs, a prune in the first, still deny as two commands",
               "python3 - <<'A'\n" + PRUNE + "\nA\npython3 - <<'B'\nprint(1)\nB")
 chained_prune("ask-alone: a python heredoc holding a prune, then a bash heredoc, still denies",
               "python3 - <<'PY'\n" + PRUNE + "\nPY\nbash <<'SH'\necho x\nSH")
@@ -9960,16 +9977,16 @@ for _label, _open in (("backslash", "E\\OF"), ("single-quoted", "E'OF'"), ("doub
                   "python3 - <<" + _open + "\nx\nEOF\n" + PRUNE)
 
 # H2. A header that pipes into a shell counts as a shell body. Its closer is EOF-X, so the EOF line in the
-# body closes nothing, and the prune in the body is a step.
+# body closes nothing, and the prune in the body is a command.
 for _shell in ("sh", "bash"):
     chained_prune("ask-alone: r1-hd a cat heredoc piped to %s, closer EOF-X, a prune in the body, denies" % _shell,
                   "cat <<EOF-X | " + _shell + "\nx\nEOF\n" + PRUNE + "\nEOF-X")
 
-# AN UNCLOSED BODY. Bash reads every line to the end of input, so every line is a step.
+# AN UNCLOSED BODY. Bash reads every line to the end of input, so every line is a command.
 chained_prune("ask-alone: r1-hd a python heredoc with no closer, a prune after it, denies",
               "python3 - <<'PY'\nprint(1)\n" + PRUNE)
 
-# Two prune lines in one python body are one step, so the command asks once.
+# Two prune lines in one python body are one command, so the call asks once.
 sh("ask-alone: r1-hd two prune lines in one python body ask once, not deny",
    "python3 - <<'PY'\n" + PRUNE + "\n" + PRUNE + "\nPY", "ask", "shared-tree", cwd=WTPRUNE)
 
@@ -9991,25 +10008,25 @@ chained_prune("ask-alone: r1-hd a plain cat heredoc piped to sh, a prune in the 
               "cat <<EOF | sh\n" + PRUNE + "\nEOF")
 
 # settle_ask strips the bodies once: a stray line equal to a delimiter (the lone EOF) must not open a
-# phantom body that holds the ask step.
+# phantom body that holds the ask command.
 chained_ask("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a cap write, denies",
             "cat <<EOF\nbody line\nEOF\n" + CAP_PLAIN + "\nEOF", cwd=PROJ, carries=CAP_STEP)
 chained_prune("ask-alone: r2-hd a stray EOF line after a closed heredoc, then a prune, denies",
               "cat <<EOF\nbody line\nEOF\n" + PRUNE + "\nEOF")
 
-# ITEM 2, the ask payload. The forms of the kill section, with a cap write in the body: one ask step.
+# ITEM 2, the ask payload. The forms of the kill section, with a cap write in the body: one ask command.
 for _label, _form in R2_FORMS + (R2_EVAL_FORM,):
     chained_ask("ask-alone: r2-hd a heredoc in %s, a cap write in the body, denies" % _label,
                 _form.replace("BODY", CAP_PLAIN), cwd=PROJ, carries=CAP_STEP)
 
 # SCANNER PIN (building-scanner-respects-strings). A node body holds a template literal
-# across lines, with `$(cat <<'EOF-1'` text and one prune in it. An interpreter body is one step, so it asks
+# across lines, with `$(cat <<'EOF-1'` text and one prune in it. An interpreter body is one command, so it asks
 # once.
 sh("ask-alone: r2-hd a node heredoc whose template literal holds $( heredoc text and a prune asks once",
    "node <<E\\OF\nconst s = `\n$(cat <<'EOF-1'\n" + PRUNE + "\n`;\nEOF", "ask", "shared-tree", cwd=WTPRUNE)
 
 
-# A prune or a push delete in a body that is kept in view is a second step, so the command denies as a chained ask.
+# A prune or a push delete in a body that is kept in view is a second command, so the command denies as a chained ask.
 # The scanner shapes (a comment opener in quotes, a lone apostrophe, a template literal) are pinned here too.
 chained_prune("ask-alone: r3-bd a prune after a stray EOF line, written then sh on the next line, denies",
               "cat <<'EOF-1' > x.sh\necho hi\nEOF\n" + PRUNE + "\nEOF-1\nsh x.sh")
@@ -10106,18 +10123,18 @@ add("test-author: Edit of package.json passes the early warning (the diff judges
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
-# ---- mutation harnesses are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
+# ---- mutation tests are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
 # by, so a test-author edits them. The builder case pins the rule to the test-author: agent_brief.py
 # tells a builder to add mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
 for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
-    add("test-author: Edit of mutation harness %s is allowed" % _path, "allow", tool="Edit",
+    add("test-author: Edit of mutation test %s is allowed" % _path, "allow", tool="Edit",
         file_path=_path, **A)
 add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
     file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
 add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
     file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
-# The harness set is a list of exact names, not a shape: a near miss stays product code, a name with
-# a colon is not a harness, and a name that differs only in case is the same file on Windows.
+# The mutation test set is a list of exact names, not a shape: a near miss stays product code, a name with
+# a colon is not a mutation test, and a name that differs only in case is the same file on Windows.
 add("test-author: Edit of hooks/mutate_x.py is refused", "deny", rule=TA, tool="Edit",
     file_path="hooks/mutate_x.py", carries=("builder", "Report"), **A)
 add("test-author: Edit of hooks/mutate_:guard_core.py is refused", "deny", rule=TA, tool="Edit",
@@ -10223,7 +10240,7 @@ BASE_FILES = {
 DIFFROOT = os.path.join(ROOT, "diffrepos")
 
 
-# A diff repo costs real git calls, and the mutation harness runs this module once per mutant while
+# A diff repo costs real git calls, and the mutation test runs this module once per mutant while
 # `MUTATE_ONLY` selects one or two cases. So a repo is built LAZILY, the first time a case runs in
 # it (`materialize`, called from `decide`). MEASURED on Windows CI: building all of them at import
 # cost 1 min 52 s per run of this module.
@@ -10523,13 +10540,13 @@ _author_mutant = diff_repo("g-author-mutant", _put("hooks/mutate_guard.py", "pas
 
 
 def author_mutant_no_log_case():
-    """A test-author's edit of a mutation harness is test code: commit and stop log no author-diff line."""
+    """A test-author's edit of a mutation test is test code: commit and stop log no author-diff line."""
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-mutant"), _author_mutant,
                               "test-author", "auth1")
     rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
     if out or rows:
-        return False, "a mutation harness was judged: %r %r" % (out[:60], rows)
-    return True, "a mutation harness logs no author-diff line"
+        return False, "a mutation test was judged: %r %r" % (out[:60], rows)
+    return True, "a mutation test logs no author-diff line"
 
 
 LOG_CHECKS_EXTRA = _TaggedLogs([
@@ -10537,7 +10554,7 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
     ("builder-diff: the diff check logs for the reviewer and never blocks", diff_logs_case),
     ("builder-diff: main's later tests merged into a long-lived worktree log nothing",
      long_lived_no_log_case),
-    ("author-diff: a test-author's mutation harness edit logs no author-diff line",
+    ("author-diff: a test-author's mutation test edit logs no author-diff line",
      author_mutant_no_log_case),
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
@@ -10772,15 +10789,15 @@ add("gap: NotebookEdit, settings cap in file_path beside notebook_path=the confi
     "deny", "frozen-path", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
     new_source=cap_settings(), notebook_path=CFG_HOOK)
 add("gap-control: NotebookEdit, a lone settings cap in file_path still asks",
-    "ask", "subagent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    "ask", "agent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
     new_source=cap_settings(), carries=(OPUS,))
 add("gap-control: NotebookEdit, a settings cap in file_path beside an ordinary notebook still asks",
-    "ask", "subagent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    "ask", "agent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path=PROJ_LOCAL,
     new_source=cap_settings(), notebook_path="docs/x.ipynb", carries=(OPUS,))
 # Rule 8 runs over every path field, so a settings file in a LATER field (notebook_path) still asks.
 # Failure class: a rule-8 loop that judges only the first field lets this settings cap through.
 add("gap: NotebookEdit, settings cap in notebook_path beside file_path=docs/x.ipynb still asks",
-    "ask", "subagent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path="docs/x.ipynb",
+    "ask", "agent-model-cap", tool="NotebookEdit", cwd=NOGIT, file_path="docs/x.ipynb",
     new_source=cap_settings(), notebook_path=PROJ_LOCAL, carries=(OPUS,))
 
 # The diff, judged at commit, push and stop. A non-.md path logs `writer-diff` (never blocks);
@@ -11356,7 +11373,7 @@ def cap_log_case():
     """Rule 8 logs its ask the way the other rules log, so the config report can surface it.
 
     One tool call and one shell call, each lifting the cap in a project settings file. Each must
-    print an `ask`, and each must add one `ask`/`subagent-model-cap` line whose matched text holds
+    print an `ask`, and each must add one `ask`/`agent-model-cap` line whose matched text holds
     the file and the requested value.
     """
     folder = os.path.join(ROOT, "caplog")
@@ -11388,7 +11405,7 @@ def cap_log_case():
     with open(path, encoding="utf-8") as handle:
         lines = [line for line in handle.read().splitlines() if line.strip()]
     asks = [line.split("\t") for line in lines if line.split("\t")[2:4] == ["ask",
-                                                                           "subagent-model-cap"]]
+                                                                           "agent-model-cap"]]
     if len(asks) != 2:
         return False, "expected two ask lines, found %d of %d" % (len(asks), len(lines))
     for fields in asks:
@@ -11437,7 +11454,7 @@ def cap_deep_path_log_case():
     with open(log, encoding="utf-8") as handle:
         lines = [line for line in handle.read().splitlines() if line.strip()]
     asks = [line.split("\t") for line in lines
-            if line.split("\t")[2:4] == ["ask", "subagent-model-cap"]]
+            if line.split("\t")[2:4] == ["ask", "agent-model-cap"]]
     if len(asks) != 1:
         return False, "expected one ask line, found %d of %d" % (len(asks), len(lines))
     # Six fields: time, tool, decision, rule, matched, session. The matched text is field 4 (index 4).
@@ -11689,17 +11706,17 @@ def branch_base_unread_log_case():
 # so no rule may print either one in a remedy. The pointer rule's remedy is a worktree, and it
 # names `git worktree add` instead, which is a different command and not the refused target.
 FAMILY = "rule9"
-# ---- Rule 9, the subagent model floor. Both directions: Haiku in any spelling is denied, and
+# ---- Rule 9, the agent model floor. Both directions: Haiku in any spelling is denied, and
 # every other model, or none, is allowed.
 # SPAWN_TOOLS lists Task as well as Agent, so Task keeps one floor row. The rest name Agent.
 # A full model id is the same branch as its short name, so the rows use the short names.
-add("floor: Agent with model haiku is denied", "deny", "subagent-model-floor",
+add("floor: Agent with model haiku is denied", "deny", "agent-model-floor",
     tool="Agent", prompt="do it", model="haiku")
-add("floor: Task with model haiku is denied", "deny", "subagent-model-floor",
+add("floor: Task with model haiku is denied", "deny", "agent-model-floor",
     tool="Task", prompt="do it", model="haiku")
-add("floor: Agent with a mixed-case haiku spelling is denied", "deny", "subagent-model-floor",
+add("floor: Agent with a mixed-case haiku spelling is denied", "deny", "agent-model-floor",
     tool="Agent", prompt="do it", model="Claude-HAIKU-4-5")
-add("floor: Agent with a list model naming haiku is denied", "deny", "subagent-model-floor",
+add("floor: Agent with a list model naming haiku is denied", "deny", "agent-model-floor",
     tool="Agent", prompt="do it", model=["haiku"])
 add("floor: Agent with model sonnet is allowed", "allow", tool="Agent", prompt="x", model="sonnet")
 add("floor: Agent with no model is allowed", "allow", tool="Agent", prompt="x")
@@ -11716,10 +11733,10 @@ for _tool in ("Agent",):
                 tool=_tool, prompt="do it", model=_model, subagent_type=_role)
     for _role in ("builder", "Plan", "general-purpose", "claude", "reviewer-lite", "not-explore"):
         add("floor: %s %s with model haiku is denied" % (_tool, _role), "deny",
-            "subagent-model-floor", tool=_tool, prompt="do it", model="haiku", subagent_type=_role)
-add("floor: Agent with an empty subagent_type and haiku is denied", "deny", "subagent-model-floor",
+            "agent-model-floor", tool=_tool, prompt="do it", model="haiku", subagent_type=_role)
+add("floor: Agent with an empty subagent_type and haiku is denied", "deny", "agent-model-floor",
     tool="Agent", prompt="do it", model="haiku", subagent_type="")
-add("floor: Agent with a list role and haiku is denied", "deny", "subagent-model-floor",
+add("floor: Agent with a list role and haiku is denied", "deny", "agent-model-floor",
     tool="Agent", prompt="do it", model="haiku", subagent_type=["reviewer"])
 add("floor: Agent builder with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="builder")
@@ -11732,7 +11749,7 @@ add("floor: Agent Explore with model opus is allowed (owner word)", "allow",
 for _tool in ("Agent",):
     for _near in ("record-writers", "Record-Writer", "record_writer", "record-writer "):
         add("floor: %s %r with model haiku is denied" % (_tool, _near), "deny",
-            "subagent-model-floor", tool=_tool, prompt="do it", model="haiku",
+            "agent-model-floor", tool=_tool, prompt="do it", model="haiku",
             subagent_type=_near)
 add("floor: Agent record-writer with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
@@ -11768,7 +11785,7 @@ add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
 add("floor step-up: builder Try 3 of 3 on opus is allowed (standing word)", "allow",
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
 add("floor step-up: builder Try 1 of 3 on opus asks (only try 3 is a standing word)", "ask",
-    "subagent-model-cap", tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus",
+    "agent-model-cap", tool="Agent", prompt="Try 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
 add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
     "allow", tool="Agent", subagent_type="reviewer", model="haiku",
@@ -11781,13 +11798,13 @@ add("floor step-up: round line after a lone quote on line two is denied", "deny"
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on opus asks (the word is per spawn, not standing)", "ask",
-    "subagent-model-cap", tool="Agent", prompt="Round 3 of 3. Re-check the diff.",
+    "agent-model-cap", tool="Agent", prompt="Round 3 of 3. Re-check the diff.",
     model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
 
-# ---- Rule 9, the Opus ceiling (decision subagent-model-cap). An Agent or
-# Task spawn that sets model opus asks the owner under `subagent-model-cap`, unless a standing word
+# ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
+# Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing word
 # covers it: Plan, a builder's `Try 3 of 3` line, and Explore (the class-level word, pinned above).
 # A reviewer's last step-up is a per-spawn word, so it asks. The floor and the step-up deny first,
 # so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
@@ -11795,7 +11812,7 @@ add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
 # Failure classes: a false allow (an Opus spawn of any spelling or role passes unasked, or a marker
 # the role does not own earns the word), a false ask (a standing word, a Sonnet spawn, or text that
 # only names opus asks).
-CEILING = "subagent-model-cap"
+CEILING = "agent-model-cap"
 add("ceiling: Agent with model opus and no role asks", "ask", CEILING, tool="Agent", prompt="x",
     model="opus", carries=(("opus", "Opus"),))
 add("ceiling: Task with model opus asks", "ask", CEILING, tool="Task", prompt="x", model="opus")
@@ -11861,23 +11878,23 @@ for _model in HAIKU_MODELS:
             tool="Workflow", script=_flow(_model, _role))
     for _role in ("builder", "Plan", "general-purpose", None):
         add("floor: Workflow agent %s on %s is denied" % (_role or "without agentType", _model),
-            "deny", "subagent-model-floor", tool="Workflow", script=_flow(_model, _role))
+            "deny", "agent-model-floor", tool="Workflow", script=_flow(_model, _role))
 add("floor: Workflow agent with a mixed-case haiku and no agentType is denied", "deny",
-    "subagent-model-floor", tool="Workflow", script=_flow("Claude-HAIKU-5-5"))
+    "agent-model-floor", tool="Workflow", script=_flow("Claude-HAIKU-5-5"))
 add("floor: Workflow with one listed and one unlisted haiku agent is denied", "deny",
-    "subagent-model-floor", tool="Workflow",
+    "agent-model-floor", tool="Workflow",
     script=_flow("haiku", "reviewer") + "\n" + _flow("haiku", "builder"))
 for _near in ("record-writers", "Record-Writer"):
-    add("floor: Workflow agent %r on haiku is denied" % _near, "deny", "subagent-model-floor",
+    add("floor: Workflow agent %r on haiku is denied" % _near, "deny", "agent-model-floor",
         tool="Workflow", script=_flow("haiku", _near))
 add("floor: Workflow record-writer on haiku with a sonnet builder beside it is denied", "deny",
-    "subagent-model-floor", tool="Workflow",
+    "agent-model-floor", tool="Workflow",
     script=_flow("haiku", "record-writer") + "\n" + _flow("haiku", "builder"))
 add("floor: Workflow agent on sonnet with no agentType is allowed", "allow",
     tool="Workflow", script=_flow("sonnet"))
-add("floor: start_session naming haiku is denied", "deny", "subagent-model-floor",
+add("floor: start_session naming haiku is denied", "deny", "agent-model-floor",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="haiku")
-add("floor: start_session naming the full haiku id is denied", "deny", "subagent-model-floor",
+add("floor: start_session naming the full haiku id is denied", "deny", "agent-model-floor",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x",
     model="claude-haiku-5-5")
 add("floor: start_session naming sonnet is allowed", "allow",
@@ -11885,12 +11902,12 @@ add("floor: start_session naming sonnet is allowed", "allow",
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
-add("floor: Workflow role spoofed in the prompt string is denied", "deny", "subagent-model-floor",
+add("floor: Workflow role spoofed in the prompt string is denied", "deny", "agent-model-floor",
     tool="Workflow", script="await agent(\"use agentType: 'reviewer'\", {model:\"haiku\"})")
-add("floor: Workflow role spoofed in the label is denied", "deny", "subagent-model-floor",
+add("floor: Workflow role spoofed in the label is denied", "deny", "agent-model-floor",
     tool="Workflow",
     script="await agent(\"x\", {model:\"haiku\", label:\"agentType: 'reviewer'\"})")
-add("floor: Workflow quoted model key with haiku is denied", "deny", "subagent-model-floor",
+add("floor: Workflow quoted model key with haiku is denied", "deny", "agent-model-floor",
     tool="Workflow", script="await agent(\"x\", {\"model\":\"haiku\"})")
 add("floor: Workflow prompt text naming a haiku model on a sonnet agent is allowed", "allow",
     tool="Workflow", script="await agent(\"set model: 'haiku' in file\", {model:\"sonnet\"})")
@@ -11901,7 +11918,7 @@ add("floor: Workflow commented-out haiku agent call is allowed", "allow",
 # a haiku named in a template's own text is no model. Each expected deny lists a haiku spawn that
 # a desynced scan would hide.
 add("floor: Workflow haiku after a quote inside a template interpolation is denied", "deny",
-    "subagent-model-floor", tool="Workflow",
+    "agent-model-floor", tool="Workflow",
     script=r"""x = `${"`"}`;
 x = 'a\"';
 agent({model: `haiku`});""")
@@ -11911,7 +11928,7 @@ for _shape in (
         r'agent(`p ${obj["k"]}`, {model: "haiku"})',
         r'agent(`p ${ {a:1}.a }`, {model: "haiku"})'):
     add("floor: Workflow haiku after template shape %r is denied" % _shape[:40], "deny",
-        "subagent-model-floor", tool="Workflow", script=_shape)
+        "agent-model-floor", tool="Workflow", script=_shape)
 add("floor: Workflow haiku named only in template text is not a model", "allow",
     tool="Workflow", script='agent(`set {model: "haiku"} in the file`, {model: "sonnet"})')
 add("floor: Workflow agent call written inside template text is not a spawn", "allow",
@@ -11919,30 +11936,30 @@ add("floor: Workflow agent call written inside template text is not a spawn", "a
 # An interpolation is code, and a haiku value built inside it is still a model. An object literal
 # inside `${}` is an expression, never the call's options.
 add("floor: Workflow model from a template interpolation of 'haiku' is denied", "deny",
-    "subagent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${'haiku'}`})")
+    "agent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${'haiku'}`})")
 add("floor: Workflow model from a template with an interpolated haiku suffix is denied", "deny",
-    "subagent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${fam}-haiku`})")
+    "agent-model-floor", tool="Workflow", script="await agent(\"x\", {model: `${fam}-haiku`})")
 add("floor: Workflow object literal inside a template interpolation is not call options", "allow",
     tool="Workflow", script='agent(`x ${ {model:"haiku"}.model }`, {model:"sonnet"})')
 
 # F1. A regex literal inside a template interpolation holds a quote or a backtick. It is code, so it
 # opens no string, and the haiku spawn after it must still deny.
 add("floor: Workflow haiku after a regex with a quote inside a template interpolation is denied",
-    "deny", "subagent-model-floor", tool="Workflow",
+    "deny", "agent-model-floor", tool="Workflow",
     script=r"""x = `${ s.replace(/"/g, '') }`;
 agent("x", {model: "haiku"})""")
 add("floor: Workflow haiku after a regex with a backtick inside a template interpolation is denied",
-    "deny", "subagent-model-floor", tool="Workflow",
+    "deny", "agent-model-floor", tool="Workflow",
     script=r"""x = `${ s.replace(/`/g, '') }`;
 agent("x", {model: "haiku"})""")
 
 # A `/` after `++` or `--` is division, not a regex literal, so the string after it is still
 # lexed and the haiku spawn after it must deny.
 add("floor: Workflow haiku after i++ divided, then a path string, is denied", "deny",
-    "subagent-model-floor", tool="Workflow",
+    "agent-model-floor", tool="Workflow",
     script='i++ / 2; s = "a/b"; agent("x", {model: "haiku"})')
 add("floor: Workflow haiku after i-- divided, then a path string, is denied", "deny",
-    "subagent-model-floor", tool="Workflow",
+    "agent-model-floor", tool="Workflow",
     script='i-- / 2; s = "a/b"; agent("x", {model: "haiku"})')
 
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "guard.py",
@@ -11954,7 +11971,7 @@ FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "g
 # cannot widen it, and a fragment left off this list, `CLAUDE.md` or `guard.py`, stays forbidden in
 # rule 8's reason too.
 REASON_MAY_NAME = {
-    "subagent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
+    "agent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
 }
 
 
@@ -12213,7 +12230,7 @@ def names_the_target(reason, rule=None):
 def stack_reason_hygiene_case():
     """CLAUDE.md: "A refusal's printed remedy never names the forbidden target."
 
-    The stack refusal is the one message a worker reads after the harness worktree reminder tells
+    The stack refusal is the one message an agent reads after the harness worktree reminder tells
     it to use the very commands this rule forbids. The message must therefore point somewhere
     else. It may name the two reads, `git stash list` and `git stash show`, because both stay
     allowed. It may not name the action it just refused.
@@ -12841,7 +12858,7 @@ def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=Non
         problems.append("%s: the deny does not name %s (%s)" % (label, rule, reason[:120]))
 
 
-# (shell, command template): the lone step that moves into a directory.
+# (shell, command template): the lone command that moves into a directory.
 MOVE_STEPS = (("Bash", "cd %s"), ("PowerShell", "Set-Location %s"))
 
 
@@ -12864,7 +12881,7 @@ def worktree_home_lone_cd_case():
 
 
 def worktree_home_chained_case():
-    """Rule 0: a `cd` or `Set-Location` into the home that has another step chained after it is
+    """Rule 0: a `cd` or `Set-Location` into the home that has another command chained after it is
     still refused, from a cwd outside the home. The lone-step allowance must not reach a chain."""
     agent_id = "wthomechain1"
     primary, worktree, problems = _home_fixture(agent_id)
@@ -12875,7 +12892,7 @@ def worktree_home_chained_case():
                          shell, primary, agent_id, template % home, rule="worktree-home")
     if problems:
         return False, "; ".join(problems)
-    return True, "a chained step after a move into the home is refused, in both path forms"
+    return True, "a chained command after a move into the home is refused, in both path forms"
 
 
 def worktree_home_posix_cwd_case():
@@ -12983,7 +13000,7 @@ def _c_form_fixture(name):
 
 
 def _c_form_decide(tool, cwd, agent_type=None, agent_id=None, command=None, **tool_input):
-    """decide() for one call whose cwd is the `/c/` spelling. A subagent names both agent fields."""
+    """decide() for one call whose cwd is the `/c/` spelling. An agent names both agent fields."""
     if command is not None:
         tool_input["command"] = command
     return decide({"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": None,
@@ -13071,17 +13088,17 @@ def worktree_home_cwd_config_case():
 
 
 def worktree_home_cwd_cap_case():
-    """Pins the subagent cap rule (is_settings_file) for a `/c/` cwd: a settings write that sets the
+    """Pins the agent cap rule (is_settings_file) for a `/c/` cwd: a settings write that sets the
     cap asks. The basename decides this one, so the case pins the verdict, not the cwd read."""
     if os.name != "nt":
         return SKIP, C_FORM_OFF_WINDOWS
     primary = _c_form_fixture("cap")
     got, reason = _c_form_decide("Write", _posix_form(primary), file_path="settings.json",
                                  content=CAP_LINE)
-    if got != "ask" or "subagent-model-cap" not in reason:
-        return False, "/c/ cwd, settings write with the cap: expected ask subagent-model-cap, " \
+    if got != "ask" or "agent-model-cap" not in reason:
+        return False, "/c/ cwd, settings write with the cap: expected ask agent-model-cap, " \
                       "got %s (%s)" % (got, reason[:120])
-    return True, "a /c/ cwd gives the subagent cap rule the verdict main gives: ask"
+    return True, "a /c/ cwd gives the agent cap rule the verdict main gives: ask"
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
@@ -13166,7 +13183,7 @@ LOG_CHECKS = (
      worktree_home_cwd_frozen_case),
     ("worktree-home: the config-edit rule reads a /c/ cwd as main does",
      worktree_home_cwd_config_case),
-    ("worktree-home: the subagent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
+    ("worktree-home: the agent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
@@ -14269,7 +14286,7 @@ FAMILY = "override"
 # override_pass.take(session_id, agent_id, rule, now). The pass file is
 # <config dir>/state/override/<session_id>.json, {"kind": "once" or "timed", "until": ISO-8601}.
 #
-# What a pass does: it covers only the session that typed it. A subagent's call spends only a timed
+# What a pass does: it covers only the session that typed it. An agent's call spends only a timed
 # pass. A valid pass makes the guard print nothing, so the normal permission flow runs, and it logs
 # one line with decision `override` and the rule it lifted. What no pass does: lift frozen-path,
 # git-env-set, or a kill of pid 0, 1 or -1, or count an unreadable pass file as a pass.
@@ -14282,7 +14299,7 @@ FAMILY = "override"
 OV_T0 = datetime(2026, 10, 18, 18, 0, tzinfo=timezone.utc)  # the clock when a pass is typed
 OV_ONCE_SECONDS = 10 * 60   # a one-act pass that nothing uses ends after this long
 OV_TIMED_SECONDS = 15 * 60  # the length of the timed pass these stories type: `override 15m`
-OV_AGENT = "a0f1e2d3c4b5a6978"  # a subagent's id on the payload, in the shape AGENT_ID accepts
+OV_AGENT = "a0f1e2d3c4b5a6978"  # an agent's id on the payload, in the shape AGENT_ID accepts
 OV_KILL = "kill $(pgrep -f override-pass-target)"  # refused with no `ps` read, so it runs on Windows too
 
 
@@ -14471,7 +14488,7 @@ def ov_opus_spawn_check(timed):
     """A one-act pass lets an Opus spawn through once, then it asks again. A timed pass lets it through
     every time until the pass ends, and the call at the end instant asks."""
     kind = "timed" if timed else "once"
-    rule = "subagent-model-cap"
+    rule = "agent-model-cap"
 
     def check():
         config, session = ov_config("opus-spawn-" + kind), "ov-opus-spawn-" + kind
@@ -14506,7 +14523,7 @@ for _is_timed in (False, True):
 
 
 # THE OPUS PASS (decision owner-override-pass). `opus <n>[m|h]` lifts only the Opus spawn ask of
-# subagent-model-cap, for the typing session and its subagents, until it ends. `opus <role> <n>[m|h]`
+# agent-model-cap, for the typing session and its agents, until it ends. `opus <role> <n>[m|h]`
 # lifts it only for spawns of that role. Every other refusal and ask stands.
 OP_SECONDS = 2 * 3600  # the length of the pass these stories type: `opus 2h`
 OP_BUILDER = {"prompt": "Try 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
@@ -14523,28 +14540,28 @@ def op_spawn(config, session, seconds, spawn=None, agent_id=None):
 
 
 def op_timed_check():
-    """`opus 2h`: an Opus spawn asks with no pass, then goes through for the session and its subagents
+    """`opus 2h`: an Opus spawn asks with no pass, then goes through for the session and its agents
     until the pass ends, and asks again at the end instant."""
-    config, session, rule = ov_config("opus-timed"), "op-timed", "subagent-model-cap"
+    config, session, rule = ov_config("opus-timed"), "op-timed", "agent-model-cap"
     ok, why = ov_story([("with no pass", lambda: op_spawn(config, session, 0), "ask", rule)])
     if not ok:
         return False, why
     note = ov_type(config, session, "opus 2h")
     ok, why = ov_story([
         ("first spawn", lambda: op_spawn(config, session, 60), "allow", rule),
-        ("a subagent's spawn", lambda: op_spawn(config, session, 120, agent_id=OV_AGENT), "allow", rule),
+        ("an agent's spawn", lambda: op_spawn(config, session, 120, agent_id=OV_AGENT), "allow", rule),
         ("second spawn", lambda: op_spawn(config, session, 180), "allow", rule),
         ("spawn just before the end", lambda: op_spawn(config, session, OP_SECONDS - 1), "allow", rule),
         ("spawn at the end instant", lambda: op_spawn(config, session, OP_SECONDS), "ask", rule),
     ], note)
     if not ok:
         return False, why
-    return True, "asked with no pass, went through for the session and a subagent until the end"
+    return True, "asked with no pass, went through for the session and an agent until the end"
 
 
 def op_minutes_check():
     """`opus 15m` is fifteen minutes, and `opus off` ends the pass at once."""
-    config, session, rule = ov_config("opus-minutes"), "op-minutes", "subagent-model-cap"
+    config, session, rule = ov_config("opus-minutes"), "op-minutes", "agent-model-cap"
     note = ov_type(config, session, "opus 15m")
     ok, why = ov_story([
         ("spawn just before the end", lambda: op_spawn(config, session, OV_TIMED_SECONDS - 1), "allow", rule),
@@ -14567,7 +14584,7 @@ def op_minutes_check():
 
 def op_role_check():
     """`opus builders 2h` lifts only builder spawns. A spawn of any other role still asks."""
-    config, session, rule = ov_config("opus-role"), "op-role", "subagent-model-cap"
+    config, session, rule = ov_config("opus-role"), "op-role", "agent-model-cap"
     ok, why = ov_story([("a builder with no pass", lambda: op_spawn(config, session, 0, OP_BUILDER),
                          "ask", rule)])
     if not ok:
@@ -14575,7 +14592,7 @@ def op_role_check():
     note = ov_type(config, session, "opus builders 2h")
     ok, why = ov_story([
         ("a builder", lambda: op_spawn(config, session, 60, OP_BUILDER), "allow", rule),
-        ("a subagent's builder", lambda: op_spawn(config, session, 90, OP_BUILDER, OV_AGENT), "allow", rule),
+        ("an agent's builder", lambda: op_spawn(config, session, 90, OP_BUILDER, OV_AGENT), "allow", rule),
         ("a general-purpose spawn", lambda: op_spawn(config, session, 120), "ask", rule),
         ("a reviewer", lambda: op_spawn(config, session, 150, OP_REVIEWER), "ask", rule),
         ("a spawn with no role", lambda: op_spawn(config, session, 180, {"prompt": "x", "model": "opus"}),
@@ -14614,7 +14631,7 @@ OP_NOT_THE_WORD = (
 
 
 def op_not_the_word_check():
-    config, rule = ov_config("opus-not-word"), "subagent-model-cap"
+    config, rule = ov_config("opus-not-word"), "agent-model-cap"
     for n, prompt in enumerate(OP_NOT_THE_WORD):
         session = "op-not-word-%d" % n
         note = ov_type(config, session, prompt)
@@ -14628,7 +14645,7 @@ def op_not_the_word_check():
 
 def op_scope_check():
     """An Opus pass covers only the session that typed it."""
-    config, rule = ov_config("opus-scope"), "subagent-model-cap"
+    config, rule = ov_config("opus-scope"), "agent-model-cap"
     note = ov_type(config, "op-scope-a", "opus 2h")
     ok, why = ov_story([
         ("another session", lambda: op_spawn(config, "op-scope-b", 60), "ask", rule),
@@ -14675,13 +14692,13 @@ def op_lifts_nothing_else_check():
     note = ov_type(config, session, "override", 120) or note
     ok, why = ov_story([
         ("an Opus spawn beside a one-act override", lambda: op_spawn(config, session, 150), "allow",
-         "subagent-model-cap"),
+         "agent-model-cap"),
         ("a kill, the one-act override still unspent", lambda: ov_kill(config, session, 180), "allow",
          "machine-wide-kill"),
         ("a second kill, the override spent", lambda: ov_kill(config, session, 210), "deny",
          "machine-wide-kill"),
         ("an Opus spawn, the Opus pass still there", lambda: op_spawn(config, session, 240), "allow",
-         "subagent-model-cap"),
+         "agent-model-cap"),
     ], note)
     if not ok:
         return False, why
@@ -14690,7 +14707,7 @@ def op_lifts_nothing_else_check():
 
 def op_corrupt_check():
     """An Opus pass file the guard cannot read, or one of another shape, is no pass."""
-    config, rule = ov_config("opus-corrupt"), "subagent-model-cap"
+    config, rule = ov_config("opus-corrupt"), "agent-model-cap"
     later = ov_clock(OP_SECONDS)
     for name, body in (
             ("text", "not json {"), ("empty", ""), ("list", "[]"),
@@ -14708,7 +14725,7 @@ def op_corrupt_check():
 
 def op_log_check():
     """The grant writes one log line naming the pass, and each lifted spawn writes one line whose
-    decision cell says `opus-pass` and whose rule cell says subagent-model-cap."""
+    decision cell says `opus-pass` and whose rule cell says agent-model-cap."""
     config, session = ov_config("opus-log"), "op-log-session"
     log = os.path.join(config, "guard.log")
     note = ov_type(config, session, "opus builders 2h")
@@ -14717,17 +14734,17 @@ def op_log_check():
             granted = [l for l in handle.read().splitlines() if l.strip()]
     except OSError:
         granted = []
-    if len(granted) != 1 or "\topus-grant\tsubagent-model-cap\t" not in granted[0] or "builder" not in granted[0]:
+    if len(granted) != 1 or "\topus-grant\tagent-model-cap\t" not in granted[0] or "builder" not in granted[0]:
         return False, "the grant wrote %r, want one opus-grant line naming builder; %s" % (granted, note or "typed")
     os.remove(log)
-    problem = ov_want(*op_spawn(config, session, 60, OP_BUILDER), "allow", "subagent-model-cap")
+    problem = ov_want(*op_spawn(config, session, 60, OP_BUILDER), "allow", "agent-model-cap")
     if problem:
         return False, "the lifted spawn: %s; %s" % (problem, note or "typed")
     with open(log, encoding="utf-8") as handle:
         lines = [l for l in handle.read().splitlines() if l.strip()]
     fields = lines[0].split("\t") if len(lines) == 1 else []
-    if len(fields) != 6 or fields[2:4] != ["opus-pass", "subagent-model-cap"] or fields[5] != session:
-        return False, "the lift wrote %r, want one opus-pass + subagent-model-cap line" % lines
+    if len(fields) != 6 or fields[2:4] != ["opus-pass", "agent-model-cap"] or fields[5] != session:
+        return False, "the lift wrote %r, want one opus-pass + agent-model-cap line" % lines
     os.remove(log)
     note = ov_type(config, session, "opus off", 90) or note
     with open(log, encoding="utf-8") as handle:
@@ -14738,7 +14755,7 @@ def op_log_check():
 
 
 for _label, _check in (
-    ("opus pass: `opus 2h` lets an Opus spawn through, a subagent's too, until it ends", op_timed_check),
+    ("opus pass: `opus 2h` lets an Opus spawn through, an agent's too, until it ends", op_timed_check),
     ("opus pass: `opus 15m` lasts fifteen minutes and `opus off` ends it", op_minutes_check),
     ("opus pass: `opus builders 2h` lifts only builder spawns", op_role_check),
     ("opus pass: an ambiguous prompt grants nothing", op_not_the_word_check),
@@ -14898,41 +14915,41 @@ def ov_late_reader_check():
 
 
 def ov_agent_once_check():
-    """A subagent's call never spends a one-act pass, and the pass stays for the orchestrator's next call."""
+    """An agent's call never spends a one-act pass, and the pass stays for the orchestrator's next call."""
     config, session = ov_config("agent-once"), "ov-agent-once"
     rule = "machine-wide-kill"
-    ok, why = ov_story([("subagent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
+    ok, why = ov_story([("agent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
                          "deny", rule)])
     if not ok:
         return False, why
     note = ov_type(config, session, "override")
     ok, why = ov_story([
-        ("subagent under a one-act pass", lambda: ov_kill(config, session, 60, OV_AGENT), "deny", rule),
+        ("agent under a one-act pass", lambda: ov_kill(config, session, 60, OV_AGENT), "deny", rule),
         ("orchestrator, pass unspent", lambda: ov_kill(config, session, 120), "allow", rule),
         ("orchestrator, pass spent", lambda: ov_kill(config, session, 180), "deny", rule)], note)
     if not ok:
         return False, why
-    return True, "the subagent was refused and left the pass; the orchestrator used it once"
+    return True, "the agent was refused and left the pass; the orchestrator used it once"
 
 
 def ov_agent_timed_check():
-    """A timed pass reaches the owner's subagents as well as the session itself, until it ends."""
+    """A timed pass reaches the owner's agents as well as the session itself, until it ends."""
     config, session = ov_config("agent-timed"), "ov-agent-timed"
     rule = "machine-wide-kill"
-    ok, why = ov_story([("subagent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
+    ok, why = ov_story([("agent, no pass", lambda: ov_kill(config, session, 0, OV_AGENT),
                          "deny", rule)])
     if not ok:
         return False, why
     note = ov_type(config, session, "override 15m")
     ok, why = ov_story([
-        ("subagent, first call", lambda: ov_kill(config, session, 60, OV_AGENT), "allow", rule),
-        ("subagent, second call", lambda: ov_kill(config, session, 120, OV_AGENT), "allow", rule),
+        ("agent, first call", lambda: ov_kill(config, session, 60, OV_AGENT), "allow", rule),
+        ("agent, second call", lambda: ov_kill(config, session, 120, OV_AGENT), "allow", rule),
         ("orchestrator", lambda: ov_kill(config, session, 180), "allow", rule),
-        ("subagent at the end instant",
+        ("agent at the end instant",
          lambda: ov_kill(config, session, OV_TIMED_SECONDS, OV_AGENT), "deny", rule)], note)
     if not ok:
         return False, why
-    return True, "a subagent is allowed under a timed pass until it ends"
+    return True, "an agent is allowed under a timed pass until it ends"
 
 
 def ov_frozen_acts(config, session):
@@ -14965,7 +14982,7 @@ def ov_kill_all_acts(config, session):
 
 # One act of an exclusion story. `rule` names the refusal (a tuple lists the rules that may name it
 # under a pass); `first` names the refusal with no pass, when the first rule to fire is another
-# one. `want` is the decision: an ask for subagent-model-cap, else a deny.
+# one. `want` is the decision: an ask for agent-model-cap, else a deny.
 OvAct = namedtuple("OvAct", "label tool tool_input rule want first cwd agent_id agent_type temp",
                    defaults=("deny", None, NOGIT, None, None, None))
 
@@ -14976,9 +14993,9 @@ def ov_act_call(act, config, session, seconds):
 
 
 def ov_drift_acts(config, session):
-    """A subagent that left its own worktree: worktree-home, rule 0, refuses every call it makes, and
+    """An agent that left its own worktree: worktree-home, rule 0, refuses every call it makes, and
     no pass lifts it (owner, 18:37 CDT). Each act is refused as worktree-home under a timed pass, with
-    or without another refusal in the same command. A pass that lifted rule 0 would free the subagent."""
+    or without another refusal in the same command. A pass that lifted rule 0 would free the agent."""
     primary = os.path.join(ROOT, "ovdrift_primary")
     worktree = os.path.join(primary, ".claude", "worktrees", "agent-" + OV_AGENT)
     if not os.path.isdir(worktree):
@@ -14989,24 +15006,24 @@ def ov_drift_acts(config, session):
     shell = tuple(OvAct(label, "Bash", {"command": command}, "worktree-home", cwd=primary,
                         agent_id=OV_AGENT)
                   for label, command in (
-        ("a drifted subagent's write onto a config hook", "echo x > " + hook),
-        ("a drifted subagent's kill of pid 0", "kill 0"),
-        ("a drifted subagent's command that sets GIT_DIR", "GIT_DIR=/x git status"),
-        ("a drifted subagent's echo", "echo hi"),
-        ("a drifted subagent's kill of a pgrep list", "kill $(pgrep x)"),
+        ("a drifted agent's write onto a config hook", "echo x > " + hook),
+        ("a drifted agent's kill of pid 0", "kill 0"),
+        ("a drifted agent's command that sets GIT_DIR", "GIT_DIR=/x git status"),
+        ("a drifted agent's echo", "echo hi"),
+        ("a drifted agent's kill of a pgrep list", "kill $(pgrep x)"),
     ))
     # The cwd is the home; the target is the primary checkout, outside it.
-    write_out = OvAct("a subagent's Write into the primary checkout from inside its worktree", "Write",
+    write_out = OvAct("an agent's Write into the primary checkout from inside its worktree", "Write",
                       {"file_path": os.path.join(primary, "src", "app.py"), "content": "x"},
                       "worktree-home", cwd=worktree, agent_id=OV_AGENT)
     return shell + (write_out,)
 
 
 def ov_cap_shell_acts(config, session):
-    """The shell form of subagent-model-cap: a write of the cap variable into the project settings
+    """The shell form of agent-model-cap: a write of the cap variable into the project settings
     file by echo, printf or a heredoc. It asks with no pass, and no pass lifts it, as for a Write."""
     line = CAP_KEY + "=opus"
-    return tuple(OvAct(label, "Bash", {"command": command}, "subagent-model-cap", "ask")
+    return tuple(OvAct(label, "Bash", {"command": command}, "agent-model-cap", "ask")
                  for label, command in (
         ("an echo of the cap variable into the project settings file",
          "echo " + line + " > " + PROJ_SETTINGS),
@@ -15041,12 +15058,12 @@ def ov_chain_acts(config, session):
 
 def ov_role_acts(config, session):
     """The model and role guards stay outside every pass, as frozen paths do: a pass that lifted them
-    would let a subagent pick its own model or edit the tests it is judged by."""
+    would let an agent pick its own model or edit the tests it is judged by."""
     return (
-        OvAct("a settings write that lifts the subagent model cap", "Write",
-              {"file_path": PROJ_LOCAL, "content": cap_settings()}, "subagent-model-cap", "ask"),
+        OvAct("a settings write that lifts the agent model cap", "Write",
+              {"file_path": PROJ_LOCAL, "content": cap_settings()}, "agent-model-cap", "ask"),
         OvAct("a spawn on the Haiku model", "Agent",
-              {"prompt": "do it", "model": "haiku"}, "subagent-model-floor"),
+              {"prompt": "do it", "model": "haiku"}, "agent-model-floor"),
         OvAct("a builder's third try on Sonnet", "Agent",
               {"prompt": "Try 3 of 3. Finish the fix.", "model": "sonnet",
                "subagent_type": "builder"}, "roles-third-try-steps-up"),
@@ -15159,8 +15176,8 @@ for _label, _check in (
     ("override: processes racing take() for one one-act pass, exactly one gets it",
      ov_take_race_check),
     ("override: a call that read a one-act pass before it was spent is refused", ov_late_reader_check),
-    ("override: a subagent never spends a one-act pass", ov_agent_once_check),
-    ("override: a timed pass reaches a subagent until it ends", ov_agent_timed_check),
+    ("override: an agent never spends a one-act pass", ov_agent_once_check),
+    ("override: a timed pass reaches an agent until it ends", ov_agent_timed_check),
     ("override: frozen-path and git-env-set stay refused under a one-act pass",
      ov_exclusion_check(False, ov_frozen_acts, "frozen")),
     ("override: frozen-path and git-env-set stay refused under a timed pass",
@@ -15169,9 +15186,9 @@ for _label, _check in (
      ov_exclusion_check(False, ov_kill_all_acts, "killall")),
     ("override: a kill of pid 0, 1 or -1 stays refused under a timed pass",
      ov_exclusion_check(True, ov_kill_all_acts, "killall")),
-    # A one-act pass never reaches a subagent (ov_agent_once_check), so the drifted subagent has
+    # A one-act pass never reaches an agent (ov_agent_once_check), so the drifted agent has
     # a timed story only.
-    ("override: a drifted subagent stays refused as worktree-home under a timed pass",
+    ("override: a drifted agent stays refused as worktree-home under a timed pass",
      ov_exclusion_check(True, ov_drift_acts, "drift")),
     ("override: a refusal no pass lifts stays when chained with one a pass lifts, one-act pass",
      ov_exclusion_check(False, ov_chain_acts, "chain")),
@@ -15181,9 +15198,9 @@ for _label, _check in (
      ov_exclusion_check(False, ov_role_acts, "role")),
     ("override: the model and role guards stay refused under a timed pass",
      ov_exclusion_check(True, ov_role_acts, "role")),
-    ("override: a shell write of the subagent model cap stays asked under a one-act pass",
+    ("override: a shell write of the agent model cap stays asked under a one-act pass",
      ov_exclusion_check(False, ov_cap_shell_acts, "capshell")),
-    ("override: a shell write of the subagent model cap stays asked under a timed pass",
+    ("override: a shell write of the agent model cap stays asked under a timed pass",
      ov_exclusion_check(True, ov_cap_shell_acts, "capshell")),
     ("override: `override off` ends a pass at once", ov_off_check),
     ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
@@ -16441,7 +16458,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the builder test-edit rule reads", "worktree-home"),
     ("worktree-home: the frozen-path rule reads", "worktree-home"),
     ("worktree-home: the config-edit rule reads", "worktree-home"),
-    ("worktree-home: the subagent cap rule reads", "worktree-home"),
+    ("worktree-home: the agent cap rule reads", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:

@@ -30,7 +30,7 @@ session transcripts, not a repo.
 | Outcomes | Read the child `CLAUDE.md` and README first screen. Run `ste_lint` on both | rules name the person served; README passes `fresh-prose` |
 | Outcomes | `grep -c "rule:" CLAUDE.md`; look for a check per local rule | each local rule has a hook, test, or CI step |
 | Roles | `git log --oneline -40 origin/main` and `git branch -r` | test commits or `tests/*` branches land before product commits |
-| Roles | `cat .claude/settings.local.json` | no stale model raise; any raise has `_subagentCapUntil` in the future |
+| Roles | `cat .claude/settings.local.json` | no stale model raise; any raise has `_agentCapUntil` in the future |
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
 | Parallelism | `$PY $P/lint/compliance_probes.py lanecap .` reads each brief and plan for a lane cap (rule parallelism-no-guessed-lane-cap); read each hit in its file | exit 0. A cap the owner named passes: the probe passes a line that cites its source, `(owner, ...)` or the owner and a date, and a cap inside a pair of quotes |
 | Shared trees | `git stash list` | no output (0 entries) |
@@ -69,7 +69,7 @@ The probe reads tracked files only, so an untracked folder is not there.
 
 ## Design
 
-`$PY $P/lint/compliance_probes.py design .` grades each item on its own line, against `ux/`
+`$PY $P/lint/compliance_probes.py design .` grades each item on its own line, against `docs/design/`
 (`checklist.md`, `layout.md`, `tokens.md`). A child with no screen files is `n/a`.
 
 | Item | Pass when |
@@ -80,7 +80,7 @@ The probe reads tracked files only, so an untracked folder is not there.
 | token file | one token source (`tokens.*`, `design-tokens.*`). A test file, and a file that says it is generated, do not count |
 | ui copy | never graded: the known STE gap in the Output row |
 
-Then mark `ux/checklist.md` for each route in `shoot.json`, at each size and theme.
+Then mark `docs/design/checklist.md` for each route in `shoot.json`, at each size and theme.
 
 ## Copies
 

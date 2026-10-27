@@ -11,8 +11,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 0. **Read the visibility first.** Run `gh repo view --json visibility`. See `snippets.md`,
    section 11. Note which steps apply. Steps tagged **(private repos)** save billed minutes only.
    The **Public repos** section applies to a public repo. An internal repo counts as private.
-1. **Measure first.** Rank the step times of a finished run. Optimize the slowest step only.
-   Never guess which step is slow. Measure wall time on the slowest job, not runner minutes
+1. **Measure first.** Rank the CI step times of a finished run. Optimize the slowest CI step only.
+   Never guess which CI step is slow. Measure wall time on the slowest job, not runner minutes
    alone: a cut off a job that is not the slowest saves money, not waiting. **(private repos)**
    Also read the billed minutes each week, and set a spending alarm in the billing settings.
    See `snippets.md`.
@@ -20,7 +20,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    beside each time: CPU use, and what else ran. A time taken under load does not compare with
    one taken on a quiet machine.
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
-   step may already run in parallel, or be cached.
+   CI step may already run in parallel, or be cached.
 3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
    Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
    trigger. If detection cannot read the diff, run the check (fail safe). A check that cannot
@@ -61,9 +61,6 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    ci-wait-reads-run-status, CI waits read the run status). Never poll with a sleep loop. A repeated `gh run view` or
    `gh pr checks` without `--watch` is a poll. To wait for any other condition, use the Monitor
    tool (decision agents-wait-with-monitor, agents wait with the Monitor tool). See `snippets.md`.
-   A cloud session waits on its PR subscription. It sets a `send_later` check-in when it starts to
-   wait, and again after each red job, each wider apart: a run with a red job sends no "all checks
-   done" wake (rule `git-ci-wait-checks-in`).
 10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
    fail. Restore the target. A gate you did not see go red is not proven.
    A pipe hides a gate's exit code. `lint | tail -1` exits 0 when lint fails, so a commit after
@@ -153,7 +150,6 @@ Record: decision opt-in-ci-templates-composite (opt-in CI templates are composit
   with:
     needs: ${{ toJSON(needs) }}
   ```
-- `ci-done-comment`: in a last job with `needs:` every other job, `if: ${{ !cancelled() && github.event_name == 'pull_request' }}` and `permissions: {pull-requests: write}`. Pass `toJSON(needs)`. A run that ends red posts one PR comment, which wakes a session that watches the PR.
 - `ci-alarm`: in a nightly workflow with `permissions: {actions: read, issues: write}`. One issue opens when main's latest run is red.
 - `readme-links`: in a weekly workflow after checkout, never per PR. Set `open-issue: true` with `issues: write`.
 - `ruling-kind`: in a pull_request job after `actions/checkout` with `fetch-depth: 0`. It fails when a changed `decisions/*.md` record has no valid Kind line, or when the base cannot be read.

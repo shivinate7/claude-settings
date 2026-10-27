@@ -3,7 +3,7 @@
 pass lifts the deny (decision owner-override-pass), as it lifts every guard.
 
 Rule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear
-something that changes its work). Spec: docs/decisions/subagent-model-cap.md, the two SendMessage rows.
+something that changes its work). Spec: docs/decisions/agent-model-cap.md, the two SendMessage rows.
 
 - The wording judge reads every send, by wording only (WORDING_PROMPT). It lives here, not in a
   settings.json prompt hook: a prompt hook sees only the call's JSON, so it cannot read the pass
@@ -47,7 +47,7 @@ OK_SHAPE = {"ok": (True, False)}
 READER_TIMEOUT = 12
 MODEL_TIMEOUT = 25
 WORDING_TIMEOUT = 30  # a prompt hook's default timeout
-WORDING_MODEL = "claude-sonnet-5-5"  # at the model's default effort (docs/decisions/subagent-model-cap.md)
+WORDING_MODEL = "claude-sonnet-5-5"  # at the model's default effort (docs/decisions/agent-model-cap.md)
 RULE = "parallelism-no-mid-task-talk"
 WORDING_PROMPT = (
     "Judge this SendMessage call: %s\nAnswer {\"ok\": true} at once for a resume, a status message, "

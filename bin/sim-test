@@ -1,0 +1,22 @@
+#!/bin/bash
+# Usage: sim-test <xcodebuild test args without -destination>   (run from the folder that holds the project)
+# Runs the tests on one phone simulator. It reuses the first booted iPhone. With none booted, it boots the shared
+# iPhone 18 Pro, tests, then shuts that simulator down. It never shuts down a simulator it did not boot.
+# The exit code is xcodebuild's. The tool takes no lock and waits for no load: the guard caps booted simulators.
+# macOS only. It runs under /bin/bash 3.2.
+SHARED=8787FE1C-48CC-4213-9B5C-8605AFE7F9B3 # iPhone 18 Pro, booted only when no iPhone is booted
+booted_by_me=
+
+cleanup() { [ -n "$booted_by_me" ] && xcrun simctl shutdown "$SHARED"; }
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+udid=$(xcrun simctl list devices booted | sed -n 's/^ *.*iPhone.* (\([0-9A-F-]\{36\}\)) (Booted).*/\1/p' | head -1)
+if [ -z "$udid" ]; then
+  udid=$SHARED
+  xcrun simctl boot "$udid" || exit 1
+  booted_by_me=1
+fi
+echo "sim-test: using $udid"
+xcodebuild test "$@" -destination "platform=iOS Simulator,id=$udid"
+exit $?

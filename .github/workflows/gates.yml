@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Decides which jobs and suites a run needs (.github/scripts/harness-scope.sh). Every other job
+  # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
   # needs it. An error in the script turns every flag on, never off. A skipped job reads as passing.
   # A draft PR skips this job, so every job that needs it skips too (decision draft-until-reviewed).
   scope:
@@ -58,7 +58,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: bash .github/scripts/harness-scope.sh
+        run: bash .github/scripts/ci-scope.sh
 
   gates:
     runs-on: ubuntu-latest
@@ -91,6 +91,9 @@ jobs:
       - name: Shell lint (ShellCheck), bin/ios-ship
         run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck --severity=warning bin/ios-ship
 
+      - name: Shell lint (ShellCheck), bin/sim-test
+        run: pipx run --spec shellcheck-py==0.11.0.1 shellcheck --severity=warning bin/sim-test
+
       - name: Guard fixture suite
         if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.guard == 'true' }}
         run: python3 hooks/test_guard.py
@@ -107,7 +110,7 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/test_sweep.py
 
-      - name: Janitor sweep mutation harness
+      - name: Janitor sweep mutation test
         if: ${{ needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
@@ -213,7 +216,7 @@ jobs:
         run: python3 lint/test_windows_split.py
 
       - name: Scope detector fixture suite
-        run: python3 lint/test_harness_scope.py
+        run: python3 lint/test_ci_scope.py
 
       - name: rm shim fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -386,7 +389,6 @@ jobs:
         run: |
           bash actions/all-jobs-passed/test_action.sh
           bash actions/ci-alarm/test_action.sh
-          python3 actions/ci-done-comment/test_comment.py
           bash actions/ruling-kind/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
@@ -415,7 +417,7 @@ jobs:
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
       # plain-english-map skill tests. The same step ends gates-windows and gates-macos. The `mods` flag
-      # comes from harness-scope.sh.
+      # comes from ci-scope.sh.
       - name: Mod and map-skill tests
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
@@ -447,7 +449,7 @@ jobs:
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
 
       # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
-      # all-on arm of harness-scope.sh, so a change there runs this job. A red shoot suite above
+      # all-on arm of ci-scope.sh, so a change there runs this job. A red shoot suite above
       # skips this step; it runs again once that suite is green.
       - name: waiting page suite
         shell: bash
@@ -494,7 +496,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
-  # checkout-detection suite and the ios-ship suite (a bash 3.2 script for macOS) are the only gates
+  # checkout-detection suite, the ios-ship suite and the sim-test suite (bash 3.2 scripts for macOS) are the only gates
   # whose result depends on either. gates-macos below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
@@ -528,6 +530,12 @@ jobs:
       - name: ios-ship fixture suite (bash on PATH)
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: bash lint/test_ios_ship.sh
+      - name: sim-test fixture suite (/bin/bash 3.2)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: /bin/bash lint/test_sim_test.sh
+      - name: sim-test fixture suite (bash on PATH)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: bash lint/test_sim_test.sh
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the gates
   # and gates-windows jobs above proved itself only on Linux and Windows, never on a real
@@ -569,14 +577,14 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_hook_platform_exit.py
 
-      # No Guard mutation harness here: it runs on the gates job (Linux) only. Accepted risk: a
+      # No Guard mutation test here: it runs on the gates job (Linux) only. Accepted risk: a
       # macOS-only mutation regression is not caught. No mutant is marked macOS-only.
 
       - name: Janitor sweep fixture suite
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_sweep.py
 
-      - name: Janitor sweep mutation harness
+      - name: Janitor sweep mutation test
         if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
@@ -789,7 +797,7 @@ jobs:
           echo "== mktemp -d, read from Git Bash =="
           mktemp -d
 
-      # The guard suite runs in gates-windows-guard. No Guard mutation harness on Windows: it took 34.5 min
+      # The guard suite runs in gates-windows-guard. No Guard mutation test on Windows: it took 34.5 min
       # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
@@ -816,7 +824,7 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
-  # The mutation harness for the guard, moved off `gates` by cut F so it runs in parallel.
+  # The mutation test for the guard, moved off `gates` by cut F so it runs in parallel.
   gates-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope
@@ -833,7 +841,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard mutation harness
+      - name: Guard mutation test
         run: python3 hooks/mutate_guard.py
 
   # The guard fixture suite on Windows, split off gates-windows by cut F. On pull_request it runs only the cases
@@ -1023,7 +1031,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.gates_windows_rest == 'true' || github.event_name != 'pull_request' }}
-    # About 550 s on push (the sweep mutation harness takes about 150 s: runs 37650386161, 37606531387).
+    # About 550 s on push (the sweep mutation test takes about 150 s: runs 37650386161, 37606531387).
     # About 2x the slowest of the 5 newest green runs (18.8 min, run 39969158671).
     timeout-minutes: 38
     steps:
@@ -1041,7 +1049,7 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_sweep.py
 
-      - name: Janitor sweep mutation harness
+      - name: Janitor sweep mutation test
         if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
 
@@ -1161,41 +1169,3 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: bash actions/stamp/test_action.sh
-
-  # Wakes a session that waits on this PR (decision ci-wait-reads-run-status, "The cloud wake").
-  # A run with a red job sends no "all checks done" wake, so this job comments once when the run
-  # ends red. It needs every other job (actions/ci-done-comment/test_comment.py checks the list).
-  # !cancelled() runs it after a failed job and skips it on a superseded run. A draft runs no CI.
-  ci-done:
-    runs-on: ubuntu-latest
-    needs:
-      - scope
-      - gates
-      - gates-shoot
-      - pointer-windows
-      - shell-macos
-      - gates-macos
-      - gates-windows
-      - gates-mutate-guard
-      - gates-windows-guard
-      - gates-windows-guard-2
-      - gates-windows-merge
-      - gates-windows-merge-2
-      - gates-windows-merge-3
-      - gates-windows-merge-4
-      - gates-windows-merge-5
-      - gates-windows-rest
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          persist-credentials: false
-
-      - name: Comment when a job ended red
-        uses: $/actions/ci-done-comment
-        with:
-          needs: ${{ toJSON(needs) }}

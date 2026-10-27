@@ -706,7 +706,7 @@ HANDOFF_WITH_PREMISES = (
     "# Handoff\n\n## Goal\nFix the handoff. Source: owner 2026-10-21.\n\n"
     "## Working premises\n"
     "- P1 [ruling] An audit Explore may run Opus. Source: owner 2026-10-21, "
-    "decisions/subagent-model-cap.md. Checked 2026-10-21.\n"
+    "decisions/agent-model-cap.md. Checked 2026-10-21.\n"
     "- P2 [read] The guard denies only a Haiku model below the floor. Source: "
     "hooks/guard.py:1577 at 73ed71a7. Checked 2026-10-21.\n"
     "- P3 [measured] test_handoff_wave2 passes on this branch. Source: verdict run "

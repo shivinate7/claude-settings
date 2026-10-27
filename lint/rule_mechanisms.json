@@ -68,10 +68,10 @@
         "reason": "No hook classifies a session's own act as orchestration versus building, or judges whether a change can move a verdict. hooks/decision_watch.py, a Stop command hook, reads the transcript and this turn's git diff and judges the act, escalating to a model only for the residual judgment a diff cannot make, which is this rule's check."
       }
     },
-    "roles-one-role-per-worker": {
+    "roles-one-role-per-agent": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook judges it. A prompt hook sees only the event input, never what a worker did, and no check reads a worker's roles."
+        "reason": "No hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
       }
     },
     "roles-sonnet-is-the-default": {
@@ -95,7 +95,7 @@
     "roles-opus-override-guarded": {
       "mechanism": {
         "kind": "guard",
-        "ref": "subagent-model-cap"
+        "ref": "agent-model-cap"
       },
       "test": "hooks/test_guard.py::cap: Write of a project local settings file setting an opus model asks"
     },
@@ -121,7 +121,7 @@
     "parallelism-each-own-checkout": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check counts checkouts against concurrent workers or catches two agents sharing one tree."
+        "reason": "No check counts checkouts against concurrent agents or catches two agents sharing one tree."
       }
     },
     "parallelism-own-lane-orchestrator": {
@@ -211,19 +211,6 @@
         "reason": "Enforcement is GitHub's required-status-checks setting on the branch, not something this repo's files can attest to."
       }
     },
-    "git-ci-wait-checks-in": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook sees that a cloud session is waiting on CI, or reads whether it set a send_later check-in. The ci-done comment covers the red-run wake; the check-in covers a lost wake."
-      }
-    },
-    "git-ci-done-comment-wakes": {
-      "mechanism": {
-        "kind": "gate",
-        "ref": "actions/ci-done-comment/comment.sh",
-        "test": "actions/ci-done-comment/test_comment.py::Body.test_failed_job_is_named"
-      }
-    },
     "git-never-discard-output": {
       "mechanism": {
         "kind": "guard",
@@ -298,7 +285,7 @@
     "verification-verify-against-repo": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check reads whether a report about long work was verified against the repo instead of a status line. The mutation harness's WRONG CAUSE verdict covers only mutant cause of death, not this."
+        "reason": "No check reads whether a report about long work was verified against the repo instead of a status line. The mutation test's WRONG CAUSE verdict covers only mutant cause of death, not this."
       }
     },
     "verification-never-dry-run-blocklist": {
@@ -353,7 +340,7 @@
     "tokens-read-report-not-transcript": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check tells whether the orchestrator read a sub-agent's report or its full transcript."
+        "reason": "No check tells whether the orchestrator read an agent's report or its full transcript."
       }
     },
     "tokens-compacting-keep-essentials": {
@@ -455,10 +442,10 @@
         "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
       }
     },
-    "output-never-echo-worker-report": {
+    "output-never-echo-agent-report": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check compares a reply against a worker's report to catch an echoed copy or a described screenshot."
+        "reason": "No check compares a reply against an agent's report to catch an echoed copy or a described screenshot."
       }
     },
     "output-never-paste-passing-output": {
@@ -634,6 +621,12 @@
       "mechanism": {
         "kind": "unmechanized",
         "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check."
+      }
+    },
+    "style-table-gold-column": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "Whether a table compares, and whether a column states the gold standard or target, is a judgment on the reply. Code in hooks/reply_judge.py finds a Markdown table and sends that Stop to the reply judge (a model, never blocks) off-sample; the model flags a comparison table with no such column, and a finding writes one guard.log line. It moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-option-says-effect": {
