@@ -4,7 +4,7 @@
 
 The owner asked whether the tests pin anything that matters, or pin a static result. `hooks/mutate_guard.py --report` answers it. It is the report mode of the one home of mutation testing (`hooks/mutate_guard.py` with `hooks/mutate_shared.py`). It is not a second tool.
 
-The mode makes mutants of a target file mechanically, with the `ast` module: a comparison flipped, `and` swapped with `or`, a `not` dropped, `True` swapped with `False`, an `if` or `while` test negated, a return value set to `None`, a `return` dropped. It samples 10 mutants per file, the same 10 on every run (seed 0). It runs each suite that names the file, in a copy of the repository, against each mutant. It prints, per file: mutants made, killed, crashed, survived, the kill rate, and the suites that killed no mutant. `REPORT_TARGETS` in `hooks/mutate_guard.py` lists the files and their suites. A new verdict-deciding file joins the report by one line there.
+The mode makes mutants of a target file mechanically, with the `ast` module. It flips a comparison, swaps `and` with `or`, drops a `not`, and swaps `True` with `False`. It negates an `if` or `while` test, sets a return value to `None`, and drops a `return`. It samples 10 mutants per file, the same 10 on every run (seed 0). It runs each suite that names the file, in a copy of the repository, against each mutant. It prints, per file: mutants made, killed, crashed, survived, the kill rate, and the suites that killed no mutant. `REPORT_TARGETS` in `hooks/mutate_guard.py` lists the files and their suites. A new verdict-deciding file joins the report by one line there.
 
 Two counts are held shut:
 
