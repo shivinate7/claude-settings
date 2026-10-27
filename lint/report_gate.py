@@ -16,6 +16,7 @@ a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
+When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 """
 import json
 import os
@@ -71,6 +72,14 @@ BLOCK_REASON_HEAD = (
 BLOCK_REASON_TAIL = (
     " Prose may sit above the report. Send the report now, as the next thing you write. Keep "
     "the reply above it as it stands. Do not write it again."
+)
+# The owner has read the report before a block lands, so a resent report doubles it. The
+# missing-report block asks for the report itself, so its reply carries every other fix. Once the
+# report is there, every other block asks for a short correction.
+# A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
+# set, so this gate stays quiet on it.
+CORRECTION_TAIL = (
+    " Post only the corrected lines, as a short correction. Never send the report again."
 )
 
 
@@ -442,7 +451,10 @@ def main():
             "Cite-gloss gate: " + repr(cite) + " is a record id with no short gloss. Write the id "
             "plus a few words, like \"D12, short titles for records\".")
     if reasons:
-        print(json.dumps({"decision": "block", "reason": " ".join(reasons)}))
+        reason = " ".join(reasons)
+        if shape_ok:
+            reason += CORRECTION_TAIL
+        print(json.dumps({"decision": "block", "reason": reason}))
 
 
 if __name__ == "__main__":
