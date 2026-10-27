@@ -1,0 +1,41 @@
+# The iOS standard of claude-settings (skills/ios-apps). The same targets run in every iOS repo.
+# CI runs tokens-check, kit-test and app-build on each pull request. native-check runs them all,
+# plus the slow UI tests, once per batch on the Mac. phone, then testflight if phone fails.
+# ios-ship and sim-test are claude-settings commands, on PATH from ~/.claude/bin.
+# sim-test lands with claude-settings roadmap step c89; until then, ui-test fails.
+APP := __APP__
+NATIVE := native
+
+.PHONY: tokens tokens-check kit-test project app-build ui-test native-check phone testflight
+
+# tokens/tokens.json is the one source of colours and spacing. Tokens.swift is generated from it.
+tokens:
+	python3 tools/gen-tokens.py
+
+tokens-check:
+	python3 tools/gen-tokens.py --check
+
+# The app logic lives in the Kit package, so its tests run in seconds with no simulator.
+kit-test:
+	swift test --package-path $(NATIVE)/$(APP)Kit
+
+project:
+	cd $(NATIVE) && xcodegen generate
+
+app-build: project
+	cd $(NATIVE) && xcodebuild build-for-testing -project $(APP).xcodeproj -scheme $(APP) -derivedDataPath build \
+		-destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+
+# Slow: the UI tests, on the one shared simulator. Once per batch, never on each pull request.
+ui-test: project
+	cd $(NATIVE) && sim-test -project $(APP).xcodeproj -scheme $(APP) -derivedDataPath build CODE_SIGNING_ALLOWED=NO
+
+native-check: tokens-check kit-test app-build ui-test
+
+# Install a Release build on the phone from this Mac.
+phone:
+	ios-ship install
+
+# The fallback when phone fails: archive and upload to TestFlight. Needs a clean tree at origin/main.
+testflight:
+	ios-ship testflight

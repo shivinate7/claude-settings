@@ -200,6 +200,9 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 
 ## Shipping iOS apps
 
+The iOS standard every app follows, and a starter for a new app, live in the `ios-apps` skill
+(`skills/ios-apps/SKILL.md`). The `ios` probe of `lint/compliance_probes.py` flags a repo that drifts from it.
+
 `bin/ios-ship` builds, signs and ships the owner's iOS apps from the Mac. It runs on macOS only, under `/bin/bash` 3.2.
 Each private app repo keeps only what differs, in `tools/ios-ship.json`. The account values live once, on the Mac.
 
