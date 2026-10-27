@@ -1,0 +1,9 @@
+{
+  "title": "A repo picks its own waiting-page colour",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33835,
+  "why": "Your question, Oct 27 11:37 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2RLR9ApAqe47Chyjxe1AwLm, screenshot of degen's blue page): how did the colour get hardcoded; can a repo pick its own?",
+  "note": "How it works today (main 43d9af2): the page draws every colour from one field, brand, in its own database (meta/page identity), so a session can change it any time with no PR; a republish keeps it. The first value comes from claude-settings' docs/design/repo-colours.json, which reads each repo's own app accent (degen: tokens.json's light accent, #0b5fff). The gap: a repo cannot state its page colour in its own files, so a fresh page or a roll-out writes the claude-settings value again. Next cloud lane: a repo may set waiting-page-colour in its .claude/layout-extras.json; skill waiting-page step 3 and lint/repo_colour.py's colour_for read it first, then repo-colours.json; the page's 4.5:1 contrast check stays. Red first on a repo whose extras colour is ignored. Needs no answer. Port: yes, every repo's page. Placed after c130 (triage, Oct 27): both are waiting-page upkeep.",
+  "updatedAt": "2026-10-27T16:55:00Z"
+}

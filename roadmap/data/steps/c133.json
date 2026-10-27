@@ -1,0 +1,9 @@
+{
+  "title": "A report rewritten after a missing-report block is still checked for model names and Unstarted",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33895,
+  "why": "Known gap from c101 (the reply judge checks every report), left in its note when it merged Oct 27.",
+  "note": "Today the gate stays quiet on the rewrite after a missing-report block (it runs with stop_hook_active set), so a report sent then is never checked for model names or the Unstarted line. Next cloud lane: on that rewrite, run the model-name and Unstarted checks once more, still with one correction tail and no loop; red first on a rewrite that drops the Unstarted line. Needs no answer. Port: no; the hook lives in claude-settings and installs everywhere. Placed after c129 (triage, Oct 27): small, and it closes a hole in a check every report passes.",
+  "updatedAt": "2026-10-27T16:55:00Z"
+}
