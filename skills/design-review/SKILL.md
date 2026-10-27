@@ -97,4 +97,4 @@ It is not a review of a built screen.
   is still open becomes a debt if Claude is likely to hit it in normal work. Otherwise it becomes a
   note. Each points to its decision (`roles-review-cap-three`, `roles-findings-are-debts-or-notes`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/docs/design/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/docs/design/tokens.md`.
-- Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/docs/design/layout.md` (gap on the parent, layout primitives, container queries, fluid tokens).
+- Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/docs/design/layout.md` (gap on the parent, layout primitives, a control beside its area, container queries, fluid tokens).
