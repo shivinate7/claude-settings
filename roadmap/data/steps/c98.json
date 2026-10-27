@@ -1,9 +1,9 @@
 {
   "title": "Every session sends fewer messages: an outbox, owners read their own answers, the roster is read first",
   "phase": "cleanup",
-  "status": "active",
+  "status": "done",
   "order": 103.31,
   "why": "Your ruling, Oct 26 19:40 CDT (\"Yes agreed\"), on the 60-an-hour message cap: the fewer-messages rules now sit only in this project's instructions.",
   "note": "Merged to main in batch PR 663 (main 1733dac, Oct 26 22:10 CDT); lane PR 660 closed as replaced. Ready for triage to close. Homes: the questions-go-to-owner rule and its decision entry, and the waiting-page skill, where the owning session reads its own answers at each wake and nobody relays them. The project-ops operating model has a \"Messages between threads\" section: the outbox, reading the roster before sending, no broadcast on a hand-off, and sending at once only when blocked or asked. No skill named orchestrate exists, so project-ops is that home. The scaffold now writes roadmap/outbox/README.md (red test first). Times in US Central stay a project instruction, not a global rule. Builder sonnet, reviewer sonnet. Port: yes; the rules are global. Placed ahead of c53's slot, after c88 and c97 (triage, Oct 27): every thread hits the cap.",
-  "updatedAt": "2026-10-27T03:12:00Z"
+  "updatedAt": "2026-10-27T04:20:00Z"
 }

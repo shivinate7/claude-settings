@@ -1,9 +1,9 @@
 {
-  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Not started. Waits for o4 (rework compliance-check). Cull first in each repo. Checked Oct 26 at q_max b47bd00 (last commit Oct 20): 819 debts and 570 decisions under docs/, up from 759 and 560 on Oct 17. Finding for home-app's visit (o8 plan thread, Oct 26, read only): records/backlog.md keeps timed counts (\"Counts at 03:00 ... at 09:25 ... at 13:30\"), a log, against your Oct 21 rule that a record holds what is true now.",
+  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Not started. Waits for o4 (rework compliance-check). Cull first in each repo. Checked Oct 26 at q_max b47bd00 (last commit Oct 20): 819 debts and 570 decisions under docs/, up from 759 and 560 on Oct 17. Finding for home-app's visit (o8 plan thread, Oct 26, read only): records/backlog.md keeps timed counts (\"Counts at 03:00 ... at 09:25 ... at 13:30\"), a log, against your Oct 21 rule that a record holds what is true now. Ask (shiv, Oct 26 21:15 CDT): when r1 opens, tell him in one line that it is ready; he is waiting on that signal instead of running compliance-check now.",
   "order": 310,
   "phase": "rollout",
   "status": "todo",
   "title": "Run compliance-check on each child repo",
-  "updatedAt": "2026-10-26T17:35:00Z",
+  "updatedAt": "2026-10-27T04:20:00Z",
   "why": "Cull first in each one. q_max has 759 debts and 560 decisions."
 }

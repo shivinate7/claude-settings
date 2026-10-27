@@ -1,9 +1,9 @@
 {
   "title": "claude-settings' ux/ folder moves to docs/design/",
   "phase": "organize",
-  "status": "review",
+  "status": "done",
   "order": 110.5,
   "why": "Left out of o2's lane 2 (Oct 26): the rest of claude-settings' records moved under docs/, but ux/ did not.",
-  "note": "PR #658 (move the house UX rules to docs/design/) merged to main on Oct 26 22:09 CDT. ux/ is now docs/design/, installed and frozen there, and both installers remove the old ~/.claude/ux. Ready for triage to close. Port: no; child repos follow o2's roll-out.",
-  "updatedAt": "2026-10-27T03:10:00Z"
+  "note": "PR #658 (move the house UX rules to docs/design/) merged to main on Oct 26 22:09 CDT. ux/ is now docs/design/, installed and frozen there, and both installers remove the old ~/.claude/ux. Closed by triage, Oct 27. Port: no; child repos follow o2's roll-out.",
+  "updatedAt": "2026-10-27T04:20:00Z"
 }

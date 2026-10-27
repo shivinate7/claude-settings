@@ -1,9 +1,9 @@
 {
   "title": "Every comparison table in a report to you has a gold-standard column",
   "phase": "cleanup",
-  "status": "review",
+  "status": "done",
   "order": 103.345,
   "why": "Your gripe, Oct 27 (iOS kit consultation): \"in all these tables include like 'gold standard' so i can get an idea of whats going on as i'm such a noob\".",
   "note": "Merged: batch PR #663 landed on main as 1733dac (PR #655 closed as replaced). The shiv-stylisms output style says a comparison table in a reply or report to you carries a gold-standard or target column. The reply judge checks it on every reply that holds a table (async Haiku, never blocks); the rule stays unmechanized because only a model can tell a comparison table. Notes: the table finder skips separators with 1 or 2 dashes per cell; every reply with a table costs one Haiku call (frequency unmeasured). Port: yes; the output style installs everywhere.",
-  "updatedAt": "2026-10-27T03:15:00Z"
+  "updatedAt": "2026-10-27T04:20:00Z"
 }

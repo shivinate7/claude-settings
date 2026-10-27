@@ -1,3 +1,0 @@
-# Outbox: compliance-check timing thread
-
-- r1 (run compliance-check on each child repo), note: shiv asked on Oct 26 at 21:15 CDT whether to run compliance-check on his repos now (message cmsg_01DoF7thf3iq2Srr1UsfXgh2Jji5VrXWJyg4bkv8drpuQn). Answer given: wait for r1's planned visits, after o2 (one layout for every repo) and o4 (rework compliance-check) finish; a run now would mostly repeat findings already measured (c78 Playwright apt installs, c76 old CI pins) and report Layout as "not rolled out" everywhere. Ask: when r1 opens, tell shiv in one line that it is ready, since he is waiting on that signal.
