@@ -1,9 +1,9 @@
 {
-  "title": "The iOS repos pin the same runner and build in Swift 6",
+  "title": "One iOS standard for every iOS repo",
   "phase": "cleanup",
   "status": "todo",
   "order": 103.93,
-  "why": "Your comments on the iOS kit page, Oct 27 (https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq).",
-  "note": "Deferred (shiv, Oct 27): both touch child repos, so each waits on your plan check. (1) home-app CI pins macos-latest; pin macos-26 like mailaudit and ios-adblock, so Xcode cannot change without warning (checked home-app 360a31f). (2) ios-adblock builds in Swift 5.0 language mode; the other three use 6.0, which checks data races at build time. It has 6 Swift files, so move it the next time its app code is touched (checked ios-adblock 78fb749). Not worth matching: XCTest against Swift Testing, and XcodeGen against a committed project. Port: no; per repo. Placed after c89, ahead of c54 (triage, Oct 27): same iOS cleanup.",
-  "updatedAt": "2026-10-27T00:38:00Z"
+  "why": "Your reframe, Oct 27: \"i never intended for the way i use these repos' interaction with ios/phone etc to be different ... i'm assuming there's best practices from each.\"",
+  "note": "Plan (iOS kit consultation, report https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq, its gold-standard column): one \"iOS apps\" page in claude-settings sets the standard for home-app, degen, mailaudit and ios-adblock: the same make targets (phone, testflight, native-check); logic in an in-repo Swift package; XcodeGen; Swift 6; CI pinned to macos-26 that runs package tests and compiles every app; slow tests once per batch on the Mac through the shared simulator tool (c89); tokens.json generated into Swift; and your Oct 22 ruling \"Mac install first, TestFlight fallback, every app\", recorded only in mailaudit today. compliance-check rows flag drift, then one visit per repo. Known drift: home-app CI pins macos-latest (360a31f); ios-adblock builds in Swift 5.0 mode, 6 files (78fb749). Not worth matching: XCTest against Swift Testing. Part 1, claude-settings (the page and the compliance-check rows), needs no answer. Deferred (shiv, Oct 27): the repo visits wait on your plan check, now on a decision card in the iOS consultation thread. Port: yes, the four iOS repos only. Placed after c47 and c89, ahead of c54 (triage, Oct 27): it finishes what c47 starts.",
+  "updatedAt": "2026-10-27T00:42:00Z"
 }

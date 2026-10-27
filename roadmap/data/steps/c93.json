@@ -1,0 +1,9 @@
+{
+  "title": "Every comparison table in a report to you has a gold-standard column",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.345,
+  "why": "Your gripe, Oct 27 (iOS kit consultation): \"in all these tables include like 'gold standard' so i can get an idea of whats going on as i'm such a noob\".",
+  "note": "Fix, needs no answer: the shiv-stylisms output style says a comparison table in a reply or report to you carries a gold-standard or target column, so each row shows what good looks like. A check, if one fits: the reply judge flags a comparison table with no such column. The consultation thread already works this way. Port: yes; the output style installs everywhere. Placed after c86, ahead of c75's slot (triage, Oct 27): a cheap change to every report you read.",
+  "updatedAt": "2026-10-27T00:42:00Z"
+}

@@ -1,0 +1,9 @@
+{
+  "title": "Every step deferred on you has a question waiting for you",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.34,
+  "why": "Finding, Oct 27 (iOS kit consultation): c47 part 2 needed your plan check, but no thread ever asked you; you asked \"is the plan waiting for me in another session\", and it was not.",
+  "note": "12 open steps carry a Deferred line (roadmap 11ebfe16). The waiting page (c71) only holds what a session puts there, so a step deferred on you can sit with no question at all. Fix, needs no answer: build.py's upkeep list counts deferred steps that need you and name no question (a waiting-page item or a decision card), and triage raises each one; the note names where the question sits. Port: no; the roadmap lives in claude-settings. Placed after c86, ahead of c93 (triage, Oct 27): a deferred step with no question stalls forever.",
+  "updatedAt": "2026-10-27T00:42:00Z"
+}
