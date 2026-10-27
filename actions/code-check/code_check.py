@@ -13,6 +13,7 @@ ZERO = "0" * 40
 
 
 def sh(cmd, cwd, text=True):
+    # nowindow: runs on a Linux CI runner only; the action may be used without hooks/_nowindow.py
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=text)
 
 
