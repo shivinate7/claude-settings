@@ -1,9 +1,9 @@
 {
-  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Your ruling, Oct 20 (o11): home-app's tokens.json is the one home for its values, and both Swift and web are generated from it; claude-settings supplies ideas, not values. Checked Oct 26 at home-app f8a59b2: still true that nothing is generated. No tokens.json; web/style.css defines colors only, in a light and a dark set; Swift has no token file.",
+  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Your ruling, Oct 20 (o11): home-app's tokens.json is the one home for its values, and both Swift and web are generated from it; claude-settings supplies ideas, not values. Checked Oct 26 at home-app f8a59b2: still true that nothing is generated. No tokens.json; web/style.css defines colors only, in a light and a dark set; Swift has no token file. Due after: o2's claude-settings half, then the roll-out visits in order, c42 first (triage, Oct 27: not a cloud lane today).",
   "order": 330,
   "phase": "rollout",
   "status": "todo",
   "title": "home-app: real tokens on both surfaces",
-  "updatedAt": "2026-10-26T16:25:00Z",
+  "updatedAt": "2026-10-27T17:52:00Z",
   "why": "Swift has no token layer, and style.css tokens cover color only. Generate both from one tokens.json."
 }

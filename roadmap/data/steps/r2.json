@@ -1,9 +1,9 @@
 {
-  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Checked Oct 26 at q_max b47bd00: still three layers. src/index.css defines 156 --aq-* and 233 --f2-* custom properties, with Tailwind 4 (@tailwindcss/vite) on top and no tailwind.config file; Chat.tsx and Workbench.tsx define --aq-* values of their own. Per your Oct 20 ruling (o11), q_max's tokens.json is the one home for its values. Not started.",
+  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Checked Oct 26 at q_max b47bd00: still three layers. src/index.css defines 156 --aq-* and 233 --f2-* custom properties, with Tailwind 4 (@tailwindcss/vite) on top and no tailwind.config file; Chat.tsx and Workbench.tsx define --aq-* values of their own. Per your Oct 20 ruling (o11), q_max's tokens.json is the one home for its values. Not started. Due after: o2's claude-settings half, then the roll-out visits in order, c42 first (triage, Oct 27: not a cloud lane today).",
   "order": 320,
   "phase": "rollout",
   "status": "todo",
   "title": "q_max: merge its three token layers",
-  "updatedAt": "2026-10-26T16:25:00Z",
+  "updatedAt": "2026-10-27T17:52:00Z",
   "why": "--aq-*, --f2-* and Tailwind drift apart. One layer stops it."
 }
