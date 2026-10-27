@@ -1308,7 +1308,76 @@ case35() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35"
+# A clone whose settings.json and other.txt are tracked, with a pin behind main (pin_behind_main).
+# settings.json holds two keys; reorder_settings rewrites a tree's copy with the keys swapped.
+settings_fixture() {
+  h="$1/home"; mkdir -p "$h"
+  live_clone "$1/clone" stub
+  printf '{"a": 1, "b": [1, 2]}\n' > "$1/clone/settings.json"
+  printf 'x\n' > "$1/clone/other.txt"
+  git -C "$1/clone" add -A; git -C "$1/clone" commit -q -m files
+  pin_behind_main "$1/clone"
+}
+reorder_settings() { printf '{"b": [1, 2], "a": 1}\n' > "$1/settings.json"; }
+
+# ---- Case 36: a pin whose settings.json only has its keys reordered moves to main, and the file equals main's ----
+case36() {
+  name="case36: a pin with only a reordered settings.json moves to main and its settings.json equals main's"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
+  d="$work/case36"; settings_fixture "$d"
+  reorder_settings "$d/clone-live"
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 0 ] || why="$why; helper exited $rc: $out"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD 2>/dev/null)" = "$(git -C "$d/clone" rev-parse main)" ] || why="$why; the pin did not move to main"
+  cmp -s "$d/clone-live/settings.json" "$d/clone/settings.json" || why="$why; the pin's settings.json differs from main's"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 37: a pin whose settings.json changes one value is refused and not moved ----
+case37() {
+  name="case37: a pin whose settings.json changes a value is refused and not moved"
+  d="$work/case37"; settings_fixture "$d"
+  printf '{"b": [1, 2], "a": 2}\n' > "$d/clone-live/settings.json"
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 1 ] || why="$why; helper exited $rc, want 1"
+  printf '%s' "$errs" | grep -q "tracked changes" || why="$why; no tracked-changes line: $errs"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pin moved"
+  grep -q '"a": 2' "$d/clone-live/settings.json" || why="$why; the changed value was lost"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 38: a reordered settings.json plus a change to another tracked file is refused ----
+case38() {
+  name="case38: a reordered settings.json plus another tracked change is refused and nothing is touched"
+  d="$work/case38"; settings_fixture "$d"
+  reorder_settings "$d/clone-live"
+  printf 'edited\n' > "$d/clone-live/other.txt"
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 1 ] || why="$why; helper exited $rc, want 1"
+  [ "$(git -C "$d/clone-live" rev-parse HEAD)" = "$c0" ] || why="$why; the pin moved"
+  [ "$(cat "$d/clone-live/other.txt")" = "edited" ] || why="$why; the other change was lost"
+  grep -q '^{"b"' "$d/clone-live/settings.json" || why="$why; settings.json was restored despite the refusal"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+# ---- Case 39: an old live tree holding only a reordered settings.json is swept ----
+case39() {
+  name="case39: an old -live-<hex> tree with only a reordered settings.json is swept"
+  command -v python3 >/dev/null 2>&1 || { skip "$name" "no python3"; return; }
+  d="$work/case39"; settings_fixture "$d"
+  git -C "$d/clone" worktree add -q --detach "$d/clone-live-aaaaaaaaaaaa" "$c0"
+  reorder_settings "$d/clone-live-aaaaaaaaaaaa"
+  run_live "$d/clone"
+  why=""
+  [ "$rc" -eq 0 ] || why="$why; helper exited $rc: $out"
+  [ ! -e "$d/clone-live-aaaaaaaaaaaa" ] || why="$why; the old tree is still there"
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
