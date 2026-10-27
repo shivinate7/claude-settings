@@ -183,6 +183,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 .dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
 .status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
 
 /* Receipt: the card stays where it was and shows what happened to the answer. */
@@ -412,11 +413,33 @@ const eff = (it) => {
   return d || (stoodNow(it) ? { choice: it.pick, auto: true, stood: true } : undefined);
 };
 function draftReady(it) {
-  const d = eff(it); if (!d) return false;
+  const d = eff(it); if (!d || blocked(it)) return false;
   if (it.kind === "task") return !!d.done;
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
   return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
 }
+// What is wrong with an item, as { text, blocks }, or null. One home for every check.
+// The page keys on the database key. A bad id field only warns: the answer still lands at answers/<key>.
+// Anything else the session could not read back safely blocks Send.
+function problem(it) {
+  const okN = typeof it.n === "number" && isFinite(it.n);
+  const fix = " Ask the session to fix " + (okN ? "item " + it.n : "this item") + ".";
+  if (!okN) return { text: "This item has no number, so it cannot be answered." + fix, blocks: true };
+  if (it.kind !== "decision" && it.kind !== "task") return { text: "This item is neither a decision nor a task, so it cannot be answered." + fix, blocks: true };
+  if (it.kind === "decision") {
+    if (it.optionsBad) return { text: "The options of this decision are not a list, so it cannot be answered." + fix, blocks: true };
+    const ks = (it.options || []).map((o) => o && o.key);
+    if (!ks.length) return { text: "This decision has no options, so it cannot be answered." + fix, blocks: true };
+    if (ks.some((k) => !k)) return { text: "An option of this decision has no key, so it cannot be answered." + fix, blocks: true };
+    const dup = ks.find((k, i) => ks.indexOf(k) !== i);
+    if (dup !== undefined) return { text: "Two options of this decision share the key " + dup + ", so it cannot be answered." + fix, blocks: true };
+    if (ks.includes(NONE)) return { text: "An option of this decision uses the key none, so it cannot be answered." + fix, blocks: true };
+  }
+  // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
+  if (it.rawId !== it.id) return { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false };
+  return null;
+}
+const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
 const staged = () => state.items.filter((it) => !isSaved(it) && draftReady(it));
 // A changed answer whose draft the owner emptied: Send withdraws the saved record.
 const withdrawing = (it) => !!state.answers[it.id] && !!state.changing[it.id] && !state.draft[it.id];
@@ -448,6 +471,7 @@ const glyph = (k) => h("span", { class: "g " + k, "aria-hidden": "true" });
 function linkIcon() { const d = document.createElement("span"); d.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>'; return d.firstChild; }
 function readyText(it) {
   const d = eff(it) || {};
+  if (blocked(it)) return "This item cannot be sent.";
   if (it.kind === "task") return d.done ? "Ready to send: done." : "";
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
@@ -521,6 +545,8 @@ function buildCard(it) {
   if (it.minutes) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
+  const bad = problem(it);
+  if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));
   if (saved) { card.append(receipt(it)); return card; }
   if (looseDesigns(it).length) card.append(designPreview(it));
   if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));
@@ -565,6 +591,7 @@ function buildCard(it) {
     nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
     card.append(nb);
   }
+  if (blocked(it)) card.querySelectorAll(".opts input, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
@@ -842,6 +869,7 @@ async function undoSend() {
 function answerLine() {
   const parts = [];
   state.items.slice().sort((a, b) => a.n - b.n).forEach((it) => {
+    if (blocked(it)) return;
     const a = state.answers[it.id], d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
@@ -973,7 +1001,7 @@ render();
   state.db = db;
   try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   const map = (s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); return m; };
-  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => d.data()).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
+  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});

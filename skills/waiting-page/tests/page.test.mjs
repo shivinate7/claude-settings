@@ -36,8 +36,8 @@ const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, 
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
-  const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
+  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
   const subs = {}, docSubs = {};
   window.__log = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
@@ -79,7 +79,7 @@ let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -91,11 +91,11 @@ async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = fa
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
-  await page.waitForSelector(`#item-${items[0].id}`);
+  await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
   return page;
 }
 const card = (page, it) => page.locator(`#item-${it.id}`);
@@ -1154,4 +1154,100 @@ test("two designs of one slug with different focus keep their own size, and the 
   assert.ok(hs[0] > hs[1] * 1.6, "the second picture took the first one's size: " + hs);
   await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
   assert.match(await page.locator("#dTitle").textContent(), /^Layout B/);
+});
+
+// ---------------------------------------------------------------- the database key is the item's key
+
+const { id: _noId, ...DECISION_NO_ID } = DECISION;
+const warn = (page, key) => card(page, { id: key }).locator(".status.broken");
+
+test("an item stored with no id field is answered under its database key", async (t) => {
+  const page = await open(t, { items: [], rawItems: { k29: { ...DECISION_NO_ID, n: 29 } } }); if (!page) return;
+  await choose(page, { id: "k29" }, "b");
+  await send(page);
+  await written(page);
+  const log = await page.evaluate(() => window.__log.filter((l) => l[0] === "set"));
+  assert.equal(log.length, 1);
+  assert.equal(log[0][2], "k29", "the answer key");
+  assert.equal(log[0][3].item, "k29");
+  assert.equal(log[0][3].choice, "b");
+  assert.match(await warn(page, "k29").textContent(), /no id field.*fix item 29/s);
+});
+
+test("an item whose id field differs from its key warns and is answered under the key", async (t) => {
+  const page = await open(t, { items: [], rawItems: { k30: { ...DECISION, id: "other-id", n: 30 } } }); if (!page) return;
+  assert.match(await warn(page, "k30").textContent(), /id field that differs.*fix item 30/s);
+  await choose(page, { id: "k30" }, "a");
+  await send(page);
+  await written(page);
+  const log = await page.evaluate(() => window.__log.filter((l) => l[0] === "set"));
+  assert.deepEqual([log.length, log[0][2], log[0][3].item], [1, "k30", "k30"]);
+});
+
+test("a decision with a duplicate option key, no options, or a none key warns and Send skips it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 31, options: [opt("a"), opt("a")], pick: "a" },
+    "no-opts": { ...DECISION, id: "no-opts", n: 32, options: [], pick: "a" },
+    "none-key": { ...DECISION, id: "none-key", n: 33, options: [opt("none"), opt("b")], pick: "b" },
+    "good": { ...DECISION, id: "good", n: 34 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  for (const k of ["dup-keys", "no-opts", "none-key"]) {
+    assert.equal(await warn(page, k).count(), 1, k + " shows no warning");
+    assert.match(await warn(page, k).textContent(), /cannot be answered.*fix item/s);
+  }
+  assert.equal(await warn(page, "good").count(), 0, "a sound item warns");
+  // A staged draft on a broken item must still not go out; Send carries only the sound one.
+  await page.evaluate(() => { for (const k of ["dup-keys", "none-key"]) setDraft(byId(k), { choice: "a", auto: true }); render(); });
+  await takePick(page, { id: "good" });
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer");
+  await send(page);
+  await written(page);
+  const log = await page.evaluate(() => window.__log.filter((l) => l[0] === "set").map((l) => l[2]));
+  assert.deepEqual(log, ["good"]);
+});
+
+test("a bad number or kind warns and Send skips it", async (t) => {
+  const rawItems = {
+    "bad-n": { ...DECISION, id: "bad-n", n: "7" },
+    "bad-kind": { ...TASK, id: "bad-kind", n: 8, kind: "chore" },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "bad-n").textContent(), /no number/);
+  assert.match(await warn(page, "bad-kind").textContent(), /neither a decision nor a task/);
+  await page.evaluate(() => { setDraft(byId("bad-kind"), { done: true }); setDraft(byId("bad-n"), { choice: "a" }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true);
+});
+
+test("a blocked card says it cannot be sent, disables its controls, and Copy answers skips it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 41, options: [opt("a"), opt("a")], pick: "a" },
+    "odd-opts": { ...DECISION, id: "odd-opts", n: 42, options: "a, b" },
+    "good": { ...DECISION, id: "good", n: 43 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "odd-opts").textContent(), /not a list/);
+  await page.evaluate(() => { setDraft(byId("dup-keys"), { choice: "a", auto: true }); render(); });
+  const c = card(page, { id: "dup-keys" });
+  assert.equal(await c.locator(".ready").textContent(), "This item cannot be sent.");
+  assert.equal(await c.locator(".takepick").isDisabled(), true);
+  assert.equal(await c.locator(".nonebtn").isDisabled(), true);
+  assert.equal(await c.locator(".opts input").first().isDisabled(), true);
+  await takePick(page, { id: "good" });
+  assert.equal(await page.evaluate(() => answerLine()), "43 a");
+});
+
+test("an item with no id field and a duplicate option key is blocked from Send and Copy, and names the key", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "k50": { ...DECISION_NO_ID, n: 50, options: [opt("x"), opt("x")], pick: "x" },
+    "good": { ...DECISION, id: "good", n: 51 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "k50").textContent(), /share the key x/);
+  await page.evaluate(() => { setDraft(byId("k50"), { choice: "x" }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open for a blocked item");
+  assert.equal(await page.evaluate(() => answerLine()), "");
 });
