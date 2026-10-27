@@ -195,11 +195,11 @@ def case_local_time_loads_no_guard_module():
 
 
 def case_local_time_output_unchanged():
-    """Pinned local_time output for a tagged, a plain, an fb and an override prompt."""
+    """Pinned local_time output for a tagged, a plain, an fb and an override prompt. Tagged prompts save nothing."""
     with tempfile.TemporaryDirectory() as cfg:
         outs = [_run_local_time(cfg, p, s).stdout for p, s in (
             ("<system-reminder>fb x", "s1"), ("<task-notification>fb y", "s1"),
-            ("hello", "s1"), ("fb real note", "s2"))]
+            ("hello", "s4"), ("fb real note", "s2"))]
         inbox = os.path.join(cfg, "handoffs", "s2.inbox.md")
         saved = open(inbox, encoding="utf-8").read() if os.path.isfile(inbox) else None
         s1 = os.path.exists(os.path.join(cfg, "handoffs", "s1.inbox.md"))

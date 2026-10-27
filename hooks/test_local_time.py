@@ -14,7 +14,7 @@ Contract the builder codes against:
         24-hour clock, America/Chicago, DST-aware. Winter reads CST and UTC-06:00.
 
     As a script: prints line() once, exits 0 (also when no tz database is present),
-    whatever stdin holds. As a UserPromptSubmit hook it also captures owner prompts; those cases
+    whatever stdin holds. As a UserPromptSubmit hook it also saves each owner prompt; those cases
     are in test_feedback_inbox.py. With --agent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
     As a UserPromptSubmit hook it also grants the owner override pass when the prompt starts with the

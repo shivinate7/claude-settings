@@ -13,7 +13,7 @@ In winter the line reads CST and UTC-06:00.
 - The hook codes the US rule: DST runs from the second Sunday of March to the first Sunday of November, at 02:00 local. It reads neither
   zoneinfo (Python on Windows often has no tz database) nor the machine zone.
 - The hook is advisory. On an internal error it prints nothing to stdout, writes one `local_time:` line to stderr, and exits 0. It prints
-  the time line before it reads stdin for feedback capture (`owner-feedback-inbox`).
+  the time line before it reads stdin to save the owner's message (`owner-feedback-inbox`).
 
 Reason: sessions saw only UTC and answered in UTC, which shows the wrong date for the owner every evening.
 

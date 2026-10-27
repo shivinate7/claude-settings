@@ -377,31 +377,24 @@ def run_reorient_cleared(payload):
 
 def inbox_note(session_id):
     """The owner feedback inbox's "After compaction" line (decision owner-feedback-inbox): the open
-    item ids (ruling, task, standing) from <session_id>.inbox.md, and whether `fb` capture is still
-    open. "" when there is nothing to say. Never raises: the reorient message must still print."""
+    item ids (ruling, task, standing) from <session_id>.inbox.md. "" when there is nothing to say.
+    Never raises: the reorient message must still print."""
     try:
         import feedback_gate
         import local_time
         paths = local_time.inbox_paths(session_id)
-        if paths is None:
+        if paths is None or not os.path.exists(paths[0]):
             return ""
+        with open(paths[0], encoding="utf-8") as f:
+            ids = feedback_gate.open_ids(feedback_gate.parse(f.read()))
     except Exception as e:
         sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
         return ""
-    note = ""
-    try:  # an unreadable inbox must not hide the "still open" line below
-        if os.path.exists(paths[0]):
-            with open(paths[0], encoding="utf-8") as f:
-                ids = feedback_gate.open_ids(feedback_gate.parse(f.read()))
-            if ids:
-                note += (" Open feedback items: %s. Keep each standing item in the handoff, and give"
-                         " each ruling and task its tracked home: a decision record or rule, or the"
-                         " repo's todo or debt store." % ", ".join(ids))
-    except Exception as e:
-        sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
-    if local_time.is_open(paths[1]):  # never raises
-        note += " Feedback capture is still open: the owner has not sent `fb done`."
-    return note
+    if not ids:
+        return ""
+    return (" Open feedback items: %s. Keep each standing item in the handoff, and give"
+            " each ruling and task its tracked home: a decision record or rule, or the"
+            " repo's todo or debt store." % ", ".join(ids))
 
 
 def handoff_premises(path):
