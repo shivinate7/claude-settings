@@ -20,6 +20,9 @@ def git(cwd, *a):
 def put(root, files):
     for name, content in files.items():
         path = os.path.join(root, name)
+        if content is None:
+            os.remove(path)
+            continue
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", newline="\n") as f:
             f.write(content)
@@ -29,11 +32,11 @@ def config(modules, exclude=()):
     return json.dumps({"exclude": list(exclude), "mypy_modules": list(modules)})
 
 
-def check(files, base_files=None, **env):
-    """Commit base_files (when given) as the base, then files on top; run the runner. Returns (exit, output)."""
+def check(files, base_files=None, base=None, **env):
+    """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
+    `base` names a ref outright. Returns (exit, output)."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q", "-b", "main")
-        base = None
         if base_files is not None:
             put(d, base_files)
             git(d, "add", "-A"); git(d, "commit", "-qm", "base")
@@ -95,6 +98,51 @@ class CodeCheck(unittest.TestCase):
         base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
         rc, out = check({".code-check.json": config(["a.py", "b.py"]), "b.py": GOOD_PY}, base_files=base)
         self.assertEqual(rc, 0, out)
+
+    def test_added_exclude_entry_is_red(self):
+        base = {".code-check.json": config([], ["vendor/"]), "vendor/x.rs": "x\n"}
+        rc, out = check({".code-check.json": config([], ["vendor/", "src/"]), "src/y.rs": "x\n"}, base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("exclude grew", out)
+        self.assertIn("src/", out)
+
+    def test_removed_exclude_entry_is_green(self):
+        base = {".code-check.json": config([], ["vendor/", "old/"])}
+        rc, out = check({".code-check.json": config([], ["vendor/"])}, base_files=base)
+        self.assertEqual(rc, 0, out)
+
+    def test_empty_or_slash_exclude_entry_is_red(self):
+        for entry in ("", "/", " "):
+            rc, out = check({".code-check.json": config([], [entry]), "main.rs": "x\n"})
+            self.assertNotEqual(rc, 0, repr(entry) + out)
+            self.assertIn("empty exclude", out)
+
+    def test_deleted_module_may_leave_the_list(self):
+        base = {".code-check.json": config(["a.py", "b.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
+        rc, out = check({".code-check.json": config(["a.py"]), "b.py": None}, base_files=base)
+        self.assertEqual(rc, 0, out)
+
+    def test_gone_module_still_listed_gets_one_message(self):
+        rc, out = check({".code-check.json": config(["a.py", "gone.py"]), "a.py": GOOD_PY})
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("remove it from mypy_modules, or list its new path", out)
+        self.assertEqual(len([l for l in out.splitlines() if "gone.py" in l and not l.startswith("::")]), 1, out)
+
+    def test_base_not_in_clone_is_unknown_not_red(self):
+        rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, base="1" * 40)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("unknown", out)
+
+    def test_pins_flag_prints_install_specs_from_the_standard(self):
+        std = json.load(open(STANDARD, encoding="utf-8"))
+        p = subprocess.run([sys.executable, RUNNER, "--pins"], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        want = ["%s==%s" % (k, std["tools"][k]) for k in ("ruff", "mypy", "shellcheck-py")]
+        self.assertEqual(p.stdout.split(), want)
+
+    def test_action_path_goes_through_env(self):
+        text = open(os.path.join(HERE, "action.yml"), encoding="utf-8").read()
+        self.assertNotIn("${{", text.split("      run: |", 1)[1])
 
     def test_ruff_finding_is_red(self):
         rc, out = check({".code-check.json": config([]), "a.py": "import os\n"})
