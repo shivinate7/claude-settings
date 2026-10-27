@@ -418,5 +418,48 @@ class ProbesText(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "0")
 
 
+class Scorecard(unittest.TestCase):
+    LINES = ("Layout: out - 1 folder (lint/compliance_probes.py layout)\n"
+             "Design: in shape - one token file (lint/compliance_probes.py design)\n")
+
+    def run_card(self, repo, text):
+        done = subprocess.run([sys.executable, PROBES, "scorecard", repo.root], input=text, capture_output=True, text=True)
+        path = os.path.join(repo.root, "docs", "health", "compliance.md")
+        body = None
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                body = handle.read()
+        return done.returncode, body
+
+    def test_writes_one_table_with_a_gold_column(self):
+        code, body = self.run_card(Repo(self), self.LINES)
+        self.assertEqual(code, 0)
+        self.assertIsNotNone(body)
+        self.assertIn("| Group | Score | Gold standard | Gap | Source |", body)
+        self.assertIn("| Layout | out | in shape | 1 folder | lint/compliance_probes.py layout |", body)
+        self.assertIn("| Design | in shape | in shape | one token file | lint/compliance_probes.py design |", body)
+
+    def test_second_run_overwrites_and_leaves_one_file(self):
+        repo = Repo(self)
+        self.run_card(repo, self.LINES)
+        code, body = self.run_card(repo, "Layout: in shape - clean (command)\n")
+        self.assertEqual(code, 0)
+        self.assertIn("| Layout | in shape |", body)
+        self.assertNotIn("| Design |", body)
+        self.assertEqual(os.listdir(os.path.join(repo.root, "docs", "health")), ["compliance.md"])
+
+    def test_same_input_gives_the_same_file(self):
+        repo = Repo(self)
+        self.run_card(repo, self.LINES)
+        first = self.run_card(repo, self.LINES)[1]
+        self.assertEqual(first, self.run_card(repo, self.LINES)[1])
+
+    def test_ui_file_gap_is_a_known_gap_row(self):
+        _, body = self.run_card(Repo(self), self.LINES)
+        row = next(line for line in body.splitlines() if line.startswith("| STE lint on UI files |"))
+        self.assertIn("| partial | in shape |", row)
+        self.assertIn("known gap", row)
+
+
 if __name__ == "__main__":
     unittest.main()
