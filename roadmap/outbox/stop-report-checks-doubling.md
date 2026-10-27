@@ -1,1 +1,1 @@
-- 2026-10-26 23:27 CDT: c101 (a report gate never makes a session send its report twice) merged in PR #669. Ready to close. Open gap noted in its note: a report sent after a missing-report block is not checked for model names or the Unstarted line.
+- 2026-10-26 23:27 CDT: c101 (a report gate never makes a session send its report twice) merged in batch PR #671 (merge commit 6902807), lane PR #669. Ready to close. Open gap noted in its note: a report sent after a missing-report block is not checked for model names or the Unstarted line.
