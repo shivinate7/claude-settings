@@ -333,6 +333,8 @@
 - clear-pointer-same-dir-swap: two sessions that /clear in the same directory at the same time can swap pointers. Decision: precompact-handoff
 - asyncrewake-min-version: the docs give no minimum version for asyncRewake; below 2.1.287 it can wake the session repeatedly. Decision: ci-wait-reads-run-status
 - foreground-timeout-unseen: a foreground command that times out and moves to the background is seen by no hook event, so the stall watch misses it. Decision: stall-watch
+- feedback-untagged-relays-count: a scheduled, PR-activity or relayed prompt with no shared_names.MACHINE_TAGS tag counts as an owner message toward a burst; which sources carry a tag is unchecked. Decision: owner-feedback-inbox
+- feedback-turn-state-index-drift: the turn state stores block indexes, so deleting or reordering inbox blocks points them at other messages. Decision: owner-feedback-inbox
 - feedback-burst-thresholds-unmeasured: the burst rule (two messages in a turn, three non-blank lines, two bullets) is the owner's ruling, not measured against real sessions. Decision: owner-feedback-inbox
 - feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the gate checks items exist and are homed, not that work is done. Decision: owner-feedback-inbox
 - sim-hook-gaps: unrecorded boot behind a script with no simulator word. the boot check skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. boot check timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is denied at the cap. Decision: sweep-shuts-down-idle-simulators; sim-boot-is-verified
