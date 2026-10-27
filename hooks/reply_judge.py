@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against six rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against seven rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -51,12 +51,13 @@ EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
 TABLE_SEPARATOR = re.compile(r"^[\s>]*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", re.M)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
-                "style-table-gold-column", "questions-go-to-owner")
+                "style-table-gold-column", "questions-go-to-owner",
+                "style-limits-kept-silently")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 INSTRUCTIONS = (
-    "Judge the final reply below against six rules. "
+    "Judge the final reply below against seven rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -79,6 +80,11 @@ INSTRUCTIONS = (
     "Never flag work in another repo. "
     "Never flag a pick another rule keeps for the owner's grant, such as a model switch or a stale decision. "
     "Running background work never makes a reply unfinished. "
+    "style-limits-kept-silently: flag a reply that narrates a limit it kept or a check that passed, "
+    "such as \"staying under the 15-line cap\" or \"rule X holds\". "
+    "Never flag a reply that says a limit blocked the work or changed the plan. "
+    "Never flag a reply that names a skipped step or a dropped item. "
+    "A result line such as \"tests pass\" in Done is a result, not narration; never flag it. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )

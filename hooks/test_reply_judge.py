@@ -40,7 +40,8 @@ RUNS = [0]
 
 MARK = "Stage two is live, MARK-7f3a"  # one line, no quotes, no rule id, no background word
 BLOCK_REASON = "output-never-paste-passing-output: paste the verdict, not the run's output."
-RULE_IDS = ("output-start-with-point", "style-cut-narration", "output-never-paste-passing-output")
+RULE_IDS = ("output-start-with-point", "style-cut-narration", "output-never-paste-passing-output",
+            "style-limits-kept-silently")
 BACKGROUND_WORDS = ("background", "unfinished", "never")
 REPLY_SESSION = "reply-judge-cases"
 
@@ -422,6 +423,54 @@ def case_owner_step_carve_outs_in_prompt():
               has_pin(sentences, ("already",), ("ran", "run"), ("not", "never", "no ")), sentences)
         check("owner step, %s: a sentence says a command named in a report line is not a step left to the owner" % label,
               has_pin(sentences, ("report",), ("line",), ("name", "mention"), ("not", "never", "no ")), sentences)
+
+
+# --------------------------------------------------------------------------- case 5c
+# The silent-limits rule, style-limits-kept-silently. As in case 5b the model is a stub, so the
+# prompt is what can go red: each case reads the rule text before the reply.
+
+LIMITS_RULE = "style-limits-kept-silently"
+NARRATES_LIMIT = "Staying under the 15-line cap. Rule X holds.\n\nThe hook change is pushed."  # (a)
+LIMIT_BLOCKED = (  # (b) a limit blocked the work, so naming it is right
+    "The 15-line cap blocks this fix: the change needs 40 lines, so I split it into two lanes."
+)
+NAMES_DROPPED_ITEM = (  # (c) a dropped item is said
+    "I dropped the table check from this batch. It needs a parser the repo lacks."
+)
+DONE_RESULT_LINE = "> **Done**\n> BUILT: the judge clause, commit abc1234, tests pass.\n"  # (d)
+
+
+def run_limits_reply(label, reply):
+    run = run_hook(reply, answer=OK_ANSWER)
+    sentences = rule_sentences(run, reply)
+    check("limits, %s: the prompt carries the reply" % label, reply in run.prompt(), run.prompt()[:300])
+    check("limits, %s: the prompt names %s before the reply" % (label, LIMITS_RULE),
+          any(LIMITS_RULE in s for s in sentences), run.prompt()[:300])
+    return sentences
+
+
+def case_limits_narration_prompt_flags_it():
+    sentences = run_limits_reply("narrates a limit", NARRATES_LIMIT)
+    check("limits, narrates a limit: a sentence says narrating a kept limit or a passed check is flagged",
+          has_pin(sentences, ("flag",), ("narrat",), ("limit",), ("check",)), sentences)
+
+
+def case_limits_blocked_work_prompt_passes_it():
+    sentences = run_limits_reply("limit blocked the work", LIMIT_BLOCKED)
+    check("limits, limit blocked the work: a sentence says a limit that blocked the work or changed the plan passes",
+          has_pin(sentences, ("limit",), ("blocked",), ("plan",), ("never flag", "passes", "not flag")), sentences)
+
+
+def case_limits_dropped_item_prompt_passes_it():
+    sentences = run_limits_reply("names a dropped item", NAMES_DROPPED_ITEM)
+    check("limits, names a dropped item: a sentence says a named skipped step or dropped item passes",
+          has_pin(sentences, ("skipped",), ("dropped",), ("never flag", "passes", "not flag")), sentences)
+
+
+def case_limits_done_result_line_is_not_narration():
+    sentences = run_limits_reply("Done result line", DONE_RESULT_LINE)
+    check("limits, Done result line: a sentence says a result line such as tests pass in Done is not narration",
+          has_pin(sentences, ("result",), ("done",), ("tests pass",), ("not narration", "never flag")), sentences)
 
 
 # --------------------------------------------------------------------------- case 6
@@ -1103,6 +1152,10 @@ CASES = (
     case_owner_step_in_prose_prompt_asks_for_fenced_block,
     case_owner_step_block_outside_report_prompt_says_where,
     case_owner_step_carve_outs_in_prompt,
+    case_limits_narration_prompt_flags_it,
+    case_limits_blocked_work_prompt_passes_it,
+    case_limits_dropped_item_prompt_passes_it,
+    case_limits_done_result_line_is_not_narration,
     case_child_cannot_retrigger_hook,
     case_settings_reply_judge_is_async_and_report_gate_is_not,
     table_sampling,
