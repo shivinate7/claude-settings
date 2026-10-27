@@ -14,7 +14,8 @@ CAP = 30
 CHUNK, OVERLAP = 1 << 20, 256  # OVERLAP > longest marker
 KEEP = 7 * 86400
 HEADER = b"=== verdict run "
-EXEC = re.compile(r"Executed (\d+) tests?")
+EXEC = re.compile(r"Executed (\d+) tests?|Test run with (\d+) tests?\b.{0,100}?\bpassed after")  # XCTest summary, Swift Testing summary
+ST_FAILED = re.compile(r"Test run with \d+ tests?\b.{0,100}?\bfailed after")  # `swift test` can exit 0 on it; its XCTest line says 0
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def prune(folder, own):
     try:
@@ -79,8 +80,8 @@ def main(argv):
                 return b
             while pos < end:  # scan the whole run region; OVERLAP keeps a marker cut by a chunk edge whole
                 f.seek(pos); buf = rd(min(CHUNK, end - pos)).decode("utf-8", errors="replace")
-                fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf
-                for n in EXEC.findall(buf): zero, ran = zero or n == "0", ran or n != "0"
+                fail = fail or "** TEST FAILED **" in buf or "** BUILD FAILED **" in buf or bool(ST_FAILED.search(buf))
+                for a, b in EXEC.findall(buf): n = a or b; zero, ran = zero or n == "0", ran or n != "0"
                 pos += CHUNK - OVERLAP if pos + CHUNK < end else CHUNK
             f.seek(max(start, end - TAIL))
             lines = rd(end - f.tell()).decode("utf-8", errors="replace").splitlines()
