@@ -45,6 +45,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-trees-own-ports-data` | A branch switch is a whole-tree act. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-confirm-before-write` | Confirm which checkout and branch you stand in before any git write or merge. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-reverify-after-incident` | Re-verify every edit after an incident. | [`CLAUDE.md`](../CLAUDE.md) |
+| `shared-trees-delete-names-absolute-path` | A delete names its target as an absolute or quoted-variable path, never after a cd. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge failing CI. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-wait-checks-in` | A session that waits on CI sets a timed check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -133,6 +134,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
 | `decision-watch-mod-limits` | The decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`docs/decisions/decision-watch-mod-limits.md`](../docs/decisions/decision-watch-mod-limits.md) |
+| `decisions-reach-a-clickable-pick` | Roadmap step c118, 2026-10-27. | [`docs/decisions/decisions-reach-a-clickable-pick.md`](../docs/decisions/decisions-reach-a-clickable-pick.md) |
 | `default-branch-read-order` | Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard read the default branch in this order. | [`docs/decisions/default-branch-read-order.md`](../docs/decisions/default-branch-read-order.md) |
 | `dependabot-security-only` | Owner, 2026-10-16: security updates only. | [`docs/decisions/dependabot-security-only.md`](../docs/decisions/dependabot-security-only.md) |
 | `design-agents` | Owner, 2026-10-26 (waiting-page item 15, answer b): a lane that touches a screen gets two design agents, and both run Opus. | [`docs/decisions/design-agents.md`](../docs/decisions/design-agents.md) |
@@ -183,7 +185,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `questions-go-to-owner` | Owner, 2026-10-26: a session with a question brings it to the owner. | [`docs/decisions/questions-go-to-owner.md`](../docs/decisions/questions-go-to-owner.md) |
 | `recovery-must-not-gate-on-its-own-state` | A recovery control exists for the moment its own precondition is false. | [`docs/decisions/recovery-must-not-gate-on-its-own-state.md`](../docs/decisions/recovery-must-not-gate-on-its-own-state.md) |
 | `reply-judge-samples-never-refuses` | The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 2026-10-12), because a prompt hook cannot exit on a field in code. | [`docs/decisions/reply-judge-samples-never-refuses.md`](../docs/decisions/reply-judge-samples-never-refuses.md) |
+| `repo-kind-and-caution` | Owner, 2026-10-27 00:30 and 00:31 CDT, roadmap step c115: about 1 in 5 home sessions refuse to log in to the owner's own Home Assistant or KEF speakers. | [`docs/decisions/repo-kind-and-caution.md`](../docs/decisions/repo-kind-and-caution.md) |
 | `reuse-needs-checkout-proof` | Lanes run in separate worktrees of one clone. | [`docs/decisions/reuse-needs-checkout-proof.md`](../docs/decisions/reuse-needs-checkout-proof.md) |
+| `rm-after-cd-names-absolute-path` | Rule `rm-after-cd` in `hooks/guard.py` refuses a recursive `rm` (`-r`, `-R`, `--recursive`) with a relative target, when a `cd` joined by `;`, `&&` or a newline came before it in the same command. | [`docs/decisions/rm-after-cd-names-absolute-path.md`](../docs/decisions/rm-after-cd-names-absolute-path.md) |
 | `rm-on-a-variable-needs-a-guard` | Bypass-mode sessions must not wait on the owner for Claude Code's critical-path `rm` prompt (owner ruling 2026-10-11). | [`docs/decisions/rm-on-a-variable-needs-a-guard.md`](../docs/decisions/rm-on-a-variable-needs-a-guard.md) |
 | `rulings-declare-kind` | A decision record that a pull request adds or changes must say what kind each ruling is: a build task, or a process change. | [`docs/decisions/rulings-declare-kind.md`](../docs/decisions/rulings-declare-kind.md) |
 | `safe-stop-queues-one-prompt` | `/safe-stop` is a command of the session-board mod (`session-board-mod-limits`, session-board keeps small records). | [`docs/decisions/safe-stop-queues-one-prompt.md`](../docs/decisions/safe-stop-queues-one-prompt.md) |

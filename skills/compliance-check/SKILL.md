@@ -42,6 +42,13 @@ Three groups read the tree, not a rule prefix. Each comes after the rule groups:
 - `Design`: screen readiness against `docs/design/`.
 - `Copies`: copies of shared things the child holds, from the probe in `copies.md`.
 - `iOS`: drift from the iOS standard of the `ios-apps` skill. A child with no iOS app is `n/a`.
+- `Caution`: listing only, for the owner to prune. It has no grade. Run `python3 <parent>/lint/layout.py caution <child>`
+  and print the level it resolves. Then list each rule in the child's `CLAUDE.md` and `.claude/rules/` that
+  restricts what Claude does with a password, a token, a login, a secret or a private datum, as
+  `<file>: "<the rule, quoted>"`. Example: "Claude never types a password or token into a field". Mark a
+  rule that blocks a login to the owner's own low-stakes device (Home Assistant, the speakers) with
+  `blocks own login`. The owner decides which to prune. Change none of them. A file that cannot be read is
+  `unknown`.
 
 ## 3. Run the probes
 
@@ -53,7 +60,7 @@ not repeat its steps.
 
 ## 4. Scorecard
 
-One line per group, in the order of step 2, then Layout, Design, Copies and iOS:
+One line per group, in the order of step 2, then Layout, Design, Copies, iOS and the Caution listing:
 
 ```
 <Group>: <in shape | partial | out | parent-covered | n/a | unknown> - <finding> (<file:line or command>)

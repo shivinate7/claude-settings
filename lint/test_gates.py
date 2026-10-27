@@ -981,6 +981,128 @@ class NoResendTests(unittest.TestCase):
                 self.assertIsNone(self.verdict(reply, (self.BUILDER,), stop_hook_active=True))
 
 
+class PickGateTests(unittest.TestCase):
+    """decisions-reach-a-clickable-pick: an Input Needed pick needs the question box or a linked waiting-page item."""
+
+    PAGE = "https://claude.ai/artifact/waitpage1"
+    OTHER = "https://claude.ai/artifact/otherrepo9"
+    PICK = ("> **Done** OTHER read the code\n"
+            "> **Input Needed** Two ways:\n> A (my pick): fold the gate\n> B: add a second hook\n"
+            "> **Next** wait")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = os.path.join(self.tmp.name, "repo")
+        os.makedirs(os.path.join(self.repo, ".git"))
+        os.makedirs(os.path.join(self.repo, ".claude"))
+        with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as f:
+            json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
+
+    def verdict(self, reply, calls=(), landed=False, repo=None):
+        records = [human("decide")]
+        if landed:
+            records.append(tool_use_msg("Bash", {"command": "git commit -m x"}))
+        for name, inp, side in calls:
+            rec = tool_use_msg(name, inp)
+            rec["isSidechain"] = side
+            records.append(rec)
+        records.append(assistant_text(reply))
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                "cwd": repo or self.repo}
+        run = run_gate(REPORT_GATE, hook)
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def page_set(self, url=None, collection="items", action="set"):
+        return ("ArtifactData", {"action": action, "collection": collection, "url": url or self.PAGE,
+                                 "doc_id": "q1"}, False)
+
+    def test_pk_red_pick_with_no_control_blocks(self):
+        # Catches: the Oct 27 incident, a pick as report text only, on an unlanded and a landed turn.
+        for landed in (False, True):
+            with self.subTest(landed=landed):
+                out = self.verdict(self.PICK, landed=landed)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("Pick gate", out["reason"])
+                self.assertIn("question box", out["reason"])
+
+    def test_pk_red_option_forms_block(self):
+        rows = [
+            "> **Input Needed** A or B: fold it or add a hook?",
+            "> **Input Needed** Two ways:\n> 1. fold the gate\n> 2. add a hook",
+            "> **Input Needed** Two ways: 1. stack them (my pick). 2. one per file.",
+            "> **Input Needed** Is it A or B? A (my pick) keeps the hook.",
+            "> **Input Needed**\n> A) fold it\n> B) add a hook",
+            "> **Input Needed** Two ways: A (my pick) fold it. B add a hook.",
+        ]
+        for row in rows:
+            with self.subTest(row=row):
+                out = self.verdict("> **Done** OTHER read it\n" + row)
+                self.assertEqual(out["decision"], "block")
+
+    def test_pk_red_page_write_to_another_repo_blocks(self):
+        out = self.verdict(self.PICK + "\n\n" + self.OTHER, [self.page_set(self.OTHER)])
+        self.assertIsNotNone(out)
+
+    def test_pk_red_page_write_without_link_in_reply_blocks(self):
+        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set()]))
+
+    def test_pk_red_agent_calls_do_not_count(self):
+        calls = [("AskUserQuestion", {}, True), ("ArtifactData", self.page_set()[1], True)]
+        self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, calls))
+
+    def test_pk_red_wrong_collection_or_action_blocks(self):
+        for call in (self.page_set(collection="notes"), self.page_set(action="get")):
+            with self.subTest(call=call):
+                self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, [call]))
+
+    def test_pk_red_unknown_page_only_the_box_passes(self):
+        bare = os.path.join(self.tmp.name, "bare")
+        os.makedirs(os.path.join(bare, ".git"))
+        self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
+        self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=bare))
+
+    def test_pk_green_update_and_batch_writes_pass(self):
+        batch = ("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
+            {"op": "set", "collection": "items", "doc_id": "q1", "data": {}}]}, False)
+        other = ("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
+            {"op": "set", "collection": "notes", "doc_id": "q1", "data": {}}]}, False)
+        reply = self.PICK + "\n" + self.PAGE
+        self.assertIsNone(self.verdict(reply, [self.page_set(action="update")]))
+        self.assertIsNone(self.verdict(reply, [batch]))
+        self.assertIsNotNone(self.verdict(reply, [other]))
+
+    def test_pk_green_controls_pass(self):
+        self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)]))
+        self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE, [self.page_set()]))
+
+    def test_pk_green_no_false_alarm(self):
+        rows = [
+            # Catches: a plain ask with no options refused.
+            "> **Done** OTHER read it\n> **Input Needed** Should the gate also cover Codex? I wait.\n> **Next** wait",
+            # Catches: a quoted earlier answer read as a pick.
+            "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait",
+            "> **Done** OTHER read it\n> **Input Needed** A decision is open. B was the old plan.",
+            # Catches: options outside Input Needed read as a pick.
+            "> **Done** OTHER two ways: A (my pick) or B\n> **Next**\n> 1. one\n> 2. two",
+            # Catches: "X or Y" in a plain ask read as a pick.
+            "> **Done** OTHER read it\n> **Input Needed** Does Q or A mode apply?",
+            "> **Done** OTHER read it\n> **Input Needed** Rename I or U in the code?",
+            "> **Done** OTHER read it\n> **Input Needed** Is X or Y the field?",
+            "> **Done** OTHER read it\n> **Input Needed** Is A or B the field?",
+            # Catches: numbered separate asks read as options.
+            "> **Done** OTHER read it\n> **Input Needed**\n> 1. Approve the cap raise.\n> 2. Confirm the date.",
+            # No Input Needed label.
+            "> **Done** OTHER read it\n> **Next** wait",
+            "plain prose with A or B in it",
+        ]
+        for row in rows:
+            with self.subTest(row=row):
+                self.assertIsNone(self.verdict(row))
+
+
 class ConfigReportTests(unittest.TestCase):
     """Decision 7: an allowed project config edit is still reported at turn end."""
 

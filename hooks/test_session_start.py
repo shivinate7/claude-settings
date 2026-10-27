@@ -99,6 +99,37 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             self.assertIn(str(LIMIT + 1), extra[0], "the notice does not state the count: %r" % extra[0])
             self.assertRegex(extra[0], NOTICE, "the notice does not name agent worktrees: %r" % extra[0])
 
+class SessionStartCautionTests(SessionStartAgentWorktreeNoticeTests):
+    """The repo's caution level prints once at session start (decision repo-kind-and-caution)."""
+
+    def point_at(self, layout_json=None):
+        """A pointer dir with lint/layout.py and layout.json, named by the config's CLAUDE.md."""
+        pointer = os.path.join(self.root, "pointer")
+        os.makedirs(os.path.join(pointer, "lint"))
+        for name in ("layout.py", "layout.json"):
+            shutil.copy(os.path.join(HERE, "..", "lint", name), os.path.join(pointer, "lint", name))
+        if layout_json is not None:
+            with open(os.path.join(pointer, "lint", "layout.json"), "w", encoding="utf-8") as handle:
+                handle.write(layout_json)
+        with open(os.path.join(self.config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % pointer.replace("\\", "/"))
+
+    def test_private_visibility_prints_the_private_solo_level(self):
+        self.point_at()
+        os.makedirs(os.path.join(self.primary, ".claude"))
+        with open(os.path.join(self.primary, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+            json.dump({"kinds": {}, "visibility": "private"}, handle)
+        lines = self.run_hook()
+        self.assertIn("repo caution: private-solo", lines)
+        self.assertTrue(any(line.startswith("repo fact: ") for line in lines))
+        self.assertEqual(len([l for l in lines if l.startswith("repo caution: ")]), 1)
+
+    def test_a_read_that_cannot_run_prints_unknown_never_a_level(self):
+        self.point_at(layout_json="{broken")
+        lines = self.run_hook()
+        self.assertIn("repo caution: unknown, the level could not be read", lines)
+        self.assertFalse(any(line.startswith("repo caution: public") for line in lines))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

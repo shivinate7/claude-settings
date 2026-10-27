@@ -17,6 +17,11 @@ test-author or record-writer spawned since the last human message goes unnamed i
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
+
+On any turn whose reply holds an Input Needed item that offers a pick with options, it also blocks
+unless the same main-session turn opened the question box (AskUserQuestion) or wrote the item to the
+repo's waiting page and the reply links that page (`decisions-reach-a-clickable-pick`). This check does
+not wait for a git write: the reply's labels are what it reads.
 """
 import json
 import os
@@ -26,6 +31,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
+import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -382,6 +388,111 @@ def unstarted_problem(text, spawned):
     """True when a builder ran this turn and the report holds no `Unstarted:` line."""
     return "builder" in spawned and not UNSTARTED_RE.search(block_text(text))
 
+# decisions-reach-a-clickable-pick: "a pick with options" in the Input Needed item is either two or
+# more distinct option markers, or the phrase "A or B". A marker is a lettered or numbered item at
+# a line start (`A:`, `A)`, `A.`, `A (my pick):`, `1.`, `2)`), or an inline letter A to F followed by
+# `:`, `)` or a "(my pick)" / "(recommended)" tag. Once a letter carries such a tag, another bare
+# capital letter A to F counts too, so "A (my pick) ... B ..." reads as two options. One marker alone
+# ("You picked A on Oct 26") is a quoted answer, never a pick.
+OPTION_LINE_RE = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?([A-F])(?=[:).]|\s*\()", re.M)
+OPTION_INLINE_RE = re.compile(r"(?<![\w'(])([A-F])(?::|\))")
+OPTION_TAG_RE = re.compile(r"(?<![\w'])([A-F])\s*\((?i:my pick|recommended|pick)\)")
+OPTION_BARE_RE = re.compile(r"(?<![\w'(])([A-F])(?![\w'.])")
+OPTION_OR_RE = re.compile(r"(?<![\w'])[A-F] or [A-F](?![\w'])")
+# Numbered items are often separate asks, and "A or B" is often plain text, so both count only
+# with pick context: a tag, a lettered marker, or one of these words in the same item.
+OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.M)
+PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
+ASK_TOOL = "AskUserQuestion"
+DATA_TOOL = "ArtifactData"
+WAITING_COLLECTION = "items"
+
+PICK_REFUSAL = (
+    "Pick gate: Input Needed offers a pick with options and gives no way to click it. Open the "
+    "question box, or put the item on the repo's waiting page and link that page in the reply."
+)
+
+
+def input_needed_section(text):
+    """The Input Needed item's text from the report block, else ''."""
+    body = []
+    inside = False
+    for line in block_text(text, keep_indent=True).splitlines():
+        m = LABEL_RE.match(line)
+        if m:
+            if inside:
+                break
+            inside = m.group(1).strip().rstrip(":").strip() == "Input Needed"
+            if inside:
+                body.append(line[m.end():].lstrip(": "))
+            continue
+        if inside:
+            body.append(line)
+    return "\n".join(body)
+
+
+def offers_a_pick(text):
+    section = input_needed_section(text)
+    if not section.strip():
+        return False
+    letters = set(OPTION_LINE_RE.findall(section)) | set(OPTION_INLINE_RE.findall(section))
+    tagged = set(OPTION_TAG_RE.findall(section))
+    letters |= tagged
+    if tagged:
+        letters |= set(OPTION_BARE_RE.findall(section))
+    if len(letters) >= 2:
+        return True
+    numbers = set(OPTION_NUM_RE.findall(section))
+    context = bool(tagged or letters or PICK_WORD_RE.search(section))
+    if OPTION_OR_RE.search(section) and (context or numbers):
+        return True
+    return len(numbers) >= 2 and context
+
+
+def repo_root(cwd):
+    """The nearest folder at or above `cwd` that holds a git entry, else None."""
+    here = os.path.realpath(cwd or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def writes_waiting_item(inp):
+    """True when an ArtifactData call sets or updates a document in the waiting collection."""
+    if inp.get("action") == "batch":
+        return any(isinstance(w, dict) and w.get("op") in ("set", "update")
+                   and w.get("collection") == WAITING_COLLECTION for w in inp.get("writes") or [])
+    return inp.get("action") in ("set", "update") and inp.get("collection") == WAITING_COLLECTION
+
+
+def pick_has_a_control(records, text, cwd):
+    """True when the main session's turn opened the question box, or wrote an item to this repo's
+    waiting page and the reply links it. An agent's own calls (isSidechain) never count."""
+    page = None
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for b in tool_uses(rec):
+            name = b.get("name")
+            if name == ASK_TOOL:
+                return True
+            if name != DATA_TOOL:
+                continue
+            inp = b.get("input") or {}
+            if not writes_waiting_item(inp):
+                continue
+            if page is None:
+                root = repo_root(cwd)
+                page = layout.waiting_page(root) if root else "unknown"
+            url = str(inp.get("url") or "").rstrip("/")
+            if page != "unknown" and url == page.rstrip("/") and page.rstrip("/") in text:
+                return True
+    return False
+
 
 def main():
     try:
@@ -423,10 +534,17 @@ def main():
         return
 
     after = records[last_human_idx + 1:]
+    text = last_reply(hook)
     if not turn_landed(after):
+        # An unlanded turn is judged on the pick check alone. An error in it fails open.
+        try:
+            if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
+                reason = PICK_REFUSAL + (CORRECTION_TAIL if report_shape_ok(text) else "")
+                print(json.dumps({"decision": "block", "reason": reason}))
+        except Exception:
+            pass
         return
 
-    text = last_reply(hook)
     shape_ok = report_shape_ok(text)
     reasons = [] if shape_ok else [BLOCK_REASON_HEAD + BLOCK_REASON_TAIL]
     item = done_format_problem(text) if shape_ok else ""
@@ -445,6 +563,11 @@ def main():
             "Unstarted gate: this turn ran a builder, so Next holds an \"Unstarted:\" line. "
             "Name each queued item with every question answered that you left unstarted, with "
             "its reason, or write \"Unstarted: none\".")
+    try:
+        if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
+            reasons.append(PICK_REFUSAL)
+    except Exception:
+        pass
     cite = bare_cite(text)
     if cite:
         reasons.append(

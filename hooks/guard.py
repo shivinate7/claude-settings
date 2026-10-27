@@ -63,6 +63,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
+  rm-after-cd          deny. A recursive delete of a relative target after a cd.
+                       (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder or a folder above it, in either shell.
@@ -265,7 +267,7 @@ while True:
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
-            rm_var_hits, rm_var_reason,
+            rm_after_cd_hits, rm_after_cd_reason, rm_var_hits, rm_var_reason,
         )
         _loading = "guard_mask_script"
         from guard_mask_script import (
@@ -2281,6 +2283,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
+    # 4b. After the wide-delete rules, so a delete of `.` or `..` keeps its own refusal.
+    # A recursive delete of a relative target after a cd (decision rm-after-cd-names-absolute-path).
+    hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
+    if hits:
+        refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
     for segment in split_segments(stripped):
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})

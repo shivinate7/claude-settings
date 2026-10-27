@@ -1,5 +1,5 @@
 {
-  "about": "Where each kind of file lives in every repo. Every shared tool reads its paths from this file through lint/layout.py. A repo adds its own kinds in its extras file, and the extras file also marks the repo as rolled out to this layout. \"legacy-repos\" keeps a kind where one repo holds it now, keyed by the repo's GitHub name, until that repo moves it. Decision one-layout-every-repo.",
+  "about": "Where each kind of file lives in every repo. Every shared tool reads its paths from this file through lint/layout.py. A repo adds its own kinds in its extras file, and the extras file also marks the repo as rolled out to this layout. \"legacy-repos\" keeps a kind where one repo holds it now, keyed by the repo's GitHub name, until that repo moves it. Decision one-layout-every-repo. The same file holds the owner's devices, the default device order for each app kind, and the caution levels. A repo names its \"kind\", \"caution\" and \"visibility\" in its extras file, and lists \"devices\" only where it differs. Decision repo-kind-and-caution.",
   "extras": ".claude/layout-extras.json",
   "kinds": {
     "claude-md": {
@@ -67,8 +67,80 @@
     "docs/plans": "plans"
   },
   "legacy-repos": {
-    "shivinate7/q_max": {"todo": "specs/todo.md"},
-    "shivinate7/home": {"todo": "records"},
-    "shivinate7/home-app": {"todo": "records"}
+    "shivinate7/q_max": {
+      "todo": "specs/todo.md"
+    },
+    "shivinate7/home": {
+      "todo": "records"
+    },
+    "shivinate7/home-app": {
+      "todo": "records"
+    }
+  },
+  "devices": {
+    "iphone-duo-folded": {
+      "name": "iPhone Duo, folded",
+      "size": null
+    },
+    "iphone-duo-unfolded": {
+      "name": "iPhone Duo, unfolded",
+      "size": null
+    },
+    "iphone-regular": {
+      "name": "regular iPhone",
+      "size": null
+    },
+    "phone-width": {
+      "name": "phone width",
+      "size": null
+    },
+    "desktop-width": {
+      "name": "desktop width",
+      "size": null
+    }
+  },
+  "app-kinds": {
+    "ios": {
+      "devices": [
+        "iphone-duo-folded",
+        "iphone-duo-unfolded",
+        "iphone-regular"
+      ]
+    },
+    "web": {
+      "devices": [
+        "phone-width",
+        "desktop-width"
+      ]
+    }
+  },
+  "visibility-caution": {
+    "public": "public",
+    "private": "private-solo",
+    "default": "public"
+  },
+  "cautions": {
+    "public": {
+      "facts": [
+        "Other people can read this repo's commits, pull requests and artifacts.",
+        "A secret or a personal datum that lands there is out for good."
+      ],
+      "acts": [
+        "Read each file before you commit it or publish it.",
+        "Keep tokens, passwords, keys and personal data out of commits, pull requests and artifacts."
+      ]
+    },
+    "private-solo": {
+      "facts": [
+        "This repo, its data and the systems it runs belong to the owner alone.",
+        "The owner's own low-stakes devices and services (Home Assistant, the KEF speakers) hold nothing that needs a ceremony to reach."
+      ],
+      "acts": [
+        "Change the repo's own data and the owner's own systems directly.",
+        "Log in to the owner's own low-stakes devices and services every time, with the credential that a tool path reads for you, and report a login that fails with the tool's error.",
+        "Never print a real secret, never commit one, and never let one leave the machine.",
+        "Ask before anything leaves the machine."
+      ]
+    }
   }
 }
