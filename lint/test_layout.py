@@ -82,7 +82,7 @@ class LayoutFile(Tree):
         want = {"claude-md": "CLAUDE.md", "agents-md": "AGENTS.md", "rules": ".claude/rules",
                 "decisions": "docs/decisions", "debts": "docs/debts", "debt-notes": "docs/debts/notes.md",
                 "plans": "docs/plans", "specs": "docs/specs", "records-index": "docs/records.md",
-                "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots"}
+                "todo": "docs/todo.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots"}
         self.assertEqual({k: v["path"] for k, v in kinds.items()}, want)
         self.assertEqual(self.layout.layout()["extras"], EXTRAS)
 
@@ -116,6 +116,79 @@ class LayoutFile(Tree):
                 self.roll_out({"x": {"path": bad}})
                 with self.assertRaises(self.layout.LayoutError):
                     self.layout.kinds(self.tree)
+
+    def origin(self, url, worktree=False):
+        """A repo whose origin is `url`, read from git's config file as git writes it."""
+        common = os.path.join(self.tree, "main.git") if worktree else os.path.join(self.tree, ".git")
+        self.put(os.path.relpath(os.path.join(common, "config"), self.tree).replace(os.sep, "/"),
+                 '[core]\n\tbare = false\n[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' % url)
+        if worktree:  # a linked worktree: .git is a file naming its git dir, which names the common dir
+            self.put("main.git/worktrees/lane/commondir", "../..\n")
+            self.put(".git", "gitdir: %s\n" % os.path.join(self.tree, "main.git", "worktrees", "lane"))
+
+    def test_todo_sits_at_docs_todo_in_a_repo_with_no_entry(self):
+        self.origin("https://github.com/shivinate7/degen.git")
+        self.assertEqual(self.layout.path(self.tree, "todo"), "docs/todo.md")
+        self.roll_out()
+        self.assertEqual(self.layout.path(self.tree, "todo"), "docs/todo.md")
+
+    def test_a_repo_entry_keeps_its_todo_where_it_is(self):
+        for url in ("https://github.com/shivinate7/q_max", "git@github.com:shivinate7/q_max.git"):
+            with self.subTest(url=url):
+                self.origin(url)
+                self.assertEqual(self.layout.path(self.tree, "todo"), "specs/todo.md")
+                self.assertEqual(self.layout.candidates(self.tree, "todo"), ("specs/todo.md", "docs/todo.md"))
+
+    def test_a_repo_entry_holds_in_a_linked_worktree(self):
+        self.origin("https://github.com/shivinate7/q_max", worktree=True)
+        self.assertEqual(self.layout.path(self.tree, "todo"), "specs/todo.md")
+
+    def test_a_repo_entry_holds_after_roll_out_and_its_extras_may_repeat_it(self):
+        self.origin("https://github.com/shivinate7/home-app")
+        self.roll_out({"todo": {"path": "records"}})  # home-app's extras file names its task home
+        self.assertEqual(self.layout.path(self.tree, "todo"), "records")
+        self.assertEqual(self.layout.path(self.tree, "decisions"), "docs/decisions")
+
+    def test_an_extras_repeat_holds_when_the_origin_cannot_be_read(self):
+        for url in (None, "http://local_proxy@127.0.0.1:41999/git/shivinate7/home", "file:///srv/home.git"):
+            with self.subTest(url=url):
+                self.setUp()
+                if url:
+                    self.origin(url)
+                self.roll_out({"todo": {"path": "records"}})
+                self.assertEqual(self.layout.path(self.tree, "todo"), "records")
+                self.assertEqual(self.layout.path(self.tree, "decisions"), "docs/decisions")
+
+    def test_origin_forms(self):
+        for url, want in (("http://local_proxy@127.0.0.1:41999/git/shivinate7/Q_Max", "shivinate7/q_max"),
+                          ("ssh://git@github.com/shivinate7/q_max.git/", "shivinate7/q_max"),
+                          ("https://notgithub.com/shivinate7/q_max", None),
+                          ("https://gitlab.com/shivinate7/q_max", None)):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertEqual(self.layout.repo_name(self.tree), want)
+
+    def test_an_unreadable_git_file_is_no_origin_never_a_crash(self):
+        with open(os.path.join(self.tree, ".git"), "wb") as f:
+            f.write(b"gitdir: \xff\xfe\x00\n")
+        self.assertIsNone(self.layout.repo_name(self.tree))
+        self.assertEqual(self.layout.path(self.tree, "todo"), "docs/todo.md")
+
+    def test_an_extras_todo_that_differs_from_the_repo_entry_is_an_error(self):
+        for url in ("https://github.com/shivinate7/home-app", "https://github.com/shivinate7/degen"):
+            with self.subTest(url=url):
+                self.origin(url)
+                self.roll_out({"todo": {"path": "elsewhere"}})
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.kinds(self.tree)
+
+    def test_each_repo_entry_names_a_layout_kind_inside_the_repo(self):
+        for repo, entry in self.layout.layout()["legacy-repos"].items():
+            for name, found in entry.items():
+                with self.subTest(repo=repo, kind=name):
+                    self.assertIn(name, self.layout.layout()["kinds"])
+                    self.assertEqual(self.layout._safe(found, repo), found)
 
     def test_broken_extras_file_is_an_error_never_a_silent_default(self):
         self.put(EXTRAS, "{not json")
@@ -349,6 +422,25 @@ class ConstantCheck(Tree):
     def test_action_script_that_names_a_folder_is_red(self):
         self.edit("actions/ruling-kind/check.sh", '"${RECORDS_DIR-}"', '"${RECORDS_DIR-decisions}"')
         self.assert_red("check.sh")
+
+    def test_a_todo_path_literal_in_a_reader_is_red(self):
+        for literal in ('"docs/todo.md"', '"specs/todo.md"'):
+            with self.subTest(literal=literal):
+                self.setUp()
+                self.append("lint/hook_catalog.py", "MUTANT = %s" % literal)
+                self.assert_red("lint/hook_catalog.py:")
+
+    def test_a_repo_entry_for_an_unknown_kind_or_outside_the_repo_is_red(self):
+        for entry in ({"no-such-kind": "x.md"}, {"todo": "../x.md"}, {"todo": 7}):
+            with self.subTest(entry=entry):
+                self.setUp()
+                path = os.path.join(self.tree, "lint", "layout.json")
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                data["legacy-repos"]["shivinate7/x"] = entry
+                with open(path, "w", encoding="utf-8", newline="\n") as f:
+                    json.dump(data, f)
+                self.assert_red("legacy-repos")
 
     def test_stamp_example_outside_docs_is_red(self):
         self.edit("actions/stamp/examples/frontmatter-prefixed-cite.stamp.json",

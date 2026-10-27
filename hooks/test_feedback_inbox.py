@@ -97,7 +97,7 @@ Gate: hooks/feedback_gate.py (env FEEDBACK_GATE_UNDER_TEST overrides the path). 
   - Tracked homes (decision owner-feedback-inbox, "Kinds and homes"). A ruling or task item, open
     or closed, names a path: relative to the repo of the payload's cwd, or absolute. The file sits
     under a home of its kind in lint/layout.json, read through lint/layout.py: ruling under the
-    keys decisions, rules, claude-md or agents-md; task under todo (a repo's extras key), debts or
+    keys decisions, rules, claude-md or agents-md; task under todo, debts or
     debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
     handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
     names the layout keys, todo first for a task.
@@ -1116,13 +1116,23 @@ def case_gate_standing_homed_to_handoff_passes():
                         handoff_ids=("fb-7",)))
 
 
-def case_gate_task_home_from_extras_todo_key():
-    extras = json.dumps({"kinds": {"todo": {"path": "specs/todo.md"}}})
-    repo = make_repo("rolled", tracked=("specs/todo.md", "docs/decisions/r.md"), extras=extras)
+def case_gate_task_home_from_the_todo_kind():
+    repo = make_repo("rolled", tracked=("docs/todo.md", "docs/decisions/r.md"), extras='{"kinds": {}}')
     cfg = new_cfg()
-    expect_silent("homes: a task homed to the extras file's todo key passes",
-                  homed(cfg, "t-todo", ("- fb-8 [task] -> specs/todo.md",
+    expect_silent("homes: a task homed to the layout's todo kind passes",
+                  homed(cfg, "t-todo", ("- fb-8 [task] -> docs/todo.md",
                                         "- fb-9 [ruling] -> docs/decisions/r.md"), cwd=repo))
+    kept = make_repo("q_max", tracked=("specs/todo.md",))
+    git(kept, "remote", "add", "origin", "https://github.com/shivinate7/q_max.git")
+    cfg = new_cfg()
+    expect_silent("homes: a task homed to the todo path legacy-repos keeps for its repo passes",
+                  homed(cfg, "t-kept", ("- fb-8 [task] -> specs/todo.md",), cwd=kept))
+    moved = make_repo("extras-todo", tracked=("tasks.md",),
+                      extras=json.dumps({"kinds": {"todo": {"path": "tasks.md"}}}))
+    cfg = new_cfg()
+    p = homed(cfg, "t-moved", ("- fb-8 [task] -> tasks.md",), cwd=moved)
+    check("homes: an extras file that moves the todo kind is a layout fault, so the check stands down",
+          block_reason(p) is None and len(fail_open_line(p)) == 1, p.desc())
     bare = make_repo("no-task-home", tracked=("decisions/r.md",))
     cfg = new_cfg()
     p = homed(cfg, "t-none", ("- fb-8 [task] -> TODO.md",), cwd=bare)
@@ -1644,7 +1654,7 @@ CASES = (
     case_gate_home_outside_its_kind_blocks,
     case_gate_tracked_homes_pass_without_the_handoff,
     case_gate_standing_homed_to_handoff_passes,
-    case_gate_task_home_from_extras_todo_key,
+    case_gate_task_home_from_the_todo_kind,
     case_gate_unreadable_layout_fails_open_with_one_line,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
