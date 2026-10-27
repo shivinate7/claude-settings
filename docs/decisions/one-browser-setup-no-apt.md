@@ -29,4 +29,5 @@ Protected by `lint/test_compliance_probes.py` (class `Playwright`) and the `gate
 - pnpm's strict layout does not link `playwright-core` at the top level, so the action stops with its one-line error there.
 
 Kind: build
+Plan: docs/decisions/one-browser-setup-no-apt.md#the-ruling (all)
 Home: actions/playwright-setup/action.yml
