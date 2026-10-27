@@ -1,0 +1,9 @@
+{
+  "title": "The CI-read hook reads checks by REST, so cloud sessions see CI",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3048,
+  "why": "Defect, Oct 26 23:30 CDT (build advisor, seen on PR #638): in cloud sessions the hook says \"CI unknown\" after any PR command.",
+  "note": "A PostToolUse Bash hook reads CI with gh pr view, which uses GraphQL; the cloud proxy refuses GraphQL (403), so every read is unknown. Fix, needs no answer: read check runs by REST (gh api repos/<owner>/<repo>/commits/<sha>/check-runs), with a test red on the GraphQL path. Unknown: the hook's file name; the lane finds it on main 6902807. Port: no; the hook installs from claude-settings. Placed ahead of c82, after c111 (triage, Oct 27): every cloud lane waits on CI reads.",
+  "updatedAt": "2026-10-27T05:05:00Z"
+}

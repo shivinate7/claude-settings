@@ -1,0 +1,9 @@
+{
+  "title": "Each repo names its mockup devices in order, and a mockup shows the first unless asked",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3396,
+  "why": "Your word, Oct 26 23:52 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2NHAwYrKyU3AX4LqKSKG3Um): degen's mockups were all on a regular iPhone; they should default to the iPhone Duo folded (small screen), then unfolded (large), then a regular iPhone, and usually one is enough.",
+  "note": "Split (coordinator's proposal, and mine): claude-settings holds the mechanism, each repo holds its list. (1) A per-repo ordered list of mockup devices in the layout config, read by the designer agent and skill design-explore; default: draw the first device only, the rest on request or when the layout breaks between them. (2) The iOS standard (c91, skill ios-apps) sets Duo folded, Duo unfolded, regular iPhone as the default list for your iOS app repos, since mailaudit is also designed for the Duo. (3) degen's list names that order now; mailaudit's at its visit. Needs no answer. Port: yes; the mechanism is global, each repo's list is its own. Placed ahead of c93, after c109 (triage, Oct 27): both shape every blind brief, and c109's template names the device from this list.",
+  "updatedAt": "2026-10-27T05:05:00Z"
+}
