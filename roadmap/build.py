@@ -120,7 +120,7 @@ def added_at():
     seen, when = {}, None
     for line in out.splitlines():
         if line.startswith("@"):
-            when = datetime.datetime.fromisoformat(line[1:])
+            when = datetime.datetime.fromisoformat(line[1:].replace("Z", "+00:00"))
         elif line.endswith(".json"):
             seen.setdefault(pathlib.Path(line).stem, when)
     return seen

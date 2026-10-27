@@ -1,10 +1,10 @@
 {
   "ask": "Draft the visual-question rule: when a question counts as visual, what picture each option needs, and where the session publishes it.",
-  "note": "Deferred (shiv, Oct 26): it needs your answer, so it waits behind all work that needs none (its pictures come from d1). d1 is done, so the reason is gone. Asked: waiting page item d9-lift-deferral (triage, Oct 27).\nFrom a home-app question, Oct 17 (TV keyboard: do the arrows hide while typing). The prose rule goes with the reply-style rules; the pictures come from d1 (the designer). Plan on a linked artifact; whether AskUserQuestion's preview field shows a real picture is not checked. Found Oct 26: home-app already answers layout questions with HTML mockups in docs/design/ (f8a59b2), the pattern this rule would make standard. Not started.",
-  "order": 216,
-  "phase": "design",
+  "note": "Deferral lifted on your gripe, Oct 27 (triage reads it as yes to waiting-page item d9-lift-deferral, which is closed; object and it parks again). Rule, reply style and skill waiting-page: a question about how something looks shows one picture per option inline, on the first device of the repo's app kind (c113's list: the Duo folded for iOS, a phone width for web); a link to a folder, repo or file is never enough, and the full mockup stays one tap away. Pictures come from the designer (d1) and design-explore; on the waiting page they use the Designs tab (c112, on main) and the per-option drawings that landed with c100. Check: the waiting-page writer refuses a design item with no embedded image per option, and the reply judge flags a visual pick in a reply that only links. Red first on banchi's item 30. Banchi's live page may still be the old template (c121). Needs no answer. Port: yes; skill and rule install everywhere. Placed ahead of c120 (triage, Oct 27): a gripe, and every design pick in every repo reaches you this way.",
+  "order": 103.3384,
+  "phase": "cleanup",
   "status": "todo",
-  "title": "Visual questions come with a picture of each option",
-  "updatedAt": "2026-10-27T01:20:00Z",
-  "why": "Agreed Oct 17. When a session asks how something should look, words like 'the keyboard has room' can't be judged. You answer these with 'I want a visual comparison' every time, so the session should bring one first: a mockup of each option side by side, published as an artifact (or a screenshot of each build), linked from the question."
+  "title": "A design pick shows a picture of each option inline, never a link to a folder",
+  "updatedAt": "2026-10-27T15:00:00Z",
+  "why": "From a home-app question, Oct 17 (TV keyboard: do the arrows hide while typing). Gripe, Oct 27 09:50 CDT (shiv, cmsg_01DoF7thf3iq2Srr1UsfXgh2KNYGfA7peKRWraS48M8yHH, screenshot): banchi's waiting-page item 30 (where a card's price history shows) linked its three mockups as \"a folder on GitHub\"; your note: \"dont send me a fucking folder on github to rev…\"."
 }

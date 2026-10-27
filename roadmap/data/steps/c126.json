@@ -1,0 +1,9 @@
+{
+  "title": "Lanes never write the waiting page; the orchestrator writes every item",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33845,
+  "why": "Your gripe (cmsg_01DoF7thf3iq2Srr1UsfXgh2CXvhMFur6osdbZSUTWVPZL), via the thread \"Find why banchi's lanes were told to write the waiting page\": a banchi orchestrator told its lanes to post their own items.",
+  "note": "Checked on main d4e1b86: skills/waiting-page and decision questions-go-to-owner say items come \"from every session\" (c71 ruling 1a) and never say who writes when an orchestrator runs lanes. Fix: a lane (subagent or lane session) puts its question in its report; the orchestrator writes the item with itself as owner and routes the answer back. Reasons: no clashing edits (item records do not clash today; the mockup republish in \"Add a design\" does), and a subagent lane has no wake after it ends, so it cannot read its own answer. Red first on a lane brief that tells a lane to post. Needs no answer. Port: yes, through the skill. Placed ahead of c120, after d9 (triage, Oct 27): a gripe, and it touches every orchestrated question.",
+  "updatedAt": "2026-10-27T15:00:00Z"
+}
