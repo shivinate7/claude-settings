@@ -72,6 +72,7 @@ CONFIG_FROZEN_SKILLS = (
     os.path.normcase("compliance-check"),
     os.path.normcase("fresh-prose"),
     os.path.normcase("design-review"),
+    os.path.normcase("design-explore"),
     os.path.normcase("impeccable"),
     os.path.normcase("plain-english-map"),
     os.path.normcase("project-ops"),
