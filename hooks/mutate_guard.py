@@ -1662,6 +1662,7 @@ def report_main(argv) -> int:
             continue
         print("scoring %s against %d suites ..." % (target, len(tests)), flush=True)
         rows.append(mutate_shared.score_target(root, target, tests, limit=args.limit, jobs=args.jobs))
+        print(mutate_shared.format_report(rows[-1:]), flush=True)  # a killed run keeps the files already scored
     gold = [row for row in rows if row["file"] == REPORT_GOLD[0]]
     note = "unmeasured (not run)" if not gold else (
         "UNKNOWN (%s)" % gold[0]["reason"] if gold[0]["status"] != "OK"
