@@ -1003,6 +1003,38 @@ def case_input_needed_finding_never_blocks():
           and out.get("hookSpecificOutput", {}).get("additionalContext") == FINDING["reason"], (run.code, run.out))
 
 
+# --------------------------------------------------------------------------- c93
+# style-table-gold-column: a comparison table carries a column for what good looks like. Code
+# finds a Markdown table (a separator row such as |---|---|) and judges that Stop off-sample; the
+# model decides whether the table compares and whether a gold-standard column is there.
+
+TABLE_RULE = "style-table-gold-column"
+TABLE_REPLY = (
+    "Two hooks compared.\n\n| Hook | Runs per day |\n|---|---:|\n| guard | 400 |\n| judge | 80 |\n"
+)
+PIPES_NO_TABLE = "Done: x.\nThe guard reads `a | b` and the judge reads `c | d`."
+
+
+def case_table_reply_is_judged_off_sample():
+    run, _ = second_stop(TABLE_REPLY, label="c93-table", session="c93-session")
+    check("table: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+    check("table: exit 0", run.code == 0, run.code)
+
+
+def case_pipes_without_table_not_judged_off_sample():
+    run, _ = second_stop(PIPES_NO_TABLE, label="c93-pipes", session="c93-pipes-session")
+    check("pipes with no separator row: Stop 2 never calls the model", not run.calls, run.calls)
+
+
+def case_prompt_asks_for_gold_column():
+    run = run_hook(TABLE_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, TABLE_REPLY)
+    check("prompt: names %s before the reply" % TABLE_RULE, any(TABLE_RULE in s for s in sentences),
+          run.prompt()[:300])
+    check("prompt: a sentence ties a comparison table to a gold-standard or target column",
+          has_pin(sentences, ("table",), ("compar",), ("gold", "target"), ("column",)), sentences)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1036,6 +1068,9 @@ CASES = (
     case_ok_verdict_writes_no_guard_log_line,
     case_guard_log_failure_fails_open,
     case_input_needed_finding_never_blocks,
+    case_table_reply_is_judged_off_sample,
+    case_pipes_without_table_not_judged_off_sample,
+    case_prompt_asks_for_gold_column,
 )
 
 
