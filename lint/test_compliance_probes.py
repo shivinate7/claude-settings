@@ -418,5 +418,97 @@ class ProbesText(unittest.TestCase):
         self.assertEqual(done.stdout.strip(), "0")
 
 
+class Scorecard(unittest.TestCase):
+    LINES = ("Layout: out - 1 folder (lint/compliance_probes.py layout)\n"
+             "Design: in shape - one token file (lint/compliance_probes.py design)\n")
+
+    def run_card(self, repo, text):
+        done = subprocess.run([sys.executable, PROBES, "scorecard", repo.root], input=text, capture_output=True, text=True)
+        path = os.path.join(repo.root, "docs", "health", "compliance.md")
+        body = None
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                body = handle.read()
+        return done.returncode, body
+
+    def test_writes_one_table_with_a_gold_column(self):
+        code, body = self.run_card(Repo(self), self.LINES)
+        self.assertEqual(code, 0)
+        self.assertIsNotNone(body)
+        self.assertIn("| Group | Score | Gold standard | Gap | Source |", body)
+        self.assertIn("| Layout | out | in shape | 1 folder | lint/compliance_probes.py layout |", body)
+        self.assertIn("| Design | in shape | in shape | one token file | lint/compliance_probes.py design |", body)
+
+    def test_second_run_overwrites_and_leaves_one_file(self):
+        repo = Repo(self)
+        self.run_card(repo, self.LINES)
+        code, body = self.run_card(repo, "Layout: in shape - clean (command)\n")
+        self.assertEqual(code, 0)
+        self.assertIn("| Layout | in shape |", body)
+        self.assertNotIn("| Design |", body)
+        self.assertEqual(os.listdir(os.path.join(repo.root, "docs", "health")), ["compliance.md"])
+
+    def test_same_input_gives_the_same_file(self):
+        repo = Repo(self)
+        self.run_card(repo, self.LINES)
+        first = self.run_card(repo, self.LINES)[1]
+        self.assertEqual(first, self.run_card(repo, self.LINES)[1])
+
+    def test_item_line_becomes_a_row_after_its_group(self):
+        text = "Design: partial - two gaps (a)\n  - screens: gap - no config (b)\n  - sizes: pass - ok\nLayout: in shape - ok (c)\n"
+        _, body = self.run_card(Repo(self), text)
+        rows = [line for line in body.splitlines() if line.startswith("| ")]
+        at = rows.index("| Design | partial | in shape | two gaps | a |")
+        self.assertEqual(rows[at + 1], "| Design: screens | gap | in shape | no config | b |", body)
+        self.assertEqual(rows[at + 2], "| Design: sizes | pass | in shape | ok | none cited |", body)
+        self.assertNotIn("## Notes", body)
+
+    def test_every_probe_item_line_becomes_a_row_after_its_group(self):
+        # Real probe output: each probe prints its item lines, then its group line.
+        repo = Repo(self).write("src/App.tsx").write("src/tokens.css").write("Makefile", "screenshot:\n\tnode s.mjs\n")
+        repo.write("briefs/b.md", "Run lanes one or two at a time.\nTwo lanes at a time (owner, 2026-10-12).\n")
+        repo.write(".github/workflows/ci.yml", "      - run: npx playwright install --with-deps chromium\n")
+        ios = Ios.gold(self)
+        flow = os.path.join(ios.root, ".github", "workflows", "ios.yml")
+        with open(flow, encoding="utf-8") as handle:
+            ios.write(".github/workflows/ios.yml", handle.read().replace("runs-on: macos-26", "runs-on: macos-latest"))
+        outs = [r.run(g)[1] for r, g in ((repo, "layout"), (repo, "design"), (repo, "lanecap"), (repo, "playwright"), (ios, "ios"))]
+        _, body = self.run_card(Repo(self), "".join(outs))
+        rows = [line for line in body.splitlines() if line.startswith("| ")]
+        grades = set()
+        for out in outs:
+            lines = out.rstrip("\n").split("\n")
+            items, group = lines[:-1], lines[-1].split(": ", 1)[0]
+            self.assertTrue(items and all(i.startswith("  ") for i in items), out)
+            at = [n for n, row in enumerate(rows) if row.startswith("| %s | " % group)]
+            self.assertEqual(len(at), 1, body)
+            for n, line in enumerate(items, at[0] + 1):
+                name, rest = line.strip().split(": ", 1)
+                self.assertTrue(rows[n].startswith("| %s: %s | " % (group, name)), (line, body))
+                grades.add(rest.split(" - ", 1)[0] if " - " in rest else None)
+        self.assertTrue({"pass", "gap", "partial", "known gap", None} <= grades, grades)
+        self.assertNotIn("## Notes", body)
+
+    def test_other_lines_are_kept_as_notes(self):
+        out, body = self.run_card(Repo(self), "Layout: in shape - ok (c)\nCaution: rule x has no probe\n\n")
+        self.assertIn("## Notes", body)
+        self.assertIn("- Caution: rule x has no probe", body)
+        self.assertEqual(body.count("rule x has no probe"), 1)
+
+    def test_sourceless_line_says_none_cited(self):
+        _, body = self.run_card(Repo(self), "Layout: out - no source here\n")
+        self.assertIn("| Layout | out | in shape | no source here | none cited |", body)
+
+    def test_pipe_is_escaped_and_dash_and_parens_survive(self):
+        _, body = self.run_card(Repo(self), "Layout: out - a | b - c (d) e (src)\n")
+        self.assertIn("| Layout | out | in shape | a \\| b - c (d) e | src |", body)
+
+    def test_ui_file_gap_is_a_known_gap_row(self):
+        _, body = self.run_card(Repo(self), self.LINES)
+        row = next(line for line in body.splitlines() if line.startswith("| STE lint on UI files |"))
+        self.assertIn("| partial | in shape |", row)
+        self.assertIn("known gap", row)
+
+
 if __name__ == "__main__":
     unittest.main()
