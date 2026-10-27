@@ -51,6 +51,7 @@ function stubDb({ items, answers, failDelete, failDeleteIn, failSet, comments, m
     collection: (name) => ({
       onSnapshot: (cb) => { (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; },
       doc: (id) => ({
+        get: async () => dsnap(name, id),
         set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
         onSnapshot: (cb) => { (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
@@ -422,7 +423,7 @@ const LOOK_OPTS = ["a", "b", "c"].map((k) => ({ key: k, label: "Layout " + k, ho
 const GITHUB_FOLDER = "Mockups: https://github.com/shivinate7/banchi/tree/main/docs/mockups/price-history";
 
 test("a look question with three options, a GitHub folder link and no designs shows a warning inside each option card", async (t) => {
-  const it = mk("price-history-where", 30, { context: GITHUB_FOLDER, options: LOOK_OPTS, pick: "a" });
+  const it = mk("price-history-where", 30, { context: GITHUB_FOLDER, look: true, options: LOOK_OPTS.map(({ design, ...o }) => o), pick: "a" });
   const page = await open(t, { items: [it] }); if (!page) return;
   assert.equal(await card(page, it).locator(".opt .dwarn").count(), 3, "no warning in an option card");
   assert.equal(await card(page, it).locator(".dwarn").count(), 3, "a warning sits outside the option cards");
@@ -452,7 +453,7 @@ test("a design that names no option shows at the front of the item, before the o
 });
 
 test("an item with some designs but not every option's design warns in the option cards that lack one", async (t) => {
-  const it = mk("half-pictures", 32, { options: LOOK_OPTS, pick: "a", designs: [{ slug: "price-a", label: "Layout a" }] });
+  const it = mk("half-pictures", 32, { look: true, options: LOOK_OPTS, pick: "a", designs: [{ slug: "price-a", label: "Layout a" }] });
   const page = await open(t, { items: [it], designData: { "price-a": "<p>a</p>" } }); if (!page) return;
   assert.equal(await card(page, it).locator(".opt .dwarn").count(), 2);
   assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dwarn`).count(), 0);
@@ -487,6 +488,13 @@ for (const width of [390, 1440]) {
     }
   });
 }
+
+test("an item that is not a look question never warns about pictures, with or without a named design", async (t) => {
+  const plain = mk("not-a-look", 37, { options: LOOK_OPTS.map(({ design, ...o }) => o), pick: "a" });
+  const named = mk("names-a-design", 38, { options: LOOK_OPTS, pick: "a" });
+  const page = await open(t, { items: [plain, named] }); if (!page) return;
+  assert.equal(await page.locator(".dwarn").count(), 0);
+});
 
 test("a long link in the context never widens the page on a phone", async (t) => {
   const it = mk("price-history-link", 33, { context: GITHUB_FOLDER, options: LOOK_OPTS, pick: "a" });
@@ -945,3 +953,43 @@ for (const width of [1440, 390]) {
     assert.equal(shown, width > 960, width > 960 ? "no visible short title in the list" : "the short title crowds a narrow list");
   });
 }
+
+// ---------------------------------------------------------------- withdraw, undo and notes on a stood pick
+
+test("a withdraw opens the 8-second Undo panel, and Undo puts the answer back", async (t) => {
+  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await send(page);
+  await page.locator("#sent .stamp").waitFor();
+  assert.match(await page.locator("#sent").textContent(), /withdrawn/i);
+  assert.equal(await page.locator("#undoBtn").count(), 1, "no Undo after a withdraw");
+  await page.click("#undoBtn");
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  assert.deepEqual((await answers(page))[DECISION.id], SAVED_A[DECISION.id]);
+  assert.equal(await page.evaluate(() => window.__sent.length), 0, "a withdraw or its undo told a session");
+});
+
+test("a withdraw leaves an answer that changed since the page read it", async (t) => {
+  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await page.evaluate((id) => { window.__answers()[id] = { item: id, n: 27, at: "2026-10-26T05:00:00Z", choice: "b", note: "" }; }, DECISION.id);
+  await send(page);
+  await c.getByText("changed", { exact: false }).waitFor();
+  assert.equal((await answers(page))[DECISION.id].choice, "b", "the newer answer was deleted");
+  assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete"), []);
+});
+
+test("a note typed on an item whose pick stands sends the stood pick plus the note", async (t) => {
+  const it = mk("stand-note", 7, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await addNote(page, it, "with a thought");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.equal(a.choice, "a");
+  assert.equal(a.note, "with a thought");
+});

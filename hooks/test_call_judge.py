@@ -206,6 +206,8 @@ def case_spawn_prompt_bars_a_lane_waiting_page_write():
     sentences = re.split(r"[.\n]", prompt)
     check("agent: the spawn prompt flags a brief that tells a lane to write a waiting-page item",
           any(all(w in s for w in ("flag", "waiting", "lane")) for s in sentences), prompt[:200])
+    check("agent: the spawn prompt passes a brief that forbids a lane to write the item",
+          any(all(w in s for w in ("forbid", "waiting")) and ("never flag" in s or "fine" in s) for s in sentences), prompt[:200])
     check("agent: the spawn prompt says the lane puts its question in its report",
           any(all(w in s for w in ("report", "question")) for s in sentences), prompt[:200])
 

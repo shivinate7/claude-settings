@@ -1162,6 +1162,8 @@ def case_prompt_flags_a_visual_pick_that_only_links():
     sentences = rule_sentences(run, LINK_ONLY_ASK)
     check("prompt: a sentence flags a pick between visual options that only links to them",
           has_pin(sentences, ("flag",), ("visual", "look"), ("link",), ("folder", "repo", "file")), sentences)
+    check("prompt: a sentence names the exception, a pointer to the waiting-page item that carries the designs",
+          has_pin(sentences, ("waiting",), ("item",), ("design",), ("never flag", "fine", "not a breach")), sentences)
     check("prompt: a sentence says each option needs its own picture",
           has_pin(sentences, ("picture", "image", "design"), ("each option", "every option")), sentences)
 
