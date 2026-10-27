@@ -1770,7 +1770,8 @@ def step_up_hit(tool: str, tool_input) -> str:
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
 # and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
-# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. No other call reads load.
+# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only a
+# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below).
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
@@ -1836,6 +1837,12 @@ def read_load() -> dict:
     return out
 
 
+def _load_value(reading: dict, key: str):
+    """A reading as a float, or None when it is unread or not a number."""
+    v = reading.get(key)
+    return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
+
+
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal."""
@@ -1847,20 +1854,14 @@ def load_hit(tool: str, tool_input) -> tuple:
         return "", ""
     if not isinstance(reading, dict):
         return "", ""
-
-    def value(key):
-        v = reading.get(key)
-        return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
-
-    memory = value("memory_pct")
-    disk, disk_total = value("disk_free_gb"), value("disk_total_gb")
+    memory = _load_value(reading, "memory_pct")
+    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
     disk_text = None if disk is None or disk_total is None else "disk %.1f GB free of %.0f GB" % (disk, disk_total)
 
     def disk_under(share, gb):
         return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
 
-    full = [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
-                        disk_under(LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB) and disk_text) if t]
+    full = load_full(reading)
     if full:
         return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
     # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
@@ -1879,6 +1880,41 @@ def load_hit(tool: str, tool_input) -> tuple:
                 else remedy.capitalize() + LOAD_BUSY_AGENT_FORM)
         return LOAD_BUSY_REASON % (", ".join(busy), text + "."), ", ".join(busy)
     return "", ""
+
+
+# A RUNNING LANE (decision machine-load-brake, "Running lanes"). An agent's own call that can fill a disk (a shell or
+# a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so a lane
+# stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
+# so the session that frees the disk is never braked by the full disk.
+RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
+LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
+                         "your orchestrator, which frees space or waits for the load to drop.")
+
+
+def running_lane_hit(payload, tool: str) -> tuple:
+    """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
+    per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+        return "", ""
+    try:
+        reading = read_load()
+    except Exception:
+        return "", ""
+    full = load_full(reading)
+    return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
+
+
+def load_full(reading) -> list:
+    """The readings over the full line, as text, or []. An unread or malformed reading counts as normal."""
+    if not isinstance(reading, dict):
+        return []
+    memory = _load_value(reading, "memory_pct")
+    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
+    disk_full = (disk is not None and disk_total is not None
+                 and disk < min(disk_total * LOAD_FULL_DISK_SHARE / 100.0, LOAD_FULL_DISK_GB))
+    return [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
+                        disk_full and "disk %.1f GB free of %.0f GB" % (disk, disk_total)) if t]
 
 
 OPUS_SPAWN_REASON = (
@@ -2610,8 +2646,10 @@ def judge(payload) -> None:
         refuse(tool, "ask", "agent-model-cap", OPUS_SPAWN_REASON, opus_model,
                spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
 
-    # 9d. The machine-load brake: one read on a lane-start call, none on any other call.
+    # 9d. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
     load_reason, load_matched = load_hit(tool, tool_input)
+    if not load_reason:
+        load_reason, load_matched = running_lane_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
