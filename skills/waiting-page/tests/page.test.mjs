@@ -3,7 +3,7 @@
 // A stub `window.claude.use("db")` stands in for the artifact database and records every write and
 // delete. No Playwright or no Chromium: skipped on a laptop, a fail in CI
 // (testing/skip-locally-fail-in-ci.mjs).
-// Seam: PAGE_UNDER_TEST is the page to load, for a red proof against another copy.
+// Seam: PAGE_UNDER_TEST is the page to load, for a red run against another copy.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";

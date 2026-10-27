@@ -6520,7 +6520,7 @@ class RecordsScope(RecordsEnv):
         # The root renders a catalog, so the generator would write docs/catalog.md and the merge would bring it in.
         self.kinds_off()
         self.on("feat", {"settings.json": "{}\n", "hooks/.gitkeep": "", "skills/.gitkeep": "",
-                         "decisions/subagent-model-cap.md": "# Subagent model cap\n\nOwner ruling. The table names each role model.\n",
+                         "decisions/agent-model-cap.md": "# Agent model cap\n\nOwner ruling. The table names each role model.\n",
                          "debts/gap-one.md": DEBT_TEXT})
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)

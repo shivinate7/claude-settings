@@ -2,7 +2,7 @@
 # Decides which gates jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: gates_windows gates_windows_merge gates_windows_rest gates_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
-#   map skill tests, one step in each of the `gates`, `gates-windows` and `gates-macos` jobs), guard (guard mutation harness), sweep (janitor mutation harness), shoot (the gates-shoot job: the bin/shoot suite, which installs a browser). The `gates` lint job always runs, so it has no flag.
+#   map skill tests, one CI step in each of the `gates`, `gates-windows` and `gates-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the gates-shoot job: the bin/shoot suite, which installs a browser). The `gates` lint job always runs, so it has no flag.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA.
@@ -18,7 +18,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   while IFS= read -r f; do
     case "$f" in
       # Fail safe: this script, the workflow, and git settings that change every checkout.
-      .github/scripts/harness-scope.sh|.github/workflows/gates.yml|.gitattributes) on="$on $ALL " ;;
+      .github/scripts/ci-scope.sh|.github/workflows/gates.yml|.gitattributes) on="$on $ALL " ;;
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $X code guard " ;;
@@ -81,7 +81,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
 else
   on=" $ALL "
 fi
-echo "harness scope: event=${EVENT:-} range=${range:-none} on=$on"
+echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"

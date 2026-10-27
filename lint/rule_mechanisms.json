@@ -68,10 +68,10 @@
         "reason": "No hook classifies a session's own act as orchestration versus building, or judges whether a change can move a verdict. hooks/decision_watch.py, a Stop command hook, reads the transcript and this turn's git diff and judges the act, escalating to a model only for the residual judgment a diff cannot make, which is this rule's check."
       }
     },
-    "roles-one-role-per-worker": {
+    "roles-one-role-per-agent": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook judges it. A prompt hook sees only the event input, never what a worker did, and no check reads a worker's roles."
+        "reason": "No hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
       }
     },
     "roles-sonnet-is-the-default": {
@@ -95,7 +95,7 @@
     "roles-opus-override-guarded": {
       "mechanism": {
         "kind": "guard",
-        "ref": "subagent-model-cap"
+        "ref": "agent-model-cap"
       },
       "test": "hooks/test_guard.py::cap: Write of a project local settings file setting an opus model asks"
     },
@@ -121,7 +121,7 @@
     "parallelism-each-own-checkout": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check counts checkouts against concurrent workers or catches two agents sharing one tree."
+        "reason": "No check counts checkouts against concurrent agents or catches two agents sharing one tree."
       }
     },
     "parallelism-own-lane-orchestrator": {
@@ -285,7 +285,7 @@
     "verification-verify-against-repo": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check reads whether a report about long work was verified against the repo instead of a status line. The mutation harness's WRONG CAUSE verdict covers only mutant cause of death, not this."
+        "reason": "No check reads whether a report about long work was verified against the repo instead of a status line. The mutation test's WRONG CAUSE verdict covers only mutant cause of death, not this."
       }
     },
     "verification-never-dry-run-blocklist": {
@@ -340,7 +340,7 @@
     "tokens-read-report-not-transcript": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check tells whether the orchestrator read a sub-agent's report or its full transcript."
+        "reason": "No check tells whether the orchestrator read an agent's report or its full transcript."
       }
     },
     "tokens-compacting-keep-essentials": {
@@ -442,10 +442,10 @@
         "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
       }
     },
-    "output-never-echo-worker-report": {
+    "output-never-echo-agent-report": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No check compares a reply against a worker's report to catch an echoed copy or a described screenshot."
+        "reason": "No check compares a reply against an agent's report to catch an echoed copy or a described screenshot."
       }
     },
     "output-never-paste-passing-output": {

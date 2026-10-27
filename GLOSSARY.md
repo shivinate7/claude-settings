@@ -34,6 +34,12 @@ one name for each thing, and a list of names to avoid.
 | orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | — |
 | builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
 | reviewer | An agent that judges the work of a builder against its brief and the governing decisions. A reviewer never edits. | `agents/reviewer.md` | — |
+| agent | Anything the Agent tool or a workflow starts. Claude Code's own names `SubagentStop`, `SubagentStart` and `subagent_type` stay as the platform spells them. | `rule:roles-one-role-per-agent` | `subagent`, `sub-agent`, `worker` |
+| mutation test | A script that breaks the code on purpose, one mutant at a time, to prove the tests catch each break. | `hooks/mutate_guard.py`, `janitor/mutate_sweep.py` | `mutation harness` |
+| red run | The recorded run of a test-author's new cases on the old code, where they fail. | `rule:roles-each-layer-proves-once` | `red proof` |
+| step | One item of planned work on the roadmap. | `rule:speak-cite-id-plus-gloss` | — |
+| CI step | One `- name:` entry in a CI job. Always say "CI step", never a bare "step". | `lint/rule_audit.py` | — |
+| command | One command in a shell chain. One shell call holds one or more commands. | `docs/decisions/ask-commands-run-alone.md` | `command step` |
 | designer | An agent that draws an HTML mockup of each changed screen before the builder starts. It writes only in the design folder. | `agents/designer.md` | — |
 | design reviewer | An agent that judges built screens against the mockup and the repo's design rules, with a verdict per screen. It is not blind, and it never edits. | `agents/design-reviewer.md` | — |
 | mockup | One HTML page in the design folder that draws a screen at every size and theme, with a notes file beside it. | `agents/designer.md` | — |
@@ -43,9 +49,6 @@ one name for each thing, and a list of names to avoid.
 Each term below has two or more meanings in this repo today. No meaning is chosen yet. Until the
 owner picks one, say which meaning you use.
 
-- **step.** (1) A roadmap step: one item of planned work (`rule:speak-cite-id-plus-gloss`).
-  (2) A CI step: one `- name:` entry in a workflow job (`lint/rule_audit.py`, kind `ci`).
-  (3) A command step: one command in a shell chain (`docs/decisions/ask-steps-run-alone.md`).
 - **gate.** (1) A hook that can block a tool call or a reply (`docs/decisions/gate-hooks-fail-closed.md`,
   `lint/report_gate.py`). (2) Any file that enforces a rule and has a test that proves it
   (`lint/rule_audit.py`, kind `gate`), lints included.

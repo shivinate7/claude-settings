@@ -3,7 +3,7 @@ name: design-review
 description: Use after a change to a screen in a repo that has screens. Runs two blind design reviews of the changed pages, then compares them with the repo's design records. Not for a change that has no screen.
 ---
 
-Run this in the orchestrator. Workers never spawn, so the orchestrator spawns both reviewers.
+Run this in the orchestrator. Agents never spawn, so the orchestrator spawns both reviewers.
 The ruling is decision design-skills (third-party design skills), 2026-10-10.
 
 ## Pinned sources
@@ -45,7 +45,7 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
      > PRODUCT.md, DESIGN.md, CLAUDE.md, tokens or decisions. Judge only what the screenshots
      > show. Write no file; report your findings in your reply.
 
-     Reviewer B is visual only: expect no detector findings. A worker cannot spawn, so its
+     Reviewer B is visual only: expect no detector findings. An agent cannot spawn, so its
      critique opens with impeccable's DEGRADED banner; ignore the banner. The harness still
      loads the repo's CLAUDE.md into Reviewer B, so a design section there can reach it.
 3. **Write the full list first.** When both reports return, record every finding. Tag each

@@ -5,7 +5,7 @@ Run it from the repository root:
 
     python hooks/test_agent_brief.py
 
-Contract (the hook's own docstring). On each subagent start
+Contract (the hook's own docstring). On each agent start
 the hook prints one JSON object on stdout and exits 0:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": "<text>"}}
 - additionalContext holds the standing rules: a scope line that follows `agent_type` from the hook

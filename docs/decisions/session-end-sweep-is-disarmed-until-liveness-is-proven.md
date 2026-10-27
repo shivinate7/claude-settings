@@ -13,7 +13,7 @@ names this entry. A config that cannot be read is reported as unknown, never as 
 
 Reason: the sweep may run only where the liveness read is proven. The read answers alive, dead, or unreadable. Unreadable reaches the
 caller as `None`, and every caller keeps or refuses on `None`. A Windows job in `.github/workflows/gates.yml` runs the guard and sweep
-suites and their mutation harnesses.
+suites and their mutation tests.
 
 Kind: process
 Home: janitor/session_end_sweep.py

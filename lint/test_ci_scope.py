@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""CLI tests for the scope detector (.github/scripts/harness-scope.sh).
+"""CLI tests for the scope detector (.github/scripts/ci-scope.sh).
 
 Each case builds a scratch git repo, commits a base, commits the changed paths, runs the script
 with EVENT and BASE_SHA set, and reads the name=value lines it wrote to $GITHUB_OUTPUT.
-HARNESS_SCOPE overrides the script path (for a successor). Needs bash on PATH.
+CI_SCOPE overrides the script path (for a successor). Needs bash on PATH.
 
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per gate job except the lint job `gates`: gates_windows, gates_windows_merge,
              gates_windows_rest, gates_macos, shell_macos, pointer_windows
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot gates the whole gates-shoot job)
 
-Run with:  python3 lint/test_harness_scope.py -v
+Run with:  python3 lint/test_ci_scope.py -v
 """
 import os
 import shutil
@@ -19,7 +19,7 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.environ.get("HARNESS_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "harness-scope.sh")
+SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 ALL = JOB_FLAGS + STEP_FLAGS
@@ -89,7 +89,7 @@ class Scope(unittest.TestCase):
         got = run(["hooks/guard.py"])
         self.assertFlags(got, want_true=["gates_windows", "gates_macos", "guard", "sweep", "code"])
         # The selector's test
-        # and mutation harness also turn `guard` on. Named failure: the guard suite runs in no job.
+        # and mutation test also turn `guard` on. Named failure: the guard suite runs in no job.
         for p in ("hooks/test_guard.py", "hooks/mutate_guard.py"):
             with self.subTest(path=p):
                 self.assertFlags(run([p]), want_true=["guard"])
@@ -99,7 +99,7 @@ class Scope(unittest.TestCase):
         self.assertFlags(got, want_false=["pointer_windows", "shell_macos"])
 
     def test_workflow_or_scope_script_change_runs_everything(self):
-        for p in (".github/workflows/gates.yml", ".github/scripts/harness-scope.sh"):
+        for p in (".github/workflows/gates.yml", ".github/scripts/ci-scope.sh"):
             self.assertFlags(run([p]), want_true=ALL)
 
     def test_unmapped_path_runs_everything(self):
@@ -203,7 +203,7 @@ class Scope(unittest.TestCase):
                 self.assertEqual(run([p], existing=[p]), want)
 
     def test_shared_names_change_sets_the_same_flags_as_guard_py(self):
-        # guard_core.py and config_watch.py import it, so the guard harnesses must run on it.
+        # guard_core.py and config_watch.py import it, so the guard mutation tests must run on it.
         want = run(["hooks/guard.py"])
         self.assertEqual(run(["hooks/shared_names.py"]), want)
         self.assertEqual(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"]),
@@ -211,7 +211,7 @@ class Scope(unittest.TestCase):
 
     def test_git_reads_change_sets_the_same_flags_as_guard_py(self):
         # guard_core.py and the janitor's sweep.py and session_end_sweep.py import it, so the guard
-        # and sweep harnesses must run on it.
+        # and sweep mutation tests must run on it.
         want = run(["hooks/guard.py"])
         self.assertEqual(run(["hooks/git_reads.py"]), want)
         self.assertEqual(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"]),
@@ -297,7 +297,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p])), {"gates_windows", "shell_macos", "code", "guard"})
 
     # The rm shim suite also runs in gates-macos: BSD rm and the /var symlink change what the shim reads,
-    # and a Linux pass proves neither. harness-scope.sh maps bin/rm and the suite to that job ahead of
+    # and a Linux pass proves neither. ci-scope.sh maps bin/rm and the suite to that job ahead of
     # the lint/* rule, which sets `code` only, so a diff that names the suite alone still reaches it.
     def test_an_rm_shim_suite_change_turns_on_the_macos_job(self):
         self.assertFlags(run(["lint/test_rm_shim.py"], existing=["lint/test_rm_shim.py"]), want_true=["gates_macos", "code"])

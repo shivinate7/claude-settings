@@ -15,7 +15,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `CLAUDE.md` | Global working rules. A one-line `@` import in `~/.claude/CLAUDE.md` loads it. |
 | `settings.json` | Output style, env vars, hooks. It becomes `~/.claude/settings.json`. |
 | `landed-dirs.txt` | The folders that both installers land. |
-| `agents/` | The subagent roles, one file each. |
+| `agents/` | The agent roles, one file each. |
 | `hooks/` | The guard, the watches, and the other hook scripts. |
 | `lint/` | The Simplified Technical English linter, and the gates and checks that CI runs. |
 | `skills/` | The shipped skills, one folder each. |
@@ -95,7 +95,7 @@ with `/<sha>/`, or set `CLAUDE_SETTINGS_REF=<sha>` as an environment variable.
 ## How a change reaches you
 
 Edit a file here, commit, push, open a pull request against `main`. `.github/workflows/gates.yml`
-runs the guard fixture suite, its mutation harness, the STE lint, and the rest of the checks
+runs the guard fixture suite, its mutation test, the STE lint, and the rest of the checks
 named in that file. Merge only when you say so, or under a repo grant, per CLAUDE.md.
 
 Once merged:
@@ -192,7 +192,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
   The `SessionStart` hook the setup script installs re-fetches on every session, so this should
   self-heal. When it does not, check the environment's network access is not blocking the three
   hosts above.
-* **The subagent model cap needs a temporary raise.** See CLAUDE.md's Roles section and
+* **The agent model cap needs a temporary raise.** See CLAUDE.md's Roles section and
   `opus-grant-expires` for the guarded override and its required expiry field.
 * **Other repositories cannot use `actions/` after this repository becomes private.** Open
   Settings, then Actions, then General, then Access. Set "Accessible from repositories owned by
@@ -283,9 +283,9 @@ the roster, a brief and a role hand-off note. A repo adopts it only on the owner
   and removed each time; install-log lines only on a failure, plus the start and end lines of the
   helper and of the installer when they run. The install log's reader is the owner; no hook reads it. Case 34 of
   `merge/test_install_from_main.sh` proves the no-move cost: no log line, no installer, one fetch.
-* **Why subagents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
-  tool from every subagent, so only the main conversation fans out. A nested child's completion
-  notice can misroute. This stalls the subagent that launched it
+* **Why agents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
+  tool from every agent, so only the main conversation fans out. A nested child's completion
+  notice can misroute. This stalls the agent that launched it
   ([anthropics/claude-code#75043](https://github.com/anthropics/claude-code/issues/75043)). A
   repo that needs nesting raises the depth in its own `.claude/settings.json` and records the
   risk in its CLAUDE.md.

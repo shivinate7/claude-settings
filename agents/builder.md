@@ -42,19 +42,19 @@ time, for the test-author to re-point red then green. A test that pins a behavio
 ruled one is class (c). Carry this 4-class list in your report.
 
 You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
-If the task is too large for one worker, stop at a clean point and report PARTIAL with the
+If the task is too large for one agent, stop at a clean point and report PARTIAL with the
 split you propose. Never review your own work. The orchestrator sends a reviewer.
 
 Prove your change once: show the test-author's new cases green on your code. Run only the
 suites your change touches. Never run the full suites locally. When your lane changes a file a
-mutation harness targets, run that harness once through `verdict` before pushing.
+mutation test targets, run that mutation test once through `verdict` before pushing.
 One exception: in claude-settings, when your head touches lint/, hooks/ or actions/, fetch
 origin/main and run `ci-job gates --base origin/main` once before you report. This one full run
 replaces the touched-suites runs for that head, because another suite's fixture can copy the file
 you changed. It runs every step of the Linux gates job, each through `verdict`, and prints one
 verdict per step. The Windows and macOS jobs stay with CI. Report each FAIL and each unknown step.
 Never report an unknown step as a pass.
-Run PowerShell with the PowerShell tool, never powershell.exe from Bash (subagent-powershell-tool).
+Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run

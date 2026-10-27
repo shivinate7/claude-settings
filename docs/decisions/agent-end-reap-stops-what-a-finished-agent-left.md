@@ -7,13 +7,13 @@ Governing record: `unattended-sweep-stops-proven-orphans` (a sweep stops only pr
 
 ## The ruling
 
-The goal: when a subagent ends, each process it left under its own worktree stops. Nothing else
+The goal: when an agent ends, each process it left under its own worktree stops. Nothing else
 stops. When the worktree is removed is in `when-a-worktree-may-be-removed`.
 
 ### The sweep takes the deepest checkout
 
 `janitor/sweep.py` `_matching_checkout` returns the deepest checkout that holds the cwd, not the
-primary checkout. Reason: no session record names a subagent, so a running subagent's worktree reads as
+primary checkout. Reason: no session record names an agent, so a running agent's worktree reads as
 "not live".
 
 Owner ruling, 2026-09-27: the sweep skips each process whose cwd is under a `.claude/worktrees/*`

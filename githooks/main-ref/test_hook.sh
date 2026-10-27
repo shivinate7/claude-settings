@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Red proof in a scratch clone: each way to move main locally is refused; a pull of an origin
+# Red run in a scratch clone: each way to move main locally is refused; a pull of an origin
 # commit, a feature-branch commit and the escape hatch are allowed.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"

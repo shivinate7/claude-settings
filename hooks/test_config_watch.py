@@ -119,7 +119,7 @@ WATCH = os.environ.get("WATCH_UNDER_TEST") or os.path.join(HERE, "config_watch.p
 # that reads it.
 KEY = "CLAUDE_CODE_" + "SUBAGENT_MODEL"
 KEY_FORCE = KEY + "_FORCE"
-EXPIRY_FIELD = "_subagentCapUntil"
+EXPIRY_FIELD = "_agentCapUntil"
 
 
 def _iso(hours_from_now: float) -> str:
@@ -132,13 +132,13 @@ PASSED_UNTIL = _iso(-1)   # one hour ago: expired
 TOO_FAR_UNTIL = _iso(48)  # two days ahead: over the 24-hour ceiling
 
 # TEST_CLOCK_ENV must match `config_watch.TEST_CLOCK_ENV`. It is the only way a fixture can put
-# `_subagentCapUntil` EXACTLY on the 24-hour boundary: `datetime.now()` called once to build the
+# `_agentCapUntil` EXACTLY on the 24-hour boundary: `datetime.now()` called once to build the
 # fixture and once more, later, inside `expiry_problem`, are never the same instant on their own,
 # so the watch under test must read a clock the fixture also controls.
 TEST_CLOCK_ENV = "CONFIG_WATCH_TEST_CLOCK"
 
 # One fixed instant, seconds only (no microseconds, so formatting and re-parsing round-trips
-# exactly), that every boundary case below both builds its `_subagentCapUntil` from and pins as
+# exactly), that every boundary case below both builds its `_agentCapUntil` from and pins as
 # the watch's own clock. Same reference on both sides: the boundary is exact, not approximate.
 REFERENCE_NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -174,9 +174,9 @@ def cap_json(model=None, force=None, until=None, extra=None):
 
 
 def cap_json_until_in_env(model, force, until):
-    """Build one settings.local.json body with `_subagentCapUntil` mis-typed INSIDE `env`.
+    """Build one settings.local.json body with `_agentCapUntil` mis-typed INSIDE `env`.
 
-    The mistake this tests: an owner reaching for `_subagentCapUntil` types it next to the
+    The mistake this tests: an owner reaching for `_agentCapUntil` types it next to the
     keys it is meant to bound. The message must say where it belongs, not read it as absent.
     """
     return json.dumps({"env": {KEY: model, KEY_FORCE: force, EXPIRY_FIELD: until}})
@@ -448,9 +448,9 @@ def empty_then_absent(project):
 
 # --------------------------------------------------------------------------- the expiry
 #
-# `_subagentCapUntil` only matters once a lift is APPROVED: an unasked write is reverted for being
+# `_agentCapUntil` only matters once a lift is APPROVED: an unasked write is reverted for being
 # unasked, before the expiry rule ever runs. So every case here goes through the approved-Write
-# path, the same shape `approved_write` above uses, and differs only in what `_subagentCapUntil`
+# path, the same shape `approved_write` above uses, and differs only in what `_agentCapUntil`
 # says.
 
 
@@ -491,21 +491,25 @@ def chain_case(name):
     return run_case
 
 
-approved_case("an approved lift with a missing _subagentCapUntil is revoked",
+approved_case("an approved lift with a missing _agentCapUntil is revoked",
               cap_json(model="opus", force="1"), "bad")
-approved_case("an approved lift with an unparseable _subagentCapUntil is revoked",
+approved_case("an approved lift with an unparseable _agentCapUntil is revoked",
               cap_json(model="opus", force="1", until="not-a-time"), "bad")
-approved_case("an approved lift with _subagentCapUntil more than 24h ahead is revoked",
+approved_case("an approved lift with _agentCapUntil more than 24h ahead is revoked",
               cap_json(model="opus", force="1", until=TOO_FAR_UNTIL), "bad")
-approved_case("an approved lift with _subagentCapUntil already passed is revoked",
+approved_case("an approved lift with _agentCapUntil already passed is revoked",
               cap_json(model="opus", force="1", until=PASSED_UNTIL), "bad")
-approved_case("an approved lift with a valid, current _subagentCapUntil is NOT reverted, "
+approved_case("an approved lift with a valid, current _agentCapUntil is NOT reverted, "
               "and stays silent", cap_json(model="opus", force="1", until=VALID_UNTIL), "valid")
-approved_case("a file with no lift above Sonnet and a stray _subagentCapUntil does nothing",
+approved_case("a file with no lift above Sonnet and a stray _agentCapUntil does nothing",
               cap_json(model="sonnet", force="1", until=VALID_UNTIL), "nocap")
-approved_case("an approved lift with _subagentCapUntil misplaced inside env is revoked, "
+approved_case("an approved lift with _agentCapUntil misplaced inside env is revoked, "
               "and says where it belongs",
               cap_json_until_in_env("opus", "1", VALID_UNTIL), "wrong_place")
+# The field's old name is read until its end day, so a deadline written before the rename counts.
+approved_case("an approved lift with a valid, current _subagentCapUntil (the old name) is NOT "
+              "reverted", cap_json(model="opus", force="1", extra={"_subagentCapUntil": VALID_UNTIL}),
+              "valid")
 
 chain_case("a second approved lift keeps the ORIGINAL pre-lift content as prior, so a later "
            "revert never installs the first lift's own content")
@@ -513,23 +517,23 @@ chain_case("a second approved lift keeps the ORIGINAL pre-lift content as prior,
 # The 24-hour boundary, pinned exactly with TEST_CLOCK_ENV (see REFERENCE_NOW above). The code
 # accepts a deadline AT the ceiling and AT the deadline instant itself: both `ahead > 24h` and
 # `ahead < 0` are strict, so `ahead == 86400` and `ahead == 0` both read as "no problem".
-approved_case("an approved lift with _subagentCapUntil exactly 24 hours ahead is accepted "
+approved_case("an approved lift with _agentCapUntil exactly 24 hours ahead is accepted "
               "(the ceiling is inclusive)",
               cap_json(model="opus", force="1", until=BOUNDARY_24H_UNTIL), "valid",
               clock=CLOCK_AT_REFERENCE)
-approved_case("an approved lift with _subagentCapUntil one second inside the 24h bound is "
+approved_case("an approved lift with _agentCapUntil one second inside the 24h bound is "
               "accepted",
               cap_json(model="opus", force="1", until=BOUNDARY_INSIDE_UNTIL), "valid",
               clock=CLOCK_AT_REFERENCE)
-approved_case("an approved lift with _subagentCapUntil one second outside the 24h bound is "
+approved_case("an approved lift with _agentCapUntil one second outside the 24h bound is "
               "revoked",
               cap_json(model="opus", force="1", until=BOUNDARY_OUTSIDE_UNTIL), "bad",
               clock=CLOCK_AT_REFERENCE)
-approved_case("an approved lift with _subagentCapUntil exactly at the deadline instant is "
+approved_case("an approved lift with _agentCapUntil exactly at the deadline instant is "
               "accepted (not yet passed)",
               cap_json(model="opus", force="1", until=BOUNDARY_AT_DEADLINE_UNTIL), "valid",
               clock=CLOCK_AT_REFERENCE)
-approved_case("an approved lift with _subagentCapUntil one second past the deadline is revoked",
+approved_case("an approved lift with _agentCapUntil one second past the deadline is revoked",
               cap_json(model="opus", force="1", until=BOUNDARY_PAST_UNTIL), "bad",
               clock=CLOCK_AT_REFERENCE)
 

@@ -187,21 +187,21 @@ MUTATIONS = [
      'worktree prune: a stale record asks, never denies'),
     ("worktree-prune: never asks, so a dropped record is silent",
      '        if subcommand == "worktree-prune":\n'
-     '            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")',
+     '            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")',
      '        if False:\n'
-     '            ask_step("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")', "guard",
+     '            ask_command("shared-tree", WORKTREE_PRUNE_ASK_REASON, matched, "worktree prune")', "guard",
      'worktree prune: a stale record asks, never denies'),
-    ("ask-alone: a chained ask step asks instead of denying",
-     '    if count_steps(text) > 1:',
+    ("ask-alone: a chained ask command asks instead of denying",
+     '    if count_commands(text) > 1:',
      '    if False:', "guard",
      'ask-alone: the incident, prune then worktree add then grep, denies and names the prune'),
-    ("ask-alone: background_steps reads no quotes, so a & inside a quoted value splits",
+    ("ask-alone: background_commands reads no quotes, so a & inside a quoted value splits",
      '            quote = char\n        elif char == "&"',
      '            quote = ""\n        elif char == "&"', "guard",
-     'ask-alone: a single & inside a quoted cap value is one step, so it asks'),
-    ("ask-alone: count_steps ignores the steps inside an inline bash -c script",
-     '        if script:\n            steps += count_steps(script) - 1',
-     '        if False:\n            steps += count_steps(script) - 1', "guard",
+     'ask-alone: a single & inside a quoted cap value is one command, so it asks'),
+    ("ask-alone: count_commands ignores the commands inside an inline bash -c script",
+     '        if script:\n            commands += count_commands(script) - 1',
+     '        if False:\n            commands += count_commands(script) - 1', "guard",
      'ask-alone: W after echo inside bash -c with double quotes denies'),
     ("worktree-prune: the call's own -n no longer reads as a pure read",
      '                if any(a in ("-n", "--dry-run") for a in args[1:]):\n'
@@ -353,10 +353,10 @@ MUTATIONS = [
      '        return entries is not None and any(entry == want for entry in entries)',
      '        return entries is not None and any(want in entry for entry in entries)',
      "guard", 'kill: a PPID-1 pid whose session id entry has a suffix', "posix"),
-    ("machine-wide-kill: a subagent call owns a pid by the shared session tag",
-     'foreign_pid_kill(tokens, transcript, "" if subagent else session_id)',
+    ("machine-wide-kill: an agent call owns a pid by the shared session tag",
+     'foreign_pid_kill(tokens, transcript, "" if agent else session_id)',
      'foreign_pid_kill(tokens, transcript, session_id)',
-     "guard", 'called by a subagent (agent_id only)', "posix"),
+     "guard", 'called by an agent (agent_id only)', "posix"),
     ("machine-wide-kill: pids 0, 1, -1 wait for the session root, so they pass when it is unknown",
      '        if number in (0, 1, -1):', '        if False:', "guard",
      'kill: init with the root unknown'),
@@ -706,7 +706,7 @@ MUTATIONS = [
      '    worktree = "--worktree" in args or "-W" in args\n'
      '    return worktree or not staged',
      '    return True', "guard", 'restore: staged alone only touches the index'),
-    # Added: the subagent model cap (rule 8, PR #42). These are the mutations its builder ran by hand
+    # Added: the agent model cap (rule 8, PR #42). These are the mutations its builder ran by hand
     # on `.bak` copies, now in CI. Each one undoes one thing the review made the rule do, so a later
     # edit that redoes it goes red here.
     ("cap: the edit-count cap comes back, so 200 no-op edits hide a lift",
@@ -732,7 +732,7 @@ MUTATIONS = [
      '    clean = CAP_CONTROL.sub(" ", text or "")',
      '    return text or ""\n    clean = CAP_CONTROL.sub(" ", text or "")', "guard", 'cap: a very long model value is cut and the cut is marked'),
     ("cap: the bare-key pass is gone, so an unreadable value walks past",
-     '    for found in SUBAGENT_CAP_KEY.finditer(text):\n'
+     '    for found in AGENT_CAP_KEY.finditer(text):\n'
      '        reading.setdefault(found.group(0), "")',
      '    for found in ():\n'
      '        reading.setdefault(found.group(0), "")', "guard", 'cap: a value the pattern cannot read still asks'),
@@ -742,7 +742,7 @@ MUTATIONS = [
      '        if is_settings_file(target, cwd):\n'
      '            change = cap_change_parts(write_content_parts(tool_input))\n'
      '            if change:\n'
-     '                refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, target),\n'
+     '                refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),\n'
      '                       target + " " + change)\n'
      '        if is_frozen(target, cwd):\n'
      '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
@@ -755,7 +755,7 @@ MUTATIONS = [
      '    if matched:\n'
      '        change = cap_change(raw)\n'
      '        if change:\n'
-     '            refuse(tool, "ask", "subagent-model-cap", cap_ask_reason(change, matched),\n'
+     '            refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, matched),\n'
      '                   matched + " " + change)\n'
      '    matched = frozen_shell_hit(stripped, cwd)\n'
      '    if matched:\n'
@@ -941,7 +941,7 @@ MUTATIONS = [
     ("watch: the 24-hour bound is negated, so even a one-hour deadline reads as too far ahead",
      '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
      '    if ahead > -(EXPIRY_MAX_AHEAD_HOURS * 3600):', "watch",
-     'a valid, current _subagentCapUntil is NOT reverted'),
+     'a valid, current _agentCapUntil is NOT reverted'),
     ("watch: the passed-deadline test is inverted, so an expired deadline reads as current",
      '    if ahead < 0:\n        return "already passed"',
      '    if ahead > 0:\n        return "already passed"', "watch",
@@ -949,7 +949,7 @@ MUTATIONS = [
     ("watch: the missing-expiry branch is turned off, so a lift with no deadline survives",
      '    if where is None:\n        return "missing"',
      '    if False:\n        return "missing"', "watch",
-     'a missing _subagentCapUntil is revoked'),
+     'a missing _agentCapUntil is revoked'),
     ("watch: next_prior carries the first lift's own content forward, so a later revert "
      "installs an override instead of the true baseline",
      '    if cap_lift_value(was):\n        return baseline.get("prior")',
@@ -958,8 +958,8 @@ MUTATIONS = [
 
     # ---- the 24-hour boundary itself, added 2026-09-20 (round 3). `expiry_problem` now takes
     # an injectable `clock`, so `hooks/test_config_watch.py`'s boundary cases can pin a
-    # fixture's `_subagentCapUntil` and the watch's own "now" to the SAME instant, and an
-    # off-by-one at the exact edge is no longer invisible to this harness.
+    # fixture's `_agentCapUntil` and the watch's own "now" to the SAME instant, and an
+    # off-by-one at the exact edge is no longer invisible to this mutation test.
     ("watch: the too-far-ahead check admits its own edge, so a deadline exactly 24h out is "
      "wrongly revoked",
      '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
@@ -1158,8 +1158,8 @@ MUTATIONS = [
      '    for target in targets[:1]:\n        # 0b.',
      "guard", "gap-control: NotebookEdit main session, an ordinary file_path beside notebook_path"),
     ("settings-cap ask loop judges only the first path field",
-     '    for target in targets:\n        # 8. The subagent model cap.',
-     '    for target in targets[:1]:\n        # 8. The subagent model cap.',
+     '    for target in targets:\n        # 8. The agent model cap.',
+     '    for target in targets[:1]:\n        # 8. The agent model cap.',
      "guard", "gap: NotebookEdit, settings cap in notebook_path beside file_path=docs/x.ipynb still asks"),
 
     # ---- the three git acts: context for a write, the merge gate, and cite by id. Each mutant breaks
@@ -1373,9 +1373,9 @@ MUTATIONS = [
     ("test-author: test config is not its own",
      '    return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES',
      '    return (is_test_rel(rel) or basename(rel) in AUTHOR_BASENAMES', "guard", "test-author: Edit of pytest.ini is allowed"),
-    ("test-author: a mutation harness is not its own",
-     '            or norm(rel).lstrip("/").lower() in AUTHOR_HARNESS)', '            or False)', "guard",
-     "test-author: Edit of mutation harness hooks/mutate_guard.py is allowed"),
+    ("test-author: a mutation test is not its own",
+     '            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)', '            or False)', "guard",
+     "test-author: Edit of mutation test hooks/mutate_guard.py is allowed"),
     ("role-diff: the builder reason drops the remedy",
      '"report. The orchestrator assigns it to a test-author."', '"report."', "guard",
      "builder-test: Write of a test file is refused"),

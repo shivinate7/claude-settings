@@ -35,7 +35,7 @@ Part 2, hooks/reread_check.py (new file):
                  Clears the flag when the path names this session's handoff, in any spelling:
                  full path, forward slashes (Windows only), 8.3 short name (Windows only),
                  long name, or `~/.claude/...`. It never denies the read: exit 0 and no deny or
-                 block in stdout. A payload with `agent_id` (the hook fired inside a subagent)
+                 block in stdout. A payload with `agent_id` (the hook fired inside an agent)
                  clears nothing: only the session's own Read counts.
   --stop         (Stop; session_id, stop_hook_active, cwd). With the flag set, stop_hook_active
                  false, and the handoff file present, prints {"decision": "block", "reason": ...},
@@ -698,11 +698,11 @@ def case_read_of_other_file_keeps_flag():
         c.cleanup()
 
 
-def case_subagent_read_keeps_flag():
-    """A Read inside a subagent carries agent_id. It must not clear the main session's flag:
-    the subagent is not the session that has to re-read its handoff. The session's own Read,
-    after the subagent's, still clears it (positive twin, same session)."""
-    check("subagent read keeps flag: live control, a flagged session blocks", live_ok())
+def case_agent_read_keeps_flag():
+    """A Read inside an agent carries agent_id. It must not clear the main session's flag:
+    the agent is not the session that has to re-read its handoff. The session's own Read,
+    after the agent's, still clears it (positive twin, same session)."""
+    check("agent read keeps flag: live control, a flagged session blocks", live_ok())
     c = Case("subread")
     try:
         c.seed_handoff("sub-1")
@@ -710,10 +710,10 @@ def case_subagent_read_keeps_flag():
         inside = {"agent_id": "agent-abc123", "agent_type": "question-reviewer"}
         for label in ("full path", "tilde"):
             rd = c.read("sub-1", spell(c, "sub-1", label), extra=inside)
-            check("subagent read by %s: the read is not denied" % label, read_allowed(rd),
+            check("agent read by %s: the read is not denied" % label, read_allowed(rd),
                   "rc=%r out=%r" % (rd.returncode, tail(rd.stdout)))
         stop = c.stop("sub-1")
-        check("subagent reads of the handoff keep the flag: the next Stop blocks",
+        check("agent reads of the handoff keep the flag: the next Stop blocks",
               blocks(c, stop, "sub-1"), "rc=%r out=%r" % (stop.returncode, tail(stop.stdout)))
         c.read("sub-1", c.handoff("sub-1"))
         check("the session's own Read after them clears the flag: the next Stop passes",
@@ -1059,7 +1059,7 @@ def main() -> int:
     case_read_by_8dot3_spelling_clears_flag()
     case_read_of_handoff_clears_flag()
     case_read_of_other_file_keeps_flag()
-    case_subagent_read_keeps_flag()
+    case_agent_read_keeps_flag()
     case_stop_hook_active_passes()
     case_stop_no_flag_passes()
     case_sibling_import_failure_exits_zero()

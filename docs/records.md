@@ -21,7 +21,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-solo-reviews-logic-diffs-only` | In solo, a fresh reviewer reads the diff before merge only when it touches a rule's behaviour, a gate's verdict, or program logic. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-solo-grows-switch-to-orchestrate` | If a solo job grows, switch to orchestrate and say so in one line. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-orchestrator-never-builds` | Orchestrate: every other job. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-one-role-per-worker` | Each worker is one role: builder, reviewer, designer, design reviewer, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-one-role-per-agent` | Each agent is one role: builder, reviewer, designer, design reviewer, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-default` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, and a builder's third try (`roles-third-try-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -32,7 +32,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-holes-are-debts` | A known gap is a debt only if Claude is likely to hit it in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-third-try-steps-up` | Third try: Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-resume-by-name` | Resume a dead agent by name, never fresh. | [`CLAUDE.md`](../CLAUDE.md) |
-| `parallelism-each-own-checkout` | Fan tasks out to workers now, each in its own checkout. | [`CLAUDE.md`](../CLAUDE.md) |
+| `parallelism-each-own-checkout` | Fan tasks out to agents now, each in its own checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-own-lane-orchestrator` | A read-only workflow agent shares the caller's checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-no-mid-task-talk` | Never let lanes talk mid-task. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-argue-max-parallelism` | Argue "at max parallelism" by naming the open lanes, never by assuming the claim. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -70,7 +70,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `tokens-verdict-not-stream` | A verification command's answer is its verdict, not its stream. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-run-through-verdict` | Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-point-brief-at-files` | Point a brief at files. | [`CLAUDE.md`](../CLAUDE.md) |
-| `tokens-read-report-not-transcript` | Read a sub-agent's report, never its transcript. | [`CLAUDE.md`](../CLAUDE.md) |
+| `tokens-read-report-not-transcript` | Read an agent's report, never its transcript. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-compacting-keep-essentials` | When compacting, keep the files, the commands, each ruling's home, and the pid and port of each server still running. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-folder-rules-load-by-path` | Move a CLAUDE.md section that matters only under one folder to a path-scoped rule. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-never-guess-answer` | Never guess an answer the code should give you. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -95,7 +95,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `questions-go-to-owner` | Bring each question to me. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-order-of-labels` | Done, Deviations, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-format` | Done: one line per item, BUILT, RECORDED, or OTHER. | [`CLAUDE.md`](../CLAUDE.md) |
-| `reports-done-names-models` | A Done item that subagents built or reviewed names each one's role and model, such as "(builder sonnet, reviewer sonnet)". | [`CLAUDE.md`](../CLAUDE.md) |
+| `reports-done-names-models` | A Done item that agents built or reviewed names each one's role and model, such as "(builder sonnet, reviewer sonnet)". | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-drop-unused-label` | Drop a label that does not apply. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-name-unstarted-items` | An orchestrator's report holds an `Unstarted:` line under Next: each queued item with every question answered that it left unstarted, with its reason, or `none`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-no-report-when-nothing-landed` | No report when nothing landed. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -110,11 +110,13 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `a-kill-by-pid-needs-an-owned-pid` | Rule `shared-trees-no-machine-wide-kill` says to kill only your own processes. | [`docs/decisions/a-kill-by-pid-needs-an-owned-pid.md`](../docs/decisions/a-kill-by-pid-needs-an-owned-pid.md) |
 | `action-pins-follow-sessions` | Owner, 2026-10-26 (gripe on the degen Duo batch): "doesn't this just mean CI is old? | [`docs/decisions/action-pins-follow-sessions.md`](../docs/decisions/action-pins-follow-sessions.md) |
 | `adoptions-declined-2026-09-28` | The owner declined each candidate below. | [`docs/decisions/adoptions-declined-2026-09-28.md`](../docs/decisions/adoptions-declined-2026-09-28.md) |
-| `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when a subagent ends, each process it left under its own worktree stops. | [`docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
+| `agent-end-reap-stops-what-a-finished-agent-left` | The goal: when an agent ends, each process it left under its own worktree stops. | [`docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md`](../docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md) |
+| `agent-model-cap` | Each agent role has its own model and effort, in the table below. | [`docs/decisions/agent-model-cap.md`](../docs/decisions/agent-model-cap.md) |
+| `agent-powershell-tool` | With Claude Code's PowerShell tool. | [`docs/decisions/agent-powershell-tool.md`](../docs/decisions/agent-powershell-tool.md) |
 | `agent-worktree-discard-is-noted` | Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands). | [`docs/decisions/agent-worktree-discard-is-noted.md`](../docs/decisions/agent-worktree-discard-is-noted.md) |
 | `agents-wait-with-monitor` | Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-once tool, is allowed. | [`docs/decisions/agents-wait-with-monitor.md`](../docs/decisions/agents-wait-with-monitor.md) |
 | `archived-branch-delete-allowed` | The installed settings carry one auto-mode allow entry, "Archived Branch Delete". | [`docs/decisions/archived-branch-delete-allowed.md`](../docs/decisions/archived-branch-delete-allowed.md) |
-| `ask-steps-run-alone` | An agent never chains a step that needs the owner's answer onto other steps in one command (owner, 2026-10-14). | [`docs/decisions/ask-steps-run-alone.md`](../docs/decisions/ask-steps-run-alone.md) |
+| `ask-commands-run-alone` | An agent never chains a command that needs the owner's answer onto other commands in one shell call (owner, 2026-10-14). | [`docs/decisions/ask-commands-run-alone.md`](../docs/decisions/ask-commands-run-alone.md) |
 | `audit-rework-order` | Owner, 2026-10-16 10:50 CDT. | [`docs/decisions/audit-rework-order.md`](../docs/decisions/audit-rework-order.md) |
 | `background-needs-end-note` | Owner, 2026-10-13 23:41 CDT: "End condition at start." | [`docs/decisions/background-needs-end-note.md`](../docs/decisions/background-needs-end-note.md) |
 | `bare-bash-on-windows-can-resolve-to-the-wsl-stub` | Python code on Windows never hands `subprocess.run` a bare `"bash"` or `"gh"`. | [`docs/decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md`](../docs/decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md) |
@@ -162,8 +164,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`docs/decisions/mods-no-cli-key-headless.md`](../docs/decisions/mods-no-cli-key-headless.md) |
 | `one-layout-every-repo` | Every repo keeps each kind of file in the same place. | [`docs/decisions/one-layout-every-repo.md`](../docs/decisions/one-layout-every-repo.md) |
 | `one-shared-record-stamp` | One shared parser in claude-settings handles every repo's record format. | [`docs/decisions/one-shared-record-stamp.md`](../docs/decisions/one-shared-record-stamp.md) |
-| `opt-in-ci-templates-composite` | Six templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no workflow step. | [`docs/decisions/opt-in-ci-templates-composite.md`](../docs/decisions/opt-in-ci-templates-composite.md) |
-| `opus-grant-expires` | An Opus worker is enabled for one repository, on the owner's word in chat (`roles-opus-override-guarded`). | [`docs/decisions/opus-grant-expires.md`](../docs/decisions/opus-grant-expires.md) |
+| `opt-in-ci-templates-composite` | Six templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no CI step. | [`docs/decisions/opt-in-ci-templates-composite.md`](../docs/decisions/opt-in-ci-templates-composite.md) |
+| `opus-grant-expires` | An Opus agent is enabled for one repository, on the owner's word in chat (`roles-opus-override-guarded`). | [`docs/decisions/opus-grant-expires.md`](../docs/decisions/opus-grant-expires.md) |
 | `owner-feedback-inbox` | When the owner opens a feedback burst, a hook writes each message to a per-session inbox. | [`docs/decisions/owner-feedback-inbox.md`](../docs/decisions/owner-feedback-inbox.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |
 | `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`docs/decisions/playwright-browsers-path.md`](../docs/decisions/playwright-browsers-path.md) |
@@ -192,8 +194,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stash-stack-is-a-shared-subject` | CLAUDE.md says: "A stash entry belongs to no branch." The guard reads `git stash` against the whole stack, not only the working tree. | [`docs/decisions/stash-stack-is-a-shared-subject.md`](../docs/decisions/stash-stack-is-a-shared-subject.md) |
 | `ste-gate-fixes-not-nags` | Owner, 2026-10-22 10:10 CDT: `settings.json` wires no STE write gate (`ste_gate.py`) and no markdown sweep (`md_sweep.py`). | [`docs/decisions/ste-gate-fixes-not-nags.md`](../docs/decisions/ste-gate-fixes-not-nags.md) |
 | `stop-guardrail-became-a-command-hook` | The Stop guardrail is never a `type: agent` hook. | [`docs/decisions/stop-guardrail-became-a-command-hook.md`](../docs/decisions/stop-guardrail-became-a-command-hook.md) |
-| `subagent-model-cap` | Each agent role has its own model and effort, in the table below. | [`docs/decisions/subagent-model-cap.md`](../docs/decisions/subagent-model-cap.md) |
-| `subagent-powershell-tool` | With Claude Code's PowerShell tool. | [`docs/decisions/subagent-powershell-tool.md`](../docs/decisions/subagent-powershell-tool.md) |
 | `sweep-shuts-down-idle-simulators` | Sessions boot simulators. The sweep stops idle ones. | [`docs/decisions/sweep-shuts-down-idle-simulators.md`](../docs/decisions/sweep-shuts-down-idle-simulators.md) |
 | `test-strategy-reset` | A test must not fail on runner speed. | [`docs/decisions/test-strategy-reset.md`](../docs/decisions/test-strategy-reset.md) |
 | `test-temp-standard` | Each test run writes temp files only in its own run folder, under one temp root per repo, and removes that folder at teardown. | [`docs/decisions/test-temp-standard.md`](../docs/decisions/test-temp-standard.md) |
@@ -246,7 +246,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ff-first-lane-not-a-tip` | `lane_tips` reads merge commits only. | [`docs/debts/ff-first-lane-not-a-tip.md`](../docs/debts/ff-first-lane-not-a-tip.md) |
 | `finished-agent-shells-keep-tree` | A finished agent's own shells, such as a dev server, have the live host as parent. | [`docs/debts/finished-agent-shells-keep-tree.md`](../docs/debts/finished-agent-shells-keep-tree.md) |
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`docs/debts/gates-job-near-timeout.md`](../docs/debts/gates-job-near-timeout.md) |
-| `gitignore-skips-map-tests` | `harness-scope.sh` turns on only `code` for a `.gitignore` change. | [`docs/debts/gitignore-skips-map-tests.md`](../docs/debts/gitignore-skips-map-tests.md) |
+| `gitignore-skips-map-tests` | `ci-scope.sh` turns on only `code` for a `.gitignore` change. | [`docs/debts/gitignore-skips-map-tests.md`](../docs/debts/gitignore-skips-map-tests.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
