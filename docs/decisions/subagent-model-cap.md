@@ -42,6 +42,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | skill `ci-hygiene` | no model pin; runs on the caller's model | none |
 | skill `compliance-check` | no model pin; runs on the caller's model | none |
 | skill `design-review` | no model pin; runs on the caller's model | none |
+| skill `design-explore` | no model pin; runs on the caller's model | none |
 | skill `fresh-prose` | no model pin; runs on the caller's model | none |
 | skill `impeccable` | no model pin; runs on the caller's model | none |
 | skill `plain-english-map` | no model pin; runs on the caller's model | none |
