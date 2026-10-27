@@ -582,6 +582,12 @@
         "reason": "Judged by hooks/reply_judge.py, an async Stop command hook that calls Haiku at xhigh and returns a finding as a note on the next turn, per reply-judge-samples-never-refuses; it moves to a mechanism after the hook makes a real catch."
       }
     },
+    "style-limits-kept-silently": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Whether a reply narrates a limit kept or a check passed, or names one because it blocked the work or changed the plan, is a content judgment. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) notes a breach."
+      }
+    },
     "style-simple-answer-short": {
       "mechanism": {
         "kind": "judgment",
