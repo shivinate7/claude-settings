@@ -394,11 +394,15 @@ def unstarted_problem(text, spawned):
 # `:`, `)` or a "(my pick)" / "(recommended)" tag. Once a letter carries such a tag, another bare
 # capital letter A to F counts too, so "A (my pick) ... B ..." reads as two options. One marker alone
 # ("You picked A on Oct 26") is a quoted answer, never a pick.
-OPTION_LINE_RE = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?([A-F](?=[:).]|\s*\()|\d{1,2}(?=[.)]))", re.M)
+OPTION_LINE_RE = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?([A-F])(?=[:).]|\s*\()", re.M)
 OPTION_INLINE_RE = re.compile(r"(?<![\w'(])([A-F])(?::|\))")
 OPTION_TAG_RE = re.compile(r"(?<![\w'])([A-F])\s*\((?i:my pick|recommended|pick)\)")
 OPTION_BARE_RE = re.compile(r"(?<![\w'(])([A-F])(?![\w'.])")
-OPTION_OR_RE = re.compile(r"(?<![\w'])[A-Z] or [A-Z](?![\w'])")
+OPTION_OR_RE = re.compile(r"(?<![\w'])[A-F] or [A-F](?![\w'])")
+# Numbered items are often separate asks, and "A or B" is often plain text, so both count only
+# with pick context: a tag, a lettered marker, or one of these words in the same item.
+OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.M)
+PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
 ASK_TOOL = "AskUserQuestion"
 DATA_TOOL = "ArtifactData"
 WAITING_COLLECTION = "items"
@@ -431,15 +435,18 @@ def offers_a_pick(text):
     section = input_needed_section(text)
     if not section.strip():
         return False
-    if OPTION_OR_RE.search(section):
-        return True
-    options = set(OPTION_LINE_RE.findall(section))
-    options |= set(OPTION_INLINE_RE.findall(section))
+    letters = set(OPTION_LINE_RE.findall(section)) | set(OPTION_INLINE_RE.findall(section))
     tagged = set(OPTION_TAG_RE.findall(section))
-    options |= tagged
+    letters |= tagged
     if tagged:
-        options |= set(OPTION_BARE_RE.findall(section))
-    return len(options) >= 2
+        letters |= set(OPTION_BARE_RE.findall(section))
+    if len(letters) >= 2:
+        return True
+    numbers = set(OPTION_NUM_RE.findall(section))
+    context = bool(tagged or letters or PICK_WORD_RE.search(section))
+    if OPTION_OR_RE.search(section) and (context or numbers):
+        return True
+    return len(numbers) >= 2 and context
 
 
 def repo_root(cwd):
@@ -452,6 +459,14 @@ def repo_root(cwd):
         if parent == here:
             return None
         here = parent
+
+
+def writes_waiting_item(inp):
+    """True when an ArtifactData call sets or updates a document in the waiting collection."""
+    if inp.get("action") == "batch":
+        return any(isinstance(w, dict) and w.get("op") in ("set", "update")
+                   and w.get("collection") == WAITING_COLLECTION for w in inp.get("writes") or [])
+    return inp.get("action") in ("set", "update") and inp.get("collection") == WAITING_COLLECTION
 
 
 def pick_has_a_control(records, text, cwd):
@@ -468,7 +483,7 @@ def pick_has_a_control(records, text, cwd):
             if name != DATA_TOOL:
                 continue
             inp = b.get("input") or {}
-            if inp.get("action") != "set" or inp.get("collection") != WAITING_COLLECTION:
+            if not writes_waiting_item(inp):
                 continue
             if page is None:
                 root = repo_root(cwd)

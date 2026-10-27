@@ -1031,7 +1031,9 @@ class PickGateTests(unittest.TestCase):
     def test_pk_red_option_forms_block(self):
         rows = [
             "> **Input Needed** A or B: fold it or add a hook?",
-            "> **Input Needed**\n> 1. fold the gate\n> 2. add a hook",
+            "> **Input Needed** Two ways:\n> 1. fold the gate\n> 2. add a hook",
+            "> **Input Needed** Two ways: 1. stack them (my pick). 2. one per file.",
+            "> **Input Needed** Is it A or B? A (my pick) keeps the hook.",
             "> **Input Needed**\n> A) fold it\n> B) add a hook",
             "> **Input Needed** Two ways: A (my pick) fold it. B add a hook.",
         ]
@@ -1062,6 +1064,16 @@ class PickGateTests(unittest.TestCase):
         self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=bare))
 
+    def test_pk_green_update_and_batch_writes_pass(self):
+        batch = ("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
+            {"op": "set", "collection": "items", "doc_id": "q1", "data": {}}]}, False)
+        other = ("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
+            {"op": "set", "collection": "notes", "doc_id": "q1", "data": {}}]}, False)
+        reply = self.PICK + "\n" + self.PAGE
+        self.assertIsNone(self.verdict(reply, [self.page_set(action="update")]))
+        self.assertIsNone(self.verdict(reply, [batch]))
+        self.assertIsNotNone(self.verdict(reply, [other]))
+
     def test_pk_green_controls_pass(self):
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)]))
         self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE, [self.page_set()]))
@@ -1075,6 +1087,13 @@ class PickGateTests(unittest.TestCase):
             "> **Done** OTHER read it\n> **Input Needed** A decision is open. B was the old plan.",
             # Catches: options outside Input Needed read as a pick.
             "> **Done** OTHER two ways: A (my pick) or B\n> **Next**\n> 1. one\n> 2. two",
+            # Catches: "X or Y" in a plain ask read as a pick.
+            "> **Done** OTHER read it\n> **Input Needed** Does Q or A mode apply?",
+            "> **Done** OTHER read it\n> **Input Needed** Rename I or U in the code?",
+            "> **Done** OTHER read it\n> **Input Needed** Is X or Y the field?",
+            "> **Done** OTHER read it\n> **Input Needed** Is A or B the field?",
+            # Catches: numbered separate asks read as options.
+            "> **Done** OTHER read it\n> **Input Needed**\n> 1. Approve the cap raise.\n> 2. Confirm the date.",
             # No Input Needed label.
             "> **Done** OTHER read it\n> **Next** wait",
             "plain prose with A or B in it",
