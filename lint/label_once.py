@@ -54,7 +54,7 @@ class Labels(HTMLParser):
     def handle_data(self, data):
         if any(skips for _, skips in self.stack):
             return
-        words = COUNT.sub("", data.strip()).rstrip(":").split()
+        words = COUNT.sub("", data.strip().rstrip(":")).rstrip(":").split()
         if not 1 <= len(words) <= MAX_WORDS or not all(WORD.fullmatch(w) for w in words):
             return
         if len(words) == 1 and len(words[0]) < 2:

@@ -48,10 +48,10 @@ class LabelOnce(unittest.TestCase):
         self.assertIn('"blocking" shows 3 times', out)
 
     def test_counts_and_colons_are_the_same_label(self):
-        page = "<main><h2>Upcoming</h2><span>Upcoming (3)</span><span>upcoming</span><b>2</b><p>Upcoming:</p></main>"
+        page = "<main><h2>Upcoming</h2><span>Upcoming (3)</span><span>upcoming</span><b>2</b><p>Upcoming:</p><i>Upcoming (1):</i></main>"
         code, out = self.run_probe(page)
         self.assertEqual(code, 1, out)
-        self.assertIn('"upcoming" shows 4 times', out)
+        self.assertIn('"upcoming" shows 5 times', out)
 
     def test_open_skip_tag_at_the_end_is_unknown(self):
         page = "<main><button>Go<p>x</p><div>Blocking</div><div>Blocking</div>"  # cut off: never closed

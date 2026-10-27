@@ -22,7 +22,7 @@ const require = createRequire(import.meta.url);
 
 const PAGES = {
   "/content.html": `<!doctype html><style>body{margin:0;background:#fff;color:#111;font:48px sans-serif}
-    @media (prefers-color-scheme: dark){body{background:#000;color:#eee}}</style><h1>Shoot fixture</h1><p>Known content.</p><nav style="display:none"><b>Phone nav</b></nav>`,
+    @media (prefers-color-scheme: dark){body{background:#000;color:#eee}}</style><h1>Shoot fixture</h1><p>Known content.</p><nav style="display:none"><b>Phone nav</b></nav><div style="display:contents"><i>Wrapped</i></div>`,
   "/app/prefixed.html": `<!doctype html><style>body{margin:0;background:#fff;color:#111;font:48px sans-serif}</style><h1>Under a prefix</h1>`,
   "/blank.html": `<!doctype html><style>body{margin:0;background:#fff}</style>`,
 };
@@ -115,6 +115,7 @@ test("one PNG per route x width x theme, each at its width, with known content n
   assert.match(html, /<h1>Shoot fixture<\/h1>/);
   assert.match(html, /<nav style="display:none" hidden="">/);  // an element the browser does not show is marked
   assert.doesNotMatch(html, /<h1[^>]*hidden/);
+  assert.match(html, /<div style="display:contents"><i>Wrapped<\/i><\/div>/);  // a wrapper with no box is still shown
 });
 
 test("a 404 route is a fail", async (t) => {
