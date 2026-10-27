@@ -228,6 +228,94 @@ class WaitingPage(Tree):
         self.assertEqual((code, out.strip()), (0, self.URL))
 
 
+class RepoKindAndCaution(Tree):
+    """A repo names its app kind and its caution level in its extras file. Devices come from the kind,
+    caution from the level, and the level defaults by visibility (steps c113 and c115)."""
+    BYPASS = ("ignore", "bypass", "skip", "disregard", "override", "waive", "turn off", "disable", "no need to")
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def extras(self, **keys):
+        self.put(EXTRAS, json.dumps(dict({"kinds": {}}, **keys)))
+
+    def cmd(self, verb):
+        return run([os.path.join(LINT, "layout.py"), verb, self.tree], self.tree)
+
+    def test_a_repo_with_no_extras_file_resolves_by_visibility_not_an_error(self):
+        self.assertEqual(self.layout.caution(self.tree)["level"], "public")
+        self.assertIsNone(self.layout.devices(self.tree))
+        self.assertEqual(self.cmd("caution")[0], 0)
+        self.assertEqual(self.cmd("devices"), (0, "unknown\n"))
+
+    def test_unknown_visibility_resolves_to_public(self):
+        for keys in ({}, {"visibility": "secret-ish"}, {"visibility": None}):
+            with self.subTest(keys=keys):
+                self.extras(**keys)
+                self.assertEqual(self.layout.caution(self.tree)["level"], "public")
+
+    def test_private_visibility_resolves_to_private_solo(self):
+        self.extras(visibility="private")
+        self.assertEqual(self.layout.caution(self.tree)["level"], "private-solo")
+        self.assertIn("private-solo", self.cmd("caution")[1])
+
+    def test_a_named_caution_beats_visibility_and_a_bad_name_is_an_error(self):
+        self.extras(visibility="private", caution="public")
+        self.assertEqual(self.layout.caution(self.tree)["level"], "public")
+        self.extras(caution="reckless")
+        with self.assertRaises(self.layout.LayoutError):
+            self.layout.caution(self.tree)
+
+    def test_each_kind_has_its_default_device_order(self):
+        self.extras(kind="ios")
+        got = [d["id"] for d in self.layout.devices(self.tree)]
+        self.assertEqual(got, ["iphone-duo-folded", "iphone-duo-unfolded", "iphone-regular"])
+        self.extras(kind="web")
+        got = [d["id"] for d in self.layout.devices(self.tree)]
+        self.assertEqual(got, ["phone-width", "desktop-width"])
+        self.assertEqual(self.cmd("devices")[1].splitlines()[0].split(":")[0], "phone-width")
+
+    def test_a_repo_lists_devices_only_where_it_differs(self):
+        self.extras(kind="ios", devices=["iphone-regular"])
+        self.assertEqual([d["id"] for d in self.layout.devices(self.tree)], ["iphone-regular"])
+        self.extras(kind="ios", devices=["no-such-device"])
+        with self.assertRaises(self.layout.LayoutError):
+            self.layout.devices(self.tree)
+        self.extras(kind="toaster")
+        with self.assertRaises(self.layout.LayoutError):
+            self.layout.devices(self.tree)
+
+    def test_no_device_carries_a_size_without_a_written_source(self):
+        for name, device in self.layout.layout()["devices"].items():
+            with self.subTest(device=name):
+                size = device.get("size")
+                self.assertTrue(size is None or (isinstance(size, dict) and size.get("source")), device)
+
+    def test_every_level_holds_facts_and_acts_and_no_bypass_phrase(self):
+        for level in ("public", "private-solo"):
+            with self.subTest(level=level):
+                self.extras(caution=level)
+                found = self.layout.caution(self.tree)
+                self.assertTrue(found["facts"] and found["acts"])
+                text = " ".join(found["facts"] + found["acts"]).lower()
+                for phrase in self.BYPASS:
+                    self.assertNotIn(phrase, text)
+
+    def test_private_solo_states_the_owners_own_logins_and_the_real_limits(self):
+        self.extras(caution="private-solo")
+        found = self.layout.caution(self.tree)
+        text = " ".join(found["acts"] + found["facts"]).lower()
+        self.assertIn("log in", text)
+        self.assertIn("tool", text)
+        self.assertIn("secret", text)
+        self.assertIn("leaves the machine", text)
+
+    def test_the_layout_repo_names_its_own_caution(self):
+        found = self.layout.caution(REPO)
+        self.assertIn(found["level"], ("public", "private-solo"))
+
+
 class Readers(Tree):
     """Each reader finds the records of a fixture repo under docs/, and of one at the legacy root."""
 
