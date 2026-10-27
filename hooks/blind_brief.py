@@ -153,6 +153,16 @@ def device_names(root):
     return [d["name"] for d in found] if found else None
 
 
+def names_device(text, name):
+    """True when `text` holds every word of device `name`, ignoring case, punctuation and spacing, in any
+    order. The word "iphone" is dropped while other words remain, so "Duo folded" names "iPhone Duo, folded"
+    and "unfolded" does not name "folded"."""
+    words = lambda t: re.findall(r"[a-z0-9]+", t.lower())
+    need = words(name)
+    need = [w for w in need if w != "iphone"] or need
+    return set(need) <= set(words(text))
+
+
 def brief_faults(text, current=(), template=None, devices=None):
     """Faults of one blind brief, as (code, where, matched) triples. An empty list is a clean brief.
     `devices` is the repo's resolved list (device_names): the Device section must name the first one."""
@@ -183,7 +193,7 @@ def brief_faults(text, current=(), template=None, devices=None):
     for line in lines:
         if PLACEHOLDER.search(line):
             faults.append(("placeholder", "header", PLACEHOLDER.search(line).group(0)))
-    if devices and parts.get("Device") and devices[0].lower() not in parts["Device"].lower():
+    if devices and parts.get("Device") and not names_device(parts["Device"], devices[0]):
         faults.append(("device-first", "Device", devices[0]))
     for name in FREE:
         body = parts.get(name, "")

@@ -340,6 +340,19 @@ class Devices(unittest.TestCase):
             self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
             self.assertIn("device-first", done.stdout)
 
+    def test_paraphrases_of_the_first_device_pass(self):
+        first = "iPhone Duo, folded"
+        for text in ("An iPhone Duo (folded), held like a book.", "Duo folded on a desk.",
+                     "the IPHONE   DUO -- FOLDED pose", "Folded iPhone Duo."):
+            with self.subTest(text=text):
+                self.assertEqual(self.m.brief_faults(brief(device=text), devices=[first]), [])
+
+    def test_a_different_device_first_is_still_refused(self):
+        first = "iPhone Duo, folded"
+        for text in ("iPhone Duo, unfolded, flat on a table.", "A regular iPhone.", "Duo only."):
+            with self.subTest(text=text):
+                self.assertIn("device-first", codes(self.m.brief_faults(brief(device=text), devices=[first])))
+
     def test_designer_and_template_point_at_the_one_command_and_name_no_device(self):
         names = [d["name"].lower() for d in self.layout.layout()["devices"].values()]
         for rel in ("agents/designer.md", "skills/design-explore/blind-brief.md", "skills/design-explore/SKILL.md"):
