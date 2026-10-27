@@ -263,7 +263,9 @@
 - shell-write-miss-sort-output: sort -o P writes P, but sort is not a mutating command and -o is not a redirect (hooks/guard_frozen.py)
 - shell-write-miss-subshell: a write inside ( ... > P) is not seen; the closing parenthesis stays glued to the path (hooks/guard_frozen.py)
 - silent-suite-platform-exit: lint/test_hook_platform_exit.py kills none of 10 mutants of hooks/stall_watch.py; it pins the platform exit only. Decision: mutation-report-scores-suites.
-- silent-suite-reply-judge: hooks/test_reply_judge.py kills none of 10 mutants of lint/report_gate.py; it pins the Stop hook wiring, not the verdict. Decision: mutation-report-scores-suites (the mutation report scores suites).
+- silent-suite-reply-judge: hooks/test_reply_judge.py kills none of 10 sampled mutants of lint/report_gate.py, but it goes red when the file is wholly broken, so it does load the file. Cause unmeasured. Decision: mutation-report-scores-suites (the mutation report scores suites).
+- mutant-load-unproven: the report never proves a silent suite loaded the mutant. A suite that skips or reads an installed copy reads silent. Fix: a whole-file break control per file. Decision: mutation-report-scores-suites.
+- mutant-subprocess-throw-kill: a mutant that throws in a child process the suite reports as a FAIL line counts as killed, so the rates are an upper bound. Decision: mutation-report-scores-suites.
 - silent-suite-rule-audit: lint/test_rule_audit.py kills none of 10 mutants of lint/report_gate.py; it names the file as a rule reference only. Decision: mutation-report-scores-suites.
 - silent-suite-session-end-sweep: janitor/test_session_end_sweep.py kills none of 10 mutants of hooks/stall_watch.py; it only names the hook in a list. Decision: mutation-report-scores-suites.
 - silent-suite-settings-matcher: lint/test_settings_matcher.py kills none of 10 mutants of lint/report_gate.py, hooks/feedback_gate.py or hooks/stall_watch.py; it pins hook registration only. Decision: mutation-report-scores-suites.
@@ -570,3 +572,4 @@
 - ci-wake-branch-route-narrow: the branch and empty selectors match only open PRs with head `<owner>:<local branch name>`, so a fork head, a branch pushed under another name, or a closed PR gives no watch (hooks/ci_wake.py read_pr)
 - ci-wake-branch-metachar-windows: a branch name with `&`, `|`, `<` or `>` reaches cmd through a .cmd gh launcher in the `-F head=` value. Such a name breaks the `gh pr ready` line first (hooks/ci_wake.py read_pr)
 - ci-job-ste-ignores-inputs: ci-job runs the gates STE step as `bin/ste-changed <base>` and reads neither its `if:` nor its `with:`, so a `full_ste_audit` dispatch (scope all, fail false) is not mirrored locally. The local run is stricter, never looser (bin/ci-job is_ste_action)
+- scorecard-indented-caution-row: an indented `x: y` line, such as an indented Caution line, becomes a `finding` row on the group before it, not a Notes line. Nothing is dropped (lint/compliance_probes.py FINDING_LINE)

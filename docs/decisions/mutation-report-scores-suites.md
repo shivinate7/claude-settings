@@ -19,7 +19,8 @@ One run, 10 mutants per file, 3 suites at a time. The gold standard is the guard
 
 | File | Mutants | Killed | Crashed | Survived | Rate | Gold |
 |---|---|---|---|---|---|---|
-| `lint/report_gate.py` | 10 | 6 | 3 | 1 | 60% | 100% (367 of 367) |
+| `hooks/guard*.py`, hand-written (gold) | 367 | 367 | 0 | 0 | 100% | 100% |
+| `lint/report_gate.py` | 10 | 6 | 3 | 1 | 60% | 100% |
 | `hooks/feedback_gate.py` | 10 | 9 | 0 | 1 | 90% | 100% |
 | `hooks/stall_watch.py` | 10 | 6 | 1 | 3 | 60% | 100% |
 | `lint/check_silent_undo.py` | 10 | 6 | 0 | 4 | 60% | 100% |
@@ -32,7 +33,7 @@ Suites that killed none of the 10 mutants of their file:
 - `hooks/stall_watch.py`: `hooks/test_wrappers.py`, `lint/test_hook_platform_exit.py`, `janitor/test_session_end_sweep.py`, `lint/test_settings_matcher.py`. The two `hooks/test_stall_watch*.py` suites kill.
 - `lint/check_silent_undo.py`: none. Its one suite kills.
 
-How to read it. The silent suites name the file in a list (a hook registered, a platform exit, a wrapper shape). They pin wiring, not the file's verdict logic, and they were not written to catch these mutants. The verdict logic of each file is pinned by its own suite. So the measure does not show a worthless suite. It shows that nothing except the file's own suite guards the verdict. A survivor may be an equivalent mutant (no change in behaviour), which the mode cannot tell from a gap. A sample of 10 gives a coarse rate: read 60% as "a gap exists", not as an exact figure. A suite silent on 10 mutants may still catch one outside the sample.
+How to read it. A review probe broke each file wholly. Every silent suite except `hooks/test_reply_judge.py` stayed green, so those suites do not test the file's logic at all: they name it in a list (a hook registered, a platform exit, a wrapper shape). `hooks/test_reply_judge.py` went red, so it loads `lint/report_gate.py` and only missed the sample. The mode itself does not prove a silent suite loaded the mutant. A mutant that throws in a child process that the suite reports as a FAIL line counts as killed, so each rate is an upper bound. The verdict logic of each file is pinned by its own suite. So the measure does not show a worthless suite. It shows that nothing except the file's own suite guards the verdict. A survivor may be an equivalent mutant (no change in behaviour), which the mode cannot tell from a gap. A sample of 10 gives a coarse rate: read 60% as "a gap exists", not as an exact figure. A suite silent on 10 mutants may still catch one outside the sample.
 
 Not measured (UNKNOWN): `hooks/test_guard.py`, `merge/test_merge.py` and `lint/test_ci_scope.py` against these files. The first two take minutes for each mutant. The third only passes a file path to the scope detector.
 
