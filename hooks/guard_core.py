@@ -1482,7 +1482,8 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
     spawn_role is set only on the Opus spawn ask, the one refusal an Opus override may lift."""
-    if not _vetoed():
+    vetoed = _vetoed()
+    if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
             import override
             lifted = override.take(_override_who[0], _override_who[1], override.now(), rule, spawn_role)
@@ -1493,6 +1494,12 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
             if lifted in override.LIFTS:
                 sys.exit(0)
     record(tool, decision, rule, matched)
+    try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
+        import override
+        line = override.NO_OVERRIDE if vetoed else override.offer(rule, spawn_role, _override_who[1])
+        reason = reason.rstrip() + " " + line
+    except Exception:
+        pass
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",

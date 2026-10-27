@@ -143,8 +143,11 @@ next refused act through, or every refused act for a time. The narrower Opus ove
 only the Opus spawn ask. No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
 `agent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
-or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list,
-the `bin/rm` and `bin/merge` shims, or any other PreToolUse gate.
+or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
+or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
+refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
+The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_state.py) refuse through
+refuse() too, so an override lifts them.
 """
 
 import importlib
@@ -313,7 +316,8 @@ while True:
                     "guard-crash: the gate is missing a part and cannot judge this call, so it refuses "
                     "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
                     "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
-                    "then retry.")}}))
+                    "then retry. No override lifts this refusal, because the failed gate cannot check "
+                    "the acts that no override lifts.")}}))
         sys.exit(0)
 
 

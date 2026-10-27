@@ -7,7 +7,8 @@ Only a path with a `decisions` folder segment (either slash, any case) is judged
 path exits 0 at once with no output and no model call. The model call is `decision_watch.invoke_model`,
 the one home for it.
 
-A model answer {"ok": false, "reason": R} prints a PreToolUse deny with R. Any model error, timeout or
+A model answer {"ok": false, "reason": R} refuses through guard_core.refuse(), so an owner override lifts it
+(decision owner-override). The deny holds R. Any model error, timeout or
 odd answer fails open: no output, exit 0, so a judge outage never stops an edit of a Markdown file.
 """
 import json
@@ -26,6 +27,7 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
+RULE = "prose-judge"
 MODEL_TIMEOUT = 40  # the settings.json row allows 45
 OK_SHAPE = {"ok": (True, False)}
 
@@ -56,6 +58,25 @@ def is_prose(path):
     return "decisions" in parts[:-1]
 
 
+def refuse(payload, tool, reason):
+    """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits, so its
+    exit is returned to main()'s caller as the hook's exit code."""
+    try:
+        import guard_core
+        guard_core.set_log_session(payload.get("session_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_veto(lambda: False)  # a prose rule is no act that no override lifts
+        guard_core.refuse(tool, "deny", RULE, reason, "")
+    except SystemExit as done:
+        return done.code or 0
+    except Exception:  # no guard_core: no override can be read, so the refusal stands
+        pass
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                             "permissionDecision": "deny",
+                                             "permissionDecisionReason": RULE + ": " + reason}}))
+    return 0
+
+
 def main():
     try:
         hook = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
@@ -79,9 +100,7 @@ def main():
         reason = verdict.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             reason = "prose judge: the edit breaks speak-rewrite-superseded-in-place."
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                                 "permissionDecision": "deny",
-                                                 "permissionDecisionReason": reason}}))
+        return refuse(hook, tool, reason)
     return 0
 
 

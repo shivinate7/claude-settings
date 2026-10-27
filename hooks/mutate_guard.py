@@ -48,6 +48,8 @@ DECISION_SUITE = os.path.join(HERE, "test_decision_watch.py")
 RULING = os.path.join(HERE, "ruling_home.py")
 RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
 OVERRIDE = os.path.join(HERE, "override.py")
+CALL_JUDGE = os.path.join(HERE, "call_judge.py")
+CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -57,6 +59,7 @@ TARGETS = {
     "decision": (DECISION, DECISION_SUITE, "DECISION_WATCH_UNDER_TEST", "decision_watch"),
     "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
     "override": (OVERRIDE, SUITE, "GUARD_UNDER_TEST", "override"),
+    "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -1570,6 +1573,51 @@ MUTATIONS = [
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
      "override", 'opus override: `opus 2h` lets an Opus spawn through'),
+    # THE OVERRIDE LINE (step c80, hooks/override.py and refuse() in hooks/guard_core.py). A refusal ends with
+    # the line the owner types, or with the sentence that no override lifts it.
+    ("override line: a vetoed refusal offers an override that cannot lift it",
+     'line = override.NO_OVERRIDE if vetoed else override.offer(rule, spawn_role, _override_who[1])',
+     'line = override.offer(rule, spawn_role, _override_who[1])',
+     "guard", 'override: a kill of pid 1 ends with the no-override line'),
+    ("override line: an agent's refusal offers the one-act word that does not reach an agent",
+     'else override.offer(rule, spawn_role, _override_who[1])',
+     'else override.offer(rule, spawn_role)',
+     "guard", 'override: a refusal an override lifts ends with the agent override line'),
+    ("override line: the line leads the reason, so the fix is not first",
+     'reason = reason.rstrip() + " " + line',
+     'reason = line + " " + reason',
+     "guard", 'override: a refusal an override lifts ends with the main override line'),
+    ("override line: the missing-module deny stops saying that no override lifts it",
+     '"then retry. No override lifts this refusal, because the failed gate cannot check "\n'
+     '                    "the acts that no override lifts.")}}))',
+     '"then retry.")}}))',
+     "guard", 'override: a missing-module deny says that no override lifts it'),
+    ("override line: the Opus spawn ask no longer names the Opus word",
+     'if rule == OPUS_RULE and spawn_role is not None:\n        role = opus_role(str(spawn_role))',
+     'if False:\n        role = opus_role(str(spawn_role))',
+     "override", 'override: a refusal an override lifts ends with the opus override line'),
+    ("override line: an agent's refusal offers the main session's line",
+     '    if agent_id:\n        return ("To allow this act',
+     '    if False:\n        return ("To allow this act',
+     "override", 'override: a refusal an override lifts ends with the agent override line'),
+    # THE CALL JUDGE (step c85, hooks/call_judge.py). Its refusal goes through refuse(); an Explore spawn
+    # on a model that is neither Sonnet nor Opus is a model guard that no override lifts.
+    ("call judge: the veto is dropped, so an override lifts the Explore model guard",
+     'guard_core.set_override_veto(lambda: vetoed)',
+     'guard_core.set_override_veto(lambda: False)',
+     "calljudge", 'explore: a flagged spawn on haiku stays denied under a timed override'),
+    ("call judge: an Opus Explore spawn is vetoed too",
+     'return "sonnet" not in model and "opus" not in model',
+     'return "sonnet" not in model',
+     "calljudge", 'explore: an Explore spawn on opus is not vetoed'),
+    ("call judge: the agent id is not passed, so a one-act override lifts an agent's call",
+     'guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))',
+     'guard_core.set_override_context(payload.get("session_id"), None)',
+     "calljudge", "agent: one-act override, an agent's call leaves the deny"),
+    ("call judge: the question judge runs on Sonnet",
+     'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60',
+     'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-sonnet-5-5", 60',
+     "calljudge", 'question: one model call, claude-opus-5-5'),
 ]
 
 
@@ -1580,6 +1628,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env.pop("WATCH_UNDER_TEST", None)
     env.pop("DECISION_WATCH_UNDER_TEST", None)
     env.pop("RULING_HOME_UNDER_TEST", None)
+    env.pop("CALL_JUDGE_UNDER_TEST", None)
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
@@ -1667,6 +1716,13 @@ def run_mutant(sources, work: str, entry):
         with open(os.path.join(tree, "override.py"), "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
         copy_path = os.path.join(tree, "guard.py")
+    elif target == "calljudge":
+        # call_judge.py imports guard_core and decision_watch beside itself: lay out the whole family.
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        mutate_shared.guard_tree(tree)
+        copy_path = os.path.join(tree, "call_judge.py")
+        with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(mutated)
     elif target != "guard":
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
