@@ -1,0 +1,9 @@
+{
+  "title": "claude-settings' ux/ folder moves to docs/design/",
+  "phase": "organize",
+  "status": "todo",
+  "order": 110.5,
+  "why": "Left out of o2's lane 2 (Oct 26): the rest of claude-settings' records moved under docs/, but ux/ did not.",
+  "note": "ux/ is installed through landed-dirs.txt, and the guard freezes it, so the move changes both installers (install.sh, install.ps1) and a guard verdict. Needs a red-then-green test for the guard's frozen paths and a reviewer. Needs no answer from you: the same-folders ruling (o2, Oct 22) covers it. Port: no; child repos follow o2's roll-out. Placed after o2, ahead of o17 (triage, Oct 27): it finishes o2's lane 2.",
+  "updatedAt": "2026-10-27T00:25:00Z"
+}

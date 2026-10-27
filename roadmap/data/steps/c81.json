@@ -1,9 +1,9 @@
 {
   "title": "The waiting page lets you clear an answer or say \"none of these\"",
   "phase": "cleanup",
-  "status": "review",
+  "status": "done",
   "order": 103.357,
   "why": "Your gripe, Oct 26 (waiting page, item 27): you could not unselect an answer, and none of the three options was right.",
-  "note": "Pilot fixed Oct 26 by the waiting-page thread (version 3, https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8; source plans/c71-waiting-page.html in project files): every decision has a \"None of these\" option that needs a note saying what you want instead, and every item has a Clear button that removes the draft or the saved answer; the answer line reads \"N none of these (note)\". claude-settings part: PR #646 (waiting page: clear an answer or say \"none of these\"), two Sonnet review rounds, round 2 clear; head 8ecd5bb sent to the build advisor for the next integration batch. The template has both controls; the skill reads \"none\" as a request for new options (its own step in Route and close) and a cleared answer as no answer; 8 browser tests in skills/waiting-page/tests run in the gates-shoot job. Port: yes, every repo's page comes from the skill. Placed after c80, ahead of c76 (triage, Oct 26).",
-  "updatedAt": "2026-10-26T21:00:00Z"
+  "note": "Done Oct 27: PR #646 merged in batch #649 (main 2ad85de6, checked by triage). Every decision has a \"None of these\" option that needs a note saying what you want instead, and every item has a Clear button that removes the draft or the saved answer; the skill reads \"none\" as a request for new options and a cleared answer as no answer; 8 browser tests run in the gates-shoot job. Pilot page fixed Oct 26 (https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8). Port: yes, every repo's page comes from the skill; a page already published keeps its old copy until it is republished.",
+  "updatedAt": "2026-10-27T00:25:00Z"
 }
