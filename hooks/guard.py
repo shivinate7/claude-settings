@@ -64,7 +64,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
-                       (rm-after-cd-names-an-absolute-path)
+                       (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder or a folder above it, in either shell.
@@ -2284,7 +2284,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
     # 4b. After the wide-delete rules, so a delete of `.` or `..` keeps its own refusal.
-    # A recursive delete of a relative target after a cd (decision rm-after-cd-names-an-absolute-path).
+    # A recursive delete of a relative target after a cd (decision rm-after-cd-names-absolute-path).
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))

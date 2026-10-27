@@ -286,7 +286,7 @@ def rm_var_reason(hits) -> str:
         "which stops the command when the variable is empty. Retry with: " + "; ".join(hits)
     )
 
-# A DELETE AFTER A CD. Decision rm-after-cd-names-an-absolute-path: a recursive `rm` with a relative
+# A DELETE AFTER A CD. Decision rm-after-cd-names-absolute-path: a recursive `rm` with a relative
 # target, after `cd X` joined by `;`, `&&` or a newline, is flagged. Claude Code's prompt cannot follow
 # the cd, and a failed cd runs the rm in the working folder. Segments and tokens come from the same
 # walk as above, so quotes and comments are not text to it. `sh -c` bodies are not walked.
