@@ -15,10 +15,13 @@ per merge in the window and one `git log` for the later commits. Writes no file 
 long-lived process.
 """
 import argparse
+import os
 import re
-import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 FIX = re.compile(r"\b(fix|fixes|fixed|fixing|repair|repairs|repaired|hotfix|broke|broken|revert|reverts)\b", re.I)
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
@@ -26,7 +29,7 @@ REVERTS = re.compile(r"This reverts commit ([0-9a-f]{7,40})")
 
 
 def git(repo, *args):
-    r = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+    r = _nowindow.run(["git", *args], cwd=repo, capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit(f"git {' '.join(args)}: {r.stderr.strip()}")
     return r.stdout
