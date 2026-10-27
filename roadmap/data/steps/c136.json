@@ -1,0 +1,9 @@
+{
+  "title": "The status page and the waiting page link to each other, and status shows what waits on you",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33889,
+  "why": "Your question, Oct 27 12:14 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2VxTQsRurAKzBZMkrCcNMRj): should a repo's project status page (o8) and its waiting-on-you page (c71) be one page?",
+  "note": "Proposal (coordinator): keep two pages, each with one owner. The status page is written by the roadmap publisher and is read-only; the waiting page is written by the orchestrator (c126) and saves your answers. Merging them would put two writers on one page, and a status republish would risk your unsent answers. Each page's header links to the other, and the status page shows a live \"N waiting on you\" count that opens the waiting page. Gain: one place to start, no new writer conflicts. Lose: two links to keep, and two pages, not one. Alternative: one page with a Waiting tab; that needs one writer for both, which today's split does not have. Deferred (shiv, Oct 27): two linked pages, or one page. Asked: project chat, coordinator's reply, Oct 27 12:14 CDT. Next cloud lane once confirmed: the header links and the count, in skills/roadmap and skills/waiting-page. Port: yes, every repo that has both pages. Placed ahead of c133 (triage, Oct 27): it shapes o8's and c71's roll-out to every repo.",
+  "updatedAt": "2026-10-27T17:16:00Z"
+}
