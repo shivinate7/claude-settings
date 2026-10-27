@@ -89,7 +89,7 @@ button:focus-visible, input:focus-visible, .opt:focus-within { outline: 2px soli
 </div></div>
 
 <script>
-const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, showDone: false };
+const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, comments: null, showDone: false };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 try { state.showDone = localStorage.getItem("waiting.showDone") === "1"; } catch (e) {}
 const $ = (id) => document.getElementById(id);
@@ -182,6 +182,38 @@ function card(it) {
   return c;
 }
 
+const TOLD = "Saved. Claude was told.";
+const NOT_TOLD = "Saved. No session was told; reply in the thread to wake one.";
+const MAX_BYTES = 4096;
+function noticeText(entries) {
+  const line = entries.map((e) => e.n + " " + (e.choice ? choiceText(e.choice) : "done") + (e.note ? " (" + e.note.replace(/\s+/g, " ").trim() + ")" : "")).join(", ");
+  const owners = [...new Set(entries.map((e) => e.owner))].join(", ");
+  let text = "Saved on the waiting page: " + line + ". Owners: " + owners + ".";
+  const enc = new TextEncoder();
+  while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
+  return text;
+}
+// One comment per save or batch, into the viewer's stored thread. It runs in the click handler's
+// chain, after the awaited write, so the platform still sees the viewer's gesture.
+// Any failure only means "no session was told"; the save stands and nothing retries.
+async function notifyClaude(entries) {
+  try {
+    const cm = state.comments;
+    if (!cm || (await cm.canSendToClaude()) !== "available") return false;
+    const text = noticeText(entries);
+    let id = null;
+    try { id = localStorage.getItem("waiting.thread"); } catch (e) {}
+    let res = null;
+    if (id) {
+      try { res = await cm.sendToClaude({ threadId: id, text }); }
+      catch (e) { if (!e || e.code !== "not_found") throw e; }
+    }
+    if (!res) res = await cm.sendToClaude({ anchor: await cm.anchorFor(document.querySelector("h1")), text });
+    try { localStorage.setItem("waiting.thread", res.threadId); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
+}
+
 async function save(it, btn, st) {
   if (!state.db) return;
   const d = state.draft[it.id] || {};
@@ -195,7 +227,14 @@ async function save(it, btn, st) {
     delete state.draft[it.id]; delete state.notice[it.id]; saveDraft();
   } catch (e) {
     btn.disabled = false; st.textContent = "Not saved (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " " + (body.choice || "done");
+    return;
   }
+  st.textContent = "Saved. Telling Claude…";
+  const told = await notifyClaude([{ n: it.n, choice: body.choice, note: body.note, owner: it.owner }]);
+  state.notice[it.id] = told ? TOLD : NOT_TOLD;
+  // An answered card leaves the list, so the bar carries the outcome too.
+  $("barStatus").textContent = "Item " + it.n + ": " + state.notice[it.id];
+  render();
 }
 
 function render() {
@@ -246,11 +285,13 @@ $("useAll").addEventListener("click", async () => {
   if ($("useAll").dataset.armed !== "1") { $("useAll").dataset.armed = "1"; $("useAll").textContent = "Press again to save " + todo.length + " picks"; return; }
   $("useAll").dataset.armed = ""; $("useAll").textContent = "Accept every pick I haven't answered";
   $("barStatus").textContent = "Saving…";
+  const saved = [];
   for (const it of todo) {
-    try { await state.db.collection("answers").doc(it.id).set({ item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }); }
-    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; return; }
+    try { await state.db.collection("answers").doc(it.id).set({ item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }); saved.push({ n: it.n, choice: it.pick, note: "accepted pick", owner: it.owner }); }
+    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; if (saved.length) await notifyClaude(saved); return; }
   }
-  $("barStatus").textContent = "Saved " + todo.length + " picks.";
+  const told = await notifyClaude(saved);
+  $("barStatus").textContent = "Saved " + todo.length + " picks. " + (told ? "Claude was told." : "No session was told; reply in the thread to wake one.");
 });
 
 render();
@@ -259,6 +300,7 @@ render();
   try { db = await window.claude?.use?.("db"); } catch (e) { db = null; }
   if (!db) { state.db = false; render(); return; }
   state.db = db;
+  try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => d.data()).filter((i) => i && i.status !== "closed"); render(); }, () => {});
   db.collection("answers").onSnapshot((s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); state.answers = m; render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; render(); }, () => {});
