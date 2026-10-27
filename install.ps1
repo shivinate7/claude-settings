@@ -695,6 +695,26 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         Log "removed stale $($entry.FullName) (source $tgt no longer exists)"
     }
 }
+# A folder an earlier install landed and the repo has since moved: ux, now docs\design (decision
+# ux-house-rules). Its links go with the prune test above, then the folder once it is empty. A
+# person's own file and a copy stay, as the loop above leaves them.
+foreach ($sub in @('ux')) {
+    $destDir = Join-Path $ClaudeDir $sub
+    $cur = Get-Item $destDir -ErrorAction SilentlyContinue
+    if (-not $cur -or $cur.LinkType) { continue }
+    foreach ($entry in @(Get-ChildItem -Path $destDir -File -ErrorAction SilentlyContinue)) {
+        if ($entry.LinkType -ne 'SymbolicLink') { continue }
+        $tgt = @($entry.Target)[0]
+        if (-not $tgt) { continue }
+        if ((Split-Path $tgt -Parent) -ne (Join-Path $RepoDir $sub)) { continue }
+        if (Test-Path $tgt) { continue }
+        Remove-Item $entry.FullName
+    }
+    if (-not (Get-ChildItem -Path $destDir -Force)) {
+        Remove-Item $destDir
+        Log "removed $destDir (the repo no longer lands it)"
+    }
+}
 # Packages that a skill loads (typescript, for plain-english-map): one `npm ci` in the clone root.
 # A skill is linked, so its real path is in the clone, and it finds the clone's node_modules.
 # A failure is logged and never fails the install.

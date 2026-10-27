@@ -25,7 +25,7 @@ Judge each changed screen at every size and theme the repo ships, against three 
 1. The mockup. Say where the built screen differs from it. A difference is a finding unless the
    mockup's notes or an owner ruling moved it.
 2. The repo's design rules: its spec, its tokens and its design decisions.
-3. The house rules: `~/.claude/ux/checklist.md`, rule by rule.
+3. The house rules: `~/.claude/docs/design/checklist.md`, rule by rule.
 
 Then set each blind finding against the repo's design. Sort it: agrees with the repo, a plain
 defect (accessibility, broken layout, overflow), or a clash with the repo's design. Never drop a

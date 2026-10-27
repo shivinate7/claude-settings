@@ -8556,15 +8556,22 @@ add("frozen: Write of a config lint script", "deny", "frozen-path", tool="Write"
     file_path=CFG_LINT)
 add("frozen: Write of a config agent file", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_AGENT)
-# ux/ holds the house rules (decision ux-house-rules). A session that could rewrite them could loosen
-# its own review bar, so it is frozen like agents/ and output-styles/. A product repo's own ux/ is not.
-CFG_UX = slash(os.path.join(CFG, "ux", "principles.md"))
-PROJ_UX = slash(os.path.join(PROJ, "ux", "principles.md"))
+# docs/design/ holds the house rules (decision ux-house-rules). A session that could rewrite them could
+# loosen its own review bar, so it is frozen like agents/ and output-styles/. It is two levels deep, so
+# its siblings under docs/, a name that only starts with "design", and a product repo's own copy stay open.
+CFG_DESIGN = slash(os.path.join(CFG, "docs", "design", "principles.md"))
+PROJ_DESIGN = slash(os.path.join(PROJ, "docs", "design", "principles.md"))
 for tool in ("Write", "Edit"):
-    add("frozen: " + tool + " of the config ux house rules", "deny", "frozen-path", tool=tool,
-        cwd=NOGIT, file_path=CFG_UX)
-add("frozen: Edit of a product repo's own ux/principles.md is allowed", "allow", tool="Edit",
-    cwd=PROJ, file_path=PROJ_UX)
+    add("frozen: " + tool + " of the config docs/design house rules", "deny", "frozen-path", tool=tool,
+        cwd=NOGIT, file_path=CFG_DESIGN)
+add("frozen: Write under the config docs/ beside docs/design is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(CFG, "docs", "notes.md")))
+add("frozen: Write under a config docs/designer folder is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(CFG, "docs", "designer", "a.md")))
+add("frozen: Write of the retired config ux folder is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(CFG, "ux", "principles.md")))
+add("frozen: Edit of a product repo's own docs/design/principles.md is allowed", "allow", tool="Edit",
+    cwd=PROJ, file_path=PROJ_DESIGN)
 add("frozen: Write of a skill this repo ships", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_SKILL)
 add("frozen: Write of a skill this repo does not ship is allowed", "allow", tool="Write",

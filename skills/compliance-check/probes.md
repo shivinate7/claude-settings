@@ -68,7 +68,7 @@ The probe reads tracked files only, so an untracked folder is not there.
 
 ## Design
 
-`$PY $P/lint/compliance_probes.py design .` grades each item on its own line, against `ux/`
+`$PY $P/lint/compliance_probes.py design .` grades each item on its own line, against `docs/design/`
 (`checklist.md`, `layout.md`, `tokens.md`). A child with no screen files is `n/a`.
 
 | Item | Pass when |
@@ -79,7 +79,7 @@ The probe reads tracked files only, so an untracked folder is not there.
 | token file | one token source (`tokens.*`, `design-tokens.*`). A test file, and a file that says it is generated, do not count |
 | ui copy | never graded: the known STE gap in the Output row |
 
-Then mark `ux/checklist.md` for each route in `shoot.json`, at each size and theme.
+Then mark `docs/design/checklist.md` for each route in `shoot.json`, at each size and theme.
 
 ## Copies
 
