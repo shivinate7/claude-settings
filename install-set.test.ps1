@@ -36,6 +36,7 @@ if ($env:OS -ne 'Windows_NT') { Write-Host 'SKIP: install set (Windows only)'; e
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Utf8    = New-Object Text.UTF8Encoding($false)
 . (Join-Path $Here 'testing\TrackedTree.ps1')  # copies what git lists, so no fixture lists files
+. (Join-Path $Here 'testing\SharedRead.ps1')   # Read-Shared: a child's output reads back while a handle holds it
 $PsHost  = (Get-Process -Id $PID).Path
 $Python  = (Get-Command python -ErrorAction Stop).Source
 $GitExe  = (Get-Command git -ErrorAction Stop).Source
@@ -64,15 +65,6 @@ ids.add(str(ns.get("INSTALL_ID", "(none)")))
 print("\n".join(sorted(ids)))
 '@
 [IO.File]::WriteAllText($ProbePy, ($ProbeText -replace "`r", ''), $Utf8)
-
-# Reads a file with read, write and delete sharing, so an installer rename is never refused by a
-# sampler, and a child's output file reads back while a process it left still holds it open for
-# write. A missing or unreadable file throws.
-function Read-Shared([string]$Path) {
-    $share = [IO.FileShare]([int][IO.FileShare]::ReadWrite -bor [int][IO.FileShare]::Delete)
-    $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
-    try { $sr = New-Object IO.StreamReader($fs, $Utf8); return $sr.ReadToEnd() } finally { $fs.Close() }
-}
 
 # Holds a file open for read with no delete sharing. A rename over the file is refused while it is held.
 function Hold-File([string]$Path) {
