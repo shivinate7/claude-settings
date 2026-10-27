@@ -395,6 +395,7 @@ function problem(it) {
   if (!okN) return { text: "This item has no number, so it cannot be answered." + fix, blocks: true };
   if (it.kind !== "decision" && it.kind !== "task") return { text: "This item is neither a decision nor a task, so it cannot be answered." + fix, blocks: true };
   if (it.kind === "decision") {
+    if (it.optionsBad) return { text: "The options of this decision are not a list, so it cannot be answered." + fix, blocks: true };
     const ks = (it.options || []).map((o) => o && o.key);
     if (!ks.length) return { text: "This decision has no options, so it cannot be answered." + fix, blocks: true };
     if (ks.some((k) => !k)) return { text: "An option of this decision has no key, so it cannot be answered." + fix, blocks: true };
@@ -431,6 +432,7 @@ const glyph = (k) => h("span", { class: "g " + k, "aria-hidden": "true" });
 function linkIcon() { const d = document.createElement("span"); d.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>'; return d.firstChild; }
 function readyText(it) {
   const d = eff(it) || {};
+  if (blocked(it)) return "This item cannot be sent.";
   if (it.kind === "task") return d.done ? "Ready to send: done." : "";
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return "";
@@ -531,6 +533,7 @@ function buildCard(it) {
     nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
     card.append(nb);
   }
+  if (blocked(it)) card.querySelectorAll(".opts input, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
@@ -797,6 +800,7 @@ async function undoSend() {
 function answerLine() {
   const parts = [];
   state.items.slice().sort((a, b) => a.n - b.n).forEach((it) => {
+    if (blocked(it)) return;
     const a = state.answers[it.id], d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
@@ -877,7 +881,7 @@ render();
   state.db = db;
   try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   const map = (s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); return m; };
-  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id }; }).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
+  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});

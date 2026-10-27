@@ -843,3 +843,22 @@ test("a bad number or kind warns and Send skips it", async (t) => {
   await page.evaluate(() => { setDraft(byId("bad-kind"), { done: true }); setDraft(byId("bad-n"), { choice: "a" }); render(); });
   assert.equal(await page.locator("#send").isDisabled(), true);
 });
+
+test("a blocked card says it cannot be sent, disables its controls, and Copy answers skips it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 41, options: [opt("a"), opt("a")], pick: "a" },
+    "odd-opts": { ...DECISION, id: "odd-opts", n: 42, options: "a, b" },
+    "good": { ...DECISION, id: "good", n: 43 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "odd-opts").textContent(), /not a list/);
+  await page.evaluate(() => { setDraft(byId("dup-keys"), { choice: "a", auto: true }); render(); });
+  const c = card(page, { id: "dup-keys" });
+  assert.equal(await c.locator(".ready").textContent(), "This item cannot be sent.");
+  assert.equal(await c.locator(".takepick").isDisabled(), true);
+  assert.equal(await c.locator(".nonebtn").isDisabled(), true);
+  assert.equal(await c.locator(".opts input").first().isDisabled(), true);
+  await takePick(page, { id: "good" });
+  assert.equal(await page.evaluate(() => answerLine()), "43 a");
+});
