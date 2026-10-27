@@ -249,7 +249,7 @@ function Write-Fixture([string]$rel, [string]$text) {
 
 # The text a child run printed to a redirected file. A missing or unreadable file throws.
 function Get-RunText([string]$Path) {
-    return [IO.File]::ReadAllText($Path)
+    return Read-Shared $Path
 }
 
 # Runs install.ps1 from the clone $CloneDir in a child shell. Returns its exit code.
