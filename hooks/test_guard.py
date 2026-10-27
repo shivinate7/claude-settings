@@ -6351,9 +6351,9 @@ for _name, _command in (
     ("rd of the parent, no /s", "rd .."),
     ("rmdir /q of the parent, no /s", "rmdir /q .."),
     ("rd /s /q of a sibling", "rd /s /q ..\\sibling"),
-    ("a folder named after a folder change", "cd build && rm -rf ./out"),
+    ("a folder named after a folder change, by absolute path", "cd build && rm -rf /tmp/build/out"),
     ("a folder named after pushd", "pushd build && rm -r out"),
-    ("a folder named after a change to the parent", "cd .. && rm -rf ./build"),
+    ("a folder named after a change to the parent, by absolute path", "cd .. && rm -rf /tmp/build"),
     ("a child of the working folder by absolute path", 'rm -rf "%s/build"' % _CWD),
     ("a sibling whose name starts with the working folder's name", 'rm -rf "%s2"' % _CWD),
     ("a sibling of the working folder by absolute path", 'rm -rf "%s/sibling"' % _PARENT),
@@ -9929,7 +9929,7 @@ chained_ask("ask-alone: the discard piped to tee, a command with effects, still 
 chained_ask("ask-alone: the prune piped to sh, a command with effects, still denies",
             ASK_PRUNE + " | sh", cwd=WTPRUNE)
 chained_ask("ask-alone: a cd, the prune, then a removal of y, still denies",
-            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf y", cwd=NOGIT)
+            "cd " + slash(WTPRUNE) + " && " + ASK_PRUNE + " && rm -rf /tmp/y", cwd=NOGIT)
 
 # TWO SAFETY HOLES, from an owner review. Both must DENY. The first: the `\"` inside the echo is an
 # escaped quote, so the `; rm -rf y` after it is a real command. The second: `cd -` moves to the previous
