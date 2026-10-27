@@ -14,3 +14,4 @@
 - For triage: c112 (Designs tab) looks built on main b031394f (skills/waiting-page/page.html has the Designs tab and sandboxed frame); check and close. c80, c85, c100, c105 still read "doing" in the data; they merged in #683.
 - 2026-10-27 04:25 CDT: c100 republish deferred on shiv: the live pages belong to a third account (cloud and Mac both get 404); shiv asked to share. Finding for triage: the Mac's auto mode refused a claude-settings reinstall as "Self-Modification", so a Mac session cannot pick up merged claude-settings work by reinstalling. Candidate new step.
 - 2026-10-27 04:30 CDT: c116 green and reviewed (#684, head 8316987). Joined integration branch batch-oct27m; the batch PR opens when more lanes arrive.
+- 2026-10-27 04:30 CDT: c114 green and reviewed (#685, head 6fd0a4b). Joined batch-oct27m.
