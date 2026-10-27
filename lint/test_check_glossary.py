@@ -14,7 +14,6 @@ module path.
 """
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -32,21 +31,11 @@ ROWS = ("| handoff | A session's notes file. | `docs/handoff.md` | `handover` |\
         "| owner | The person who rules. | `rule:one-rule` | — |\n")
 
 
-def rm_tree(path):
-    def clear(func, p, _exc):
-        os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
-        func(p)
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=clear)
-    else:
-        shutil.rmtree(path, onerror=clear)
-
-
 class GlossaryTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_glossary.py")
         self.tree = tempfile.mkdtemp(prefix="gls_")
-        self.addCleanup(rm_tree, self.tree)
+        self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # rule_audit.py and the check's other imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_glossary.py"))
         self.put("CLAUDE.md", CLAUDE_MD)

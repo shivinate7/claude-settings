@@ -217,6 +217,7 @@ def watch(pid, log, quiet, also=()):
     last = time.monotonic()
     marks = log_marks(also)
     next_check = 0.0
+    recheck = False
     waited = 0
     while not os.path.exists(log):  # the shell creates it a moment before this runs
         waited += 1
@@ -226,8 +227,9 @@ def watch(pid, log, quiet, also=()):
     with open(log, "rb") as f:
         while True:
             now = time.monotonic()
-            ended = False
-            if now >= next_check:  # one ps a second, not one per read
+            ended = checked = False
+            if now >= next_check or recheck:  # one ps a second, not one per read
+                checked, recheck = True, False
                 ended = ended_state(job_state(pid))
                 next_check = now + 1.0
                 if also:
@@ -242,6 +244,9 @@ def watch(pid, log, quiet, also=()):
             if ended:
                 return 0
             if time.monotonic() - last >= quiet:
+                if not checked:  # the last sample may be a second old: sample again, then decide
+                    recheck = True
+                    continue
                 report(pid, quiet, log, also)
                 return STALL_EXIT
             time.sleep(0.2)
