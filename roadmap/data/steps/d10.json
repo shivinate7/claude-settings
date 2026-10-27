@@ -1,0 +1,9 @@
+{
+  "title": "A design exploration spreads its mockups across blind, informed and directed lanes",
+  "phase": "design",
+  "status": "todo",
+  "order": 215,
+  "why": "Your view, Oct 27: \"a lot of design work sometimes prefers a lane or two of totally blank and a lane that gets to see the old and then some in between with directed prompts ... to get a good mix of control and idea between the mockups.\"",
+  "note": "Builds on d1 (designer agent, on Opus, on main 2ad85de6), which today draws its options from one brief that sees the current screen. Fix, needs no answer: when the designer explores a screen, it runs a default mix of lanes: one or two blind (blank canvas, never shown the current design), one that sees the current design, and a few in between with directed prompts. Each mockup is labelled with its lane kind, and you cull from the set. The mix is a default, not a hard rule; a brief can change it. Mirrors design-review's blind reviewers A and B. Port: yes; the designer agent installs everywhere. Placed ahead of d9, after d1 and d2 (triage, Oct 27): it shapes every exploration the new designer runs.",
+  "updatedAt": "2026-10-27T00:50:00Z"
+}
