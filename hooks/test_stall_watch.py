@@ -836,6 +836,57 @@ def named_log_relative_tee_and_flag_forms_are_read():
     return problems
 
 
+def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6):
+    """Run stall_watch.watch on a fake clock. The job writes a named log every `period` seconds from
+    `phase`, then ends 1 s after its last write. Each ps takes `ps_secs`, each sleep overshoots by
+    `tick_extra`, as on a loaded runner. Return watch's exit code."""
+    import builtins
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("stall_watch_sim", MODULE)
+    sw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sw)
+    clock = [0.0]
+    stamps = [phase + period * i for i in range(writes)]
+    end = stamps[-1] + 1.0
+
+    def job_state(_pid):
+        clock[0] += ps_secs
+        return "Z" if clock[0] >= end else "S"
+
+    class Empty:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def read(self):
+            return b""
+
+    sw.time = type("Clock", (), {
+        "monotonic": staticmethod(lambda: clock[0]),
+        "sleep": staticmethod(lambda secs: clock.__setitem__(0, clock[0] + secs + tick_extra))})
+    sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(lambda _p: True)})})
+    sw.job_state = job_state
+    sw.log_marks = lambda paths, base=None: {p: (sum(1 for w in stamps if w <= clock[0]), 0) for p in paths}
+    sw.report = lambda *_a: None
+    real_open = builtins.open
+    builtins.open = lambda *_a, **_k: Empty()
+    try:
+        return sw.watch(1, "log", quiet, ["named.log"])
+    finally:
+        builtins.open = real_open
+
+
+@posix_case
+def named_log_written_slower_than_the_check_is_no_stall():
+    """23b2. a named log written every 1.7 s under a 2 s quiet, with a slow ps and a late sleep, is no
+    stall at any phase: the quiet test acts on a fresh sample, not the one from up to a second ago"""
+    stalls = [(ph, ps) for ps in range(0, 400, 3) for ph in range(0, 190, 4)
+              if simulated_watch(ph / 100, ps / 1000, 0.005) == 3]
+    return expect(not stalls, f"{len(stalls)} of 2584 runs reported a STALL, first (phase, ps ms): {stalls[:3]}")
+
+
 @posix_case
 def named_log_that_stops_growing_stalls():
     """23c. the same job whose log stops growing: STALL within about 4 s, exit 3, the job alive"""
