@@ -206,7 +206,9 @@ class BriefFaults(unittest.TestCase):
     def test_plain_job_words_pass(self):
         for line in ("Keep the screen on while sorting.", "Each card has a spec sheet.",
                      "He signs in with a login token.", "Orders hold qty <5 and >2.",
-                     "He sorts by date and/or app/seller."):
+                     "He sorts by date and/or app/seller.", "Keep the design simple for her.",
+                     "Keep the structure of boxes tidy.", "Copy the app seller name.",
+                     "Match the look of a label to an order."):
             with self.subTest(line=line):
                 self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
 

@@ -55,11 +55,11 @@ PATTERNS = {
         r"\blooks?\s+like\s+(?:the\s+)?(?:current|existing|old|web|today)",
     ],
     "keep": [
-        r"\b(?:keep|keeps|kept|keeping|preserve[sd]?|retain[s]?|reuse[sd]?)\s+(?:the\s+|that\s+|its\s+|this\s+|our\s+"
-        r"|today'?s\s+)?(?:current\s+|existing\s+)?(?:look|feel|style|layout|design|structure"
-        r"|navigation|nav|ui|chrome)\b",
+        r"\b(?:keep|keeps|kept|keeping|preserve[sd]?|retain[s]?|reuse[sd]?)\s+(?:that|its|this|our|today'?s"
+        r"|(?:the\s+)?current|(?:the\s+)?existing)\s+(?:look|feel|style|layout|design|structure|navigation|nav|ui"
+        r"|chrome)\b",
         r"\b(?:match|matches|matched|matching|mirror|mirrors|copy|copies)\s+(?:the\s+|that\s+|its\s+|our\s+)?"
-        r"(?:current|existing|web|live|old|native|present|look|style|design|layout|screens?|views?|app)\b",
+        r"(?:current|existing|web|live|old|native|present)\b",
         r"\bsame\s+(?:look|layout|design|structure|views?|screens?|tabs?|navigation)\s+as\b",
         r"\bconsistent\s+with\s+(?:the\s+)?(?:current|existing|web|old|app)\b",
         r"\bstays?\s+(?:close|true)\s+to\b",
