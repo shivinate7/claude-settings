@@ -17,5 +17,6 @@ runs:
       shell: bash
       env:
         BASE: ${{ inputs.base }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        python3 "${{ github.action_path }}/code_check.py" --base "$BASE"
+        python3 "$ACTION_PATH/code_check.py" --base "$BASE"

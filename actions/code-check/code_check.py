@@ -2,7 +2,7 @@
 """code-check: one type check and one bug lint per language, read from standard.json (the one home of the table).
     python3 code_check.py [--root DIR] [--base REF]
 Fails when a tracked file has a language with no row, when a row is malformed, when a tool finds a bug, or when the
-repo's mypy list (.code-check.json, "mypy_modules") lost a module since --base. Tools are pinned in standard.json and
+repo's mypy list (.code-check.json, "mypy_modules") lost a module since --base (the exclude list likewise only shrinks). Tools are pinned in standard.json and
 run through pipx or npx. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests, a dev machine).
 Formatter layers are skipped until o2 (one layout) lands; their rows say so."""
 import argparse, json, os, re, subprocess, sys
@@ -83,18 +83,27 @@ def classify(root, files, std):
     return found, missing
 
 
-def shrink_problems(root, base, modules):
-    """Modules the base ref listed that the list no longer holds. A list that only grows."""
+def base_config(root, base):
+    """The base ref's .code-check.json as a dict, or None (printed as unknown) when it cannot be read."""
     if not base or base == ZERO:
-        print("code-check: mypy list shrink check unknown: no base ref given")
-        return []
+        print("code-check: list shrink check unknown: no base ref given")
+        return None
     if sh(["git", "rev-parse", "--verify", "--quiet", base + "^{commit}"], root).returncode:
-        return ["base %s is not in this clone; check out with fetch-depth 0" % base]
+        print("code-check: list shrink check unknown: base %s is not in this clone (use fetch-depth 0)" % base)
+        return None
     old = sh(["git", "show", "%s:%s" % (base, CONFIG)], root)
-    if old.returncode:
-        return []  # the base had no list: first adoption
-    gone = [m for m in json.loads(old.stdout).get("mypy_modules", []) if m not in modules]
-    return ["mypy list shrank: %s left %s since the base ref; the list only grows" % (m, CONFIG) for m in gone]
+    return json.loads(old.stdout) if old.returncode == 0 else None  # none: first adoption
+
+
+def list_problems(old, cfg, files):
+    """Both lists only shrink. A module may leave mypy_modules once its file is gone; exclude may only lose entries."""
+    if old is None:
+        return []
+    out = ["mypy list shrank: %s left %s while the file still exists; the list only grows" % (m, CONFIG)
+           for m in old.get("mypy_modules", []) if m not in cfg.get("mypy_modules", []) and m in files]
+    out += ["exclude grew: %s is new in %s; the list only shrinks" % (e, CONFIG)
+            for e in cfg.get("exclude", []) if e not in old.get("exclude", [])]
+    return out
 
 
 def tool(std, name):
@@ -153,21 +162,29 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--base", default="")
+    ap.add_argument("--pins", action="store_true", help="print the pip specs of the tools the tests install, then exit")
     args = ap.parse_args(argv)
+    if args.pins:
+        tools = load_standard()["tools"]
+        print(" ".join("%s==%s" % (k, tools[k]) for k in ("ruff", "mypy", "shellcheck-py")))
+        return 0
     root = os.path.abspath(args.root)
     std = load_standard()
     failures = table_problems(std, RUNNERS)
     cfg_path = os.path.join(root, CONFIG)
     cfg = json.load(open(cfg_path, encoding="utf-8")) if os.path.exists(cfg_path) else {}
     modules = cfg.get("mypy_modules", [])
-    files = tracked(root, cfg.get("exclude", []))
+    for e in cfg.get("exclude", []):
+        if not e.strip().strip("/"):
+            failures.append("empty exclude entry %r in %s matches every file" % (e, CONFIG))
+    files = tracked(root, [e for e in cfg.get("exclude", []) if e.strip().strip("/")])
     found, missing = classify(root, files, std)
     for n in missing:
         failures.append("%s: language has no row in actions/code-check/standard.json; add a row or list the path in %s exclude" % (n, CONFIG))
-    failures += shrink_problems(root, args.base, modules)
+    failures += list_problems(base_config(root, args.base), cfg, files)
     for m in modules:
         if m not in files:
-            failures.append("mypy list names %s, which is not a tracked file" % m)
+            failures.append("mypy list names %s, which is not a tracked file; remove it from mypy_modules, or list its new path" % m)
     if "python" not in found and modules:
         failures.append("mypy list is set but the repo tracks no Python")
     ctx = {"std": std, "files": files, "found": found, "modules": [m for m in modules if m in files]}
