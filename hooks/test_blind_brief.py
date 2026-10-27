@@ -197,6 +197,22 @@ class BriefFaults(unittest.TestCase):
     def test_missing_lane_line_is_refused(self):
         self.assertIn("lane", codes(self.m.brief_faults(brief(header="Lane kind: blind"))))
 
+    def test_hex_first_palette_lines_pass(self):
+        self.assertEqual(self.m.brief_faults(brief(palette="#F4ECD8 parchment\n#2B2118 ink")), [])
+
+    def test_sub_heading_inside_job_passes(self):
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n### On mail day\nHe sorts by seller.")), [])
+
+    def test_plain_job_words_pass(self):
+        for line in ("Keep the screen on while sorting.", "Each card has a spec sheet.",
+                     "He signs in with a login token.", "Orders hold qty <5 and >2.",
+                     "He sorts by date and/or app/seller."):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
+    def test_lane_name_with_capitals_and_underscore_passes(self):
+        self.assertEqual(self.m.brief_faults(brief(header="Lane kind: blind\nLane: Pack_view-blind-1")), [])
+
     def test_wrong_kind_line_is_refused(self):
         self.assertIn("kind", codes(self.m.brief_faults(brief(header="Lane kind: informed\nLane: packages-blind-1"))))
 
@@ -323,6 +339,12 @@ class Hook(unittest.TestCase):
 
     def test_owner_none_with_no_words_is_denied(self):
         self.assertDenied(self.spawn("Lane kind: informed\nBlind lanes: none\n\nDraw it."))
+
+    def test_blind_kind_after_a_preamble_is_judged(self):
+        self.assertDenied(self.spawn("You are the designer.\nLane kind: blind\nLane: duo-blind-1\n\n" + DUO_BRIEF))
+
+    def test_informed_kind_after_a_preamble_is_judged(self):
+        self.assertDenied(self.spawn("You are the designer.\nLane kind: informed\n\nDraw it."))
 
     def test_designer_spawn_with_no_kind_passes(self):
         # A small change to one screen skips design-explore and names no kind.

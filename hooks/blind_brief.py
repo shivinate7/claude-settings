@@ -36,11 +36,11 @@ FREE = ("Job", "Device", "Palette")
 FIXED = ("House rules", "Deliver")
 
 KIND_LINE = re.compile(r"^lane kind:\s*(blind|informed|directed)\b", re.I)
-LANE_LINE = re.compile(r"^Lane:\s*[a-z0-9][a-z0-9-]*-blind-[1-9][0-9]*\s*$")
+LANE_LINE = re.compile(r"^Lane:\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
 BLIND_LANES = re.compile(r"^blind lanes:\s*(.*?)\s*$", re.I | re.M)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
-HEADING = re.compile(r"^#+\s*(.*?)\s*$")
-PLACEHOLDER = re.compile(r"<[^<>\n]{3,}>")
+HEADING = re.compile(r"^##\s+(.*?)\s*$")
+PLACEHOLDER = re.compile(r"<[A-Za-z][^<>\n]{2,}>")
 
 _NOUN = (r"(?:products?|apps?|screens?|views?|pages?|layouts?|designs?|ui|look|versions?|sites?|tabs?"
          r"|navigation|nav|clients?)")
@@ -56,7 +56,7 @@ PATTERNS = {
     ],
     "keep": [
         r"\b(?:keep|keeps|kept|keeping|preserve[sd]?|retain[s]?|reuse[sd]?)\s+(?:the\s+|that\s+|its\s+|this\s+|our\s+"
-        r"|today'?s\s+)?(?:current\s+|existing\s+)?(?:look|feel|style|layout|design|structure|views?|screens?|tabs?"
+        r"|today'?s\s+)?(?:current\s+|existing\s+)?(?:look|feel|style|layout|design|structure"
         r"|navigation|nav|ui|chrome)\b",
         r"\b(?:match|matches|matched|matching|mirror|mirrors|copy|copies)\s+(?:the\s+|that\s+|its\s+|our\s+)?"
         r"(?:current|existing|web|live|old|native|present|look|style|design|layout|screens?|views?|app)\b",
@@ -71,23 +71,27 @@ PATTERNS = {
     "path": [
         r"\bhttps?://", r"\bfile://", r"\blocalhost\b", r"\b127\.0\.0\.1\b",
         r"(?:^|[\s(`'\"])(?:~|\.{1,2})/[\w.-]",
-        r"\b(?:docs|src|app|design|captures|screens|public|assets|specs)/[\w.-]",
+        r"\b(?:docs|src|app|design|captures|screens|public|assets|specs)/[\w.-]+/",
         r"\b[\w-]+\.(?:png|jpe?g|gif|webp|heic|svg|pdf|html?|css|tsx?|jsx?|swift|json|md|txt|figma|sketch)\b",
     ],
     "spec": [
-        r"\bspecs?\b", r"\bspecification\b", r"\bdesign\s+(?:system|doc|docs|records?|decisions?)\b",
-        r"\b(?:design\s+)?tokens?\b", r"(?<![\w-])--[a-z][a-z0-9]*-[\w-]+", r"\bstyle\s*guide\b",
+        r"\b(?:the|its|our|design|product|app|ui|screen)\s+spec(?:s|ification)?\b(?!\s+sheets?)",
+        r"\bdesign\s+(?:system|doc|docs|records?|decisions?)\b",
+        r"\b(?:design|colou?r|style|css|theme)\s+tokens?\b", r"\btokens?\s+(?:file|values?)\b",
+        r"(?<![\w-])--[a-z][a-z0-9]*-[\w-]+", r"\bstyle\s*guide\b",
     ],
 }
 COMPILED = {kind: [re.compile(p, re.I) for p in pats] for kind, pats in PATTERNS.items()}
 
 
 def kind_of(text):
-    """The lane kind of a brief's first non-blank line, lowercased, or None."""
+    """The lane kind of the brief's first `Lane kind:` line, lowercased, or None. The line may come after
+    a preamble, so a preamble hides no kind; brief_faults still refuses a blind brief whose first line
+    is not the kind."""
     for line in text.splitlines():
-        if line.strip():
-            m = KIND_LINE.match(line.strip())
-            return m.group(1).lower() if m else None
+        m = KIND_LINE.match(line.strip())
+        if m:
+            return m.group(1).lower()
     return None
 
 
@@ -100,7 +104,7 @@ def sections(text):
         m = HEADING.match(line)
         if m:
             name = m.group(1)
-            if line.startswith("## ") and name in FREE + FIXED:
+            if name in FREE + FIXED:
                 if name in parts:
                     repeated.append(name)
                 current = name
@@ -137,7 +141,7 @@ def brief_faults(text, current=(), template=None):
     faults = []
     header, parts, extra, repeated = sections(text)
     lines = [line.strip() for line in header if line.strip()]
-    if not lines or kind_of(text) != "blind":
+    if not lines or not KIND_LINE.match(lines[0]) or kind_of(text) != "blind":
         faults.append(("kind", "first line", lines[0] if lines else ""))
     if not any(LANE_LINE.match(line) for line in lines):
         faults.append(("lane", "header", "no Lane line"))
