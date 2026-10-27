@@ -13,7 +13,7 @@ Why: an agent resumed after the harness removed its worktree (folder and branch)
 - **Outside home, Write, Edit, MultiEdit and NotebookEdit:** the target is inside the same clone, under the primary checkout, but outside the recorded home. A target outside the clone, such as a scratchpad file, is allowed.
 - **Read and Grep** are always allowed, so the agent can still report (`recovery-must-not-gate-on-its-own-state`).
 - **The refusal** never names the recorded home or the call's own path (`git-remedy-never-names-target`). It says the tree is gone or left, to make no further change, and to stop and report to the orchestrator. The matched detail goes to the log.
-- **Unreadable is not a hit.** No git, no common directory, or an unreadable record file returns "unknown", which allows (`verification-report-unknown-reads`). A guard that denied on every unreadable state would cry wolf.
+- **Unreadable is not a hit.** No git, no common directory, or an unreadable record file returns "unknown", which allows (`verification-report-unknown-reads`). A guard that refused on every unreadable state would cry wolf.
 - **The predicate is the act** (`predicate-is-the-act`). The rule reads `agent_id`, `cwd` and the write target. The lone-move exception reads the command text only to allow. Any doubt in that read refuses.
 
 Kind: build

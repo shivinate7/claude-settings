@@ -254,7 +254,7 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
     os.makedirs(cfg)
-    if override is not None:  # (session id, pass file body): the pass the owner's prompt would write
+    if override is not None:  # (session id, override file body): the override the owner's prompt would write
         write_pass(cfg, *override)
     agents = os.path.join(base, "agents.json")
     with open(agents, "w", encoding="utf-8") as f:
@@ -296,7 +296,7 @@ def hook_input(to=PEER, message="Status: the step is done, no change for you.", 
 
 
 def write_pass(cfg, session, body):
-    """Write <config>/state/override/<session>.json, the owner override pass (hooks/override_pass.py)."""
+    """Write <config>/state/override/<session>.json, the owner override (hooks/override.py)."""
     folder = os.path.join(cfg, "state", "override")
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, session + ".json"), "w", encoding="utf-8") as f:
@@ -586,19 +586,19 @@ def claims(r):
     return [n for n in os.listdir(folder) if n.endswith(".claim")] if os.path.isdir(folder) else []
 
 
-def case_override_pass_lifts_a_deny():
-    # decision owner-override-pass: an active pass lifts either judge.
+def case_override_lifts_a_deny():
+    # decision owner-override: an active override lifts either judge.
     both = {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG, "wording": FLAG}
     for label, override, inp, kwargs, lifted in (
-        ("timed pass, both judges FLAG", (SID_A, TIMED), hook_input(), both, True),
-        ("timed pass, an agent's call", (SID_A, TIMED), hook_input(agent="a1"), both, True),
-        ("one-act pass, wording FLAG", (SID_A, ONCE), hook_input(), {"reader_mode": "idle", "wording": FLAG}, True),
-        ("one-act pass, busy FLAG", (SID_A, ONCE), hook_input(), {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG}, True),
-        ("one-act pass, an agent's call", (SID_A, ONCE), hook_input(agent="a1"), both, False),
-        ("an ended pass", (SID_A, dict(TIMED, until=PAST)), hook_input(), both, False),
-        ("another session's pass", (SID_B, TIMED), hook_input(), both, False),
-        ("a corrupt pass file", (SID_A, "{not json"), hook_input(), both, False),
-        ("no pass", None, hook_input(), both, False),
+        ("timed override, both judges FLAG", (SID_A, TIMED), hook_input(), both, True),
+        ("timed override, an agent's call", (SID_A, TIMED), hook_input(agent="a1"), both, True),
+        ("one-act override, wording FLAG", (SID_A, ONCE), hook_input(), {"reader_mode": "idle", "wording": FLAG}, True),
+        ("one-act override, busy FLAG", (SID_A, ONCE), hook_input(), {"rows": [row(SID_A, PEER, "busy")], "answer": FLAG}, True),
+        ("one-act override, an agent's call", (SID_A, ONCE), hook_input(agent="a1"), both, False),
+        ("an ended override", (SID_A, dict(TIMED, until=PAST)), hook_input(), both, False),
+        ("another session's override", (SID_B, TIMED), hook_input(), both, False),
+        ("a corrupt override file", (SID_A, "{not json"), hook_input(), both, False),
+        ("no override", None, hook_input(), both, False),
     ):
         r = run_hook(inp, override=override, **kwargs)
         if lifted:
@@ -611,16 +611,16 @@ def case_override_pass_lifts_a_deny():
                   r.code == 0 and d is not None and d.get("permissionDecision") == "deny"
                   and "\toverride\t" not in r.log, detail(r) + " log=%r" % r.log)
     r = run_hook(hook_input(), override=(SID_A, ONCE), reader_mode="idle", wording=FLAG)
-    check("one-act pass: the lift spends it (one claim marker)", len(claims(r)) == 1, detail(r))
+    check("one-act override: the lift spends it (one claim marker)", len(claims(r)) == 1, detail(r))
     r = run_hook(hook_input(), override=(SID_A, ONCE), reader_mode="idle", wording=ALLOW)
-    check("one-act pass: an allowed send leaves it unspent", r.out == "" and claims(r) == [], detail(r))
+    check("one-act override: an allowed send leaves it unspent", r.out == "" and claims(r) == [], detail(r))
 
 
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
                  case_wording_judge_denies_any_receiver,
-                 case_override_pass_lifts_a_deny,
+                 case_override_lifts_a_deny,
                  case_idle_and_waiting_allow_with_no_model_call,
                  case_busy_flag_rows,
                  case_busy_allows_when_the_model_does_not_flag,

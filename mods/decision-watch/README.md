@@ -1,6 +1,6 @@
 # decision-watch
 
-A mod. It runs the decision watch on each completed turn (`turn.complete`) with this session's own model login. It replaces the Stop hook row. It never blocks a turn. A FLAG or UNKNOWN verdict shows in the session as a toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked `Decision watch notice:`.
+A mod. It runs the decision watch on each completed turn (`turn.complete`) with this session's own model login. It replaces the Stop hook row. It never refuses a turn. A FLAG or UNKNOWN verdict shows in the session as a toast. An ALLOW verdict shows nothing. Each config notice shows as its own toast, marked `Decision watch notice:`.
 
 ## What it does
 
@@ -52,7 +52,7 @@ The last line is "Stops seen: N". N counts the STOP seen lines now in the log. T
 ## Limits
 
 - The script must be the version that knows `--emit-prompt`, `--model-text`, and `--model-error`.
-- A bad flag combination on the script falls back to the normal `claude -p` call. This is a hole: a wrong flag from a caller runs the old path.
+- A bad flag combination on the script falls back to the normal `claude -p` call. This is a known limit: a wrong flag from a caller runs the old path.
 - A turn that arrives during a judge is skipped. The script scopes a turn by the file time after the last human message. So a new turn that lands during a judge is never judged.
 - The ruling and what is unverified: `decision-watch-mod-limits` (limits of the mod).
 

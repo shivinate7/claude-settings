@@ -14,11 +14,11 @@ to the repo (`rule:building-land-design-or-abandon` had no mechanism).
   not a home, because it is not tracked. `MEMORY.md`, the index, is exempt.
 - The hook checks only that the value resolves. It never compares text, so a paraphrase cannot
   make it cry wolf.
-- When git or the transcript cannot be read, the hook stands down with no block
+- When git or the transcript cannot be read, the hook stands down with no refusal
   (recovery-must-not-gate-on-its-own-state).
 
 Process state stays in memory with `home: process-only`: merge order, which agent holds which
-branch, a merge approval for one act, a personal preference. `lint/ruling_census.py` counts those lines.
+branch, a merge grant for one act, a personal preference. `lint/ruling_census.py` counts those lines.
 
 ## The owner's rulings
 
@@ -26,7 +26,7 @@ branch, a merge approval for one act, a personal preference. `lint/ruling_census
 - "A memory entry may point to a ruling. It is never the ruling's only home." `hooks/ruling_home.py`
   enforces it, so its prose left CLAUDE.md (claude-md-shrink).
 - Each answer to a question gets a home (`rule:output-answer-has-a-home`). The report is a
-  scratchpad: each ruling in it moves to its decision entry or a debt's Ruling section.
+  scratchpad: each ruling in it moves to its decision or a debt's Ruling section.
 - No standing `records/<session>` branch for the orchestrator's records, until a measure shows the
   cost of a record is the cause.
 - `docs/debts/` is the one home for deferred work, one file per item (owner, 2026-10-17 23:46 CDT). The question reviewer hook judges the box alone and does not read `docs/debts/` (`question-reviewer-agent-hook`, one Opus agent hook on each question).

@@ -30,7 +30,7 @@ only if a small script cannot do the job, and name each dependency you add, with
 | Prose | Claims that rot | Rung that fits |
 | --- | --- | --- |
 | README | see `readme.md` in this skill | see `readme.md` |
-| CLAUDE.md, agent files | "the guard blocks X", file paths | Check it: link each rule to a test that runs and goes red. `lint/rule_audit.py` checks only that the test exists and is collected. The red runs are in `lint/test_rule_audit.py` and `hooks/mutate_guard.py` |
+| CLAUDE.md, agent files | "the guard refuses X", file paths | Check it: link each rule to a test that runs and goes red. `lint/rule_audit.py` checks only that the test exists and is collected. The red runs are in `lint/test_rule_audit.py` and `hooks/mutate_guard.py` |
 | Rule text that a hook injects into a session | the copy drifts from the rule it copies | Check it: name the source of the copy, and add a test that fails when the printed text and the source differ |
 | docs, guides | commands, flags, config keys | Generate from `--help` or the schema, or run the commands in CI |
 | Decision records | "we chose X because Y was true" | A trigger, not a test: name the fact that would date the record |
@@ -48,7 +48,7 @@ is not yet on the ladder.
 When a fact changes, rewrite the claim in place. Keep only what is true now, in the fewest
 words. Never add a "was X, now Y" line or a history. Git keeps the history
 (`speak-rewrite-superseded-in-place`). A decision record whose ruling changes is rewritten in
-its own entry (`git-one-entry-per-question`).
+its own record (`git-one-record-per-question`).
 
 ## Proof
 

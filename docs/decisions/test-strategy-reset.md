@@ -11,7 +11,7 @@ A test must not fail on runner speed. CI runs a job only when its suites' files 
 3. One shared set of fixtures: one git template, and one fake each for `gh`, `claude` and `xcrun`.
 4. The pure-parse guard families run in one Python process. The cases that need a real hook process stay as subprocess cases.
 5. A test stays only when it names the real failure it catches: a wrong allow or deny, lost work, a stuck merge, or a wrong record. A test
-   that pins a known gap becomes a debt entry, not a test.
+   that pins a known finding becomes a debt, not a test.
 6. A merge of look-alike tests keeps one row for each item in a guard's list, each part of its pattern, and each filter. A row that alone
    fails when that item goes stays.
 
@@ -29,7 +29,7 @@ A test must not fail on runner speed. CI runs a job only when its suites' files 
 Reason: a slow Windows runner failed a PR on tests its change did not touch. Fixed sleeps cost time, and macOS CI minutes went to suites
 that do not touch the OS. A duplicate run costs minutes for no new verdict.
 
-Accepted risk: a bug in an OS-independent suite that shows only on macOS or Windows is not caught. Unmeasured.
+Accepted risk: a defect in an OS-independent suite that shows only on macOS or Windows is not caught. Unmeasured.
 
 Kind: process
 Home: .github/workflows/gates.yml

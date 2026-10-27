@@ -18,7 +18,7 @@ worktree (`parallelism-each-own-checkout`).
   the owner's words, and writes them into the brief in plain words. The brief never names the spec.
   Never paste screen code into a blind brief. A blind lane shows ideas the repo's habits would hide.
   It rests on its brief and its own instruction. Each designer's worktree holds the code, spec,
-  tokens and mockups, and the guard `designer-scope` limits writes only, so nothing blocks the read.
+  tokens and mockups, and the guard `designer-scope` limits writes only, so nothing refuses the read.
 - **Informed lane.** The brief gives the current screen, its mockups, the spec and the tokens.
 - **Directed lane.** An informed lane plus one named direction, such as denser, phone first, or one
   primary action. The orchestrator picks directions that differ from each other.

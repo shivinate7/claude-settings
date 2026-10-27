@@ -25,7 +25,7 @@
         "reason": "Sorting a failing test into re-point-and-show-red-then-green, real defect, possibly-stale, or already-ruled-out is a judgment call on the failure's cause. Whether a builder or reviewer actually applied that reasoning is not something a hook can read from a diff. agents/builder.md and agents/reviewer.md carrying the 4-class list is checkable, but proving the check works needs a test fixture, and builders do not write tests; left to a test-author to mechanize that slice."
       }
     },
-    "outcomes-word-covers-named-act": {
+    "outcomes-grant-covers-named-act": {
       "mechanism": {
         "kind": "judgment",
         "reason": "Whether a stated act matches the literal word given, versus a variant of it, and whether a test expects exactly the behaviour a ruling ruled out, are judgment calls on wording. No hook parses an instruction and an action for a match."
@@ -258,7 +258,7 @@
         "reason": "No check enforces one file per decision or a separate folder per record kind."
       }
     },
-    "git-one-entry-per-question": {
+    "git-one-record-per-question": {
       "mechanism": {
         "kind": "judgment",
         "reason": "Whether a new entry restates an open question or opens a new one is a judgment about meaning. A hook sees a new file, not its question."
@@ -301,7 +301,7 @@
         "reason": "No check reads whether a report about long work was verified against the repo instead of a status line. The mutation test's WRONG CAUSE verdict covers only mutant cause of death, not this."
       }
     },
-    "verification-never-dry-run-blocklist": {
+    "verification-never-dry-run-refusal-list": {
       "mechanism": {
         "kind": "unmechanized",
         "reason": "No check reads whether a block-list was tested by running it for real. The guard suite drives the guard as a subprocess, but nothing proves a dry run would be refused."
@@ -408,7 +408,7 @@
     "building-land-design-or-abandon": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Nothing checks that a design discussed in chat was later landed in a spec, a decision entry, or declared abandoned."
+        "reason": "Nothing checks that a design discussed in chat was later landed in a spec, a decision, or declared abandoned."
       }
     },
     "speak-cite-id-plus-gloss": {
@@ -446,7 +446,7 @@
     "output-start-with-point": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by hooks/reply_judge.py, an async Stop command hook that calls Haiku at xhigh and returns a finding as a note on the next turn, per reply-judge-samples-never-blocks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by hooks/reply_judge.py, an async Stop command hook that calls Haiku at xhigh and returns a finding as a note on the next turn, per reply-judge-samples-never-refuses; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-tracking-turn-one-line": {
@@ -464,7 +464,7 @@
     "output-never-paste-passing-output": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by hooks/reply_judge.py, an async Stop command hook that calls Haiku at xhigh and returns a finding as a note on the next turn, per reply-judge-samples-never-blocks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by hooks/reply_judge.py, an async Stop command hook that calls Haiku at xhigh and returns a finding as a note on the next turn, per reply-judge-samples-never-refuses; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "output-bring-decisions-as-question": {
@@ -567,7 +567,7 @@
     "output-answer-has-a-home": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Nothing checks that an answer given in chat reached a decision entry or a deferred item before the work it governs merged. A check would have to pair each AskUserQuestion answer with a tracked path that a later report names."
+        "reason": "Nothing checks that an answer given in chat reached a decision or a deferred item before the work it governs merged. A check would have to pair each AskUserQuestion answer with a tracked path that a later report names."
       }
     },
     "questions-go-to-owner": {
@@ -579,7 +579,7 @@
     "style-cut-narration": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Judged by hooks/reply_judge.py, an async Stop command hook that calls Haiku at xhigh and returns a finding as a note on the next turn, per reply-judge-samples-never-blocks; it moves to a mechanism after the hook makes a real catch."
+        "reason": "Judged by hooks/reply_judge.py, an async Stop command hook that calls Haiku at xhigh and returns a finding as a note on the next turn, per reply-judge-samples-never-refuses; it moves to a mechanism after the hook makes a real catch."
       }
     },
     "style-simple-answer-short": {
@@ -690,10 +690,10 @@
         "reason": "Round counts live in briefs and reviewer reports. No check reads how many rounds a PR had. The hold rests on the round-3 reviewer's 'Net safety value:' line in agents/reviewer.md, which the orchestrator reads. No check blocks the merge of a held lane."
       }
     },
-    "roles-holes-are-debts": {
+    "roles-findings-are-debts-or-notes": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "A prose rule. No check reads the debt store yet; one would have to find each known gap in the repo and check that it has a debt entry."
+        "reason": "A prose rule. No check reads the debt store yet; one would have to find each open finding in the repo and check that it has a debt."
       }
     },
     "building-comments-say-why": {

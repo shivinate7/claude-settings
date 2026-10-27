@@ -30,7 +30,7 @@ do not probe it, only when both checks pass:
 - `${CLAUDE_CONFIG_DIR:-~/.claude}/guard.log` has a verdict line from the last 7 days. Run
   `lint/guard_log_report.py --days 7` from the parent to read it.
 
-If a check fails, the mechanism does not cover the child: report the rule as a gap in the
+If a check fails, the mechanism does not cover the child: report the rule as a finding in the
 parent's install. If a file is missing or unreadable, mark the rule `unknown`.
 
 Probe only what lives in the child's tree, from `probes.md` in this skill folder. A rule about
@@ -61,14 +61,14 @@ One line per group, in the order of step 2, then Layout, Design, Copies and iOS:
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
 known score, and lists each unknown probe after it. Layout, Design and iOS list each item under the
-group line, with its own grade, so one score never hides a gap. A child with no extras file
+group line, with its own grade, so one score never hides a finding. A child with no extras file
 scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
 that no probe and no mechanism covers.
 
 ## 5. Plan
 
-Rank the gaps. First, a gap that can lose work or ship a wrong result to the person the repo
-serves. Next, a gap that hides defects. Last, cost and tidiness. Give each gap one lane the
+Rank the findings. First, a finding that can lose work or ship a wrong result to the person the repo
+serves. Next, a finding that hides defects. Last, cost and tidiness. Give each finding one lane the
 orchestrator can brief:
 
 ```
@@ -77,5 +77,5 @@ orchestrator can brief:
    done when: <one bounded command and its expected verdict>
 ```
 
-Keep each lane under 40 lines of change. Split a larger gap into lanes. A gap that needs an
+Keep each lane under 40 lines of change. Split a larger finding into lanes. A finding that needs an
 owner ruling is a question with options and a recommendation, not a lane.

@@ -5,9 +5,9 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central. A prompt that opens with
   `fb` also starts feedback capture to the session's inbox file. Capture ends at `fb done`,
   after 10 minutes of quiet, or when a judge says a prompt is not feedback.
-  A prompt whose first word is `override` also grants a one-act owner override pass, and the rest is the
+  A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
-  (decision owner-override-pass; hooks/override_pass.py). It prints one more line.
+  (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 
 Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: 2026-10-13 21:40 CDT (UTC-05:00)".
@@ -86,23 +86,23 @@ def line(clock=clock):
 
 
 def central_hhmm(at):
-    """`HH:MM CDT` (or CST) for an instant: the time line's own clock, cut to the end of a pass."""
+    """`HH:MM CDT` (or CST) for an instant: the time line's own clock, cut to the end of an override."""
     return " ".join(line(lambda: at).split()[3:5])
 
 
 def override_line(result):
-    """The context line for a grant() result: names the pass and when it ends, Central time."""
+    """The context line for a grant() result: names the override and when it ends, Central time."""
     kind, until = result[:2]
     if kind == "off":
-        return "Override pass: ended."
+        return "Override: ended."
     if kind == "opus-off":
-        return "Opus pass: ended."
+        return "Opus override: ended."
     if kind == "opus":
         who = "%s spawns" % result[2] if result[2] else "spawns"
-        return "Opus pass: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
+        return "Opus override: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
     if kind == "once":
-        return "Override pass: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
-    return "Override pass: every refused act goes through until %s." % central_hhmm(until)
+        return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
+    return "Override: every refused act goes through until %s." % central_hhmm(until)
 
 
 def inbox_paths(session_id):
@@ -190,18 +190,18 @@ def capture(raw, stamp, at=None):
 
 def grant_override(raw, at):
     """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
-    (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override-pass): grants or ends
-    the session's pass and prints one line. Any failure is one stderr line, no pass."""
+    (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
+    the session's override and prints one line. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
-        import override_pass
-        result = override_pass.grant(hook.get("session_id"), hook.get("prompt"), at)
+        import override
+        result = override.grant(hook.get("session_id"), hook.get("prompt"), at)
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):
         pass  # stdin is no hook payload: capture() reports that once
     except Exception as e:  # advisory: the time line and capture still run
-        print("local_time: override pass: %s" % e, file=sys.stderr)
+        print("local_time: override: %s" % e, file=sys.stderr)
 
 
 OLD_FLAG_ENDS = "2026-11-09"

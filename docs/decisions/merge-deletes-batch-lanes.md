@@ -21,7 +21,7 @@ sessions read them as open work, and they mislead the next batch.
 
 Reason for the open-PR rule, as measured: GitHub marks a lane PR merged a median of 2 s after its batch merges
 (minimum 1 s, over 40 lane PRs). The cleanup reads open PRs at about that moment, so a lane PR can still read open.
-An open PR whose head is the lane tip has all its commits on main already, so it does not block the delete.
+An open PR whose head is the lane tip has all its commits on main already, so it does not refuse the delete.
 
 Reason for the stack rule, as measured: 5 of the last 500 PRs here were stacked PRs, and none was a backport.
 PR #456 on map-skill-move is open today.
@@ -62,7 +62,7 @@ prove that a squash-merged lane landed.
 Kind: process
 Home: merge/merge.py
 
-## Holes, named
+## Safety holes, named
 
 - (a) Any origin head at a lane tip's sha is deleted. `merge.keepBranches` is the only guard, so a long-lived branch merged into a batch is lost. Its commits stay on main; restoring it is one push. Debt: `long-lived-head-lost-in-batch`.
 - (b) A fast-forwarded first lane is never a tip (0 of 112 recent lane merges did this). Debt: `ff-first-lane-not-a-tip`.

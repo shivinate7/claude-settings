@@ -4,7 +4,7 @@ description: Use when the owner asks to give a repo standing roles, counted hand
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
-adopt it. The owner decides when a repo adopts it. Never set it up in a repo without the owner's word.
+adopt it. The owner decides when a repo adopts it. Never set it up in a repo without the owner's grant.
 
 The model assumes a claude.ai project: a coordinator session in the project chat starts one thread
 per role. Without a project, each role is one Claude Code session, and the owner acts as the coordinator.
@@ -30,7 +30,7 @@ branch's `handoffs/` folder that a standing role writes for its successor.
 
 ## Steps
 
-1. **Get the owner's word.** Name the repo and the record branch. When the owner has not named the repo, stop.
+1. **Get the owner's grant.** Name the repo and the record branch. When the owner has not named the repo, stop.
 2. **Make the record branch.** In a new worktree of the repo, make an orphan branch:
    `git worktree add --orphan -b <branch> ../<repo>-<branch>` (git 2.42 or later).
 3. **Write the skeleton.** From the repo root of that worktree:

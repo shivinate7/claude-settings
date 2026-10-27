@@ -178,7 +178,7 @@ def is_frozen(path: str, cwd: str) -> bool:
 def is_project_config(path: str, cwd: str) -> bool:
     """True when the path is a project's own `.claude/settings*.json` or `.claude/hooks/*`.
 
-    Decision 7: allowed in any checkout, never denied. The caller logs the edit as `noted` under
+    Decision 7: allowed in any checkout, never refused. The caller logs the edit as `noted` under
     rule `config-edit` instead of refusing it.
     """
     if not path:
@@ -434,7 +434,7 @@ def _runs_stored_text(segment: str, words, plain: str) -> bool:
 # COPY-OUT. `cp SRC... DEST` writes only DEST. Only plain POSIX flags are read (a PowerShell
 # `-Destination` fails closed to a deny), and a DEST built from a variable, a glob or a brace fails
 # closed too. DEST also counts as hit when it is a directory the predicate hits (`DEST/_`), so a
-# frozen file copied into a frozen folder stays denied.
+# frozen file copied into a frozen folder stays refused.
 # `l` and `s` (and the long `--link`, `--symbolic-link`, even cut short) make a link, not a copy: a
 # later write to the new name writes the frozen file, so those flags are never read as a copy.
 _CP_FLAGS = re.compile(r"-[RrfiaHLPpnvuxTS]+|--[a-z][a-z-]*(?:=.*)?|--")

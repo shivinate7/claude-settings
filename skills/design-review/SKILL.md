@@ -78,6 +78,6 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
   deletes and adds nothing gets one round. A round is steps 2 to
   5, with a new pair of blind reviewers. After round 3, run no fourth round. Each finding that
   is still open becomes a debt if Claude is likely to hit it in normal work. Otherwise it becomes a
-  note. Each points to its decision (`roles-review-cap-three`, `roles-holes-are-debts`).
+  note. Each points to its decision (`roles-review-cap-three`, `roles-findings-are-debts-or-notes`).
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/docs/design/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/docs/design/tokens.md`.
 - Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/docs/design/layout.md` (gap on the parent, layout primitives, container queries, fluid tokens).

@@ -1,4 +1,4 @@
-# The reply judge samples, judges Input Needed, and never blocks
+# The reply judge samples, judges Input Needed, and never refuses
 
 ## The ruling
 
@@ -8,10 +8,10 @@ The Stop reply judge is `hooks/reply_judge.py`, a command hook (owner ruling 202
 - Each finding writes one line to guard.log through `guard_core.record`. Named reader: the advisor at each cull, who counts flags against owner-confirmed misses and false alarms, to rule whether the judge stays, widens or goes. A failed write is swallowed. A judge line carries the judged style rule id, or `reply-judge` when the reason names none; the cull reads these with `lint/guard_log_report.py`, not the never-fired list.
 - A damaged, missing or unwritable counter means that Stop is judged. It never refuses and never crashes (`gate-hooks-fail-closed`). A frozen counter therefore means judge every Stop (owner ruling 2026-10-13 17:52 CDT).
 - The model call is `decision_watch.invoke_model`, the one home. Model and effort are the reply judge row of the model table (`agent-model-cap`).
-- The model call starts a second `claude` program that does not share the app's login. Every hook that calls `invoke_model` logs in with a token from `claude setup-token`, saved in `~/.claude/state/hook-token` on each machine and never in the repository. The guard blocks writes to that folder, not reads (accepted risk, debt `token-read-accepted-risk`).
-- A finding never blocks (owner ruling 2026-10-13 11:33 CDT). The hook runs `async: true` and passes the finding as a note at the start of the next turn. Reason: a block came after the owner had read the reply, so the session sent the reply twice. The report-shape gate still blocks.
-- The report gate, `lint/report_gate.py`, still blocks, but no block makes a session send its report twice (roadmap c101, the report gate never asks for the report again). A wrong Done label, a missing model name, a missing `Unstarted:` line or a bare record id gets a block that asks for only the corrected lines. Only a missing report is sent in full. Incident: on Oct 26 21:12 CDT a mailaudit session sent its whole report twice to fix one Done label and add model names.
-- It fails open. An error, a timeout or an odd answer prints one stderr line and blocks nothing.
+- The model call starts a second `claude` program that does not share the app's login. Every hook that calls `invoke_model` logs in with a token from `claude setup-token`, saved in `~/.claude/state/hook-token` on each machine and never in the repository. The guard refuses writes to that folder, not reads (accepted risk, debt `token-read-accepted-risk`).
+- A finding never refuses (owner ruling 2026-10-13 11:33 CDT). The hook runs `async: true` and passes the finding as a note at the start of the next turn. Reason: a refusal came after the owner had read the reply, so the session sent the reply twice. The report-shape gate still refuses.
+- The report gate, `lint/report_gate.py`, still refuses, but no refusal makes a session send its report twice (roadmap c101, the report gate never asks for the report again). A wrong Done label, a missing model name, a missing `Unstarted:` line or a bare record id gets a refusal that asks for only the corrected lines. Only a missing report is sent in full. Incident: on Oct 26 21:12 CDT a mailaudit session sent its whole report twice to fix one Done label and add model names.
+- It fails open. An error, a timeout or an odd answer prints one stderr line and refuses nothing.
 - The model call times out at 20 s. Three runs took 6.6, 7.0 and 8.0 s on the owner's machine, and the Stop entry in `settings.json` allows 25 s.
 - Its rules are `output-start-with-point`, `style-cut-narration`, `output-never-paste-passing-output`, `output-never-hand-off-doable-step`, `style-table-gold-column` and `questions-go-to-owner` (an Input Needed pick that can be undone). The first five stay `unmechanized` and `questions-go-to-owner` stays `judgment` in `lint/rule_mechanisms.json` until the hook catches a real defect.
 

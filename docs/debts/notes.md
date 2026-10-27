@@ -1,22 +1,22 @@
 # Notes: findings too unlikely to hit to be debts
-- AskUserQuestion gain/loss rule may block terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
-- hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a deny case. Decision: wsl-allow-list (WSL allow list).
+- AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
+- hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a refusal case. Decision: wsl-allow-list (WSL allow list).
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
 - agent-brief-no-matcher: SubagentStart agent-brief hook has no matcher, so every agent type gets the standing rules (settings.json)
 - agent-brief-text-copy-drifts: agent brief rule text copies CLAUDE.md and agents/*.md; a rule change needs a second edit and the test pins the copy (hooks/agent_brief.py)
 - agent-plan-scope-line-general: Plan and claude-code-guide get the general scope line, which names only reviewer and Explore as never-edit (hooks/agent_brief.py)
 - alias-skip-misses-case-forms: python wrapper alias skip misses mixed-case and backslash WindowsApps paths; Git Bash prints canonical form, so theoretical (python wrappers)
 - ansi-c-escape-not-decoded: escapes inside $'...' such as \x2f stay text, so a protected path spelled with escapes passes frozen and cap checks (hooks/guard_frozen.py)
-- ask-alone-echo-amp-overdeny: a quoted & in a harmless echo tail counts as a command, so a chain with an ask command over-denies (hooks/guard.py UNSAFE_TEXT)
-- ask-alone-empty-segment-denies: a trailing newline or ; after a harmless tail stops the tail count, so a chain with an ask command over-denies (hooks/guard.py harmless_commands)
-- ask-alone-ps-backslash-denies: UNSAFE_TEXT reads \" as an escape in PowerShell, so a quoted path ending in a backslash counts as a step and over-denies (hooks/guard.py)
-- ask-alone-sl-chdir-denies: sl, chdir and Push-Location are not harmless leads, so a chain starting with them over-denies; owner ruling names only Set-Location (hooks/guard.py harmless_lead)
+- ask-alone-echo-amp-overdeny: a quoted & in a harmless echo tail counts as a command, so a chain with an ask command over-refuses (hooks/guard.py UNSAFE_TEXT)
+- ask-alone-empty-segment-refuses: a trailing newline or ; after a harmless tail stops the tail count, so a chain with an ask command over-refuses (hooks/guard.py harmless_commands)
+- ask-alone-ps-backslash-refuses: UNSAFE_TEXT reads \" as an escape in PowerShell, so a quoted path ending in a backslash counts as a step and over-refuses (hooks/guard.py)
+- ask-alone-sl-chdir-refuses: sl, chdir and Push-Location are not harmless leads, so a chain starting with them over-refuses; owner ruling names only Set-Location (hooks/guard.py harmless_lead)
 - ask-alone-tail-args-unchecked: echo and Write-Host tail arguments are not checked, so a PowerShell (...) subexpression tail counts harmless and asks alone (hooks/guard.py)
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
 - ask-step-hidden-in-script: cap write inside command substitution, backticks or unspaced subshell, and force push inside bash -c, pass with no ask (hooks/guard.py)
 - bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py)
 - bare-merge-skips-host-merge-tool: mcp__github__merge_pull_request merges bare in a merge-tool repo with no bare-merge ask; merge-checks still gates it (hooks/guard.py)
-- bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks denies a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py)
+- bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks refuses a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py)
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
 - base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py)
 - blind-git-fixtures-unaudited: other blind-command fixtures, such as make_blind_git, are not audited for the PATH shim gap (janitor/test_sweep.py)
@@ -27,7 +27,7 @@
 - cite-by-id-skips-merge-subject: the cite-by-id rule does not read a gh pr merge subject; the lane-by-slug rule does (hooks/guard.py)
 - cites-lack-gloss-unchecked: some cites of record ids in decisions and debts carry no gloss and no check requires one (decisions, debts)
 - cmd-c-quote-count-bash-reader: bash reader treats \" as an escape but cmd does not, so a cmd /c string can end where the guard disagrees (hooks/guard_core.py)
-- debt-decision-link-unchecked: no check confirms that a debt's decision still names its gap (docs/debts/, decisions Holes sections)
+- debt-decision-link-unchecked: no check confirms that a debt's decision still names its finding (docs/debts/, the decisions' safety-hole sections)
 - debts-no-check-reads-parts: no check reads the four parts of a debt file; check_record_slugs checks only the slug length (lint/check_record_slugs.py)
 - discards-output-slow-path: discards_output re-walks the segment once per redirect match; cost unmeasured (hooks/guard.py)
 - dropped-bloat-phrases-silent: 'in between', 'in terms of' and 'it would appear that' left BLOAT, so the lint no longer reports them even as a warning (lint/ste_lint.py)
@@ -45,7 +45,7 @@
 - dw-slash-cache-hit-reads-clean: a repeat /dw after a FLAG prints 'nothing to say' like a clean turn; Stops seen is capped at 500 (mods/decision-watch)
 - dw-slot-timers-unmeasured: decision-watch slot timers sum to about 168 s, computed not measured; a timer frees the slot but does not kill the child (mods/decision-watch)
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
-- env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a hole with no pinning case (hooks/guard_env.py)
+- env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
 - env-node-env-file-prints: node --env-file=.env -e 'console.log(process.env)' prints the env file through the runner allow-list (hooks/guard_env.py)
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
@@ -61,7 +61,7 @@
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
 - git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks)
-- git-env-set-false-alarms: safe forms such as try{$env:GIT_DIR=$null}catch{} and Write-Host {$env:GIT_DIR=1} are denied (hooks/guard_kill.py)
+- git-env-set-false-alarms: safe forms such as try{$env:GIT_DIR=$null}catch{} and Write-Host {$env:GIT_DIR=1} are refused (hooks/guard_kill.py)
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
@@ -83,14 +83,14 @@
 - guard-log-one-reader-gaps: OneReaderTests flags only a literal .split(tab); partition, re.split, csv or readers in merge/ janitor/ bin/ pass (lint test)
 - guard-log-session-id-fence: a pipe or backtick in a session id breaks the --by-session table display; counts stay right (lint/guard_log_report.py)
 - guard-log-tool-field-tab: a tab in the tool field can add a seventh guard.log field; not every caller was checked (guard_core record, decision_watch)
-- guard-lone-quote-overdeny: a lone quote line plus two interpreter heredoc bodies naming a lane or record can deny a clean commit; no bypass in 300k cases (guard_core heredoc readers)
-- guard-msg-blank-segment-split: a commit -m value holding ; | or newline is cut before blanking, so a later heredoc body stays inspected; main denies too (guard_core)
+- guard-lone-quote-overdeny: a lone quote line plus two interpreter heredoc bodies naming a lane or record can refuse a clean commit; no bypass in 300k cases (guard_core heredoc readers)
+- guard-msg-blank-segment-split: a commit -m value holding ; | or newline is cut before blanking, so a later heredoc body stays inspected; main refuses too (guard_core)
 - guard-old-install-mixes-once: an install made before the switch rule copies guard files one at a time, so a session can mix two installs once (install.sh put_file, install.ps1)
 - guard-realpath-after-flip: in link mode _HERE comes from realpath; a link flip before it runs mixes two main commits for milliseconds (hooks/guard.py)
 - guard-redirect-paren-heredoc: a leading redirect before the command word, )# opening no comment, and a heredoc header ending in an open quote hide a kill (guard_core)
 - guard-shell-wrap-discard-unread: a discard inside sh -c, eval or $(...) is not read; eight shapes stay open under the round cap (guard_shared_tree.py)
 - guard-split-heredocs-here-string: _split_heredocs reads a quoted or here-string <<<word as a heredoc and strips later lines from every rule (hooks/guard_core.py)
-- guard-split-ignores-backslash: no guard test denies the \' and \" forms; background_commands counts echo \" & echo b as one command (guard_core, guard.py)
+- guard-split-ignores-backslash: no guard test refuses the \' and \" forms; background_commands counts echo \" & echo b as one command (guard_core, guard.py)
 - guard-split-mutant-needs-git: the root-scope mutant (_git drops -C) is killed only inside a git checkout; CI does (hooks/mutate_guard.py)
 - guard-split-sibling-mutant-case: PR2 needs a case in the in-process load that kills a sibling mutant (hooks/test_guard.py)
 - guard-substitution-in-token: a command inside a token, such as glued $(...), backticks or x=$(...), is not read as a command (guard_core command_indexes)
@@ -110,7 +110,7 @@
 - heredoc-indented-close: _split_heredocs closes on an indented EOF after .strip(); bash does not, so later text is read as commands (guard_core)
 - heredoc-run-other-path: heredoc bodies run through a next-line pipe or other paths are read as text (guard_core, test_guard.py)
 - heredoc-script-then-run: a heredoc that writes a script the same command then runs is not read for the script body (guard_core, guard.py)
-- hold-own-hole-unrecorded: no held change has yet shown the hole record the review-cap rule describes (CLAUDE.md roles-review-cap-three)
+- hold-own-safety-hole-unrecorded: no held change has yet shown the safety-hole record the review-cap rule describes (CLAUDE.md roles-review-cap-three)
 - home-cd-escaped-space: the worktree-home rule refuses a lone cd into a home path with an escaped space or newline; fails closed (guard_core is_move_into)
 - home-cwd-mutant-fragment: the four home_cwd mutants require only the worktree-home: fragment, so a kill does not prove the named case (mutation test)
 - impeccable-piped-shell-body: a body fed by here-string or $SHELL to a shell, such as bash <<< "npx impeccable install", is allowed (guard_core SHELL_HEREDOC, guard.py)
@@ -189,11 +189,11 @@
 - off-line-fork-reads-pre-cut: a branch cut from a later-merged PR branch makes the silent-undo window flag a deliberate removal (lint/check_silent_undo.py)
 - old-before-was-flags-history: the history rule flags the word old followed later by was and a colon in one block, so a plain description fails as history (lint/hook_catalog.py)
 - one-term-per-meaning-unchecked: no check reads the 'one term per meaning' clause of output-write-in-ste (CLAUDE.md, lint/rule_mechanisms.json)
-- override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants a pass. Decision: owner-override-pass
-- override-once-not-bound: a one-act pass lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a hole). Decision: owner-override-pass
+- override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants an override. Decision: owner-override
+- override-once-not-bound: a one-act override lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a safety hole). Decision: owner-override
 - override-removal-unreminded: nothing reminds an agent to remove a raised agent-cap file early; only expiry reverts it (hooks/config_watch.py)
-- override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_pass_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_pass_context. Decision: owner-override-pass
-- override-veto-no-mutants: no mutant covers never_passed, take or the veto path. Decision: owner-override-pass
+- override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_override_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_override_context. Decision: owner-override
+- override-veto-no-mutants: no mutant covers never_lifted, take or the veto path. Decision: owner-override
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
 - plain-diff-4mib-unconfirmed: the 4 MiB host output limit behind 'Diff truncated' is unconfirmed in code (mods/plain-diff register.mjs)
@@ -251,12 +251,12 @@
 - sb-hook-order-unproven: mod assumes the host runs the permission check inside next(); a headless run did not confirm it (mods/session-board)
 - sb-host-calls-unbounded: session start, end and clear calls to $.session.repo, $.command.register and store deletes have no time bound (mods/session-board)
 - sb-prompt-turn-end: board state at turn end while a prompt is still open is unknown; headless cannot test it (mods/session-board)
-- sb-safe-stop-origin: /safe-stop origin check is a block-list; an unclassified origin still runs it (mods/session-board hooks/lib.mjs)
+- sb-safe-stop-origin: /safe-stop origin check is a refusal list; an unclassified origin still runs it (mods/session-board hooks/lib.mjs)
 - schtasks-test-not-in-ci: janitor/test_install_schtasks.py is in no CI job; its skip never ran on Windows CI (janitor, CI)
 - sendmessage-judge-dup-names: same-name sessions, an unmatched [ref], or near-equal names make receiverState read the wrong row or none (mods/session-board hooks/lib.mjs)
 - sendmessage-wording-judge-unrun: no logged real SendMessage shows the wording judge's `claude -p` call answering inside its 30 s timeout; a timeout fails open (hooks/sendmessage_state.py)
 - sendmessage-wording-judge-clip: the wording judge sees only the first 4000 characters of a plain message (MESSAGE_MAX), so a breach after them is not judged; unmeasured (hooks/sendmessage_state.py)
-- sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override pass too; the busy judge removes none (hooks/sendmessage_state.py)
+- sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override too; the busy judge removes none (hooks/sendmessage_state.py)
 - shell-write-miss-dq-substitution: a write inside "$( ... > P)" to a frozen path is not seen (hooks/guard_frozen.py _shell_write_hit)
 - shell-write-miss-eval-heredoc: an eval of a heredoc body that writes a frozen path is not seen; the body is stripped first (hooks/guard_core.py)
 - shell-write-miss-git-config-file: git config --file P writes P, but the flag value is not read as a target (hooks/guard_frozen.py writes_to)
@@ -288,7 +288,7 @@
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
 - stash-allow-any-linked-worktree: the allow passes any linked worktree, not only the caller's own (hooks/guard_shared_tree.py)
-- stash-create-false-refusal: git stash create reads as a take and is denied over a non-empty stack; false refusal unmeasured (hooks/guard_shared_tree.py)
+- stash-create-false-refusal: git stash create reads as a take and is refused over a non-empty stack; false refusal unmeasured (hooks/guard_shared_tree.py)
 - stash-export-comment-stale: a comment in the test file says import and export are not git subcommands; git 2.55 lists both (hooks/test_guard.py line 1737)
 - stash-read-to-run-race: a session that dirties the tree or pushes an entry between the guard's read and the run is not covered (hooks/guard_shared_tree.py)
 - ste-autofix-tests-linux-only: lint/test_ste_autofix.py runs on the Linux job only; macOS and Windows cost unmeasured (CI)
@@ -326,31 +326,31 @@
 - stash-stack-kind-build-plan-only: stash-stack-is-a-shared-subject is Kind: build with plan sections that only name CI jobs; the guard rule is built, so Kind: process with Home hooks/guard_shared_tree.py may fit (owner call)
 - precompact-digest-60k-loses-detail: the digest keeps the last 60,000 characters, so a long talk-heavy gap since the last checkpoint can lose detail after compaction
 - precompact-compaction-before-checkpoint-small-model: the hook reads autoCompactWindow from settings.json but cannot see the model's own window, so a smaller model can compact before a checkpoint
-- precompact-stop-block-skips-other-gates: the reply after a checkpoint block runs with stop_hook_active set so other Stop gates skip it, and when another Stop hook blocks first the checkpoint fires one stop later
+- precompact-stop-block-skips-other-gates: the reply after a checkpoint block runs with stop_hook_active set so other Stop gates skip it, and when another Stop hook refuses first the checkpoint fires one stop later
 - precompact-rewrite-vs-append-unchecked: nothing checks that a session rewrote the handoff and did not append; the prompt asks and the owner reads the result
 - silent-undo-history-window-60: the --history audit misses a reversal older than --window (default 60 commits); --window 0 reads all history
 - silent-undo-git-utf8-replace: git() decodes output as UTF-8 with errors=replace, so two lines that differ only in bad bytes compare equal
 - silent-undo-unread-shapes: a binary file is not read, a resolver half-rewritten line passes, and a reversal that also rewrites a line reads as a new edit
 - haiku-hook-model-id-prefix-only: lint/test_settings_matcher.py checks the claude- prefix only, so a well-formed wrong id such as claude-sonnet-5 passes the test and fails open
 - haiku-hook-headless-only: the prompt-hook model id and latency were tested in the headless CLI only, not in the desktop app
-- install-stamp-stuck-file: a file the installer cannot replace keeps its old stamp, so the guard denies every call until an install succeeds; remedy is to run the installer from a terminal. Decision: install-hooks-whole
+- install-stamp-stuck-file: a file the installer cannot replace keeps its old stamp, so the guard refuses every call until an install succeeds; remedy is to run the installer from a terminal. Decision: install-hooks-whole
 - clear-pointer-same-dir-swap: two sessions that /clear in the same directory at the same time can swap pointers. Decision: precompact-handoff
 - asyncrewake-min-version: the docs give no minimum version for asyncRewake; below 2.1.287 it can wake the session repeatedly. Decision: ci-wait-reads-run-status
 - foreground-timeout-unseen: a foreground command that times out and moves to the background is seen by no hook event, so the stall watch misses it. Decision: stall-watch
 - feedback-inbox-selfattested: a [closed] mark waives the handoff check and nothing checks the item's home; the gate checks items exist and are homed, not that work is done; judge accuracy unmeasured. Decision: owner-feedback-inbox
-- sim-hook-gaps: unrecorded boot behind a script with no simulator word. the boot check skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. boot check timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is denied at the cap. Decision: sweep-shuts-down-idle-simulators; sim-boot-is-verified
-- builders-tests-gaps: update-ref or branch -f can move a base. sh -c / subshell commits unread at commit time. hard-linked file passes write deny. ABTests-like product folders read as tests, FooSpec.swift and FooTests.m unseen. xctestplan only skippedTests read. spec dir covers design-spec folders. SubagentStop cwd read from payload. Decision: builders-cannot-edit-tests
-- memory-home-gaps: a Bash write that does not name the memory folder (cd plus relative path, variable, script) is out of reach. one rare false block when this session reads the folder while a peer writes. a ruling typed in chat and never written, and cloud sessions with no memory folder, leave no act to key on. a 'home: process-only' reflex is counted by lint/ruling_census.py only. Decision: memory-is-never-a-rulings-only-home
+- sim-hook-gaps: unrecorded boot behind a script with no simulator word. the boot check skips xcodebuild/bootstatus -b/flag-before-device boots. OS=latest on a name records nothing. no single launchd_sim after retry leaves the old pid. boot check timeouts and bootstatus/shutdown costs unmeasured. a shut-down device named like the target UDID is refused at the cap. Decision: sweep-shuts-down-idle-simulators; sim-boot-is-verified
+- builders-tests-gaps: update-ref or branch -f can move a base. sh -c / subshell commits unread at commit time. hard-linked file passes the write refusal. ABTests-like product folders read as tests, FooSpec.swift and FooTests.m unseen. xctestplan only skippedTests read. spec dir covers design-spec folders. SubagentStop cwd read from payload. Decision: builders-cannot-edit-tests
+- memory-home-gaps: a Bash write that does not name the memory folder (cd plus relative path, variable, script) is out of reach. one rare false refusal when this session reads the folder while a peer writes. a ruling typed in chat and never written, and cloud sessions with no memory folder, leave no act to key on. a 'home: process-only' reflex is counted by lint/ruling_census.py only. Decision: memory-is-never-a-rulings-only-home
 - ruling-kind-gaps: actions/ruling-kind/check.sh copies the lint's RULE_FILES with no test comparing them. action never run on a hosted runner. no test for '..' or leading '/' in --dir/records-dir. Edit judge misses old records without Kind and allowed deleting one of two Plan lines. Bash writes into docs/decisions/ not judged. slug lints skip absolute file args and .MD names. Decision: rulings-declare-kind
 - force-push-gaps: git older than 2.30 lacks --force-if-includes (measured on 2.54.0 only). a push through shell alias, git alias or sh -c is unread. shell variables in a refspec not expanded. several -C and subshell cd not followed. refspec src:heads/main not matched as default branch. remote.<name>.push config not read. Decision: stale-safe-force-push
 - session-board-limits: git-read cost per turn and claude agents --json cost on large lists unmeasured; tests use a fake host, not the desktop app. Decision: session-board-mod-limits
 - plain-diff-limits: false positives hide ordinary source (about 1% of this repo's history, 0.7% of Python stdlib, not re-measured); note quality unmeasured; docs/mockup.html notes are hand-typed. Decision: plain-diff-mod-limits
 - stamp-engine-dropped-rules: path cites run longest slug first and a rewritten file keeps its line ending; both live in actions/stamp code and tests, no longer in the decision. Decision: one-shared-record-stamp
 - ste-config-notice: load_config in lint/ste_lint.py prints a stderr notice for max_words_procedural and max_words_descriptive in a config (lint/ste_lint.py)
-- guard-log-no-outcome: guard.log holds matched text, not the outcome, so it cannot say whether a deny was right; a hand-graded sample is the next measurement and none exists. Decision: guard-log-read-weekly
+- guard-log-no-outcome: guard.log holds matched text, not the outcome, so it cannot say whether a refusal was right; a hand-graded sample is the next measurement and none exists. Decision: guard-log-read-weekly
 - daily-note-no-volume-check: the daily note has no volume check; a count jump over a 7-day baseline fired on 6 of 14 real days from growth in use alone (hooks/daily_note.py). Decision: guard-log-read-weekly
 - guard-log-one-machine: guard.log is one machine per log; a count is a lower bound (verdicts, not harm or false alarms). Decision: guard-log-read-weekly
-- guard-denies-unjudged: unjudged whether silent-write (git -q), test-author-scope and detached-launch earn their denies. Decision: guard-log-read-weekly
+- guard-denies-unjudged: unjudged whether silent-write (git -q), test-author-scope and detached-launch earn their refusals. Decision: guard-log-read-weekly
 - daily-note-reads-failures-only: a rule that never fires, or fires for the wrong reason, shows only in the reader's tables, read by hand (hooks/daily_note.py). Decision: guard-log-read-weekly
 - local-time-model-may-ignore: nothing forces the model to use the Local time line (hooks/local_time.py). Decision: local-time-central
 - local-time-fixed-at-send: the time is fixed at prompt send or agent start (hooks/local_time.py). Decision: local-time-central
@@ -365,7 +365,7 @@
 - impeccable-guard-unread-forms: impeccable-review-only does not read through npx --registry/--cache, '| sh', '(impeccable install)', '$r=& impeccable install'; rare false alarms on 'npm run impeccable -- detect' and 'impeccable --json detect' (hooks/guard.py). Decision: design-skills
 - home-tree-payload-unmeasured: worktree-home rule unmeasured on Windows and for Write/Edit payload shapes (fixture only); reopen if the harness drops agent_id, changes cwd, or names worktrees other than agent-<agent_id> (hooks/guard.py). Decision: an-agent-outside-its-home-tree-must-stop (an agent outside its home tree must stop)
 - bare-merge-stamp-from-worktree: bare-merge rule reads .github/stamp.json from the working tree, not the base branch, so a lane that edits it changes its own session's ask (hooks/guard_merge.py). Decision: bare-merge-asks (a bare merge in a merge-tool repo asks)
-- bare-merge-chain-overdenies: a bare gh pr merge chained after a non-harmless command (ls && gh pr merge 12) is denied as ask-alone, stricter than main; split the command (hooks/guard.py). Decision: bare-merge-asks
+- bare-merge-chain-overdenies: a bare gh pr merge chained after a non-harmless command (ls && gh pr merge 12) is refused as ask-alone, stricter than main; split the command (hooks/guard.py). Decision: bare-merge-asks
 - ci-secondary-limit-unmeasured: GitHub's per-minute REST cap shared by several sessions' watchers is unmeasured; merge waits 60/300/900 s on it (merge/merge.py). Decision: ci-wait-reads-run-status (CI waits read the run status)
 - ci-bg-checks-watch-allowed: background gh pr checks --watch is still allowed, since the ruling names only gh run watch; its API cost is unmeasured. Decision: ci-wait-reads-run-status
 - ci-watch-wrapped-unread: the guard does not read gh run watch wrapped in bash -c, cmd /c or pwsh -Command, or captured as x=$(gh run watch 7) (hooks/guard_stream.py). Decision: ci-wait-reads-run-status
@@ -374,7 +374,7 @@
 - claude-md-flag-unenforced: the bold rule-file flag in the Done line is not enforced; a crash between merge and print loses it; a gh pr merge or web merge is not flagged (merge/merge.py). Decision: claude-md-change-is-flagged (a CLAUDE.md change is flagged)
 - default-base-verify-untested: a verify that cannot run after an earlier 'no' has no test; the code fails safe (hooks/guard_core.py resolve_default_base). Decision: default-branch-read-order
 - awk-v-glob-cleared: an awk -v value holding a glob is cleared as a search pattern; test_guard.py pins it as an allow (hooks/guard_env.py). Decision: none
-- env-wrapper-shape-reopen: reopen the hooks/guard_env.py rules on a wrapper shape that test_guard.py does not pin, with a counted number of denies in the weekly table (guard-log-read-weekly) (hooks/guard_env.py)
+- env-wrapper-shape-reopen: reopen the hooks/guard_env.py rules on a wrapper shape that test_guard.py does not pin, with a counted number of refusals in the weekly table (guard-log-read-weekly) (hooks/guard_env.py)
 - lane-number-unread-acts: old history is not checked, only new acts; reopen when a session number reaches main through an act the guard does not read, then widen the scan (hooks/guard.py LANE_NUMBER). Decision: lane-by-slug (a lane is named by its branch slug)
 - merge-lock-expired-delete-race: GhLock (the Mac) deletes an expired lock with no compare-and-swap. So it can remove a live lock that another run just took, and then two runs hold the lock. The window is a few API calls. A cloud run releases the lock to an expired commit, never deletes it, so every Mac take after a cloud merge goes through this window. Fix: the Mac also uses GitLock, whose leased push is compare-and-swap (merge/merge.py GhLock.acquire). Decision: none
 - merge-unborn-workflow-green: a workflow GitHub has not created yet reads as green; runs read and the settle read close most of the window, ceiling is a workflow that appears after SETTLE_SECONDS (merge/merge.py). Decision: none
@@ -389,7 +389,7 @@
 - sb-auto-approve-unseen: An auto-approve mode can answer an ask with no person present, and the mod has no mode check, so a permission label may show for nobody. Decision: session-board-mod-limits
 - sb-store-not-shared: The store is per plugin and per config folder. --plugin-dir sessions or other config folders do not show, and a shared app and terminal store is unknown. Decision: session-board-mod-limits
 - stall-message-delivery-unproven: No run shows a Stop systemMessage reaches the model, so the stall alarm may never reach it. decision_watch uses the same channel (hooks/stall_watch.py). Decision: stall-watch
-- prompt-hooks-fail-open: Prompt hooks (Agent, docs/decisions/ Edit and Write) and the AskUserQuestion agent hook can deny but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
+- prompt-hooks-fail-open: Prompt hooks (Agent, docs/decisions/ Edit and Write) and the AskUserQuestion agent hook can refuse but have no documented onFailure, so a failed hook lets the call through (settings.json). Decision: gate-hooks-fail-closed
 - guard-timeout-fails-open: A timed-out or crashed PreToolUse guard lets the call run. onFailure is unset pending an owner ruling (2026-10-12 incident: block refused every call on a slow python alias). an odd count of ' doubles guard time (6,001 words about 15 to 32 s). Decision: gate-hooks-fail-closed
 - shell-write-miss-spaced-target: cat > "dir with space/.claude/settings.json" splits the quoted path on its space, so a cap write there is not asked. main misses it too (hooks/guard_frozen.py near line 370). Decision: agent-model-cap
 - cmd-c-script-skips-kill: The kill rule judges segment words, not the script cmd /c runs, so cmd /c taskkill /F /IM node.exe and cmd /c cd C:\x\& taskkill /F /IM node.exe pass. same on main (hooks/guard_kill.py). Decision: guard-command-position
@@ -399,7 +399,7 @@
 - node-file-server-unchecked: node <file> under run_in_background is not refused without an until: note, because the roster cannot tell a server script from a one-off script (hooks/guard_stream.py). Decision: background-needs-end-note
 - timeout-moved-server-unchecked: A foreground server the harness moves to background at its 120 s timeout is not checked, because the background-end rule reads the call at start (hooks/guard_stream.py). Decision: background-needs-end-note
 - dead-run-extended-lock-blocks: A run that dies after a lock extension leaves a lock held up to 1200 s. other runs wait until it expires, and merge --unlock clears it (merge/merge.py). Decision: none
-- stdin-python-read-as-code: Quoted cap keys or frozen paths piped into python, py or wrappers deny even when the text is data. only pure printers (echo, cat, grep, wc, jq) make it data (hooks/guard_frozen.py). Decision: frozen-path-resolves-shell-vars
+- stdin-python-read-as-code: Quoted cap keys or frozen paths piped into python, py or wrappers refuse even when the text is data. only pure printers (echo, cat, grep, wc, jq) make it data (hooks/guard_frozen.py). Decision: frozen-path-resolves-shell-vars
 - split-reader-misses-cd-forms: split_segments misses $'...', $(...), backticks, cd "$DIR" and previous-folder forms (cd ~-, cd -, Set-Location +/-), so a hidden cd is skipped (hooks/guard.py, hooks/guard_core.py). Decision: none
 - silent-undo-oracle-hides-cause: When the records page generator fails, the silent-undo check reports only hunk reversed and drops stderr. the generator run has no timeout (lint/check_silent_undo.py generated_page). Decision: records-index-at-merge
 - sendmessage-judge-blind-recvs: The busy-state layer reads an agent id, a uds: address, main and * as unseen and allows. only the wording judge covers them (hooks/sendmessage_state.py, mods/session-board/hooks/lib.mjs). Decision: agent-model-cap
@@ -407,7 +407,7 @@
 - step-up-prefix-forms: roles-third-try-steps-up counts only a line starting Round N of 3 or Try N of 3. forms like Round 2/3, '- Round 2 of 3', bold and '# ' pass unseen. Decision: agent-model-cap
 - step-up-plugin-types: roles-third-try-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked, and a Workflow agent() call is not checked. Decision: agent-model-cap
 - step-up-sonnet-substring: the reviewer check is a substring match on sonnet, so a made-up model such as opus-sonnet passes. Decision: agent-model-cap
-- step-up-round1-prose-line: a round 1 reviewer brief with a prose line that starts Round 2 of 3 is denied. the refusal names the fix. Decision: agent-model-cap
+- step-up-round1-prose-line: a round 1 reviewer brief with a prose line that starts Round 2 of 3 is refused. the refusal names the fix. Decision: agent-model-cap
 - floor-workflow-runtime-models: agent-model-floor reads string literals in each agent( call. a model or role built at run time, or a call after a regex literal holding a quote, is unseen. Decision: agent-model-cap
 - floor-builtin-agents: a built-in agent with no file in agents/ picks its own model and never puts it in the tool input. Decision: agent-model-cap
 - explore-audit-judge-misread: the Agent prompt judge is a model and can misread a borderline Explore brief. the caller spot-checks findings before acting on an audit. Decision: agent-model-cap
@@ -430,26 +430,26 @@
 - ste-lint-gloss-collapse: no test pins that a title holding inline code collapses whole. Decision: none
 - install-sh-mv-retries: the 25 x 0.1 s retry budget in install.sh has no test and no pin to Move-OverFile in install.ps1. Decision: none
 - env-file-rule-false-alarms: The env-file guard refuses `ag -f` and `ack -f` (boolean -f), `grep -r --exclude=.env` and `rg -t py .env`. all four are safe. Where: hooks/guard_env.py. Decision: none
-- git-rm-cached-false-alarm: The push-delete guard denies `git rm -rf --cached .`, which removes files from the index only. allow `git rm` with `--cached`. Where: hooks/guard_push_delete.py. Decision: guard-reads-wrapped-commands
-- records-page-gen-false-alarm: The records-page guard denies a commit after a generator run in one call even when the page is unchanged, and reads `--root <other>`, `-h` and `--che` as runs. Where: hooks/guard_merge.py _runs_generator. Decision: records-index-at-merge
+- git-rm-cached-false-alarm: The push-delete guard refuses `git rm -rf --cached .`, which removes files from the index only. allow `git rm` with `--cached`. Where: hooks/guard_push_delete.py. Decision: guard-reads-wrapped-commands
+- records-page-gen-false-alarm: The records-page guard refuses a commit after a generator run in one call even when the page is unchanged, and reads `--root <other>`, `-h` and `--che` as runs. Where: hooks/guard_merge.py _runs_generator. Decision: records-index-at-merge
 - report-on-empty-turn-unchecked: The report gate returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check. Where: lint/report_gate.py. Decision: claude-md-shrink
 - slug-cite-gloss-unchecked: The report gate checks only D<n> ids for a gloss, so a bare slug cite breaks speak-cite-id-plus-gloss unseen. Where: lint/report_gate.py. Decision: claude-md-shrink
-- stash-reminder-text-outside-repo: The harness worktree reminder still tells an agent to push a tagged stash entry, which guard_shared_tree.py now denies. the reminder text is outside this repo. Decision: stash-stack-is-a-shared-subject
-- token-read-accepted-risk: The guard blocks writes to the hook-token state folder but not reads, so a session can print the token into its transcript. .credentials.json carries the same risk. Decision: reply-judge-samples-never-blocks
+- stash-reminder-text-outside-repo: The harness worktree reminder still tells an agent to push a tagged stash entry, which guard_shared_tree.py now refuses. the reminder text is outside this repo. Decision: stash-stack-is-a-shared-subject
+- token-read-accepted-risk: The guard refuses writes to the hook-token state folder but not reads, so a session can print the token into its transcript. .credentials.json carries the same risk. Decision: reply-judge-samples-never-refuses
 - ruling-kind-lint-scope: The lint checks each Plan line present and that a Home exists, not which platforms a ruling needs nor that the home enforces it. Decision: rulings-declare-kind
 - ruling-kind-write-judge-misses: The Write and Edit prompt judges are models and can miss a case. only the Write judge and the lint check a whole record. Decision: rulings-declare-kind
 - one-shared-record-stamp-left-out: The stamp engine leaves out build steps, debts, the flat-file fallback when ORDER.json is missing, branch-side reads (--stale, --unclaim, --landed, --porcelain, merging()), and folder/prefix forms with no pending form. Decision: one-shared-record-stamp
 - stale-safe-force-push-sha-lease: A lease with a sha guards only the one ref it names. the design accepts this, and git's own lease plus --force-if-includes still protects where the guard reads no push. Decision: stale-safe-force-push
 - stall-watch-windows-stop-check: Windows is not covered by the stall hook (it returns nothing when os.name is not posix). the Stop-time check reports a background shell left open. Decision: stall-watch
 - stall-watch-quiet-job: A command that prints progress forever is never reported, even when stuck. A quiet healthy job gets a STALL report, and the wrapper keeps exit 3 (owner ruling, 2026-10-18 15:15 CDT). Decision: stall-watch
-- stall-watch-log-and-child: After a stall report the temp-directory log stays and nothing removes it. a command that backgrounds its own child is not watched (the guard denies that shape). Decision: stall-watch
+- stall-watch-log-and-child: After a stall report the temp-directory log stays and nothing removes it. a command that backgrounds its own child is not watched (the guard refuses that shape). Decision: stall-watch
 - stall-watch-backslash: A trailing backslash continuation or an odd run of backslashes at the end of a command: the hook probes /bin/sh and doubles the last backslash when sh keeps it literal. Decision: stall-watch
 - build-dirs-reap-limits: A crashed agent whose SubagentStop never fires keeps its build output until build-disk-guard lands, as does scratchpad derived data. a resumed agent rebuilds cold. on Windows a link swapped in between rename and delete is not covered. Decision: build-dirs-reaped-at-agent-end
 - build-dirs-reopen-triggers: Reopen the build-folder reap on a hook_cancelled or timedOut:true end, a folder deleted outside the gates, a link followed, or trash names that nothing deletes. Decision: build-dirs-reaped-at-agent-end
 - plain-diff-untracked-files: The plain-diff mod diffs against HEAD or the empty tree. untracked files are not shown. Decision: plain-diff-mod-limits
 - impeccable-guard-limits: The impeccable-review-only guard allows 'audit then polish' in one call and does not read through the launchers pnpx, bun x, timeout N, cmd /c or powershell -Command. Decision: design-skills
 - builder-test-edit-pins-cut: the ruff --ignore and symlink false-alarm pins and the main-checkout log stop now lives only in guard code and tests. Decision: builders-cannot-edit-tests
-- ruling-home-false-alarm-pins: peer writes, reads and old-mtime Bash mentions never block ruling_home.py. the decision no longer says so. Decision: memory-is-never-a-rulings-only-home
+- ruling-home-false-alarm-pins: peer writes, reads and old-mtime Bash mentions never make ruling_home.py refuse. the decision no longer says so. Decision: memory-is-never-a-rulings-only-home
 - waiter-monitor-failures-unmeasured: Unmeasured whether Monitor still errors. reopen on a counted rise of Monitor failures in agent reports, or a waiter count in the guard-log table that does not fall. Decision: agents-wait-with-monitor
 - waiter-subshell-bodies-unparsed: bash -c bodies and subshells such as (sleep 30) and $(sleep 30) are not parsed. the owner accepted this. Decision: agents-wait-with-monitor
 - waiter-sleep-multi-arg-reads-first: sleep 20 20 reads as 20 s, not 40 s, and passes. an agent may still burn up to 25 s per call on one pause. Decision: agents-wait-with-monitor
@@ -470,14 +470,14 @@
 - stall-open-job-no-age-ceiling: Open jobs in hooks/stall_watch.py have no age ceiling, so a job left from a resumed session reads as still running. Decision: stall-watch
 - guard-modules-stay-flat: installers copy files, not folders, and .github/scripts/ci-scope.sh and hooks/test_install_src.sh glob hooks/guard_*.py, so guard code in a subfolder is missed. Decision: none
 - merge-retarget-before-merge: a base change after the last wait pass and before gh pr merge lands the merge on the new base; no retarget seen. Fix: one host.pr(n) read before host.merge, revert a pushed claim through fail(), add a BaseAware case (merge/merge.py). Decision: none
-- ste-into-agent-briefs: move the STE writing standard from CLAUDE.md into agent briefs; agents/*.md still say "Write in Simplified Technical English". Owner's word, or 30 days after the plain-prose lint merges to main, counted by date (agents/*.md). Decision: plain-prose-lint
+- ste-into-agent-briefs: move the STE writing standard from CLAUDE.md into agent briefs; agents/*.md still say "Write in Simplified Technical English". Owner's grant, or 30 days after the plain-prose lint merges to main, counted by date (agents/*.md). Decision: plain-prose-lint
 - undo-check-rename-alarm: check_silent_undo goes red when a PR renames a file and main edits the old name, because it reads with --no-renames; a Drops-lines trailer passes it. Fix when it fires on a real merge: read renames with -M for the PR side only (lint/check_silent_undo.py). Decision: none
 - git-h-stash-reads-bare: `git -h stash` allows on main. The guard skips -h as a git option and reads a bare git stash, which passes over a clean tree. `bash -c "git stash pop"` allows too, the known wrapper gap in guard-shell-wrap-discard-unread (hooks/guard_core.py _git_subcommand_index). Decision: stash-stack-is-a-shared-subject (the stash stack is a shared subject)
 - catalog-cell-pipes-over-cap: cell() cuts a cell to CELL_CAP before it writes each pipe as \|, so a cut cell can render a few chars over the cap. Test e13 goes red on any cut cell, so no cell is cut today (lint/hook_catalog.py). Decision: catalog-cells-never-cut (catalog cells are never cut)
 - comment-narration-limits: lint/check_comment_narration.py (lane comment-narration-lint, not on main yet) flags a legit line, such as "round 2 decimals" or a hex id (7 repo lines in the review), and has no suppression marker. A moved block shows as added. No test pins the split("\n") of the diff in added_lines. Decision: none
 - linked-tree-cites-old-decision: install.sh, install.ps1, hooks/test_install_src.sh and install.test.ps1 cite merge-reinstalls-from-main for the rule that a linked worktree is allowed only at <clone>-live, detached at main. That rule now lives in install-refuses-linked-tree. The off-main line comment in hooks/test_install_src.sh is the same case. Fix: re-point the comments that state these rules. Decision: install-refuses-linked-tree (the installer refuses a linked worktree, except the live pin)
 - stall-list-no-child-cap: the STALL report lists every process under the job with no cap, so a job with hundreds of children prints hundreds of rows and one long pid list. The orphan and TERM-trap limits are in the ruling (hooks/stall_watch.py job_tree, report). Decision: stall-watch (a stalled background command is reported, never stopped)
-- measured-claims-no-home: hooks/guard_env.py holds "MEASURED: 29 false `env-file` denies" in a docstring, and the GIT_ENV_REASON deny text in hooks/guard_kill.py holds a "Measured in q_max on 2026-10-14" clause. No decision holds either measurement. Fix: move each to its decision, or drop it. Decision: none for the first; git-env-set-denied (a command that sets a git location variable is denied) for the second
+- measured-claims-no-home: hooks/guard_env.py holds "29 false `env-file` refusals" in a docstring, and the GIT_ENV_REASON refusal text in hooks/guard_kill.py holds a "Measured in q_max on 2026-10-14" clause. No decision holds either measurement. Fix: move each to its decision, or drop it. Decision: none for the first; git-env-set-refused (a command that sets a git location variable is refused) for the second
 - guard-family-twin-elsewhere: five duplicate cases cut in known-cuts-tests keep their twin in another GUARD_FAMILY (wsl and push-delete twins sit in stream; ask-alone twins sit in shared-tree and push-delete). A run of one of those families alone skips those inputs; the full suite and CI keep them. The delete-scanner ALLOW header in hooks/test_guard.py still says it holds the same constructs, but its lone-apostrophe case now lives in stream. Decision: none
 - stall-test-exec-loses-mark: a test job that execs (`exec sleep N`, or zsh's last command) loses the shell's `$0` mark, so reap() finds it only through the pid its report names (hooks/test_stall_watch.py run_rewritten). Fix if one leaks: kill the job's process group. Decision: none
 - sweep-fetch-fail-wrong-cause: when the fetch fails but ls-remote works, a tree reads `unpushed` with no fetch-failed mark (janitor/sweep.py sweep_repo). Kept, so safe. Fix: also mark reasons starting with unpushed. Decision: when-a-worktree-may-be-removed
@@ -491,7 +491,7 @@
 - watch-escaped-cap-key: a JSON-escaped cap key outside env is a lift to the guard but not to the fast path, so its expiry check is skipped; only an attacker writes it (hooks/config_watch.py lift_candidate). Decision: config-watch-fast-exit
 - watch-bad-json-mixed-cap: in unparseable JSON the last text cap assignment wins, so opus then sonnet reads as Sonnet; such a file loads no settings (hooks/config_watch.py). Decision: config-watch-fast-exit
 - watch-sonnet-1m-reported: a first-sight cap of sonnet[1m] reads as unknown, a false alarm in the safe direction (hooks/config_watch.py). Decision: config-watch-fast-exit
-- config-dir-copies: config_dir logic is copied in daily_note, override_pass, precompact_handoff and sim_boot_record; shared_names is its home (hooks/shared_names.py). Decision: config-watch-fast-exit
+- config-dir-copies: config_dir logic is copied in daily_note, override, precompact_handoff and sim_boot_record; shared_names is its home (hooks/shared_names.py). Decision: config-watch-fast-exit
 - drops-body-nested-fence: a 4-backtick fence that holds a 3-backtick fence closes on the 3 backticks, so lines after it read as body text. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-fence-in-comment: a fence opener inside an `<!-- -->` comment drops a real trailer after it (false alarm). Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
 - drops-body-edit-no-commit: a PR body edit excuses a drop without a new commit, so the head does not change. Decision: silent-undo-check-design (one check catches a merge or branch that silently undoes earlier work)
@@ -500,12 +500,12 @@
 - sweep-failed-fetch-stale-reap: when the SessionEnd fetch fails with time left, decide_branch still reaps on the stale on-remote read, as on main and as janitor/GUIDE.md documents (janitor/sweep.py _fetch_prune). Decision: when-a-worktree-may-be-removed
 - ci-wake-prefilter-unicode-escape: the ci_wake shell prefilter misses a "ready" written as a JSON unicode escape (ready), which python decodes; Claude Code never escapes ASCII letters (settings.json ci_wake row). Decision: none
 - verdict-prune-reused-temp-log: a caller that reuses a VERDICT_LOG named verdict-*.log inside the temp folder can lose it to another run's prune once it is 7 days idle (bin/verdict prune). Decision: none
-- delete-rule-quoted-text: the first DESTRUCTIVE_DELETE pattern has no UnquotedStart wrapper, so quoted text such as `echo "rm -r -f ."` or `echo "del -Recurse -Force C:/"` is denied as a delete; the second pattern skips quoted text (hooks/guard_push_delete.py). Checked on the patterns and the guard's deny loop, not through a full guard run. Decision: rm-path-wrapper (an rm shim on PATH, with the guard holding the line on Windows)
+- delete-rule-quoted-text: the first DESTRUCTIVE_DELETE pattern has no UnquotedStart wrapper, so quoted text such as `echo "rm -r -f ."` or `echo "del -Recurse -Force C:/"` is refused as a delete; the second pattern skips quoted text (hooks/guard_push_delete.py). Checked on the patterns and the guard's refusal loop, not through a full guard run. Decision: rm-path-wrapper (an rm shim on PATH, with the guard holding the line on Windows)
 - rm-guard-home-parents-pass: the guard refuses a recursive delete of the working folder and every folder above it. It does not refuse a folder above home when the working folder is outside it, so `rm -r C:/Users` passes from D:/proj. The Mac and Linux shim refuses it (hooks/guard_push_delete.py _parent_target, hooks/guard_rm_var.py _rm_target_bad). Checked on the two functions, not through a full guard run. Decision: rm-path-wrapper (an rm shim on PATH, with the guard holding the line on Windows)
 - eol-scan-bom-env-u: the eol scan reads line 1 as ASCII. A UTF-8 BOM then hides a #! line. The scan also reads the name after `env -u` (as in `#!/usr/bin/env -S -u NAME bash`) as the interpreter. An extensionless shell script with either form is not scanned for CR, and a .sh name still is (install-bin-eol.test.ps1 Get-FirstLine, Get-Interpreter). Measured with the real functions on fixtures, 2026-10-22. Decision: shell-scripts-check-out-lf (shell scripts check out with LF)
 - pointer-windows-cap-unmeasured: the pointer-windows job caps (10 min for the job, 3 min for the eol CI step) have no measured run time in this repo; the job comment cites the debt measured-time-table (no table of measured times), which holds whole-run figures only (.github/workflows/gates.yml). Unmeasured: no CI read was made. Decision: none
 - scratchpad-shared-per-session: the guard keys a scratchpad by session id, and an agent carries its parent's id. So every agent of one session shares one scratchpad. A test-author may overwrite another agent's folder in it. Only another session's scratchpad is refused (hooks/guard.py role_write_hit, hooks/guard_shared_tree.py under_session_scratchpad). A test-author overwrite was reported, not re-observed. Decision: an-agent-outside-its-home-tree-must-stop (an agent outside its home tree must stop)
-- question-agent-hook-block-unmeasured: what a block from the AskUserQuestion agent hook does to the turn is unmeasured, and no test runs the hook against a live defect (settings.json PreToolUse AskUserQuestion). Decision: question-reviewer-agent-hook (one agent hook reviews each question)
+- question-agent-hook-block-unmeasured: what a refusal from the AskUserQuestion agent hook does to the turn is unmeasured, and no test runs the hook against a live defect (settings.json PreToolUse AskUserQuestion). Decision: question-reviewer-agent-hook (one agent hook reviews each question)
 - deadline-floor-no-stamp: a repo with no .github/stamp.json waits the 45-minute default, not the largest job cap plus 5 (merge/merge.py load_config). Decision: none
 - ste-lint-safepath-env: actions/ste-lint/test_action.py run() inherits os.environ, so with PYTHONSAFEPATH=1 the old python3 -c form passes the planted-module cases; CI does not set it. Decision: none
 - janitor-git-timeout-load: janitor/test_sweep.py runs fixture git with a 10 s timeout, which a loaded Windows host exceeds (measured 2026-10-22, two local runs aborted). Decision: none

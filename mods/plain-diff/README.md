@@ -20,13 +20,13 @@ The command opens a pane. The pane lists each changed file. Each file has a shor
 2. One small-model call (`haiku`) for a file with no such words. The pane marks the note "(summarised by a model)". The limit is at most 5 calls per run, shared by overlapping runs. Runs that overlap share one budget of 5. A call that hangs is freed after 25 seconds. Each call gets at most 6000 characters of one diff.
 3. If no call is possible, the pane shows "No note" and the diff.
 
-A model error never blocks the pane. Notes are kept in memory for the session, by file path and diff hash. The mod does not write to `$.store`. File text leaves the machine only through `$.model.complete`.
+A model error never stops the pane. Notes are kept in memory for the session, by file path and diff hash. The mod does not write to `$.store`. File text leaves the machine only through `$.model.complete`.
 
 ## Secret files
 
 The mod skips a secret file. A secret file is one with a name such as `.env`, `*.pem`, `id_rsa`, or `credentials.json`. A file is also secret when its change holds a key in a known form. Examples are a private key block and a cloud or API token. The pane shows "Skipped: secret file" and no diff. The text is never sent to a model. The check runs before any model call. A note from Claude's own turn text is dropped when it holds a secret in a known form.
 
-Known holes, in plain words:
+Known limits, in plain words:
 
 - A secret in a form the mod does not know is not caught.
 - The check can also hide ordinary source. It flagged about 1% of the changes in this repo's history. Those files show "Skipped: secret file" with no note and no diff.

@@ -33,7 +33,7 @@
 //     noteFromMessages returns '' for a turn text that holds a secret shape
 //   hooks/register.mjs: reads isStdoutTruncated into report.truncated; passes gitDiffArgs to git
 //   README.md: wording 'at most 5 calls per run, shared by overlapping runs'; names the empty tree
-// Known hole, not pinned: a rename that git shows as a new file (no 'rename from' line).
+// Known limit, not pinned: a rename that git shows as a new file (no 'rename from' line).
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'

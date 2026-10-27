@@ -14,7 +14,7 @@ names the reader, lint/guard_log_report.py, by its absolute path beside this hoo
 path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
-There is no volume check: denies grew with use, and a count check fired on 6 of 14 real days.
+There is no volume check: refusals grew with use, and a count check fired on 6 of 14 real days.
 A line's day is the date its timestamp is written with: guard.log holds Central wall time.
 
 Seam: CLAUDE_DAILY_NOTE_NOW, an ISO-8601 instant with its UTC offset, in place of the clock.

@@ -630,7 +630,7 @@ def heredoc_delimiter(word: str):
     with a quoted or escaped part (the body is then text), else ''. A quote later in the word
     (a backslash or a quote after the first character) still dequotes the delimiter but leaves `quote` empty, so the body stays
     code to every reader: the same reading main gives it. Bash itself reads such a body as text; a
-    body written to a file and run (`> x.sh && sh x.sh`) is the act this keeps denied."""
+    body written to a file and run (`> x.sh && sh x.sh`) is the act this keeps refused."""
     quote = ""
     out = []
     for position, (escaped, single, double, plain) in enumerate(_WORD_PART.findall(word)):
@@ -813,7 +813,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
 # pattern. At a word such as `'EOF-1'` or `\EOF` it finds no header; at `EOF-1` or `"E"OF` it reads a shorter
 # word and closes the body early at a line `EOF` or `E`. Main so kept body lines in view, and a run path no
-# rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line, `| python3 -`) still denied.
+# rule names (`cat <<'E-1' > x.sh && sh x.sh`, a pipe on the next line, `| python3 -`) still refused.
 # heredoc_delimiter reads those words right, so _drop_heredoc_bodies walks the command as the lane reads it and
 # as main read it, and keeps a line when either walk keeps it: every drop, the unconditional one too, sees what main saw,
 # also for two heredocs where main's early close at a line of the second body leaves its payload outside every body.
@@ -1166,7 +1166,7 @@ def command_root(cmd: str, shell_cwd: str) -> str:
 # from the primary checkout or from any other worktree of the same clone, never from inside the
 # tree it deletes.
 #
-# THREE THINGS MAKE THE SUBJECT NON-EMPTY, so the call denies: uncommitted or untracked work in
+# THREE THINGS MAKE THE SUBJECT NON-EMPTY, so the call refuses: uncommitted or untracked work in
 # that tree (`git status --porcelain`), a lock (`git worktree list --porcelain` naming it
 # `locked`), or a LIVE SESSION still standing in it. None of the three is a guess: each is read
 # straight off git or off the session record git-worktree-remove would run past.
@@ -1451,46 +1451,46 @@ def _log_unlock(handle) -> None:
         pass
 
 
-_pass_who = ("", None)  # (session id, agent id) of the call this process judges
+_override_who = ("", None)  # (session id, agent id) of the call this process judges
 
 
-def set_pass_context(session_id, agent_id) -> None:
-    """Name the session and agent whose call this process judges, for the owner override pass."""
-    global _pass_who
-    _pass_who = (session_id, agent_id or None)
+def set_override_context(session_id, agent_id) -> None:
+    """Name the session and agent whose call this process judges, for the owner override."""
+    global _override_who
+    _override_who = (session_id, agent_id or None)
 
 
-def set_pass_veto(veto) -> None:
+def set_override_veto(veto) -> None:
     """Register the test judge() builds for this call: veto() is true when the call holds an act no
-    override pass lifts. Until it is set, no refusal is passable."""
-    global _pass_veto
-    _pass_veto = veto
+    override lifts. Until it is set, no refusal is liftable."""
+    global _override_veto
+    _override_veto = veto
 
 
-_pass_veto = lambda: True  # noqa: E731 - fail closed until judge() registers its own
+_override_veto = lambda: True  # noqa: E731 - fail closed until judge() registers its own
 
 
 def _vetoed() -> bool:
     try:
-        return bool(_pass_veto())
+        return bool(_override_veto())
     except Exception:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
 def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None) -> None:
-    """Print a deny or an ask and exit, unless an owner override pass lifts it (decision
-    owner-override-pass). A lifted act prints nothing, so the normal permission flow runs. The
-    veto runs before the pass is taken, so a call that also holds a never-passed act spends no pass.
-    spawn_role is set only on the Opus spawn ask, the one refusal an Opus pass may lift."""
+    """Print a deny or an ask and exit, unless an owner override lifts it (decision
+    owner-override). A lifted act prints nothing, so the normal permission flow runs. The
+    veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
+    spawn_role is set only on the Opus spawn ask, the one refusal an Opus override may lift."""
     if not _vetoed():
-        try:  # an import or read failure is no pass: the refusal stands
-            import override_pass
-            lifted = override_pass.take(_pass_who[0], _pass_who[1], override_pass.now(), rule, spawn_role)
+        try:  # an import or read failure is no override: the refusal stands
+            import override
+            lifted = override.take(_override_who[0], _override_who[1], override.now(), rule, spawn_role)
         except Exception:
             lifted = None
         if lifted:
             record(tool, lifted, rule, matched)
-            if lifted in override_pass.LIFTS:
+            if lifted in override.LIFTS:
                 sys.exit(0)
     record(tool, decision, rule, matched)
     print(json.dumps({

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Before a SendMessage, two model judges read the call. Either may deny it, and an owner override
-pass lifts the deny (decision owner-override-pass), as it lifts every guard.
+"""Before a SendMessage, two model judges read the call. Either may refuse it, and an owner override
+lifts the refusal (decision owner-override), as it lifts every guard.
 
 Rule: parallelism-no-mid-task-talk (a lane messages a peer only when the branch must hear
 something that changes its work). Spec: docs/decisions/agent-model-cap.md, the two SendMessage rows.
 
 - The wording judge reads every send, by wording only (WORDING_PROMPT). It lives here, not in a
-  settings.json prompt hook: a prompt hook sees only the call's JSON, so it cannot read the pass
+  settings.json prompt hook: a prompt hook sees only the call's JSON, so it cannot read the override
   file, and a command hook cannot stop a sibling hook.
 - The busy judge reads the receiver's state from the session board: `claude agents --json`, read by
   mods/session-board/hooks/receiver-state.mjs (lib.mjs is the one home of that read). One word:
@@ -16,8 +16,8 @@ something that changes its work). Spec: docs/decisions/agent-model-cap.md, the t
 Both model calls go through decision_watch.invoke_model, the one model caller. The wording call runs
 in a thread beside the board read, so the two do not add their times.
 
-A deny goes through guard_core.refuse(), the one home of the pass check and the guard.log line.
-Fail open. Any judge error allows, with one stderr line. Deny: one PreToolUse deny JSON, exit 0.
+A refusal goes through guard_core.refuse(), the one home of the override check and the guard.log line.
+Fail open. Any judge error allows, with one stderr line. A refusal: one PreToolUse deny JSON, exit 0.
 receiver-state.mjs is found in the pointer checkout (a copy install has no mods/ beside hooks/),
 else beside this file's real path (a symlink install, a worktree). Neither found reads as unseen.
 """
@@ -144,8 +144,8 @@ def ask(answers, key, prompt, **kwargs):
         answers[key] = (None, "%s: %s" % (type(exc).__name__, exc))
 
 
-def deny(payload, to, reason):
-    """Deny through guard_core.refuse(), which lets an owner override pass lift it. refuse() exits."""
+def refuse(payload, to, reason):
+    """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     reason = reason.strip()
     if reason.startswith(RULE):
         reason = reason[len(RULE):].lstrip(" :-")
@@ -153,10 +153,10 @@ def deny(payload, to, reason):
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
-        guard_core.set_pass_context(payload.get("session_id"), payload.get("agent_id"))
-        guard_core.set_pass_veto(lambda: False)  # a SendMessage holds no act that every pass refuses
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_veto(lambda: False)  # a SendMessage holds no act that no override lifts
         guard_core.refuse("SendMessage", "deny", RULE, reason, to)
-    except Exception:  # no guard_core: no pass can be read, so the deny stands
+    except Exception:  # no guard_core: no override can be read, so the refusal stands
         pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                              "permissionDecision": "deny",
@@ -198,7 +198,7 @@ def main():
             reason = verdict.get("reason")
             reasons.append(reason if isinstance(reason, str) else "")
     if reasons:
-        return deny(payload, to if isinstance(to, str) else "", next((r for r in reasons if r.strip()), ""))
+        return refuse(payload, to if isinstance(to, str) else "", next((r for r in reasons if r.strip()), ""))
     return 0
 
 

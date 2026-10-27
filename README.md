@@ -270,7 +270,7 @@ The `project-ops` skill packages how the claude-settings project on claude.ai ru
 standing roles (triage, build advisor, local liaison, merge hand), one roster, counted hand-offs and
 autopilot deferral. It also holds a record branch for the roadmap data, briefs and role hand-off notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
-the roster, a brief and a role hand-off note. A repo adopts it only on the owner's word. See
+the roster, a brief and a role hand-off note. A repo adopts it only on the owner's grant. See
 `skills/project-ops/SKILL.md`.
 
 ## Details worth knowing but not part of setup

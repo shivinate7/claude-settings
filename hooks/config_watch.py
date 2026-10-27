@@ -32,7 +32,7 @@ THIS IS REVERT AND REPORT, NOT PREVENTION. The write lands and is then undone. T
 here and nowhere wider: the cap takes effect when an agent is next spawned, and the restore
 happens before the next tool call can spawn one.
 
-DECISION 7 STILL HOLDS. A project's own `.claude` files are allowed and reported, never denied. So
+DECISION 7 STILL HOLDS. A project's own `.claude` files are allowed and reported, never refused. So
 an ordinary project config edit is re-baselined in silence. Only a change to a CAP VARIABLE is
 reverted, and only when the guard did not ask about it.
 
@@ -129,7 +129,7 @@ def _load_guard() -> None:
 # ------------------------------------------------------------------ the watched set
 #
 # The project's own settings files, the pair `shared_names.PROJECT_FROZEN_FILES` names. The
-# config directory is NOT watched here. Rule 7 denies a write there, and `~/.claude/settings.json`
+# config directory is NOT watched here. Rule 7 refuses a write there, and `~/.claude/settings.json`
 # is a symlink onto the clone of claude-settings, which is deliberately unfrozen so that the
 # repository can edit its own source. A hash watch that followed that symlink would revert the
 # repository's own work.
@@ -182,7 +182,7 @@ def safe(text: str, limit: int) -> str:
 # WHERE THE BASELINE LIVES, AND WHY.
 #
 # The store sits under `<config dir>/state/config-watch/`, and `state` is on the guard's
-# CONFIG_FROZEN_DIRS list. So rule 7 DENIES a session write to the store in every shape PreToolUse
+# CONFIG_FROZEN_DIRS list. So rule 7 REFUSES a session write to the store in every shape PreToolUse
 # can read, which is a wider set than rule 8 reads: rule 7 needs only the path, never the value, so
 # `cp`, `mv`, `sed -i`, a redirect and `tee` onto the store are all refused.
 #
@@ -487,7 +487,7 @@ def expiry_problem(content, clock=None) -> str:
 # test here is rule 8's own condition, re-run against the same tool call, so the two cannot drift.
 #
 # NO TOKEN IS PASSED BETWEEN THE HOOKS, and the design brief's one-shot token is deliberately not
-# built. A token has to survive a DENIED ask: PreToolUse asks, the owner says no, the tool never
+# built. A token has to survive a REFUSED ask: PreToolUse asks, the owner says no, the tool never
 # runs, PostToolUse never fires and the token is left behind for the next write to spend. Closing
 # that needs a time to live, which is a window. Re-running the condition needs no window at all.
 # PostToolUse fires only for a call that SUCCEEDED, and rule 8's answer is `ask`, so a successful

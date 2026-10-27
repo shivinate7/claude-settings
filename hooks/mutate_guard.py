@@ -47,7 +47,7 @@ DECISION = os.path.join(HERE, "decision_watch.py")
 DECISION_SUITE = os.path.join(HERE, "test_decision_watch.py")
 RULING = os.path.join(HERE, "ruling_home.py")
 RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
-OVERRIDE = os.path.join(HERE, "override_pass.py")
+OVERRIDE = os.path.join(HERE, "override.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -56,7 +56,7 @@ TARGETS = {
     "watch": (WATCH, WATCH_SUITE, "WATCH_UNDER_TEST", "config_watch"),
     "decision": (DECISION, DECISION_SUITE, "DECISION_WATCH_UNDER_TEST", "decision_watch"),
     "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
-    "override": (OVERRIDE, SUITE, "GUARD_UNDER_TEST", "override_pass"),
+    "override": (OVERRIDE, SUITE, "GUARD_UNDER_TEST", "override"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -125,7 +125,7 @@ MUTATIONS = [
      'agent-owned worktree is allowed and noted, not asked'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
-    # mutation breaks one arm of the state read the plan named as the hole in this rule.
+    # mutation breaks one arm of the state read the plan named as the safety hole in this rule.
     ("branch-delete: -D no longer marks a delete call",
      'BRANCH_DELETE_FLAGS = {"-d", "-D", "--delete"}',
      'BRANCH_DELETE_FLAGS = {"-d", "--delete"}', "guard",
@@ -786,7 +786,7 @@ MUTATIONS = [
      'STEP_UP_MARKER = re.compile(r"(?i)^', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
     ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
      'n == "3" and "sonnet" not in model and "opus" not in model',
-     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus asks (the word is per spawn, not standing)'),
+     'n == "3" and "sonnet" not in model', "guard", 'floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, not standing)'),
     ("step-up: a builder try 3 on a non-opus model is no longer refused",
      'if role == "builder" and kind == "try" and n == "3" and "opus" not in model:',
      'if False and role == "builder" and kind == "try" and n == "3" and "opus" not in model:',
@@ -794,7 +794,7 @@ MUTATIONS = [
     ("ceiling: the Opus spawn ask never fires, so an Opus spawn passes unasked",
      'if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():',
      'if True:', "guard", 'ceiling: Agent with model opus and no role asks'),
-    ("ceiling: a Try 3 of 3 line earns the standing word for any role, so a reviewer passes unasked",
+    ("ceiling: a Try 3 of 3 line earns the standing grant for any role, so a reviewer passes unasked",
      'if role == "builder" and isinstance(brief, str) and any(',
      'if isinstance(brief, str) and any(', "guard",
      "ceiling: Agent reviewer on opus with the brief 'Try 3 of 3. Finish the f' asks"),
@@ -988,7 +988,7 @@ MUTATIONS = [
 
     # ---- the liveness oracle's alive/dead/unreadable split, added for Windows parity. Each
     # mutant here folds the new third state back into one of the other two, the exact shape of
-    # the bug this whole change fixes.
+    # the defect this whole change fixes.
     # POSIX-only mutant: it breaks `_process_start_ms`'s `ps`-exit-code arm, which
     # `_process_start_ms` never reaches on Windows (it routes straight to the ctypes Windows arm
     # instead, see guard.py's `_process_start_ms`). `process_start_ms_case` in test_guard.py
@@ -1548,28 +1548,28 @@ MUTATIONS = [
      'stop and report to the owner which layer refused and its exact ',
      'stop and report to the owner the exact ',
      "guard", 'hand-made worktree: the refusal text'),
-    # THE ONE-ACT PASS (hooks/override_pass.py). A spend that skips the claim lifts a second act.
-    ("override: a one-act pass is spent with no claim, so a late reader is let through",
+    # THE ONE-ACT OVERRIDE (hooks/override.py). A spend that skips the claim lifts a second act.
+    ("override: a one-act override is spent with no claim, so a late reader is let through",
      '    if not _claim(path, raw):\n        return None\n',
      '',
-     "override", 'override: a call that read a one-act pass before it was spent is refused'),
-    ("override: the claim marker names the session, not the pass, so a new pass is refused",
+     "override", 'override: a call that read a one-act override before it was spent is refused'),
+    ("override: the claim marker names the session, not the override, so a new override is refused",
      'marker = "%s.%s.claim" % (path, hashlib.sha256(raw).hexdigest()[:32])',
      'marker = "%s.claim" % path',
-     "override", 'override: a call that read a one-act pass before it was spent is refused'),
-    # THE OPUS PASS (hooks/override_pass.py). It lifts only the Opus spawn ask, of its own role, until it ends.
-    ("opus pass: the scope check is dropped, so the Opus pass lifts any refusal",
+     "override", 'override: a call that read a one-act override before it was spent is refused'),
+    # THE OPUS OVERRIDE (hooks/override.py). It lifts only the Opus spawn ask, of its own role, until it ends.
+    ("opus override: the scope check is dropped, so the Opus override lifts any refusal",
      'if rule == OPUS_RULE and spawn_role is not None else None',
      'if True else None',
-     "override", 'opus pass: every other refusal and ask stands under it'),
-    ("opus pass: the role check is dropped, so a role pass lifts every role",
+     "override", 'opus override: every other refusal and ask stands under it'),
+    ("opus override: the role check is dropped, so a role override lifts every role",
      '    if at >= until or (role is not None and role != str(spawn_role).lower()):',
      '    if at >= until:',
-     "override", 'opus pass: `opus builders 2h` lifts only builder spawns'),
-    ("opus pass: the end instant still lifts",
+     "override", 'opus override: `opus builders 2h` lifts only builder spawns'),
+    ("opus override: the end instant still lifts",
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
-     "override", 'opus pass: `opus 2h` lets an Opus spawn through'),
+     "override", 'opus override: `opus 2h` lets an Opus spawn through'),
 ]
 
 
@@ -1658,13 +1658,13 @@ def run_mutant(sources, work: str, entry):
             mutate_shared.guard_tree(os.path.join(tree, "hooks"))
         copy_path = os.path.join(tree, "hooks", os.path.basename(TARGETS[target][0]))
     if target == "override":
-        # The guard family, local_time.py and the mutated override_pass.py share one folder: the
-        # copied guard and the suite's grant child both import the pass module beside guard.py.
+        # The guard family, local_time.py and the mutated override.py share one folder: the
+        # copied guard and the suite's grant child both import the override module beside guard.py.
         tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
         mutate_shared.guard_tree(tree)
         for helper in ("local_time.py", "_nowindow.py"):
             shutil.copy(os.path.join(HERE, helper), tree)
-        with open(os.path.join(tree, "override_pass.py"), "w", encoding="utf-8", newline="\n") as handle:
+        with open(os.path.join(tree, "override.py"), "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
         copy_path = os.path.join(tree, "guard.py")
     elif target != "guard":

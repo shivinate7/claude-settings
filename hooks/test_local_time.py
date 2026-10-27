@@ -17,7 +17,7 @@ Contract the builder codes against:
     whatever stdin holds. As a UserPromptSubmit hook it also captures owner prompts; those cases
     are in test_feedback_inbox.py. With --agent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
-    As a UserPromptSubmit hook it also grants the owner override pass when the prompt starts with the
+    As a UserPromptSubmit hook it also grants the owner override when the prompt starts with the
     word `override` (the rest is the reason, logged to guard.log). The whole-prompt forms
     `override <n>[m|h]` and `override off` keep their meaning. The cases for that are the override_* ones.
 
@@ -289,12 +289,12 @@ def case_cli_no_tz_database():
           "stdout=%r" % proc.stdout[-200:])
 
 
-# OWNER OVERRIDE PASS. local_time.py is the only UserPromptSubmit hook, so it is where the owner's
-# word `override` becomes a pass. It calls override_pass.grant(session_id, prompt, now), which writes
+# OWNER OVERRIDE. local_time.py is the only UserPromptSubmit hook, so it is where the owner's
+# word `override` becomes an override. It calls override.grant(session_id, prompt, now), which writes
 # <config dir>/state/override/<session_id>.json as {"kind": "once" or "timed", "until": a time}.
-# The keyword counts only as the FIRST word of the prompt, in any case, after leading whitespace: a pass
-# spent on a word inside a sentence, a notice, or text another agent wrote would be a pass the owner
-# never gave. A prompt that starts with the word is a one-act pass and the rest is the reason, written
+# The keyword counts only as the FIRST word of the prompt, in any case, after leading whitespace: an override
+# spent on a word inside a sentence, a notice, or text another agent wrote would be an override the owner
+# never gave. A prompt that starts with the word is a one-act override and the rest is the reason, written
 # to guard.log. `override <n>[m|h]` and `override off` keep their meaning as the whole prompt. These
 # cases drive the hook as a child, as Claude Code does, with the clock and the config directory in its
 # environment.
@@ -322,7 +322,7 @@ def ov_type(cfg, prompt, session=OV_SESSION):
 
 
 def ov_pass(cfg, session=OV_SESSION):
-    """(kind, until as an aware datetime) from the session's pass file, or None when it is missing or
+    """(kind, until as an aware datetime) from the session's override file, or None when it is missing or
     unreadable. `until` may be an ISO-8601 string or epoch seconds."""
     path = os.path.join(cfg, "state", "override", session + ".json")
     try:
@@ -347,7 +347,7 @@ def ov_files(cfg):
 
 def ov_pass_files(cfg):
     """The files under state/override/. A grant may log to guard.log or write other state, so the
-    cases that want "no pass" look only here."""
+    cases that want "no override" look only here."""
     return [f for f in ov_files(cfg) if f.startswith(os.path.join("state", "override") + os.sep)]
 
 
@@ -361,16 +361,16 @@ def ov_log(cfg):
         return []
 
 
-# (name, prompt, kind, how long the pass lasts)
+# (name, prompt, kind, how long the override lasts)
 OV_GRANTS = [
-    ("`override` is a one-act pass that ends after 10 minutes", "override", "once", timedelta(minutes=10)),
-    ("`override 15m` is a 15-minute pass", "override 15m", "timed", timedelta(minutes=15)),
+    ("`override` is a one-act override that ends after 10 minutes", "override", "once", timedelta(minutes=10)),
+    ("`override 15m` is a 15-minute override", "override 15m", "timed", timedelta(minutes=15)),
     ("`override 15`: a bare number is minutes", "override 15", "timed", timedelta(minutes=15)),
-    ("`override 3h` is a 3-hour pass", "override 3h", "timed", timedelta(hours=3)),
+    ("`override 3h` is a 3-hour override", "override 3h", "timed", timedelta(hours=3)),
     ("`override 72h`: the owner picks the length, there is no cap", "override 72h", "timed",
      timedelta(hours=72)),
     ("`OVERRIDE 2H`: keyword and unit ignore case", "OVERRIDE 2H", "timed", timedelta(hours=2)),
-    ("`override 2h` is a 2-hour pass", "override 2h", "timed", timedelta(hours=2)),
+    ("`override 2h` is a 2-hour override", "override 2h", "timed", timedelta(hours=2)),
 ]
 
 
@@ -387,33 +387,33 @@ def case_override_grants():
 
 
 def case_override_context_line():
-    # The session learns the pass exists and when it ends: the owner's word reached the guard.
+    # The session learns the override exists and when it ends: the owner's grant reached the guard.
     for prompt, ends in (("override", "13:10"), ("override 3h", "16:00"),
                          ("override: use opus for that one review agent", "13:10")):
         proc = ov_type(ov_cfg(), prompt)
         lines = proc.stdout.splitlines() if proc else []
         named = [l for l in lines if "override" in l.lower()]
-        check("override: `%s` prints one line that names the pass and its end %s" % (prompt, ends),
+        check("override: `%s` prints one line that names the override and its end %s" % (prompt, ends),
               any(ends in l for l in named) and any(LINE_FULL.fullmatch(l) for l in lines),
               "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
 
 
 def case_opus_context_line():
-    # The Opus word prints one line naming the pass, its role and its end; `opus off` names the end of
-    # the pass, and `override off` leaves an Opus pass in place.
+    # The Opus word prints one line naming the override, its role and its end; `opus off` names the end of
+    # the override, and `override off` leaves an Opus override in place.
     cfg = ov_cfg()
     for prompt, want in (("opus 3h", "16:00"), ("opus builders 2h", "builder spawns"),
-                         ("opus off", "Opus pass: ended.")):
+                         ("opus off", "Opus override: ended.")):
         proc = ov_type(cfg, prompt)
         lines = proc.stdout.splitlines() if proc else []
-        check("opus: `%s` prints one line that names the Opus pass and %s" % (prompt, want),
-              sum(l.startswith("Opus pass:") for l in lines) == 1 and any(want in l for l in lines)
+        check("opus: `%s` prints one line that names the Opus override and %s" % (prompt, want),
+              sum(l.startswith("Opus override:") for l in lines) == 1 and any(want in l for l in lines)
               and any(LINE_FULL.fullmatch(l) for l in lines),
               "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
     cfg = ov_cfg()
     ov_type(cfg, "opus 2h")
     ov_type(cfg, "override off")
-    check("opus: `override off` leaves an Opus pass in place",
+    check("opus: `override off` leaves an Opus override in place",
           os.path.exists(os.path.join(cfg, "state", "override", "opus", OV_SESSION + ".json")),
           "files %r" % ov_pass_files(cfg))
 
@@ -423,23 +423,23 @@ def case_override_off():
     ov_type(cfg, "override 15m")
     before = ov_pass(cfg)
     proc = ov_type(cfg, "override off")
-    check("override: `override off` removes a timed pass",
+    check("override: `override off` removes a timed override",
           before is not None and proc is not None and ov_pass(cfg) is None and not ov_pass_files(cfg),
           "before %r, after %r, files %r" % (before, ov_pass(cfg), ov_pass_files(cfg)))
     cfg = ov_cfg()
     ov_type(cfg, "override")
     before = ov_pass(cfg)
     ov_type(cfg, "override off")
-    check("override: `override off` removes a one-act pass", before is not None and ov_pass(cfg) is None,
+    check("override: `override off` removes a one-act override", before is not None and ov_pass(cfg) is None,
           "before %r, after %r" % (before, ov_pass(cfg)))
     cfg = ov_cfg()
     proc = ov_type(cfg, "override off")
-    check("override: `override off` with no pass is quiet and writes nothing",
+    check("override: `override off` with no override is quiet and writes nothing",
           proc is not None and proc.returncode == 0 and "Traceback" not in proc.stderr
           and not ov_pass_files(cfg), "rc=%s files %r" % (proc and proc.returncode, ov_pass_files(cfg)))
 
 
-# A prompt that starts with the word `override` is a one-act pass, and the rest is the reason. The
+# A prompt that starts with the word `override` is a one-act override, and the rest is the reason. The
 # reason goes to guard.log on ONE line: the log is one record per line, tab-separated, so a newline
 # or a tab in the owner's text is folded to a space. The log line may be built any way; the cases only
 # look for the reason's text. (name, prompt, the reason as it must read in the log line)
@@ -470,11 +470,11 @@ def case_override_takes_words():
               and abs((got[1] - (OV_NOW + timedelta(minutes=10))).total_seconds()) <= 1
               and len(hits) == 1)
         check("override: takes words, %s" % name, ok,
-              "pass %r; log lines holding the reason %d of %r; files %r; stderr %r" % (
+              "override %r; log lines holding the reason %d of %r; files %r; stderr %r" % (
                   got, len(hits), ov_log(cfg), ov_files(cfg), proc.stderr.strip()[-120:] if proc else "timed out"))
 
 
-# None of these starts with the word `override` as a word of its own, so none grants a pass and none
+# None of these starts with the word `override` as a word of its own, so none grants an override and none
 # writes a log line. The word as a plural, a past participle or an -ing form is a different word. So is
 # a name that only begins with it: a hyphenated flag, a call, a possessive.
 # Each of these holds the word `override`, and none of them is the whole prompt. The notice forms are
@@ -490,7 +490,7 @@ OV_NO_GRANT = [
     ("a length with no space", "override15m"),
     ("a hyphenated flag name", "override-flag is not set, check the config"),
     ("a call", "override() should return the parent value"),
-    ("a possessive", "override's behaviour is wrong when the pass is spent"),
+    ("a possessive", "override's behaviour is wrong when the override is spent"),
     ("the word at the start of a later line", "run the tests\noverride: use opus"),
     ("a system-reminder notice", "<system-reminder>\noverride\n</system-reminder>"),
     ("a system-reminder notice that holds a reason", "<system-reminder>\noverride: use opus\n</system-reminder>"),
@@ -523,8 +523,8 @@ def case_override_reason_goes_through_the_log_writer():
         import guard_core
         real_record = guard_core.record
         guard_core.record = lambda *args, **kwargs: calls.append(args + tuple(kwargs.values()))
-        spec = importlib.util.spec_from_file_location("override_pass_under_test",
-                                                      os.path.join(hooks, "override_pass.py"))
+        spec = importlib.util.spec_from_file_location("override_under_test",
+                                                      os.path.join(hooks, "override.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)  # after the patch, so a `from guard_core import record` is patched too
         os.environ.update(CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg)
@@ -550,7 +550,7 @@ def case_override_reason_goes_through_the_log_writer():
 
 def case_override_reason_with_a_lone_surrogate():
     # A lone surrogate cannot be encoded as UTF-8. A write that raises on it and swallows the error
-    # drops the reason line without a trace. The pass still stands, and the line must still land.
+    # drops the reason line without a trace. The override still stands, and the line must still land.
     cfg = ov_cfg()
     proc = ov_type(cfg, "override: use opus \ud800 for the review agent")
     got = ov_pass(cfg)
@@ -559,7 +559,7 @@ def case_override_reason_with_a_lone_surrogate():
     check("override: a reason with a lone surrogate still writes one log line",
           proc is not None and proc.returncode == 0 and got is not None and got[0] == "once"
           and len(log) == 1 and len(hits) == 1,
-          "pass %r; log %r; files %r; stderr %r" % (got, log, ov_files(cfg),
+          "override %r; log %r; files %r; stderr %r" % (got, log, ov_files(cfg),
                                                     proc.stderr.strip()[-120:] if proc else "timed out"))
 
 
@@ -571,23 +571,23 @@ def case_override_corrupt_file_replaced():
         handle.write(b"not json {")
     proc = ov_type(cfg, "override 15m")
     got = ov_pass(cfg)
-    check("override: a corrupt pass file is replaced by the next grant",
+    check("override: a corrupt override file is replaced by the next grant",
           proc is not None and got is not None and got[0] == "timed"
           and abs((got[1] - (OV_NOW + timedelta(minutes=15))).total_seconds()) <= 1,
           "got %r" % (got,))
-    # A new grant never reads the old one, so a timed pass does not stretch a later one-act pass.
+    # A new grant never reads the old one, so a timed override does not stretch a later one-act override.
     cfg = ov_cfg()
     ov_type(cfg, "override 3h")
     ov_type(cfg, "override")
     got = ov_pass(cfg)
-    check("override: a later `override` replaces a timed pass with a one-act pass",
+    check("override: a later `override` replaces a timed override with a one-act override",
           got is not None and got[0] == "once"
           and abs((got[1] - (OV_NOW + timedelta(minutes=10))).total_seconds()) <= 1, "got %r" % (got,))
 
 
 def case_override_session_id_stays_inside():
-    # The session id names the pass file. An id that climbs out must not write outside state/override/.
-    # guard.log at the top of the config directory is not a pass file, so a grant may write it.
+    # The session id names the override file. An id that climbs out must not write outside state/override/.
+    # guard.log at the top of the config directory is not an override file, so a grant may write it.
     for session in ("../escape", "../../escape", "..\\escape", "a/b"):
         cfg = ov_cfg()
         proc = ov_type(cfg, "override", session=session)

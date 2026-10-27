@@ -697,7 +697,7 @@ def case_invoke_model_timeout_is_error():
     check("timeout: error names the failure", bool(error), error)
 
 
-# The one home for the child's isolation flags. Decision reply-judge-samples-never-blocks (the
+# The one home for the child's isolation flags. Decision reply-judge-samples-never-refuses (the
 # reply judge) and the reply judge row of agent-model-cap: haiku, xhigh effort, module timeout.
 def case_invoke_model_argv():
     # Its env checks assume no token file: pin CLAUDE_CONFIG_DIR so a real one on this
@@ -956,7 +956,7 @@ def case_main_stop_hook_active_stays_quiet():
 
 
 # --------------------------------------------------------------------------- case 12
-# The one-year token file (decisions/reply-judge-samples-never-blocks.md).
+# The one-year token file (decisions/reply-judge-samples-never-refuses.md).
 # invoke_model reads `${CLAUDE_CONFIG_DIR:-~/.claude}/state/hook-token` and passes its
 # stripped content to the child as CLAUDE_CODE_OAUTH_TOKEN. Every case uses the fake
 # FAKE_TOKEN and a scratch CLAUDE_CONFIG_DIR, so no case reads a real token or this
@@ -1490,7 +1490,7 @@ def case_emit_prompt_runs_with_dash_I_as_the_mod_spawns_it():
 
 
 def case_phase_one_prints_a_key_for_the_evidence_it_judged():
-    # HOLE 1 (decision decision-watch-mod-limits): phase 1 prints a non-empty
+    # SAFETY HOLE 1 (decision decision-watch-mod-limits): phase 1 prints a non-empty
     # "key" with the needs_model JSON, so phase 2 can be given back the evidence it judged.
     name = "key_printed"
     with scratch_config(name):

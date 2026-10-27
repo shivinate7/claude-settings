@@ -1178,7 +1178,7 @@ def _process_cwd_windows(pid: int):
 
 def process_command(pid: int):
     """Best-effort, display-only. Never used to decide reap-or-keep
-    (verification-never-dry-run-blocklist) -- the preview shows it so a human can recognise the
+    (verification-never-dry-run-refusal-list) -- the preview shows it so a human can recognise the
     program, and a signal is still sent by pid number alone."""
     if sys.platform == "darwin":
         return _process_command_posix(pid)

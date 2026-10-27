@@ -8,15 +8,15 @@ Judge the result, not the commands. The act is a test path in the diff (`predica
 
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). It LOGS.
 - A builder's SubagentStop. It LOGS.
-- A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path. It DENIES. Every path field the call carries is judged, and every deny runs on all fields before any ask, so a decoy field cannot hide a denied path.
+- A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path. It DENIES. Every path field the call carries is judged, and every refusal runs on all fields before any ask, so a decoy field cannot hide a refused path.
 
-Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` line (`builder-diff` or `author-diff`) with the path, and the guard allows the act. An unreadable diff logs `role-diff-unread`. The reviewer reads the log and the diff. Reason: the base can be wrong, and a refusal on a wrong base is a false alarm (`verification-cry-wolf-guard-is-spent`). Restore blocking when the base bug is fixed, with the undo route and the once-only stop.
+Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` line (`builder-diff` or `author-diff`) with the path, and the guard allows the act. An unreadable diff logs `role-diff-unread`. The reviewer reads the log and the diff. Reason: the base can be wrong, and a refusal on a wrong base is a false alarm (`verification-cry-wolf-guard-is-spent`). Restore the refusal when the base defect is fixed, with the undo route and the once-only stop.
 
 **Roles.** The payload must carry an `agent_id`. The main session, reviewers, Explore, and a session started with `--agent builder` (no `agent_id`) stay allowed.
 
-- `builder`: logged when the diff holds a test path. The write tool denies it.
+- `builder`: logged when the diff holds a test path. The write tool refuses it.
 - `test-author`: the inverse. Logged when the diff holds anything but a test path, test config or a dev dependency list.
-- `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool denies any other path (`record-writer-scope`). A diff that holds one is logged at commit, push or stop (`writer-diff`).
+- `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool refuses any other path (`record-writer-scope`). A diff that holds one is logged at commit, push or stop (`writer-diff`).
   - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`).
 - Each write refusal names no path. It says to report the needed change, and the orchestrator assigns it to another role (`git-remedy-never-names-target`).
 - The orchestrator gives a test to a test-author, before or after the build. The builder reports the test change it needs and never writes it (`agents/builder.md`).

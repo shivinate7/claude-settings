@@ -506,7 +506,7 @@ def worktree_live_session(target: str):
     spelling of a live session's own worktree.
 
     A record with an unreadable liveness read is never dropped by `continue` as though it were
-    confirmed dead. Doing so would fold "could not tell" back into "not live," the exact bug
+    confirmed dead. Doing so would fold "could not tell" back into "not live," the exact defect
     this read exists to avoid."""
     records = session_records()
     if records is None:

@@ -42,7 +42,7 @@ For each screen the brief names, write two files in the design folder:
   URL. Use the repo's real tokens (except in a blind lane) and the real data shapes. Never put a token, password, cookie or
   personal datum in a mockup.
 - `<screen>-notes.md`, or `<screen>-<kind>-<n>-notes.md` in such a lane: one numbered item per design choice. Each item says what it is, the gain, the
-  loss, and your pick. Mark an item that changes the spec or a ruling `Owner word: yes`. Show every
+  loss, and your pick. Mark an item that changes the spec or a ruling `Owner grant: yes`. Show every
   option first, and let the owner cull. Give each option a control in the mockup that hides it, so
   one press removes one option.
 
@@ -57,5 +57,5 @@ report, stop every Monitor and background task you started with `TaskStop`, and 
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, list each mockup with its path, its deep links, and the sizes and themes it draws. Under
-Input Needed, list each `Owner word: yes` item. Write in Simplified Technical English. Report in
+Input Needed, list each `Owner grant: yes` item. Write in Simplified Technical English. Report in
 under 25 lines unless the brief names another cap.
