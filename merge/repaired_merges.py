@@ -3,16 +3,16 @@
 
 Usage: python3 merge/repaired_merges.py [--days N] [--ref main] [--repo DIR]
 
-A first-parent merge commit on the ref, made in the last N days (default 14), is repaired when a later
-first-parent commit either
+A first-parent merge commit on the ref, made in the last N days (default 14), is repaired when a commit
+that landed on the ref in a LATER first-parent step (a later merge brings its second-parent commits with it) either
   (a) says "This reverts commit <sha>" for the merge or for any commit the merge brought in, or
   (b) names the merge's PR ("#N") or its branch (from "Merge pull request #N from owner/<branch>")
       on the same line as a fix word (fix, repair, hotfix, broke, revert).
 Prints the count, then one line per repaired merge: merge sha, PR, repairing commit sha.
 
-Cost (rule outcomes-mechanize-rules): read on demand, never on a timer. Starts about 3 git processes
-per merge in the window and one `git log` for the later commits. Writes no file and starts no
-long-lived process.
+Cost (rule outcomes-mechanize-rules): read on demand, never on a timer. Starts one `git log` plus one
+`git log` per first-parent commit on the ref (426 on this repo, about 4 s); it scans the whole first-parent
+history, not just the window. Writes no file and starts no long-lived process.
 """
 import argparse
 import os
@@ -42,8 +42,9 @@ def names(line, pr, branch):
     return bool(pr_hit or branch_hit)
 
 
-def repairing_commit(merge, pr, branch, brought, later):
-    """Return the short sha of the first later commit that repairs this merge, or None."""
+def repairing_commit(pr, branch, brought, later):
+    """Return the short sha of the first commit that landed after the merge and repairs it, or None.
+    later: (sha, message) of every commit that landed on the ref in a later first-parent step."""
     for sha, body in later:
         for rev in REVERTS.findall(body):
             if any(h.startswith(rev) for h in brought):
@@ -53,24 +54,34 @@ def repairing_commit(merge, pr, branch, brought, later):
     return None
 
 
+def landings(repo, ref):
+    """[(first-parent commit, [(sha, message) of every commit it brought to the ref])], oldest first.
+    A merge brings its second-parent commits with it, so a repair inside a later batch merge is seen."""
+    steps = git(repo, "log", "--first-parent", "--reverse", "--format=%H%x00%ct%x00%P%x00%s", ref).splitlines()
+    out = []
+    for row in steps:
+        sha, when, parents, subject = row.split("\x00", 3)
+        rng = f"{sha}^1..{sha}" if parents else sha
+        log = git(repo, "log", "--format=%H%x00%B%x01", rng)
+        commits = [(c.partition("\x00")[0].strip(), c.partition("\x00")[2]) for c in log.split("\x01") if c.strip()]
+        out.append((sha, int(when), parents.count(" ") == 1, subject, commits))
+    return out
+
+
 def repaired(repo, ref, days):
-    # Filter by date here: git's own --since stops walking at the first old commit, so one commit with an
+    # Dates are filtered here: git's own --since stops walking at the first old commit, so one commit with an
     # old date would hide every merge below it.
     cutoff = time.time() - days * 86400
-    out = git(repo, "log", "--first-parent", "--merges", "--format=%H%x00%ct%x00%s", ref)
+    steps = landings(repo, ref)
     found = []
-    for row in out.splitlines():
-        sha, when, subject = row.split("\x00", 2)
-        if int(when) < cutoff:
-            continue
+    for i, (sha, when, is_merge, subject, commits) in enumerate(steps):
         m = MERGE_SUBJECT.match(subject)
-        if not m:
+        if not (is_merge and m) or when < cutoff:
             continue
         pr, branch = m.group(1), m.group(2)
-        brought = {sha, *git(repo, "rev-list", f"{sha}^1..{sha}^2").split()}
-        log = git(repo, "log", "--first-parent", "--reverse", "--format=%H%x00%B%x01", f"{sha}..{ref}")
-        later = [(c.partition("\x00")[0].strip(), c.partition("\x00")[2]) for c in log.split("\x01") if c.strip()]
-        fix = repairing_commit(sha, pr, branch, brought, later)
+        brought = {c for c, _ in commits}
+        later = [c for step in steps[i + 1:] for c in step[4]]
+        fix = repairing_commit(pr, branch, brought, later)
         if fix:
             found.append((sha[:7], pr, fix))
     return found

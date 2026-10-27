@@ -27,6 +27,21 @@ def merge_pr(repo, n, branch, env=None):
     return git(repo, "rev-parse", "HEAD", env=env)
 
 
+def merge_branch(repo, n, branch, msgs, revert_of=None, env=None):
+    """Merge a PR whose branch holds extra commits (messages msgs) and, if revert_of, a revert of that merge."""
+    git(repo, "checkout", "-q", "-b", branch, "main", env=env)
+    Path(repo, f"{branch}.txt").write_text(branch)
+    git(repo, "add", "-A", env=env)
+    git(repo, "commit", "-q", "-m", f"work on {branch}", env=env)
+    for m in msgs:
+        git(repo, "commit", "-q", "--allow-empty", "-m", m, env=env)
+    if revert_of:
+        git(repo, "revert", "--no-edit", "-m", "1", revert_of, env=env)
+    git(repo, "checkout", "-q", "main", env=env)
+    git(repo, "merge", "-q", "--no-ff", "-m", f"Merge pull request #{n} from owner/{branch}", branch, env=env)
+    return git(repo, "rev-parse", "HEAD", env=env)
+
+
 def commit(repo, msg):
     git(repo, "commit", "-q", "--allow-empty", "-m", msg)
 
@@ -49,12 +64,19 @@ def main():
         git(d, "revert", "--no-edit", "-m", "1", old)
         commit(d, "Fix the batch-beta test that the merge left red")
         commit(d, "Unrelated work on batch-clean docs")
+        # A fix commit inside the batch it names is no repair: it never reached main before the merge did.
+        merge_branch(d, 15, "batch-gamma", ["Fix #15 flake before it lands"])
+        # A repair that arrives inside a later batch merge is a second-parent commit, and counts.
+        shaky = merge_pr(d, 17, "batch-eps")
+        merge_branch(d, 18, "batch-zeta", [], revert_of=shaky)
         r = run_script(d)
         assert r.returncode == 0, r.stderr
         first = r.stdout.splitlines()[0]
-        assert first == "repaired merges in the last 14 days: 2", r.stdout
+        assert first == "repaired merges in the last 14 days: 3", r.stdout
         assert reverted[:7] in r.stdout and "#11" in r.stdout, r.stdout
         assert fixed[:7] in r.stdout and "#12" in r.stdout, r.stdout
+        assert shaky[:7] in r.stdout and "#17" in r.stdout, r.stdout
+        assert "#15" not in r.stdout and "#18" not in r.stdout, r.stdout
         assert "#13" not in r.stdout and "#9 " not in r.stdout, r.stdout
         print("ok")
 
