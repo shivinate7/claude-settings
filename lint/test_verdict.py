@@ -243,6 +243,12 @@ class T(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("runner failure marker", r.stdout.splitlines()[0])
 
+    def test_swift_testing_line_without_suite_count_is_still_read(self):
+        r = run(f"print({self.XCT0!r})\nprint('Test run with 1 test passed after 0.001 seconds.')")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        r = run("print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint('Test run with 2 tests failed after 0.001 seconds with 1 issue.')")
+        self.assertEqual(r.returncode, 1, r.stdout)
+
     def test_swift_testing_zero_tests_on_exit0_is_fail_no_tests_ran(self):
         r = run(f"print({self.XCT0!r})\nprint('\u2714 Test run with 0 tests in 0 suites passed after 0.001 seconds.')")
         self.assertEqual(r.returncode, 1, r.stdout)
