@@ -14,6 +14,7 @@
 # renames the path is absent for a moment, and a guard load retries through that.
 # Without symlink rights the pinned checkout is switched in place (git switch --detach), which
 # writes the files one at a time (a live reader can see a mix there).
+# A settings.json that only reordered keys is restored from HEAD first and does not count as a change.
 # A pin with tracked changes is never moved, switched or removed, nor is an old tree with them: the
 # run prints one stderr line naming the pin and exits 1; the SessionStart hook writes that line to
 # the install log. A <clone>-live-<commit> tree whose only changes are missing tracked files (a git
@@ -76,6 +77,19 @@ not_deletions() { git -C "$1" status --porcelain --untracked-files=no 2>/dev/nul
 # True when DIR is detached at main's commit with no tracked file missing.
 at_main() { at_commit "$1" && ! missing_files "$1"; }
 
+# Frees DIR of a settings.json save that only reordered keys (the app and CLI rewrite the linked file).
+# Only when settings.json is DIR's one tracked change and parses to the same JSON as HEAD's: it is then
+# restored from HEAD. Any other change, an unparsable file or no python3 leaves DIR as it is (fail safe).
+restore_reordered_settings() {
+  [ "$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)" = " M settings.json" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  git -C "$1" show HEAD:settings.json 2>/dev/null | python3 -c '
+import json, sys
+sys.exit(0 if json.load(sys.stdin) == json.load(open(sys.argv[1])) else 1)' "$1/settings.json" 2>/dev/null \
+    && git -C "$1" checkout -q -- settings.json >/dev/null 2>&1
+  return 0
+}
+
 # Makes $pin a link to worktree $1 by one rename of the link. Returns 1 when no real link can be made.
 # The temp name is per run, so a run that died never leaves a name another run shares.
 point_at() {
@@ -115,6 +129,7 @@ prune_trees() {
     [ "${#s}" = 12 ] && [ -z "${s//[0-9a-f]/}" ] || continue
     [ "$(canon "$w")" = "$(canon "$1")" ] && continue
     [ -n "$2" ] && [ "$(canon "$w")" = "$(canon "$2")" ] && continue
+    restore_reordered_settings "$w"
     [ -z "$(git -C "$w" status --porcelain --untracked-files=no 2>/dev/null)" ] || continue   # never drop a tree with tracked changes
     git worktree remove -f -f "$w" >/dev/null 2>&1
   done
@@ -122,6 +137,7 @@ prune_trees() {
 
 # Moves the pinned checkout to main's commit.
 move_pin() {
+  restore_reordered_settings "$pin"
   if [ -n "$(git -C "$pin" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
     # Tracked changes in the pin are someone's work: move, switch and remove nothing.
     fail "the pinned checkout $pin has tracked changes, so it was not moved; commit or discard them there (git -C \"$pin\" status), then run merge/install_from_main.sh"
