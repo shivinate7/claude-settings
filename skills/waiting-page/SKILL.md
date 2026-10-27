@@ -4,10 +4,9 @@ description: Use when a session has a question, a decision or a task for the own
 ---
 
 The waiting page is one private page per repo or project. It holds every item that waits on the
-owner. Only a session that reads its own answers at a wake writes an item. A lane (a background
-agent, or a lane session that ends) never writes one: it puts its question in its report, and the
-orchestrator writes the item with itself as `owner` and routes the answer back to the lane or its
-next try. Every repo's page is the same template. The page is fixed. All content
+owner. Only a session that reads its own answers at a wake writes an item. A lane never writes one. A lane is a background
+agent, or a lane session that ends. It puts its question in its report. The orchestrator writes the
+item with itself as `owner`. It routes the answer back to the lane or its next try. Every repo's page is the same template. The page is fixed. All content
 lives in its database, through the ArtifactData tool. The one exception is a design mockup: it is
 stored in the page itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each question
 here. Decision `questions-go-to-owner` holds the rulings.
@@ -33,8 +32,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
-  - `designs` (a list of `{slug, label}`) shows mockups beside the question (see "Add a design").
-  - A decision adds `options` (a list of `{key, label, how, gain, lose}`), `pick` (the key you
+  - `designs` (a list of `{slug, label}`) shows mockups at the front of the card, before the options
+    (see "Add a design"). An option names its picture with `design` (a slug in `designs`).
+  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
     with that key. The page never preselects an option: it stars `pick` and offers "Take my pick".
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
@@ -161,16 +161,21 @@ unmeasured.
 
 ## Add a design
 
-An item may carry mockups. The owner sees each one in a sandboxed frame beside the question, and
-the Designs tab pages through every mockup whose question is open.
+A question about how something looks carries one design per option. The owner picks by looking, so
+a link to a folder, a repo or a file is never enough. The page shows the designs at the front of the
+card, before the options. An option that names a design (`design`) which the item does not carry
+shows a warning line in place of the picture.
 
-1. Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-2. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
+1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
+   phone width for a web app. The full mockup stays one tap away ("Open full size").
+2. Put the whole mockup in one HTML string. Write `<` as `\u003c`.
+3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
    JSON in `<script type="application/json" id="designData">`.
-3. Add `designs: [{slug, label}]` to the item.
-4. Republish the page to the same URL with the same capabilities. The database stays.
+4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
+5. Republish the page to the same URL with the same capabilities. The database stays.
    A republish replaces the whole page, so run this step in one session at a time. A second session
-   that read the page earlier would overwrite the first one's mockups.
+   that read the page earlier would overwrite the first one's mockups. A lane never does this step:
+   the orchestrator does (see "Add an item").
 
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.

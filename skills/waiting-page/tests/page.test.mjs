@@ -428,6 +428,12 @@ test("a look question with three options, a GitHub folder link and no designs sh
   assert.equal(await card(page, it).locator("iframe.dframe").count(), 0);
 });
 
+test("a long link in the context never widens the page on a phone", async (t) => {
+  const it = mk("price-history-link", 33, { context: GITHUB_FOLDER, options: LOOK_OPTS, pick: "a" });
+  const page = await open(t, { items: [it], viewport: { width: 390, height: 900 } }); if (!page) return;
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+});
+
 test("an item with a design for each option shows them before the option list and no warning", async (t) => {
   const it = mk("with-pictures", 31, {
     options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })),
