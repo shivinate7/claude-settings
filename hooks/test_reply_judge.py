@@ -1035,6 +1035,56 @@ def case_prompt_asks_for_gold_column():
           has_pin(sentences, ("table",), ("compar",), ("gold", "target"), ("column",)), sentences)
 
 
+# --------------------------------------------------------------------------- c102
+# questions-go-to-owner: a question whose pick can be undone is taken, not asked. Code already
+# judges every Input Needed Stop; the model reads whether an item's pick can be undone and, if it
+# can, notes it. A pick that cannot be undone, or that changes the owner's goal, is never noted.
+
+ASK_RULE = "questions-go-to-owner"
+UNDOABLE_ASK = (
+    "Done: built the waiting page.\n"
+    "Input Needed: link the waiting page now with a folder move, or later? Later changes nothing.\n"
+)
+UNDOABLE_FINDING = {"ok": False, "reason": ASK_RULE + ": the pick can be undone; take it and name it under Done."}
+
+
+def case_undoable_pick_question_is_judged_off_sample():
+    run, _ = second_stop(UNDOABLE_ASK, label="c102-judged", session="c102-judged")
+    check("undoable pick: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_prompt_notes_an_undoable_pick():
+    run = run_hook(UNDOABLE_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, UNDOABLE_ASK)
+    check("prompt: names %s before the reply" % ASK_RULE, any(ASK_RULE in s for s in sentences),
+          run.prompt()[:300])
+    check("prompt: a sentence flags an Input Needed pick that can be undone",
+          has_pin(sentences, ("input needed",), ("undo",), ("flag",)), sentences)
+    check("prompt: a sentence says the session takes the pick and names it under Done",
+          has_pin(sentences, ("take",), ("done",)), sentences)
+
+
+def case_prompt_spares_irreversible_and_goal_picks():
+    run = run_hook(UNDOABLE_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, UNDOABLE_ASK)
+    check("prompt: never flag a pick that cannot be undone",
+          has_pin(sentences, ("never flag",), ("cannot be undone",)), sentences)
+    check("prompt: never flag a pick that changes the owner's goal",
+          has_pin(sentences, ("never flag",), ("goal",)), sentences)
+
+
+def case_undoable_pick_finding_logs_its_rule():
+    run, config = second_stop(UNDOABLE_ASK, answer=json.dumps(UNDOABLE_FINDING), label="c102-log",
+                              session="c102-log")
+    parts = (guard_lines(config) or [""])[0].split("\t")
+    check("guard.log: rule is %s" % ASK_RULE, len(parts) == 6 and parts[3] == ASK_RULE, parts)
+    out = parse_stdout(run)
+    check("undoable pick: a note, never a block, exit 0",
+          run.code == 0 and isinstance(out, dict) and "decision" not in out
+          and out.get("hookSpecificOutput", {}).get("additionalContext") == UNDOABLE_FINDING["reason"],
+          (run.code, run.out))
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1071,6 +1121,10 @@ CASES = (
     case_table_reply_is_judged_off_sample,
     case_pipes_without_table_not_judged_off_sample,
     case_prompt_asks_for_gold_column,
+    case_undoable_pick_question_is_judged_off_sample,
+    case_prompt_notes_an_undoable_pick,
+    case_prompt_spares_irreversible_and_goal_picks,
+    case_undoable_pick_finding_logs_its_rule,
 )
 
 
