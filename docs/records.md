@@ -47,6 +47,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-trees-reverify-after-incident` | Re-verify every edit after an incident. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge failing CI. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-ci-wait-checks-in` | A session that waits on CI sets a timed check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep command output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-slug-then-claim-number` | Never allocate a numbered record on a branch. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -166,7 +168,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`docs/decisions/mods-no-cli-key-headless.md`](../docs/decisions/mods-no-cli-key-headless.md) |
 | `one-layout-every-repo` | Every repo keeps each kind of file in the same place. | [`docs/decisions/one-layout-every-repo.md`](../docs/decisions/one-layout-every-repo.md) |
 | `one-shared-record-stamp` | One shared parser in claude-settings handles every repo's record format. | [`docs/decisions/one-shared-record-stamp.md`](../docs/decisions/one-shared-record-stamp.md) |
-| `opt-in-ci-templates-composite` | Six templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no CI step. | [`docs/decisions/opt-in-ci-templates-composite.md`](../docs/decisions/opt-in-ci-templates-composite.md) |
+| `opt-in-ci-templates-composite` | Seven templates any repo can adopt live in one home and one shape: a composite action under `actions/<name>/`, or a plain file where the template is no CI step. | [`docs/decisions/opt-in-ci-templates-composite.md`](../docs/decisions/opt-in-ci-templates-composite.md) |
 | `opus-grant-expires` | An Opus agent is enabled for one repository, on the owner's word in chat (`roles-opus-override-guarded`). | [`docs/decisions/opus-grant-expires.md`](../docs/decisions/opus-grant-expires.md) |
 | `owner-feedback-inbox` | When the owner opens a feedback burst, a hook writes each message to a per-session inbox. | [`docs/decisions/owner-feedback-inbox.md`](../docs/decisions/owner-feedback-inbox.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |

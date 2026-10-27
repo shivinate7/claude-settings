@@ -211,6 +211,19 @@
         "reason": "Enforcement is GitHub's required-status-checks setting on the branch, not something this repo's files can attest to."
       }
     },
+    "git-ci-wait-checks-in": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook sees that a cloud session is waiting on CI, or reads whether it set a send_later check-in. The ci-done comment covers the red-run wake; the check-in covers a lost wake."
+      }
+    },
+    "git-ci-done-comment-wakes": {
+      "mechanism": {
+        "kind": "gate",
+        "ref": "actions/ci-done-comment/comment.sh",
+        "test": "actions/ci-done-comment/test_comment.py::Body.test_failed_job_is_named"
+      }
+    },
     "git-never-discard-output": {
       "mechanism": {
         "kind": "guard",
