@@ -10,7 +10,7 @@ hand-off rule below.
 
 - **Triage.** The gatekeeper of the roadmap. Only triage writes a new step, merges two steps,
   changes the work order, or closes a step. Only triage publishes the roadmap page, from the head
-  of the record branch. Triage reviews the whole roadmap at each batch merge and when the owner asks.
+  of the record branch. Triage reads the outbox at each wake. Triage reviews the whole roadmap at each batch merge and when the owner asks.
 - **Build advisor.** Keeps about <4 to 6> build threads running, in roadmap order. Owns the build
   order, the merge queue and the integration branch. Dispatches no deferred step.
 - **Local liaison.** Writes briefs for work that needs a local machine, and reads back the
@@ -35,7 +35,7 @@ Count each limit. Never wait for the owner to notice.
   when a limit is hit.
 - On a hand-off, the old thread writes `handoffs/<role>-<date>.md` on the record branch from
   `role-handoff.md`. The coordinator starts the successor from that file, updates the roster,
-  tells every running thread the new thread, and resolves the old thread.
+  and resolves the old thread. The coordinator sends no broadcast. Threads read the roster.
 - The owner may exempt a role from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
@@ -58,6 +58,16 @@ Count each limit. Never wait for the owner to notice.
   as one dated line.
 - A new or moved step near the top gets the line `Placed ahead of <step> (triage, <date>): <why>`.
 - Pull right before each write.
+
+## Messages between threads
+
+- Send a message at once only when work is blocked (a PR held, a lane stopped), or when the owner
+  asked for something to be passed on.
+- Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<thread-slug>.md`
+  on the record branch. Each thread keeps one file and rewrites it to hold only what is unfiled.
+- Triage reads the outbox at each wake, files each item, and removes what it filed.
+- Owners read their own answers on the waiting page. Skill `waiting-page` holds the protocol.
+- A thread re-reads the roster right before it sends to a standing thread.
 
 ## Briefs
 
