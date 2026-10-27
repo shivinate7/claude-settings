@@ -1254,17 +1254,31 @@ class CutLanes(Env):
         sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def test_a_lane_whose_merge_was_reverted_on_the_batch_is_kept(self):
+    def assert_refused_drop(self, rc, out, feat):
+        """c110: a batch that drops a lane by a revert of its merge is refused before anything is claimed, pushed or merged."""
+        self.assertEqual(rc, 1, out)
+        self.assertIn("rebuild the batch branch from main without the lane", out)
+        self.assertNotIn("merged as", out)
+        self.assertEqual(self.claims("feat"), 0, "the refusal claimed record numbers")
+        self.assertEqual(self.head("feat"), feat, "the refusal pushed to the batch branch")
+        for b in self.tips:
+            self.assertNotEqual(self.head(b), "", f"{b} was deleted")
+        self.assertFalse(self.lock_ref())
+
+    def test_a_batch_that_drops_a_lane_by_a_revert_is_refused(self):
+        lane_batch(self, "lane1", "lane2")
+        feat = self.revert_on_batch(self.merge_of("lane1"))
+        rc, out = self.go()
+        self.assert_refused_drop(rc, out, feat)
+
+    def test_the_preview_blocks_a_batch_that_drops_a_lane_by_a_revert(self):
         lane_batch(self, "lane1", "lane2")
         self.revert_on_batch(self.merge_of("lane1"))
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assert_deleted(out, "lane2")  # control: the live lane still goes
-        self.assertNotEqual(self.head("lane1"), "", "lane1 was deleted although its merge was reverted")
-        lines = [l for l in out.splitlines() if "origin/lane1" in l]
-        self.assertEqual(len(lines), 1, out)
-        self.assertIn("reverted", lines[0])
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        blocked = [l for l in out.splitlines() if l.startswith("BLOCKED:")]
+        self.assertEqual(len(blocked), 1, out)
+        self.assertIn("revert", blocked[0])
 
     def test_a_lane_reverted_then_reapplied_is_deleted(self):
         lane_batch(self, "lane1", "lane2")
@@ -1274,7 +1288,7 @@ class CutLanes(Env):
         self.assertEqual(rc, 0, out)
         self.assert_deleted(out, "lane1", "lane2")
 
-    def test_a_lane_reverted_then_merged_again_at_a_new_tip_is_deleted(self):
+    def test_a_lane_reverted_then_merged_again_at_a_new_tip_is_refused(self):
         lane_batch(self, "lane1", "lane2")
         self.revert_on_batch(self.merge_of("lane1"))
         o = self.other
@@ -1286,9 +1300,8 @@ class CutLanes(Env):
         sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge remote-tracking branch 'origin/lane1' into feat", new_tip)
         sh(o, "git", "push", "-q", "origin", "feat")
         self.tips["lane1"] = new_tip
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_deleted(out, "lane1", "lane2")
+        rc, out = self.go()  # the new merge brings only the fix: the reverted lane commit stays undone, so main would lose its file
+        self.assert_refused_drop(rc, out, self.head("feat"))
 
     def test_a_lane_pushed_to_after_the_merge_is_kept(self):
         tips = lane_batch(self, "lane1", "lane2")
@@ -1612,7 +1625,10 @@ class CutLanes(Env):
         self.assert_merged()
         for b in ("lane1", "lane2"):
             self.assertNotEqual(self.head(b), "", f"{b} was deleted")
-        self.assert_one_lane_line(out)
+        # c110: the same read runs once before the claim, for the dropped-lane check. It fails open with its own one line; the cleanup keeps its one line.
+        check = [l for l in out.splitlines() if l.startswith("merge: the dropped-lane check could not run")]
+        self.assertEqual(len(check), 1, out)
+        self.assert_one_lane_line("\n".join(l for l in out.splitlines() if l not in check))
 
     def test_a_failed_git_log_in_lane_tips_prints_one_line_and_deletes_nothing(self):
         self.lane_tips_breaks((128, "fatal: bad revision"))
@@ -1735,17 +1751,14 @@ class CutLanes(Env):
 
     def test_a_dropped_lane_keeps_its_local_branch_and_clean_tree(self):
         tips = lane_batch(self, "lane1", "lane2")
-        self.revert_on_batch(self.merge_of("lane1"))  # lane1's merge is reverted on the batch: a dropped lane
+        feat = self.revert_on_batch(self.merge_of("lane1"))  # lane1's merge is reverted on the batch: a dropped lane
         tree = self.local_branch("lane-a", tips["lane1"], os.path.join(self.t, "wt-lane-a"))
         self.assertTrue(self.tree_listed(tree), "subject: the dropped lane's worktree must exist first")
         rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
+        self.assert_refused_drop(rc, out, feat)
         self.assertTrue(os.path.isdir(tree), f"the dropped lane's clean tree was removed; out: {out!r}")
         self.assertTrue(self.tree_listed(tree), out)
         self.assertTrue(self.has_local("lane-a"), f"the dropped lane's local branch was deleted; out: {out!r}")
-        self.assertNotEqual(self.head("lane1"), "", "control: origin/lane1 is kept as a dropped lane")
-        self.assert_deleted(out, "lane2")
 
     def kept_local_lane(self, branch, tip):
         """A local lane branch at `tip`, with a clean worktree on it. -> the worktree path. Both must exist before the merge."""
