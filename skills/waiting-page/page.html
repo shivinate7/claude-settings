@@ -1,205 +1,672 @@
-<title>Waiting on Shiv</title>
+<meta charset="utf-8">
+<title>Waiting on you</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@700;800&family=Newsreader:opsz,wght@6..72,600&display=swap">
 <style>
-/* Layout: one reading column of numbered cards, decisions then hands-on tasks, a sticky answer bar. */
+/* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
+   repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
 :root {
-  --bg: #f3f5f7; --surface: #ffffff; --ink: #18212b; --muted: #5a6776; --line: #d9dfe6;
-  --accent: #b45f06; --accent-soft: #fbeedd; --good: #2f7a4c; --good-soft: #e3f2e8; --chip: #eef1f5;
-  --display: "Newsreader", Georgia, serif; --body: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #11161c; --surface: #19212a; --ink: #e6ebf0; --muted: #98a5b3; --line: #2c3743;
-  --accent: #f0a14a; --accent-soft: #3a2a17; --good: #6cc48f; --good-soft: #193326; --chip: #222c37; color-scheme: dark } }
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
 :root[data-theme="dark"] {
-  --bg: #11161c; --surface: #19212a; --ink: #e6ebf0; --muted: #98a5b3; --line: #2c3743;
-  --accent: #f0a14a; --accent-soft: #3a2a17; --good: #6cc48f; --good-soft: #193326; --chip: #222c37; color-scheme: dark }
-body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); }
-body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
-.wrap { max-width: 760px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 120px; display: grid; gap: 22px; }
-header { display: grid; gap: 8px; }
-h1 { font: 600 2rem/1.15 var(--display); margin: 0; text-wrap: balance; }
-.lede { color: var(--muted); margin: 0; max-width: 62ch; }
-.meta { font: 12px var(--mono); color: var(--muted); }
-.tally { display: flex; flex-wrap: wrap; gap: 8px; }
-.pill { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--chip); }
-.pill b { font-variant-numeric: tabular-nums; }
-.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 14px; }
-h2 { font: 600 1.25rem var(--display); margin: 10px 0 0; }
-.list { display: grid; gap: 14px; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
-.card.answered { border-color: var(--good); }
-.top { display: flex; gap: 12px; align-items: baseline; }
-.num { font: 600 1.4rem var(--display); color: var(--accent); min-width: 1.6em; font-variant-numeric: tabular-nums; }
-.title { font-weight: 600; font-size: 16px; text-wrap: balance; }
-.ref { font: 12px/1.4 var(--mono); color: var(--muted); margin-top: 2px; }
-.ctx { white-space: pre-line; margin: 0; color: var(--ink); }
-.opts { display: grid; gap: 8px; }
-.opt { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.opt:hover { border-color: var(--muted); }
-.opt.picked { border-color: var(--accent); background: var(--accent-soft); }
-.opt input { margin-top: 4px; accent-color: var(--accent); }
-.opt .lab { font-weight: 600; }
-.opt .lab .tag { font: 500 11px var(--mono); color: var(--accent); margin-left: 6px; letter-spacing: .04em; text-transform: uppercase; }
-.opt .d { grid-column: 2; font-size: 14px; color: var(--muted); }
-.opt .d b { color: var(--ink); font-weight: 500; }
-.why { font-size: 14px; margin: 0; }
-.why b { color: var(--accent); }
-ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
-.links { display: flex; flex-wrap: wrap; gap: 10px; font-size: 14px; }
-a { color: var(--accent); }
-.foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border-top: 1px dashed var(--line); padding-top: 10px; }
-.foot input[type=text] { flex: 1 1 220px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; font-size: 14px; }
-button { font: 500 14px var(--body); padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); cursor: pointer; }
-button.ghost { background: transparent; color: var(--accent); }
-button:disabled { opacity: .5; cursor: default; }
-button:focus-visible, input:focus-visible, .opt:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.status { font-size: 13px; color: var(--muted); }
-.status.ok { color: var(--good); }
-.owner { font: 12px var(--mono); color: var(--muted); }
-.parked { font-size: 14px; color: var(--muted); margin: 0; padding-left: 20px; }
-.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 10px; }
-.bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding-top: 10px; z-index: 5; }
-.bar .in { max-width: 760px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
-@media (prefers-reduced-motion: no-preference) { .card { transition: border-color .2s; } }
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .sub { font-size: 13.5px; opacity: .88; white-space: nowrap; }
+@media (max-width: 420px) { .who .sub { display: none; } }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.stands { border-radius: 50%; background: var(--gold-ink); }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: 700 26px/1 var(--body); font-variant-numeric: tabular-nums; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
+.pairchips .nchip { height: 28px; width: 44px; }
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; }
+.key { flex: none; width: 26px; height: 26px; border-radius: 7px; border: 1.5px solid var(--line); display: grid; place-items: center; font: 600 13px var(--mono); color: var(--muted); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { font: 700 15px/1.25 var(--body); color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+
+.ready { min-height: 1.55em; margin: 0; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+.ready.on::before { content: "\2713  "; }
+/* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.alts .sp { flex: 1 1 0; }
+.alts .gone { visibility: hidden; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 10px; }
+.receipt .line { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 15.5px; }
+.receipt .line b { color: var(--good); }
+.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+.trail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.trail li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 13px; background: var(--chip); color: var(--faint); }
+.trail li.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.trail li .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
+.parked ul { margin: 6px 0 0; padding-left: 20px; }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 14px; display: grid; gap: 10px; font-size: 15px; }
+.sent-head { display: flex; gap: 14px; align-items: center; }
+.stamp { flex: none; transform: rotate(-6deg); border: 3px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 9px 3px; font: 700 18px/1 var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 11px/1.3 var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp .42s cubic-bezier(.3,1.6,.5,1) both; } }
+@keyframes stamp { from { transform: rotate(-6deg) scale(2); opacity: 0; } to { transform: rotate(-6deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 22vh; overflow: auto; }
+.sent-list li { display: inline-flex; gap: 8px; align-items: center; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.dstate { padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+
+/* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
+.dprev { display: grid; gap: 8px; }
+.dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dprev .dbar .sp { flex: 1; }
+.dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
+.card .dframe { height: 340px; }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-rows: auto 1fr; }
+.dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
+.dsh-head .in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 220px; }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn.quiet { color: var(--on-hdr); border-color: color-mix(in srgb, var(--on-hdr) 40%, transparent); }
+.dsh-body { position: relative; min-height: 0; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dframe { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dsh-body .dframe.off { visibility: hidden; }
+body.sheet-open { overflow: hidden; }
 </style>
 
-<div class="wrap">
-  <header>
-    <h1>Waiting on you</h1>
-    <p class="lede">Everything your sessions have parked for your word, with the context, each option's trade and a pick. Choose an option and press Save, or reply in the thread with one line such as "1 a, 4 a, 18 done". Saved answers go to the thread that owns each item, and answered items drop off.</p>
-    <div class="meta" id="checked"></div>
-    <div class="tally" id="tally"></div>
-    <div class="controls">
-      <label><input type="checkbox" id="showDone"> Show answered items</label>
-    </div>
-  </header>
-  <section><h2>Decisions</h2><div class="list" id="decisions"><div class="empty">Loading the items waiting on you…</div></div></section>
-  <section><h2>Things only you can do</h2><div class="list" id="tasks"></div></section>
-  <section id="parkedSec" hidden><h2>Parked by you, nothing to answer</h2><ul class="parked" id="parked"></ul></section>
+<header class="hdr"><div class="in">
+  <div class="mark" id="mark" aria-hidden="true"></div>
+  <div class="who"><h1 class="repo" id="repoName">Waiting on you</h1><span class="sub" id="repoSub" hidden>waiting on you</span></div>
+</div></header>
+
+<nav class="in tabs" id="tabs" aria-label="Page" hidden><a href="#" id="tabQ" aria-current="page">Questions</a><a href="#" id="tabD" role="button">Designs <span class="cnt" id="dCount"></span></a></nav>
+<div class="in main" id="qView">
+  <nav class="rail" id="rail" aria-label="Overview"></nav>
+  <div class="list" id="list"><div class="empty">Loading the items waiting on you…</div></div>
 </div>
 
-<div class="bar"><div class="in">
-  <button id="useAll" class="ghost" type="button">Accept every pick I haven't answered</button>
-  <button id="copy" type="button">Copy answers as one message</button>
-  <span class="status" id="barStatus"></span>
-  <textarea id="copyBox" rows="2" hidden readonly></textarea>
-</div></div>
+<div class="bar" id="bar">
+  <div class="sent" id="sent" hidden><div class="in" id="sentIn"></div></div>
+  <div class="in">
+    <span class="st" id="barStatus"></span>
+    <button class="btn quiet" type="button" id="copy" hidden>Copy answers</button>
+    <button class="btn send" type="button" id="send" disabled>Send answers</button>
+    <textarea id="copyBox" rows="2" hidden readonly></textarea>
+  </div>
+</div>
+
+<div class="dsheet" id="dsheet" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
+  <div class="dsh-head"><div class="in">
+    <h2 id="dTitle"></h2><span id="dPos"></span>
+    <button class="btn quiet" type="button" id="dPrev">Prev</button><button class="btn quiet" type="button" id="dNext">Next</button>
+    <button class="btn quiet" type="button" id="dBack"></button>
+    <button class="btn" type="button" id="dClose">Close</button>
+  </div></div>
+  <div class="dsh-body" id="dStage"></div>
+</div>
+
+<!-- A session that adds designs republishes this page with {slug: whole mockup HTML}, "<" written as <. -->
+<script type="application/json" id="designData">{}</script>
 
 <script>
-const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, comments: null, showDone: false };
+const state = { items: [], answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
-try { state.showDone = localStorage.getItem("waiting.showDone") === "1"; } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
 const choiceText = (k) => (k === NONE ? "none of these" : k);
-$("showDone").checked = state.showDone;
-$("showDone").addEventListener("change", (e) => { state.showDone = e.target.checked; try { localStorage.setItem("waiting.showDone", e.target.checked ? "1" : "0"); } catch (x) {} render(); });
-
-function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+function h(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v === true) n.setAttribute(k, ""); else if (v !== false && v != null) n.setAttribute(k, v); }
+  for (const c of kids.flat()) if (c != null && c !== false) n.append(c.nodeType ? c : document.createTextNode(c));
+  return n;
+}
 function saveDraft() { try { localStorage.setItem("waiting.draft", JSON.stringify(state.draft)); } catch (e) {} }
-function isAnswered(it) { return !!state.answers[it.id] || it.status === "closed"; }
-function fmtTime(s) { try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); } catch (e) { return s; } }
 
-function card(it) {
-  const ans = state.answers[it.id];
-  const d = state.draft[it.id] || {};
-  const c = el("article", "card" + (ans ? " answered" : ""));
-  const top = el("div", "top");
-  top.append(el("div", "num", String(it.n)));
-  const tt = el("div"); tt.append(el("div", "title", it.title), el("div", "ref", it.ref)); top.append(tt);
-  c.append(top);
-  c.append(el("p", "ctx", it.context));
-  if (it.kind === "decision") {
-    const opts = el("div", "opts");
-    const chosen = d.choice || (ans && ans.choice) || "";
-    (it.options || []).forEach((o) => {
-      const lab = el("label", "opt" + (chosen === o.key ? " picked" : ""));
-      const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.value = o.key; r.id = "o-" + it.id + "-" + o.key; r.checked = chosen === o.key;
-      r.addEventListener("change", () => {
-        const next = Object.assign({}, state.draft[it.id], { choice: o.key });
-        // A saved "none" note says what the owner wants instead. It does not carry over to an option.
-        if (ans && ans.choice === NONE && next.note == null) next.note = "";
-        state.draft[it.id] = next; saveDraft(); render();
-      });
-      const head = el("span", "lab", o.key + ") " + o.label);
-      if (o.key === it.pick) head.append(el("span", "tag", "my pick"));
-      lab.append(r, head);
-      [["How it works", o.how], ["You gain", o.gain], ["You lose", o.lose]].forEach(([k, v]) => { const p = el("div", "d"); p.append(el("b", null, k + ": "), document.createTextNode(v)); lab.append(p); });
-      opts.append(lab);
+/* ---------- Colour: one brand per repo, every derived token contrast-checked ---------- */
+const hx = (c) => { c = c.replace("#", ""); return [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16)); };
+const toHex = (c) => "#" + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+const mix = (a, b, t) => toHex(hx(a).map((v, i) => v * (1 - t) + hx(b)[i] * t));
+const lum = (c) => { const l = hx(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]; };
+const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+const hueDist = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+function hsl(c) { const [r, g, b] = hx(c).map((v) => v / 255); const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn; let H = 0, S = 0; if (d) { S = d / (1 - Math.abs(2 * l - 1)); H = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; H *= 60; if (H < 0) H += 360; } return [H, S * 100, l * 100]; }
+function hslHex(hh, ss, ll) { ss /= 100; ll /= 100; const k = (n) => (n + hh / 30) % 12, a = ss * Math.min(ll, 1 - ll); const f = (n) => ll - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return toHex([f(0), f(8), f(4)].map((v) => v * 255)); }
+const SURF_L = "#ffffff", SURF_D = "#191e26", BASE_L = "#f3f4f6", BASE_D = "#11151b", DARKTXT = "#11151b";
+// Walks a colour toward black or white until it reaches min contrast on every background.
+function towards(c, target, bgs, min) { let x = c, i = 0; while (bgs.some((bg) => ratio(x, bg) < min) && i < 60) { x = mix(x, target, 0.06); i++; } return x; }
+function onColour(bg) { const w = ratio("#ffffff", bg), d = ratio(DARKTXT, bg); return w >= d ? ["#ffffff", w] : [DARKTXT, d]; }
+// State colours keep their meaning on every repo. Each turns its hue away from the repo's hue until the two
+// sit 30 degrees apart, then darkens (light theme) or lightens (dark theme) until it reaches 4.5:1 on every
+// background it sits on.
+const STATE_BASE = { holds: ["#b3261e", "#ff8b7f"], due: ["#8a5300", "#f2b55c"], good: ["#1d7445", "#6fcf98"] };
+const STATE_SOFT = { holds: [], due: ["#fbefd9", "#35270f"], good: ["#e0f2e7", "#15301f"] };
+function stateColours(brand, t) {
+  const bh = hsl(brand), bs = bh[1] / 100, out = {};
+  for (const [k, [l0, d0]] of Object.entries(STATE_BASE)) {
+    [[l0, "l", [t.groundL, SURF_L, t.softL, STATE_SOFT[k][0]], "#000000"], [d0, "d", [t.groundD, SURF_D, t.softD, STATE_SOFT[k][1]], "#ffffff"]].forEach(([base, th, bgs, toward]) => {
+      let [H, S, L] = hsl(base);
+      const gap = hueDist(H, bh[0]);
+      if (bs >= 0.3 && gap < 30) { const dir = ((H - bh[0] + 540) % 360) - 180 >= 0 ? 1 : -1; H = (H + dir * (30 - gap) + 360) % 360; S = Math.min(100, S + 12); }
+      out[k + th] = towards(hslHex(H, S, L), toward, bgs.filter(Boolean), 4.5);
     });
-    {
-      // "none" is reserved: no item may use it as an option key (skill waiting-page, "Add an item").
-      const lab = el("label", "opt" + (chosen === NONE ? " picked" : ""));
-      const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.value = NONE; r.id = "o-" + it.id + "-" + NONE; r.checked = chosen === NONE;
-      r.addEventListener("change", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { choice: NONE }); saveDraft(); render(); setTimeout(() => { const n = $("n-" + it.id); if (n) n.focus(); }, 0); });
-      lab.append(r, el("span", "lab", "None of these"));
-      lab.append(el("div", "d", "Say in the note what you want instead, or what is missing. The owning session comes back with new options."));
-      opts.append(lab);
-    }
-    c.append(opts);
-    const why = el("p", "why"); why.append(el("b", null, "My pick: " + it.pick + ". "), document.createTextNode(it.why)); c.append(why);
-  } else {
-    const ol = el("ol", "steps"); (it.steps || []).forEach((s) => ol.append(el("li", null, s))); c.append(ol);
   }
-  if (it.links && it.links.length) { const l = el("div", "links"); it.links.forEach((k) => { const a = el("a", null, k.label + " ↗"); a.href = k.url; a.target = "_blank"; a.rel = "noopener"; l.append(a); }); c.append(l); }
-  const foot = el("div", "foot");
-  const note = document.createElement("input"); note.type = "text"; note.id = "n-" + it.id; note.placeholder = it.kind === "task" ? "Optional note, e.g. what you saw" : (d.choice === NONE ? "Required: what you want instead" : "Optional note or your own answer");
-  note.value = d.note != null ? d.note : (ans && ans.note) || "";
-  note.addEventListener("input", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { note: note.value }); saveDraft(); });
-  const btn = el("button", null, it.kind === "task" ? (ans ? "Update" : "Mark done") : (ans ? "Update answer" : "Save answer"));
-  btn.type = "button";
-  // A decision saves with a choice or a note. "None of these" also needs a note.
-  const blocked = () => {
-    if (it.kind !== "decision") return false;
-    const choice = (state.draft[it.id] || {}).choice || (ans && ans.choice) || "";
-    return choice === NONE ? !note.value.trim() : !choice && !note.value;
-  };
-  btn.disabled = !state.db || blocked();
-  note.addEventListener("input", () => { btn.disabled = !state.db || blocked(); clr.hidden = false; });
-  const notice = state.notice[it.id];
-  const st = el("span", "status" + (ans && !notice ? " ok" : ""), notice || (ans ? ("Saved " + fmtTime(ans.at) + (ans.choice ? ", answer " + choiceText(ans.choice) : "") + (ans.done ? ", done" : "") + ". Goes to: " + it.owner) : "Goes to: " + it.owner));
-  btn.addEventListener("click", async () => { await save(it, btn, st); });
-  // Clear removes the draft and the saved answer. A cleared item reads as unanswered.
-  const clr = el("button", "ghost", "Clear"); clr.type = "button";
-  clr.hidden = !ans && !d.choice && !d.note;
-  // The draft goes only once the saved answer is gone, so a failed Clear leaves the card as it was.
-  clr.addEventListener("click", async () => {
-    delete state.notice[it.id];
-    if (ans) {
-      try {
-        if (!state.db) throw { code: "no store" };
-        await state.db.collection("answers").doc(it.id).delete(); delete state.answers[it.id];
-      } catch (e) { state.notice[it.id] = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; render(); return; }
-    }
-    delete state.draft[it.id]; saveDraft();
-    render();
-  });
-  foot.append(note, btn, clr, st);
-  c.append(foot);
-  return c;
+  out.onHoldsl = onColour(out.holdsl)[0]; out.onHoldsd = onColour(out.holdsd)[0];
+  return out;
+}
+function derive(brand) {
+  let hdrL = brand, [onL] = onColour(hdrL);
+  if (ratio(onL, hdrL) < 4.5) { hdrL = towards(brand, "#000000", ["#ffffff"], 4.5); [onL] = onColour(hdrL); }
+  let hdrD = mix(brand, BASE_D, 0.38), [onD] = onColour(hdrD);
+  if (ratio(onD, hdrD) < 4.5) { hdrD = towards(hdrD, "#000000", ["#ffffff"], 4.5); [onD] = onColour(hdrD); }
+  const groundL = mix(BASE_L, brand, 0.07), groundD = mix(BASE_D, brand, 0.09), softL = mix(SURF_L, brand, 0.10), softD = mix(SURF_D, brand, 0.20);
+  const inkL = towards(brand, "#000000", [SURF_L, groundL, softL], 4.5), inkD = towards(brand, "#ffffff", [SURF_D, groundD, softD], 4.5);
+  return { ...stateColours(brand, { groundL, groundD, softL, softD }), brand, hdrL, onL, hdrD, onD, inkL, inkD, groundL, groundD, softL, softD };
+}
+const FACES = {
+  sans: ["system-ui, -apple-system, sans-serif", 700, "-0.01em"],
+  serif: ['"Newsreader", Georgia, serif', 600, "-0.01em"],
+  display: ['"Manrope", system-ui, sans-serif', 800, "-0.01em"],
+  classic: ['Cochin, "Iowan Old Style", Georgia, serif', 600, "0.12em"],
+};
+const REPO_VARS = ["--r-hdr-l", "--r-on-hdr-l", "--r-hdr-d", "--r-on-hdr-d", "--r-ink-l", "--r-ink-d", "--r-ground-l", "--r-ground-d", "--r-soft-l", "--r-soft-d", "--r-holds-l", "--r-holds-d", "--r-on-holds-l", "--r-on-holds-d", "--r-due-l", "--r-due-d", "--r-good-l", "--r-good-d"];
+const brandHex = (v) => { const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(v || "").trim()); if (!m) return null; const x = m[1].toLowerCase(); return "#" + (x.length === 3 ? x.replace(/./g, "$&$&") : x); };
+// With no valid brand the neutral defaults in the style block stay, so no colour is drawn here.
+function applyIdentity() {
+  const id = (state.meta && state.meta.identity) || {}, st = document.documentElement.style;
+  REPO_VARS.forEach((k) => st.removeProperty(k));
+  const brand = brandHex(id.brand);
+  if (brand) {
+    const t = derive(brand);
+    [["--r-hdr-l", t.hdrL], ["--r-on-hdr-l", t.onL], ["--r-hdr-d", t.hdrD], ["--r-on-hdr-d", t.onD], ["--r-ink-l", t.inkL], ["--r-ink-d", t.inkD], ["--r-ground-l", t.groundL], ["--r-ground-d", t.groundD], ["--r-soft-l", t.softL], ["--r-soft-d", t.softD], ["--r-holds-l", t.holdsl], ["--r-holds-d", t.holdsd], ["--r-on-holds-l", t.onHoldsl], ["--r-on-holds-d", t.onHoldsd], ["--r-due-l", t.duel], ["--r-due-d", t.dued], ["--r-good-l", t.goodl], ["--r-good-d", t.goodd]].forEach(([k, v]) => st.setProperty(k, v));
+  }
+  const f = FACES[id.face] || FACES.sans, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
+  st.setProperty("--wm", f[0]); st.setProperty("--wmw", f[1]); st.setProperty("--wmls", f[2]);
+  $("mark").textContent = (typeof id.mark === "string" && id.mark.trim() ? id.mark.trim() : name).slice(0, 1).toUpperCase();
+  $("mark").hidden = !$("mark").textContent;
+  $("repoName").textContent = name || "Waiting on you";
+  $("repoSub").hidden = !name;
+  document.title = name ? name + ": waiting on you" : "Waiting on you";
 }
 
-const TOLD = "Saved. Claude was told.";
-const NOT_TOLD = "Saved. No session was told; reply in the thread to wake one.";
-const MAX_BYTES = 4096;
-const MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000;
+/* ---------- Time: always US Central, 24-hour, with the zone named ---------- */
+function fmt(iso, withDay = true) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(d);
+  const g = (t) => (p.find((x) => x.type === t) || {}).value;
+  return (withDay ? g("month") + " " + g("day") + ", " : "") + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
+}
+const span = (ms) => { const hrs = Math.round(Math.abs(ms) / 36e5); if (hrs < 1) return "under an hour"; if (hrs < 24) return hrs + (hrs === 1 ? " hour" : " hours"); const d = Math.round(hrs / 24); return d + (d === 1 ? " day" : " days"); };
+const validT = (iso) => !isNaN(Date.parse(iso));
+const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(iso)) : "");
+
+/* ---------- Tiers: what holds up work, then what has a deadline, then the rest by age ---------- */
+const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
+const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
+const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
+// A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
+const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && (it.options || []).some((o) => o.key === it.pick);
+const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by && validT(it.by) ? "due" : "calm");
+const mates = (it) => (it.group ? state.items.filter((x) => x.group === it.group) : [it]);
+// A group sits in the most urgent tier of any member, so its items never split across tiers.
+const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
+function sorted() {
+  const by = { holds: [], due: [], calm: [], stands: [] };
+  state.items.forEach((it) => by[tierOf(it)].push(it));
+  const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
+  const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
+  const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
+  by.holds.sort(byAge);
+  by.due.sort((a, b) => dl(a) - dl(b) || byAge(a, b));
+  by.calm.sort((a, b) => (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1));
+  by.stands.sort(byAge);
+  return by;
+}
+
+/* ---------- Answers ---------- */
+const byId = (id) => state.items.find((i) => i.id === id);
+const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
+// The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
+const eff = (it) => state.draft[it.id] || (standsOk(it) && !state.answers[it.id] ? { choice: it.pick, auto: true, stood: true } : undefined);
+function draftReady(it) {
+  const d = eff(it); if (!d) return false;
+  if (it.kind === "task") return !!d.done;
+  if (d.choice === NONE) return !!(d.note || "").trim();
+  return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
+}
+const staged = () => state.items.filter((it) => !isSaved(it) && draftReady(it));
+function setDraft(it, patch) {
+  const next = Object.assign({}, state.draft[it.id], patch);
+  if (!next.choice && !next.done && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
+  saveDraft();
+}
+function choose(it, key) {
+  const cur = state.draft[it.id] || {};
+  // A "none" note says what the owner wants instead. It does not carry over to an option.
+  const patch = { choice: key, auto: false };
+  if (cur.choice === NONE && key !== NONE) patch.note = "";
+  edited(); setDraft(it, patch); repaint(it);
+  if (key === NONE) { const t = $("n-" + it.id); if (t) t.focus(); }
+}
+function answerBody(it, d, at) {
+  const typed = d.note != null ? d.note : "";
+  const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
+  if (it.kind === "decision") body.choice = d.choice; else body.done = true;
+  return body;
+}
+const edited = () => { state.barNote = ""; state.copyOffer = false; };
+
+/* ---------- Cards ---------- */
+const glyph = (k) => h("span", { class: "g " + k, "aria-hidden": "true" });
+function linkIcon() { const d = document.createElement("span"); d.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>'; return d.firstChild; }
+function readyText(it) {
+  const d = eff(it) || {};
+  if (it.kind === "task") return d.done ? "Ready to send: done." : "";
+  if (d.stood) return "My pick goes with your next Send.";
+  if (!d.choice) return "";
+  if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
+  return "Ready to send: " + d.choice.toUpperCase() + (d.auto ? ", my pick." : ", your choice.");
+}
+function optCard(it, o, chosen) {
+  const id = "o-" + it.id + "-" + o.key;
+  return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
+    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, checked: chosen === o.key, onchange: () => choose(it, o.key) }),
+    h("span", { class: "head" }, h("span", { class: "key" }, o.key.toUpperCase()), h("span", { class: "lab" }, o.label)),
+    h("p", { class: "how" }, o.how),
+    h("div", { class: "tr" }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
+    o.key === it.pick ? h("div", { class: "pick" }, h("b", { "aria-label": "My pick", title: "My pick" }, "★"), it.why) : h("span", { class: "nopick" }));
+}
+const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
+function receipt(it) {
+  const sv = state.answers[it.id], rc = state.receipts[it.id] || {};
+  let what;
+  if (it.kind === "task") what = "Marked done";
+  else if (sv.choice === NONE) what = "None of these";
+  else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + String(sv.choice || "").toUpperCase() + (o ? ": " + o.label : ""); }
+  const steps = [["Saved " + fmt(sv.at, false), true], ["Read by " + it.owner + (rc.read ? " " + fmt(rc.read, false) : ""), !!rc.read], ["Filed in " + it.home + (rc.filed ? " " + fmt(rc.filed, false) : ""), !!rc.filed]];
+  return h("div", { class: "receipt" },
+    h("div", { class: "line" }, glyph("done"), h("b", {}, what + "."), h("span", {}, fmt(sv.at)),
+      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+    sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null,
+    h("ol", { class: "trail", "aria-label": "Where the answer is" }, steps.map(([s, on]) => h("li", { class: on ? "on" : "" }, h("span", { class: "dot" }), s))));
+}
+function designPreview(it) {
+  const box = h("div", { class: "dprev" }); let i = 0;
+  const draw = () => {
+    const d = it.designs[i];
+    const bar = h("div", { class: "dbar" }, h("span", {}, d.label));
+    if (it.designs.length > 1) {
+      bar.append(h("span", {}, (i + 1) + " of " + it.designs.length),
+        h("button", { class: "btn quiet", type: "button", "aria-label": "Previous design", onclick: () => { i = (i + it.designs.length - 1) % it.designs.length; draw(); } }, "Prev"),
+        h("button", { class: "btn quiet", type: "button", "aria-label": "Next design", onclick: () => { i = (i + 1) % it.designs.length; draw(); } }, "Next"));
+    }
+    bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", onclick: () => openDesign(d.slug) }, "Open full size"));
+    box.replaceChildren(bar, frame(d.slug, d.label));
+  };
+  draw(); return box;
+}
+function buildCard(it) {
+  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {};
+  const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
+  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n), h("span", {}, waited(it.added)));
+  if (it.minutes) top.append(h("span", {}, minutesText(it.minutes)));
+  if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
+  card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
+  if (saved) { card.append(receipt(it)); return card; }
+  if (it.designs && it.designs.length) card.append(designPreview(it));
+  if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));
+  if (it.by && validT(it.by)) {
+    const left = Date.parse(it.by) - Date.now();
+    card.append(h("p", { class: "stake due" }, glyph("due"), h("span", {}, left >= 0 ? "Answer by " + fmt(it.by) + ", " + span(left) + " from now." : "Answer was due " + fmt(it.by) + ", " + span(left) + " ago.")));
+  }
+  const more = !!state.more[it.id], ctxText = it.context || "";
+  card.append(h("p", { class: "ctx" + (more || ctxText.length <= 220 ? "" : " clamp"), id: "ctx-" + it.id }, ctxText));
+  if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
+  if (it.ref) card.append(h("p", { class: "about" }, it.ref));
+  if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
+  const noteShown = !!(state.noteOpen[it.id] || d.choice === NONE || d.note);
+  const clearable = !!(d.choice || d.done || d.note || state.changing[it.id]) && !d.stood;
+  const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
+  const clear = h("button", { class: "btn quiet clearbtn" + (clearable ? "" : " gone"), type: "button", id: "b-clear-" + it.id, onclick: () => clearItem(it) }, "Clear");
+  const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
+  if (it.kind === "decision") {
+    const opts = h("div", { class: "opts", role: "radiogroup", "aria-label": "Options for No. " + it.n });
+    (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
+    card.append(opts, ready,
+      h("div", { class: "alts" },
+        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
+        addNote, h("span", { class: "sp" }), clear,
+        h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + String(it.pick).toUpperCase() + ")")));
+  } else {
+    card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
+    if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
+    card.append(ready, h("div", { class: "alts" },
+      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),
+      addNote, h("span", { class: "sp" }), clear));
+  }
+  if (noteShown) {
+    const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
+    const ta = h("textarea", { id: "n-" + it.id, placeholder: need ? "Say what you want instead." : "Anything the session should know" });
+    ta.value = d.note || "";
+    ta.addEventListener("input", () => {
+      edited(); setDraft(it, { note: ta.value });
+      nb.classList.toggle("need", need && !ta.value.trim());
+      const dd = eff(it) || {}, rd = ta.closest(".card").querySelector(".ready");
+      rd.textContent = readyText(it); rd.classList.toggle("on", draftReady(it));
+      clear.classList.toggle("gone", !((dd.choice || dd.done || dd.note || state.changing[it.id]) && !dd.stood));
+      renderRail(); renderBar();
+    });
+    nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
+    card.append(nb);
+  }
+  card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
+  return card;
+}
+// Clear drops the draft. On a changed answer it also withdraws the saved record, and the draft stays if the store refuses.
+async function clearItem(it) {
+  delete state.notice[it.id]; edited();
+  if (state.answers[it.id]) {
+    try {
+      if (!state.db) throw { code: "no store" };
+      await state.db.collection("answers").doc(it.id).delete();
+      delete state.answers[it.id];
+    } catch (e) { state.notice[it.id] = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; repaint(it); return; }
+  }
+  delete state.changing[it.id]; delete state.draft[it.id]; delete state.noteOpen[it.id]; saveDraft();
+  repaint(it);
+}
+
+/* ---------- Painting: a card is rebuilt only when what it shows changed, and a live design preview is never detached ---------- */
+const cards = {}, heights = {};
+const hourBucket = () => Math.floor(Date.now() / 36e5);
+function signature(it) {
+  const d = eff(it) || {};
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.noteOpen[it.id], state.more[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+}
+function patch(old, nu) {
+  const active = document.activeElement, focusId = active && old.contains(active) ? active.id : "";
+  const keep = old.querySelector(":scope > .dprev"), slot = nu.querySelector(":scope > .dprev");
+  const wasReceipt = !!old.querySelector(":scope > .receipt"), isReceipt = !!nu.querySelector(":scope > .receipt");
+  // A card that turns into a receipt keeps its height, so nothing below it moves.
+  if (!wasReceipt) heights[old.id] = old.getBoundingClientRect().height;
+  const minH = !isReceipt ? "" : wasReceipt ? old.style.minHeight : heights[old.id] ? heights[old.id] + "px" : "";
+  [...old.attributes].forEach((a) => old.removeAttribute(a.name)); [...nu.attributes].forEach((a) => old.setAttribute(a.name, a.value));
+  if (keep && slot) {
+    [...old.childNodes].forEach((c) => { if (c !== keep) c.remove(); });
+    let before = true; [...nu.childNodes].forEach((c) => { if (c === slot) { before = false; return; } before ? old.insertBefore(c, keep) : old.append(c); });
+  } else old.replaceChildren(...nu.childNodes);
+  old.style.minHeight = minH;
+  if (focusId) { const f = $(focusId); if (f && !f.disabled) f.focus({ preventScroll: true }); }
+}
+function cardFor(it) {
+  const sig = signature(it), rec = cards[it.id];
+  if (rec && rec.sig === sig) return rec.el;
+  const nu = buildCard(it);
+  if (!rec) { cards[it.id] = { el: nu, sig }; return nu; }
+  patch(rec.el, nu); rec.sig = sig; return rec.el;
+}
+function repaint() { render(); }
+function reconcile(parent, want) {
+  want.forEach((n, i) => { if (parent.children[i] !== n) parent.insertBefore(n, parent.children[i] || null); });
+  while (parent.children.length > want.length) parent.lastElementChild.remove();
+}
+const tierEls = {}, bundleEls = {};
+function tierEl(T) {
+  if (!tierEls[T.k]) {
+    const count = h("span", { class: "ct" });
+    tierEls[T.k] = { el: h("section", { class: "tier", id: "tier-" + T.k, "aria-labelledby": "th-" + T.k }), count, head: h("header", {}, h("h2", { id: "th-" + T.k }, glyph(T.k), T.name, count)) };
+  }
+  return tierEls[T.k];
+}
+function bundleEl(slug) {
+  if (!bundleEls[slug]) bundleEls[slug] = { el: h("section", { class: "bundle", id: "group-" + slug }), head: h("header", {}) };
+  const g = state.groups[slug] || {}, b = bundleEls[slug];
+  const title = g.title || "Answer these together";
+  b.el.setAttribute("aria-label", title);
+  b.head.replaceChildren(linkIcon(), h("b", {}, title), h("p", {}, g.why || ""));
+  return b;
+}
+function renderList() {
+  const list = $("list"), by = sorted(), want = [];
+  if (!state.items.length) {
+    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing is waiting on you right now. Sessions add items here when they park something for your word."));
+  }
+  const live = new Set();
+  TIERS.forEach((T) => {
+    const items = by[T.k]; if (!items.length) return;
+    const te = tierEl(T), body = [], done = new Set();
+    te.count.textContent = String(items.filter((i) => !isSaved(i)).length);
+    items.forEach((it) => {
+      if (done.has(it.id)) return;
+      const m = it.group ? items.filter((x) => x.group === it.group) : [it];
+      if (m.length < 2) { done.add(it.id); body.push(cardFor(it)); return; }
+      m.forEach((x) => done.add(x.id));
+      const b = bundleEl(it.group); live.add(it.group);
+      reconcile(b.el, [b.head, ...m.map(cardFor)]);
+      body.push(b.el);
+    });
+    reconcile(te.el, [te.head, ...body]);
+    want.push(te.el);
+  });
+  const open = new Set(state.items.map((i) => i.id));
+  Object.keys(cards).forEach((id) => { if (!open.has(id)) delete cards[id]; });
+  if (state.meta) {
+    want.push(h("p", { class: "checked" }, "Checked against " + (state.meta.checked || "")));
+    const pk = state.meta.parked || [];
+    if (pk.length) want.push(h("div", { class: "parked" }, h("b", {}, "Parked by you"), h("ul", {}, pk.map((p) => h("li", {}, p.ref + ": " + p.note)))));
+  }
+  reconcile(list, want);
+}
+
+/* ---------- Overview ---------- */
+function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+function renderRail() {
+  const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
+  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().length;
+  rail.hidden = !total;
+  const kids = [h("div", { class: "ov-prog" },
+    h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
+    h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
+    h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ", sent" : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, String(it.n));
+  TIERS.forEach((T) => {
+    const list = by[T.k]; if (!list.length) return;
+    const open = list.filter((i) => !isSaved(i)).length, row = h("div", { class: "chips-n" }), seen = new Set();
+    list.forEach((it) => {
+      if (seen.has(it.id)) return;
+      const m = it.group ? list.filter((x) => x.group === it.group) : [it];
+      m.forEach((x) => seen.add(x.id));
+      row.append(m.length > 1 ? h("span", { class: "pairchips", title: (state.groups[it.group] || {}).title || "Answer these together" }, m.map(chip)) : chip(it));
+    });
+    kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
+  });
+  rail.replaceChildren(...kids);
+  if (focusId && $(focusId)) $(focusId).focus({ preventScroll: true });
+}
+
+/* ---------- Bar and Send ---------- */
+function renderBar() {
+  const st = staged(), open = state.items.filter((i) => !isSaved(i)), sa = $("send");
+  const mine = st.filter((i) => (eff(i) || {}).auto && !(eff(i) || {}).stood).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - st.length;
+  const parts = [];
+  if (state.barNote) parts.push(state.barNote);
+  else {
+    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [mine && mine + " by Take my pick", stood && stood + " where my pick stands"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
+    if (left) parts.push(h("b", {}, String(left)), " stay open.");
+    if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
+  }
+  $("barStatus").replaceChildren(...parts);
+  sa.disabled = !state.db || state.sending || !st.length;
+  sa.textContent = st.length ? "Send " + st.length + (st.length === 1 ? " answer" : " answers") : "Send answers";
+  $("copy").hidden = !(state.db === false || state.copyOffer);
+}
+
+const TOLD = "Claude was told.";
+const NOT_TOLD = "No session was told; reply in the thread to wake one.";
+const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
-function noticeText(entries) {
+function noticeText(entries, head, tail) {
   const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
-  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : ""); }).join(", ");
-  let text = "Saved on the waiting page. Owners: " + owners + ". Items: " + line + ".";
+  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : "")); }).join(", ");
+  let text = head + " Owners: " + owners + ". Items: " + line + (tail || ".");
   const enc = new TextEncoder();
   while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
   return text;
 }
 // Asked before the answer write, so only the write and the send sit between the click and the send.
-// The platform wants the send to follow the viewer's own gesture. How long that holds on a slow
-// store is unmeasured.
-// A call that never answers must not hold the save, so it gives up after CAN_WAIT_MS.
+// The platform wants the send to follow the viewer's own gesture. How long that holds on a slow store is unmeasured.
+// A call that never answers must not hold the send, so it gives up after CAN_WAIT_MS.
 async function canTell() {
   if (!state.comments) return false;
   try {
@@ -207,13 +674,12 @@ async function canTell() {
     return await Promise.race([state.comments.canSendToClaude().then((v) => v === "available"), give]);
   } catch (e) { return false; }
 }
-// One comment per save or batch, into the viewer's stored thread.
-// Any failure only means "no session was told"; the save stands and nothing retries.
-async function notifyClaude(entries, can) {
+// One comment per Send or Undo, into the viewer's stored thread.
+// Any failure only means "no session was told"; the answers stand and nothing retries.
+async function notifyClaude(text, can) {
   try {
     const cm = state.comments;
     if (!cm || !can) return false;
-    const text = noticeText(entries);
     let id = null;
     try { id = localStorage.getItem("waiting.thread"); } catch (e) {}
     let res = null;
@@ -227,103 +693,172 @@ async function notifyClaude(entries, can) {
   } catch (e) { return false; }
 }
 
-async function save(it, btn, st) {
-  if (!state.db) return;
-  const d = state.draft[it.id] || {};
-  const prev = state.answers[it.id] || {};
-  const body = { item: it.id, n: it.n, at: new Date().toISOString(), note: (d.note != null ? d.note : prev.note || "") };
-  if (it.kind === "decision") body.choice = d.choice || prev.choice || ""; else body.done = true;
-  if (body.choice === NONE && !body.note.trim()) { st.className = "status"; st.textContent = "Add a note saying what you want instead, then save."; const n = $("n-" + it.id); if (n) n.focus(); return; }
-  btn.disabled = true; st.className = "status"; st.textContent = "Saving…";
-  const can = await canTell();
+async function sendAll() {
+  if (!state.db || state.sending) return;
+  const st = staged(); if (!st.length) return;
+  state.sending = true; edited(); renderBar();
+  const wrote = [], entries = [];
   try {
-    await state.db.collection("answers").doc(it.id).set(body);
-    delete state.draft[it.id]; delete state.notice[it.id]; saveDraft();
-  } catch (e) {
-    btn.disabled = false; st.textContent = "Not saved (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " " + (body.choice || "done");
-    return;
-  }
-  st.textContent = "Saved. Telling Claude…"; $("barStatus").textContent = "Item " + it.n + ": Saved. Telling Claude…";
-  const told = await notifyClaude([{ n: it.n, choice: body.choice, note: body.note, owner: it.owner }], can);
-  state.notice[it.id] = told ? TOLD : NOT_TOLD;
-  // An answered card leaves the list, so the bar carries the outcome too.
-  $("barStatus").textContent = "Item " + it.n + ": " + state.notice[it.id];
-  render();
+    const can = await canTell();
+    const at = new Date().toISOString();
+    for (const it of st) {
+      const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
+      try { await state.db.collection("answers").doc(it.id).set(body); }
+      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from No. " + it.n : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
+      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id] });
+      state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id]; delete state.noteOpen[it.id];
+      entries.push({ n: it.n, choice: body.choice, note: body.note, owner: it.owner });
+    }
+    saveDraft();
+    if (wrote.length) openSent(wrote, at);
+    render();
+    if (wrote.length) {
+      const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
+      setSentStatus(told ? TOLD : NOT_TOLD);
+    }
+  } finally { state.sending = false; renderBar(); }
 }
 
-function render() {
-  const open = state.items.filter((it) => state.showDone || !isAnswered(it)).sort((a, b) => a.n - b.n);
-  const dec = $("decisions"), tasks = $("tasks");
-  dec.replaceChildren(); tasks.replaceChildren();
-  const ds = open.filter((i) => i.kind === "decision"), ts = open.filter((i) => i.kind === "task");
-  if (!state.items.length) dec.append(el("div", "empty", state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing is waiting on you right now. Sessions add items here when they park something for your word."));
-  else if (!ds.length) dec.append(el("div", "empty", "No decisions waiting."));
-  ds.forEach((i) => dec.append(card(i)));
-  if (state.items.length && !ts.length) tasks.append(el("div", "empty", "No hands-on tasks waiting."));
-  ts.forEach((i) => tasks.append(card(i)));
-  const all = state.items, ans = all.filter(isAnswered).length;
-  const t = $("tally"); t.replaceChildren();
-  [["Decisions open", all.filter((i) => i.kind === "decision" && !isAnswered(i)).length], ["Tasks open", all.filter((i) => i.kind === "task" && !isAnswered(i)).length], ["Answered", ans]].forEach(([k, v]) => { const p = el("span", "pill", k + " "); p.append(el("b", null, String(v))); t.append(p); });
-  if (state.meta) {
-    $("checked").textContent = "Checked against " + (state.meta.checked || "");
-    const pk = state.meta.parked || []; $("parkedSec").hidden = !pk.length;
-    const ul = $("parked"); ul.replaceChildren(); pk.forEach((p) => { const li = el("li"); li.append(el("b", null, p.ref + ": "), document.createTextNode(p.note)); ul.append(li); });
+/* The panel above the bar: stamp, who was told, and 8 seconds to take it back. */
+let undoTimer, closeTimer;
+// The window is read from the clock, so a throttled tab cannot stretch it past what a session waits.
+const undoLeft = (p) => Math.max(0, Math.ceil((Date.parse(p.at) + UNDO_S * 1000 - Date.now()) / 1000));
+function openSent(wrote, at) {
+  clearInterval(undoTimer); clearTimeout(closeTimer);
+  state.sentPanel = { wrote, at, status: "Telling Claude…" };
+  renderSent();
+  undoTimer = setInterval(() => { const p = state.sentPanel; if (!p) return clearInterval(undoTimer); if (undoLeft(p) <= 0) clearInterval(undoTimer); renderSent(); }, 1000);
+  closeTimer = setTimeout(closeSent, 20000);
+}
+function setSentStatus(s) { if (state.sentPanel) { state.sentPanel.status = s; renderSent(); } }
+function closeSent() { clearInterval(undoTimer); clearTimeout(closeTimer); state.sentPanel = null; renderSent(); }
+function renderSent() {
+  const p = state.sentPanel, box = $("sent");
+  box.hidden = !p;
+  if (!p) { $("sentIn").replaceChildren(); return; }
+  const n = p.wrote.length, blk = p.wrote.filter((w) => w.it.holds).length;
+  $("sentIn").replaceChildren(
+    h("div", { class: "sent-head" }, h("span", { class: "stamp" }, "Sent", h("small", {}, fmt(p.at, false))),
+      h("div", {}, h("b", {}, n + (n === 1 ? " answer" : " answers") + " sent. "), h("span", { id: "sentStatus" }, p.status),
+        blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null)),
+    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = state.receipts[w.it.id] || {}; return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
+    h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, "Undo send (" + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
+}
+// Undo puts back what each write replaced: the earlier answer, or nothing. The owner's picks come back as drafts.
+async function undoSend() {
+  const p = state.sentPanel; if (!p || p.busy || undoLeft(p) <= 0) return;
+  p.busy = true;
+  const undone = [], late = [];
+  // Deletes come first and each one checks the clock, so none runs after the window a session waits out.
+  const todo = p.wrote.slice().reverse();
+  for (let i = 0; i < todo.length; i++) {
+    const w = todo[i];
+    if (undoLeft(p) <= 0) { todo.slice(i).forEach((x) => late.push(x.it.n)); break; }
+    try {
+      const ref = state.db.collection("answers").doc(w.it.id);
+      if (w.prior) await ref.set(w.prior); else await ref.delete();
+    } catch (e) { state.barNote = "Undo failed (" + (e && e.code || "error") + ") at No. " + w.it.n + "."; break; }
+    if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
+    if (w.draft) state.draft[w.it.id] = w.draft; if (w.changing) state.changing[w.it.id] = true;
+    undone.push(w);
+    // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else.
+    if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); delete state.receipts[w.it.id]; } catch (e) {} }
   }
-  $("useAll").disabled = !state.db;
+  if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + late.map((n) => "No. " + n).join(" and ") + "."; }
+  saveDraft(); closeSent(); render();
+  if (undone.length) {
+    const can = await canTell();
+    await notifyClaude(noticeText(undone.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
+  }
 }
 
 function answerLine() {
   const parts = [];
   state.items.slice().sort((a, b) => a.n - b.n).forEach((it) => {
-    if (it.status === "closed") return;
-    const a = state.answers[it.id], d = state.draft[it.id] || {};
-    const choice = d.choice || (a && a.choice); const note = d.note != null ? d.note : (a && a.note);
+    const a = state.answers[it.id], d = eff(it) || {};
+    const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
-    else if (it.kind === "decision" && note) parts.push(it.n + ": " + note);
-    else if (it.kind === "task" && a && a.done) parts.push(it.n + " done" + (note ? " (" + note + ")" : ""));
+    else if (it.kind === "task" && (d.done || (a && a.done))) parts.push(it.n + " done" + (note ? " (" + note + ")" : ""));
   });
   return parts.join(", ");
 }
-
 $("copy").addEventListener("click", async () => {
-  const text = answerLine() || "No answers yet.";
-  const box = $("copyBox");
-  try { await navigator.clipboard.writeText(text); $("barStatus").textContent = "Copied. Paste it in the thread."; box.hidden = true; }
-  catch (e) { box.hidden = false; box.value = text; box.select(); $("barStatus").textContent = "Select and copy the text below."; }
+  const text = answerLine() || "No answers yet.", box = $("copyBox");
+  try { await navigator.clipboard.writeText(text); state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
+  catch (e) { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
+  renderBar();
+});
+$("send").addEventListener("click", sendAll);
+
+/* ---------- Designs: each mockup is stored whole in this page and shown in a sandboxed frame ---------- */
+let DESIGN_HTML = {};
+try { DESIGN_HTML = JSON.parse($("designData").textContent) || {}; } catch (e) {}
+const allDesigns = () => state.items.filter((it) => it.designs && !isSaved(it)).flatMap((it) => it.designs.map((d) => ({ ...d, it })));
+function frame(slug, title) {
+  const f = h("iframe", { class: "dframe", title, sandbox: "allow-scripts", loading: "lazy" });
+  f.srcdoc = DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>";
+  return f;
+}
+// The sheet's frames are built once and only shown or hidden, so paging never reloads a mockup and closing leaves the list where it was.
+let dList = [], dAt = 0, dFrom = null, dY = 0;
+const STAGE = {};
+function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = frame(d.slug, d.label); STAGE[d.slug].removeAttribute("loading"); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
+function showDesign(i) {
+  dAt = (i + dList.length) % dList.length; const d = dList[dAt];
+  Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off");
+  $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + " of " + dList.length;
+  $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
+  $("dBack").textContent = "Answer No. " + d.it.n;
+}
+function openDesign(slug) {
+  dList = allDesigns(); if (!dList.length) return;
+  dFrom = document.activeElement; dY = scrollY; document.body.classList.add("sheet-open"); $("dsheet").hidden = false;
+  showDesign(Math.max(0, dList.findIndex((d) => d.slug === slug))); $("dClose").focus();
+}
+function closeDesign(toItem) {
+  $("dsheet").hidden = true; document.body.classList.remove("sheet-open");
+  if (toItem) { const c = $("item-" + toItem.id); if (c) { c.scrollIntoView({ block: "start" }); const f = c.querySelector(".opt input, button"); if (f) f.focus({ preventScroll: true }); return; } }
+  window.scrollTo(0, dY);
+  if (dFrom && dFrom.focus) dFrom.focus({ preventScroll: true });
+}
+$("dPrev").onclick = () => showDesign(dAt - 1); $("dNext").onclick = () => showDesign(dAt + 1);
+$("dClose").onclick = () => closeDesign(); $("dBack").onclick = () => closeDesign(dList[dAt].it);
+$("tabD").onclick = (e) => { e.preventDefault(); openDesign(""); };
+$("tabQ").onclick = (e) => e.preventDefault();
+
+/* ---------- Keys: A to C pick on the focused card, Ctrl or Cmd+Enter sends. Nothing on screen teaches them. ---------- */
+let hoverItem = null;
+document.addEventListener("mouseover", (e) => { const c = e.target.closest && e.target.closest(".card"); if (c) hoverItem = c.id.replace("item-", ""); });
+document.addEventListener("keydown", (e) => {
+  if (!$("dsheet").hidden) { if (e.key === "Escape") closeDesign(); else if (e.key === "ArrowLeft") showDesign(dAt - 1); else if (e.key === "ArrowRight") showDesign(dAt + 1); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); sendAll(); return; }
+  if (e.target.closest && e.target.closest("textarea,input[type=text]")) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const fc = document.activeElement && document.activeElement.closest && document.activeElement.closest(".card");
+  const it = byId(fc ? fc.id.replace("item-", "") : hoverItem);
+  if (!it || isSaved(it) || it.kind !== "decision") return;
+  const k = e.key.toLowerCase();
+  if ((it.options || []).some((o) => o.key === k)) { e.preventDefault(); choose(it, k); const r = $("o-" + it.id + "-" + k); if (r) r.focus({ preventScroll: true }); }
 });
 
-$("useAll").addEventListener("click", async () => {
-  if (!state.db || state.batching) return;
-  const todo = state.items.filter((it) => it.kind === "decision" && !isAnswered(it) && !(state.draft[it.id] || {}).choice);
-  if (!todo.length) { $("barStatus").textContent = "Every open decision already has an answer."; return; }
-  if ($("useAll").dataset.armed !== "1") { $("useAll").dataset.armed = "1"; $("useAll").textContent = "Press again to save " + todo.length + " picks"; return; }
-  $("useAll").dataset.armed = ""; $("useAll").textContent = "Accept every pick I haven't answered";
-  state.batching = true;
-  try { await saveBatch(todo); } finally { state.batching = false; }
-});
-
-async function saveBatch(todo) {
-  $("barStatus").textContent = "Saving…";
-  const can = await canTell();
-  const saved = [];
-  for (const it of todo) {
-    try { await state.db.collection("answers").doc(it.id).set({ item: it.id, n: it.n, at: new Date().toISOString(), choice: it.pick, note: "accepted pick" }); saved.push({ n: it.n, choice: it.pick, note: "accepted pick", owner: it.owner }); }
-    catch (e) { $("barStatus").textContent = "Stopped at item " + it.n + " (" + (e && e.code || "error") + ")."; if (saved.length) await notifyClaude(saved, can); return; }
-  }
-  $("barStatus").textContent = "Saved. Telling Claude…";
-  const told = await notifyClaude(saved, can);
-  $("barStatus").textContent = "Saved " + todo.length + " picks. " + (told ? "Claude was told." : "No session was told; reply in the thread to wake one.");
+function render() {
+  renderList(); renderRail(); renderBar(); renderSent();
+  const nd = allDesigns().length;
+  $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => i.designs && i.designs.length);
 }
 
 render();
 (async () => {
   let db = null;
   try { db = await window.claude?.use?.("db"); } catch (e) { db = null; }
-  if (!db) { state.db = false; render(); return; }
+  if (!db) { state.db = false; state.loaded = true; render(); return; }
   state.db = db;
   try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
-  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => d.data()).filter((i) => i && i.status !== "closed"); render(); }, () => {});
-  db.collection("answers").onSnapshot((s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); state.answers = m; render(); }, () => {});
-  db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; render(); }, () => {});
+  const map = (s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); return m; };
+  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => d.data()).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
+  db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
+  db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
+  db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});
+  db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; applyIdentity(); render(); }, () => {});
 })();
 </script>
