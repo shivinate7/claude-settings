@@ -8,7 +8,8 @@
     "Across repos: a shared skill, script or test is pinned to claude-settings, never vendored. The q_max map-skill copy drifted and failed PR 969 (Oct 20). That is the failure this rule prevents.",
     "Where each layer lives (your ruling, Oct 20): claude-settings holds the ideas and shared tools, since it governs every repo. Each repo holds its concrete design in its own files, because the repos differ: home-app is Swift plus web, q_max is separate, banchi has its own look. The rule applies inside each repo too: one home per value, component or test step.",
     "When a copy is right: the two things only look alike and will change for different reasons. Then the copy states that reason in one line.",
-    "Enforcement: the builder looks for the shared piece first; compliance-check reports copied code and vendored files (o4, o11)."
+    "Enforcement: the builder looks for the shared piece first; compliance-check reports copied code and vendored files (o4, o11).",
+    "Your ruling, Oct 27 12:51 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh225EHTbUr63KanrkWb8D3Gn, \"I prefer uniform over everything\"): when a repo differs from a shared format, the repo changes to match it; the shared tool never grows a second accepted form to fit one repo. The case: a recommendation to let a shared tool accept banchi's odd record titles."
   ],
   "summary": "Your rule against copies, and how it maps onto code, design and tests.",
   "title": "One home, then variants"
