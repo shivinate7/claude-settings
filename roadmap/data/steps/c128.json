@@ -1,9 +1,9 @@
 {
   "title": "The waiting-page time test cannot expire",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.25,
   "why": "Found by the c120 lane, Oct 27 10:56 CDT: since 09:45 CDT every CI run is red (gates-shoot on main and every branch; run 40530284999, claude-settings a97af49).",
-  "note": "Cause: the test \"times are 24-hour Chicago time with the zone named\" in skills/waiting-page/tests/page.test.mjs sets a due date of 2026-10-27T14:45:00Z and asserts \"Answer by Oct 27, 09:45 CDT\"; past that time the page shows \"Answer was due ... 1 hour ago\". Fix: a fixed fake clock in the test (or a due date relative to now), so the assertion keeps its meaning and cannot expire; never skip or weaken it. Red first: the test fails today on main. Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of c95 (triage, Oct 27): every batch is blocked until it lands.",
-  "updatedAt": "2026-10-27T16:00:00Z"
+  "note": "Cause: the test \"times are 24-hour Chicago time with the zone named\" in skills/waiting-page/tests/page.test.mjs sets a due date of 2026-10-27T14:45:00Z and asserts \"Answer by Oct 27, 09:45 CDT\"; past that time the page shows \"Answer was due ... 1 hour ago\". Fix: a fixed fake clock in the test (or a due date relative to now), so the assertion keeps its meaning and cannot expire; never skip or weaken it. Built by the build advisor as lane ci-waiting-page-date (due date moved to 2099), riding in batch #697; closes when #697 merges. A fake clock would be the cause fix; 2099 is enough for the life of the test. Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of c95 (triage, Oct 27): every batch is blocked until it lands.",
+  "updatedAt": "2026-10-27T16:02:00Z"
 }
