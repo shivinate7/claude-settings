@@ -4,6 +4,7 @@ import os, re, shlex, subprocess, sys, tempfile, time, unittest
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
 # The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
 CMD = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict.cmd")]
+UTF8 = {"PYTHONIOENCODING": "utf-8"}  # the child prints the real \u2714/\u2718 marks; a cp1252 stdout cannot
 HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 
 def run(code, log=None, extra=None, timeout=None, launcher=None):
@@ -234,23 +235,23 @@ class T(unittest.TestCase):
     ST_FAIL = "\u2718 Test run with 2 tests in 0 suites failed after 0.001 seconds with 1 issue."
 
     def test_swift_testing_pass_on_exit0_is_pass(self):
-        r = run(f"print({self.XCT0!r})\nprint({ascii(self.ST_PASS)})")
+        r = run(f"print({self.XCT0!r})\nprint({ascii(self.ST_PASS)})", extra=UTF8)
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
     def test_swift_testing_failure_on_exit0_is_fail_even_with_xctest_tests(self):
-        r = run(f"print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint({ascii(self.ST_FAIL)})")
+        r = run(f"print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint({ascii(self.ST_FAIL)})", extra=UTF8)
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("runner failure marker", r.stdout.splitlines()[0])
 
     def test_swift_testing_line_without_suite_count_is_still_read(self):
-        r = run(f"print({self.XCT0!r})\nprint('Test run with 1 test passed after 0.001 seconds.')")
+        r = run(f"print({self.XCT0!r})\nprint('Test run with 1 test passed after 0.001 seconds.')", extra=UTF8)
         self.assertEqual(r.returncode, 0, r.stdout)
-        r = run("print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint('Test run with 2 tests failed after 0.001 seconds with 1 issue.')")
+        r = run("print('Executed 3 tests, with 0 failures (0 unexpected) in 0.1 (0.2) seconds')\nprint('Test run with 2 tests failed after 0.001 seconds with 1 issue.')", extra=UTF8)
         self.assertEqual(r.returncode, 1, r.stdout)
 
     def test_swift_testing_zero_tests_on_exit0_is_fail_no_tests_ran(self):
-        r = run(f"print({self.XCT0!r})\nprint('\\u2714 Test run with 0 tests in 0 suites passed after 0.001 seconds.')")
+        r = run(f"print({self.XCT0!r})\nprint('\\u2714 Test run with 0 tests in 0 suites passed after 0.001 seconds.')", extra=UTF8)
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("no tests ran", r.stdout.splitlines()[0])
 
