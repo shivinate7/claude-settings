@@ -698,15 +698,15 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
 # A folder an earlier install landed and the repo has since moved: ux, now docs\design (decision
 # ux-house-rules). Its links go with the prune test above, then the folder once it is empty. A
 # person's own file and a copy stay, as the loop above leaves them.
-foreach ($sub in @('ux')) {
-    $destDir = Join-Path $ClaudeDir $sub
+foreach ($gone in @('ux')) {
+    $destDir = Join-Path $ClaudeDir $gone
     $cur = Get-Item $destDir -ErrorAction SilentlyContinue
     if (-not $cur -or $cur.LinkType) { continue }
     foreach ($entry in @(Get-ChildItem -Path $destDir -File -ErrorAction SilentlyContinue)) {
         if ($entry.LinkType -ne 'SymbolicLink') { continue }
         $tgt = @($entry.Target)[0]
         if (-not $tgt) { continue }
-        if ((Split-Path $tgt -Parent) -ne (Join-Path $RepoDir $sub)) { continue }
+        if ((Split-Path $tgt -Parent) -ne (Join-Path $RepoDir $gone)) { continue }
         if (Test-Path $tgt) { continue }
         Remove-Item $entry.FullName
     }
