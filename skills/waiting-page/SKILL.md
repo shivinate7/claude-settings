@@ -20,7 +20,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 ## The database
 
-- `items/<id>`: one per waiting item. Fields: `id`, `n` (a stable number the owner answers by),
+- `items/<id>`: one per waiting item. The database key and the `id` field must be the same
+  string. The page keys on the database key, and warns on an item whose `id` field is missing or
+  different. Fields: `id`, `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `owner` (the session that reads the answer at its wake), `home` (the step, PR or
   record the answer goes to), `context` (plain text, line breaks kept).
@@ -64,7 +66,11 @@ The page hides an item with status `closed`. It shows an item as answered, in pl
 1. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
-   or fewer. Never reuse an `id`. If a slug is taken, add a suffix.
+   or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
+   and make it equal to the key. After the `set`, read the item back (`ArtifactData get
+   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
+   unique key, and no key `none`. Fix the item at once if a check fails. The page refuses to send an
+   answer to a broken item.
    - Fill `holds` whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
