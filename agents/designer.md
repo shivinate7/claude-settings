@@ -23,7 +23,7 @@ Before you draw, read these:
 - The repo's design spec, its tokens (the `tokens` kind in the layout) and its design decisions.
 - The design folder. A mockup that is there already sets the pattern: reuse its tokens, frame and
   controls by reading them. Never copy a file of another repo.
-- `~/.claude/ux/principles.md`, `~/.claude/ux/layout.md` and `~/.claude/ux/tokens.md`.
+- `~/.claude/docs/design/principles.md`, `~/.claude/docs/design/layout.md` and `~/.claude/docs/design/tokens.md`.
 - `GLOSSARY.md` beside the global `CLAUDE.md`, before you name a file or a term.
 
 For each screen the brief names, write two files in the design folder:

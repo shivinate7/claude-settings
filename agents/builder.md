@@ -14,14 +14,14 @@ One home per shared piece (`building-one-home-per-capability`). Before you build
 style, helper, test step or skill that more than one place uses, search for its home in this
 repo and in claude-settings. Extend the home with a variant: a parameter, a modifier class, a
 custom property, a style or a fixture option. A copy needs a stated reason in your commit
-message. `ux/layout.md` (ux-variant-extends-home) and `agents/test-author.md` show each form.
+message. Rule `ux-variant-extends-home` (the house layout rules) and `agents/test-author.md` show each form.
 
 Build only what the brief names. Never guess an answer the code should give you. Surface
 ambiguity instead of resolving it silently. Never drop an item without saying so. Check whether
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
 
-If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet. Read `~/.claude/ux/principles.md` before you write any UI. Read `~/.claude/ux/tokens.md` for the house design values. When the step has a mockup in the repo's design folder, build to it, and report each place you differ from it.
+If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet. Read `~/.claude/docs/design/principles.md` before you write any UI. Read `~/.claude/docs/design/tokens.md` for the house design values. When the step has a mockup in the repo's design folder, build to it, and report each place you differ from it.
 
 Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the findings from a FAIL at review round 1. Try 3 runs on Opus only after a FAIL at review round 2, by the owner's standing word of 2026-10-12. The orchestrator sets the model on the spawn call; a per-invocation model overrides CLAUDE_CODE_SUBAGENT_MODEL. Your brief names your try on a line that starts with `Try N of 3`, and the guard reads that line. A build that started on Opus by the owner's word has no step left.
 

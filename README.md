@@ -20,7 +20,7 @@ stays in the clone. The mods install from the marketplace instead (decision
 | `lint/` | The Simplified Technical English linter, and the gates and checks that CI runs. |
 | `skills/` | The shipped skills, one folder each. |
 | `output-styles/` | The `shiv-stylisms` output style. |
-| `ux/` | The house UX rules. |
+| `docs/design/` | The house UX rules. |
 | `bin/` | The command launchers: `merge`, `verdict`, `ste-changed`, `claude-janitor`, and `ci-job`, which runs every step of one workflow job here and prints one verdict per step. Also `ios-ship`, the shared tool that ships iOS apps from the Mac (see "Shipping iOS apps"), and `shoot`, which takes one screenshot per route, width and theme from a repo's `.claude/shoot.json` and prints one verdict line. |
 | `janitor/` | The machine-wide sweep for orphaned worktrees, branches, and listeners. See `janitor/GUIDE.md`. |
 | `merge/` | The code of the `merge` command. It runs from the clone, and nothing installs a copy. `bin/merge` starts it. |

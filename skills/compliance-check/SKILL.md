@@ -39,7 +39,7 @@ session practice, with no trace in the tree, is `n/a (session)`.
 Three groups read the tree, not a rule prefix. Each comes after the rule groups:
 
 - `Layout`: folder shape against `lint/layout.json` and the child's extras file.
-- `Design`: screen readiness against `ux/`.
+- `Design`: screen readiness against `docs/design/`.
 - `Copies`: copies of shared things the child holds, from the probe in `copies.md`.
 
 ## 3. Run the probes
