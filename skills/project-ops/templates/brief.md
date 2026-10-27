@@ -21,7 +21,8 @@ onto main after review. Push record-branch edits to that branch only. Only triag
 
 Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane joins a batch, run
 `bin/ci-job gates --lint --base origin/main` and report its verdict. It runs the fast lint steps of
-the gates job and no full suite.
+the gates job and no full suite. Also run `bin/ste-changed origin/main`: the mode skips a `uses:` step,
+and the STE lint is one.
 
 ## Report
 
