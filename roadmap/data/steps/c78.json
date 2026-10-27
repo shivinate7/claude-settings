@@ -1,9 +1,9 @@
 {
   "title": "A CI fix found in one repo reaches the others: one shared browser-test setup",
   "phase": "cleanup",
-  "status": "review",
+  "status": "todo",
   "order": 103.37,
   "why": "Oct 26: degen's PR 263 went red when its browser setup timed out on Ubuntu's slow package mirror, the same cause claude-settings fixed for itself the same day (c64). The fix never reached the child repos.",
-  "note": "claude-settings part built: PR 644 (one shared Playwright setup and an apt-install probe), head b9ebcff, dispatch run 40396955015 green, two Sonnet review rounds (round 2 clear). actions/playwright-setup pins Playwright from a lockfile, caches the browsers by version and runs no apt step; gates-shoot uses it (setup 9 s, cold cache). compliance_probes.py playwright flags installs that run apt; today it flags degen (2), banchi (2), q_max (1), joyous (1); mailaudit in shape. Decision one-browser-setup-no-apt. Three review notes in debts/notes.md. Fault (Oct 26): degen's own workflow; the claude-settings gap was that a CI fix could not reach other repos. Child-repo part deferred (shiv, Oct 26): each repo drops its apt step and adopts the action in its own lane, after your plan check; degen also skips web tests on native-only changes. Port: yes, banchi, q_max, degen, joyous (the four the probe flags). Linked: c76 keeps pins to this action current.",
-  "updatedAt": "2026-10-26T21:16:00Z"
+  "note": "claude-settings part merged (PR 644, one shared Playwright setup, landed on main e305bdb, Oct 27): actions/playwright-setup pins Playwright from a lockfile, caches the browsers and runs no apt step; gates-shoot uses it (setup 9 s). compliance_probes.py playwright flags installs that run apt; on Oct 26 it flagged degen (2), banchi (2), q_max (1), joyous (1). Decision one-browser-setup-no-apt; three review notes in docs/debts/notes.md. Fault (Oct 26): degen's own workflow; the claude-settings gap was that a CI fix could not reach other repos. Deferred: the child-repo part waits for your plan check (shiv, Oct 26). Each flagged repo drops its apt step and adopts the action in its own lane; degen also skips web tests on native-only changes. Port: yes, banchi, q_max, degen, joyous. Linked: c76 keeps pins to this action current.",
+  "updatedAt": "2026-10-27T01:45:00Z"
 }
