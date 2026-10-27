@@ -1446,10 +1446,11 @@ class CutLanes(Env):
         return hits[0]
 
     def proof_fails_for(self, tip):
-        """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real."""
+        """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
+        c110: read_lanes asks merge-base against origin/main before the claim, and a failure there refuses; that read stays real."""
         real = merge.sh
         def broken(args, *a, **k):
-            if "merge-base" in args and tip in args:
+            if "merge-base" in args and tip in args and "origin/main" not in args:
                 return 128, "fatal: simulated: the ancestry proof cannot run"
             return real(args, *a, **k)
         return unittest.mock.patch.object(merge, "sh", broken)
@@ -1647,6 +1648,20 @@ class CutLanes(Env):
         self.assertEqual(self.claims("feat"), 0)
         self.assertEqual(self.head("feat"), feat)
         self.assertFalse(self.lock_ref())
+
+    def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
+        # c110: a merge-base failure is a failed read, never "not an ancestor".
+        tips = lane_batch(self, "lane1", "lane2")
+        real = merge.sh
+        def broken(args, *a, **k):
+            if "merge-base" in args and tips["lane1"] in args and "origin/main" in args:
+                return 128, "fatal: simulated"
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", broken):
+            rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("git merge-base failed", out)
+        self.assertEqual(self.claims("feat"), 0)
 
     def test_an_override_past_a_failed_dropped_lane_read_still_keeps_a_reverted_lane(self):
         # c110: the cleanup's kept line is the fallback when the owner overrides a failed first read.
