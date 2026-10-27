@@ -63,7 +63,7 @@ not repeat its steps.
 One line per group, in the order of step 2, then Layout, Design, Copies, iOS and the Caution listing:
 
 ```
-<Group>: <in shape | partial | out | parent-covered | n/a | unknown> - <finding> (<file:line or command>)
+<Group>: <in shape | partial | out | parent-covered | not rolled out | n/a | unknown> - <finding> (<file:line or command>)
 ```
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
@@ -71,6 +71,17 @@ known score, and lists each unknown probe after it. Layout, Design and iOS list 
 group line, with its own grade, so one score never hides a finding. A child with no extras file
 scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
 that no probe and no mechanism covers.
+
+Write the scorecard to one file, `docs/health/compliance.md` in the checked repo. Pipe the group
+lines into `python3 lint/compliance_probes.py scorecard <child root>`. It rewrites the file in place
+on each run. Never write a dated copy beside it. The file holds one table, with the columns
+Group, Score, Gold standard, Gap, Source. Gold standard is `in shape`. The script always adds a row
+`STE lint on UI files`, scored `partial`: the lint does not read UI text, and that is a known gap.
+An indented item line, `- <item>: <grade> - <finding> (<source>)`, becomes its own row after its
+group row. Its grade is pass, gap or partial, not a group score. An indented line with no grade
+becomes a row scored `finding`. Raw probe output works too. The script keeps every other line under
+Notes and drops none. Report the UI gap as a known
+gap. Do not build a UI linter.
 
 ## 5. Plan
 

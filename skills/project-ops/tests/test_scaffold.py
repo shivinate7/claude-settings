@@ -71,6 +71,27 @@ class Scaffold(unittest.TestCase):
         for rel, text in files.items():
             self.assertNotIn("{{", text, rel)
 
+    def test_readme_points_at_the_roadmap_skill(self):
+        run("--dest", self.dest, "--repo", "acme/widgets")
+        readme = tree(self.dest)["roadmap/README.md"]
+        self.assertIn("skills/roadmap", readme)
+        self.assertIn("--live", readme)
+        self.assertNotIn("build.py` on the", readme)
+        self.assertNotIn("has no page", readme)
+
+    def test_skill_files_name_no_stale_builder(self):
+        for rel, text in tree(SKILL).items():
+            if rel.startswith("tests/"):
+                continue
+            self.assertNotRegex(text, r"(?<!skills/)roadmap/build\.py", rel)
+            self.assertNotIn("has no page", text, rel)
+
+    def test_triage_passes_live_at_each_publish(self):
+        text = tree(SKILL)["templates/operating-model.md"]
+        bullet = re.search(r"- \*\*Triage\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
+        self.assertIn("publishes the roadmap page", bullet)
+        self.assertIn("--live", bullet)
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():

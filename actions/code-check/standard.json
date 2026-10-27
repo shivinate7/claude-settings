@@ -1,0 +1,66 @@
+{
+  "tools": {"ruff": "0.17.3", "mypy": "2.4.0", "shellcheck-py": "0.11.0.1", "typescript": "5.9.3"},
+  "layers": ["typecheck", "lint", "format"],
+  "not_code": {
+    "reason": "prose, data and markup: nothing to type check or lint",
+    "extensions": [".md", ".json", ".yml", ".yaml", ".toml", ".txt", ".tmpl", ".html", ".css", ".svg", ".png", ".gitignore", ".gitattributes", ".ste-lint-exclude"]
+  },
+  "languages": {
+    "python": {
+      "extensions": [".py", ".pyi"],
+      "shebangs": ["python", "python3"],
+      "gold": {"typecheck": "mypy --strict", "lint": "ruff check, bug rules", "format": "ruff format"},
+      "typecheck": {"run": "mypy"},
+      "lint": {"run": "ruff"},
+      "format": {"skip": "after o2"}
+    },
+    "shell": {
+      "extensions": [".sh", ".bash"],
+      "shebangs": ["sh", "bash"],
+      "gold": {"typecheck": "none exists", "lint": "ShellCheck", "format": "shfmt"},
+      "typecheck": {"skip": "shell has no type system"},
+      "lint": {"run": "shellcheck"},
+      "format": {"skip": "after o2"}
+    },
+    "typescript": {
+      "extensions": [".ts", ".tsx", ".mts", ".cts"],
+      "shebangs": [],
+      "gold": {"typecheck": "tsc --noEmit, strict", "lint": "ESLint, bug rules", "format": "Prettier"},
+      "typecheck": {"run": "tsc"},
+      "lint": {"skip": "no bug-rule set chosen for ESLint yet"},
+      "format": {"skip": "after o2"}
+    },
+    "javascript": {
+      "extensions": [".js", ".mjs", ".cjs"],
+      "shebangs": ["node"],
+      "gold": {"typecheck": "tsc --noEmit with checkJs", "lint": "ESLint, bug rules", "format": "Prettier"},
+      "typecheck": {"skip": "plain scripts with no tsconfig; checkJs not adopted"},
+      "lint": {"skip": "no bug-rule set chosen for ESLint yet"},
+      "format": {"skip": "after o2"}
+    },
+    "powershell": {
+      "extensions": [".ps1", ".psm1", ".psd1"],
+      "shebangs": ["pwsh"],
+      "gold": {"typecheck": "none exists", "lint": "PSScriptAnalyzer", "format": "PSScriptAnalyzer Invoke-Formatter"},
+      "typecheck": {"skip": "PowerShell has no static types"},
+      "lint": {"skip": "PSScriptAnalyzer not adopted; the Windows test job runs these scripts"},
+      "format": {"skip": "after o2"}
+    },
+    "batch": {
+      "extensions": [".cmd", ".bat"],
+      "shebangs": [],
+      "gold": {"typecheck": "none exists", "lint": "none exists", "format": "none exists"},
+      "typecheck": {"skip": "batch has no type system"},
+      "lint": {"skip": "no maintained batch linter; each .cmd is a one-line shim"},
+      "format": {"skip": "no batch formatter exists"}
+    },
+    "sql": {
+      "extensions": [".sql"],
+      "shebangs": [],
+      "gold": {"typecheck": "none exists", "lint": "sqlfluff", "format": "sqlfluff fix"},
+      "typecheck": {"skip": "SQL has no type system outside a database"},
+      "lint": {"skip": "sqlfluff is excluded by owner ruling"},
+      "format": {"skip": "sqlfluff is excluded by owner ruling"}
+    }
+  }
+}

@@ -194,6 +194,18 @@ def waiting_page(root):
     return found
 
 
+def live_pages(roots):
+    """[(owner, url)] for every root in `roots` that has a waiting page, in order: the one list of
+    live waiting pages (skill waiting-page). The owner is the repo's folder name. A root with no
+    page is left out, because it has none; a bad link is a LayoutError."""
+    found = []
+    for root in roots:
+        url = waiting_page(os.path.abspath(root))
+        if url != "unknown":
+            found.append((os.path.basename(os.path.abspath(root)), url))
+    return found
+
+
 def _repo_keys(root):
     """The extras file of `root` as a dict, or {} when the repo has none."""
     return _read(_extras(root)) if rolled_out(root) else {}
@@ -270,6 +282,7 @@ if __name__ == "__main__":
     import sys
     # python3 lint/layout.py path <root> <kind>: one path, for a shell step.
     # python3 lint/layout.py waiting-page <root>: the page URL, or "unknown".
+    # Pages of several repos: live_pages(roots), read by skills/waiting-page/stale_pages.py.
     # python3 lint/layout.py devices <root>: the repo's devices, first drawn first, or "unknown".
     # python3 lint/layout.py caution <root>: the repo's caution level with its facts and acts.
     ROOT_VERBS = (WAITING_PAGE, "devices", "caution")
