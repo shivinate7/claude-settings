@@ -54,10 +54,11 @@ function stubDb({ items, answers, failDelete, comments }) {
   // failCodes rejects every send; goneThreads rejects a send into those thread ids with not_found.
   window.__sent = [];
   const cm = comments && {
-    canSendToClaude: async () => { if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
+    canSendToClaude: async () => { if (comments.canHangs) return new Promise(() => {}); if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
     anchorFor: async (el) => ({ path: "h1", x: 0, y: 0, tag: el.tagName }),
     sendToClaude: async (target) => {
       window.__sent.push(target);
+      if (comments.sendDelay) await new Promise((r) => setTimeout(r, comments.sendDelay));
       if (comments.failCode) throw { code: comments.failCode, message: "stub" };
       if (target.threadId && (comments.goneThreads || []).includes(target.threadId)) throw { code: "not_found", message: "stub" };
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
@@ -78,7 +79,7 @@ async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = fa
   t.after(() => page.close());
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
-  await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html", body: html }) : r.abort()));
+  await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
   await page.addInitScript(stubDb, { items, answers, failDelete, comments });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
@@ -306,4 +307,47 @@ test("canSendToClaude is asked before the answer write", async (t) => {
   await c.getByRole("button", { name: "Save answer" }).click();
   await page.waitForFunction(() => window.__sent.length === 1);
   assert.deepEqual(await page.evaluate(() => window.__order), ["can", "set"]);
+});
+
+test("a batch of many items with long owners is cut to 4 KiB and keeps Owners", async (t) => {
+  const many = Array.from({ length: 70 }, (_, i) => ({ ...DECISION, id: i ? "pick-" + i : DECISION.id, n: 100 + i, owner: ("owner" + i + " ").padEnd(120, "o") }));
+  const page = await open(t, { items: many }); if (!page) return;
+  await page.click("#useAll");
+  await page.click("#useAll");
+  await page.waitForFunction(() => window.__sent.length >= 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4096, "over 4 KiB");
+  assert.match(text, /Owners: owner0 /);
+  assert.ok(text.endsWith("…"), "the cut did not run");
+});
+
+test("an owner name is capped at 80 characters", async (t) => {
+  const long = { ...DECISION, owner: "q".repeat(300) };
+  const page = await open(t, { items: [long] }); if (!page) return;
+  const c = card(page, long);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.waitForFunction(() => window.__sent.length === 1);
+  const text = (await sent(page))[0].text;
+  assert.ok(text.includes("q".repeat(80)) && !text.includes("q".repeat(81)));
+});
+
+test("pressing Accept every pick again while a batch is in flight does nothing", async (t) => {
+  const page = await open(t, { comments: { can: "available", sendDelay: 600 } }); if (!page) return;
+  await page.click("#useAll");
+  await page.click("#useAll");
+  await page.evaluate(() => { for (let i = 0; i < 3; i++) document.getElementById("useAll").click(); });
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 1500)));
+  assert.equal((await sent(page)).length, 1, "a second notice went out");
+  assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "set").length, 1, "the batch saved twice");
+});
+
+test("a canSendToClaude that never answers does not hold the save", async (t) => {
+  const page = await open(t, { comments: { canHangs: true } }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByText("a) Red").click();
+  await c.getByRole("button", { name: "Save answer" }).click();
+  await page.locator("#barStatus", { hasText: "No session was told" }).waitFor({ timeout: 8000 });
+  assert.ok((await answers(page))[DECISION.id]);
+  assert.equal((await sent(page)).length, 0);
 });

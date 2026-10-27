@@ -185,11 +185,11 @@ function card(it) {
 const TOLD = "Saved. Claude was told.";
 const NOT_TOLD = "Saved. No session was told; reply in the thread to wake one.";
 const MAX_BYTES = 4096;
-const MAX_NOTE = 500;
+const MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
 function noticeText(entries) {
-  const owners = [...new Set(entries.map((e) => e.owner || "?"))].join(", ");
+  const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
   const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : ""); }).join(", ");
   let text = "Saved on the waiting page. Owners: " + owners + ". Items: " + line + ".";
   const enc = new TextEncoder();
@@ -199,8 +199,13 @@ function noticeText(entries) {
 // Asked before the answer write, so only the write and the send sit between the click and the send.
 // The platform wants the send to follow the viewer's own gesture. How long that holds on a slow
 // store is unmeasured.
+// A call that never answers must not hold the save, so it gives up after CAN_WAIT_MS.
 async function canTell() {
-  try { return !!state.comments && (await state.comments.canSendToClaude()) === "available"; } catch (e) { return false; }
+  if (!state.comments) return false;
+  try {
+    const give = new Promise((r) => setTimeout(() => r(false), CAN_WAIT_MS));
+    return await Promise.race([state.comments.canSendToClaude().then((v) => v === "available"), give]);
+  } catch (e) { return false; }
 }
 // One comment per save or batch, into the viewer's stored thread.
 // Any failure only means "no session was told"; the save stands and nothing retries.
@@ -288,11 +293,16 @@ $("copy").addEventListener("click", async () => {
 });
 
 $("useAll").addEventListener("click", async () => {
-  if (!state.db) return;
+  if (!state.db || state.batching) return;
   const todo = state.items.filter((it) => it.kind === "decision" && !isAnswered(it) && !(state.draft[it.id] || {}).choice);
   if (!todo.length) { $("barStatus").textContent = "Every open decision already has an answer."; return; }
   if ($("useAll").dataset.armed !== "1") { $("useAll").dataset.armed = "1"; $("useAll").textContent = "Press again to save " + todo.length + " picks"; return; }
   $("useAll").dataset.armed = ""; $("useAll").textContent = "Accept every pick I haven't answered";
+  state.batching = true;
+  try { await saveBatch(todo); } finally { state.batching = false; }
+});
+
+async function saveBatch(todo) {
   $("barStatus").textContent = "Saving…";
   const can = await canTell();
   const saved = [];
@@ -303,7 +313,7 @@ $("useAll").addEventListener("click", async () => {
   $("barStatus").textContent = "Saved. Telling Claude…";
   const told = await notifyClaude(saved, can);
   $("barStatus").textContent = "Saved " + todo.length + " picks. " + (told ? "Claude was told." : "No session was told; reply in the thread to wake one.");
-});
+}
 
 render();
 (async () => {
