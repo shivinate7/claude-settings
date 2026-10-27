@@ -681,3 +681,75 @@ test("Undo tells Claude the answers are withdrawn", async (t) => {
   await page.waitForFunction(() => window.__sent.length === 2);
   assert.match((await sent(page))[1].text, /Undone on the waiting page\. Owners: test thread\. Items: 27 are open again\./);
 });
+
+// ---------------------------------------------------------------- fix round 1
+
+const jump = (page, ms) => page.evaluate((m) => { const real = Date.now; Date.now = () => real() + m; }, ms);
+
+test("the Undo window follows the clock, not the timer ticks", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await jump(page, 9000); // a throttled tab: the clock moved, the timer did not
+  await page.locator("#undoBtn").waitFor({ state: "detached", timeout: 2500 });
+  assert.ok((await answers(page))[DECISION.id], "the answer went");
+});
+
+test("Undo deletes before the canSend wait", async (t) => {
+  const page = await open(t, { comments: { canHangs: true } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").waitFor({ timeout: 8000 });
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0, null, { timeout: 1500 }); // not held behind the 3 s wait
+});
+
+test("Undo refuses a delete once 8 seconds from the send have passed", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await page.evaluate(() => { const real = Date.now, b = document.getElementById("undoBtn"); Date.now = () => real() + 9000; b.click(); });
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
+  assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete").length, 0, "a delete ran after the window");
+  assert.ok((await answers(page))[DECISION.id]);
+});
+
+test("Undo deletes the receipt of each item it reopens", async (t) => {
+  const page = await open(t, { receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction((id) => window.__log.some((l) => l[0] === "delete" && l[1] === "receipts" && l[2] === id), DECISION.id);
+});
+
+test("the faint text reaches 4.5:1 on chips and the ground, for any brand", async (t) => {
+  const faint = [...html.matchAll(/--faint: (#[0-9a-f]{6})/gi)].map((m) => m[1]);
+  assert.equal(faint.length, 3);
+  const page = await open(t); if (!page) return;
+  const bad = await page.evaluate(`(() => {${CONTRAST}
+    const f = ${JSON.stringify(faint)}, out = [];
+    const hslHex = (h, s, l) => { s /= 100; l /= 100; const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l); const g = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return "#" + [g(0), g(8), g(4)].map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join(""); };
+    const brands = ${JSON.stringify(BRANDS)};
+    for (let h = 0; h < 360; h += 15) for (const [s, l] of [[100, 50], [100, 25], [60, 70], [100, 90], [80, 40]]) brands.push(hslHex(h, s, l));
+    const chk = (w, a, b) => { const r = R(a, b); if (r < 4.5) out.push(w + " " + r.toFixed(2)); };
+    chk("light chip", f[0], "#eef1f4"); chk("dark chip", f[1], "#222a35");
+    for (const b of brands) { const t = derive(b); chk(b + " light ground", f[0], t.groundL); chk(b + " dark ground", f[1], t.groundD); chk(b + " light card", f[0], "#ffffff"); chk(b + " dark card", f[1], "#191e26"); }
+    return out;
+  })()`);
+  assert.deepEqual(bad, []);
+});
+
+test("a sent chip in the overview carries a check mark, so it differs from ready by more than colour", async (t) => {
+  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  const content = await page.evaluate((id) => getComputedStyle(document.getElementById("c-" + id), "::before").content, DECISION.id);
+  assert.match(content, /✓/);
+});
+
+test("an invalid added or by date shows no NaN and no Invalid", async (t) => {
+  const page = await open(t, { items: [mk("badtime", 1, { added: "garbage", by: "nope" })] }); if (!page) return;
+  const text = await page.locator("body").innerText();
+  assert.doesNotMatch(text, /NaN|Invalid|undefined/);
+  assert.equal(await page.locator("#tier-calm #item-badtime").count(), 1, "an invalid deadline made it Upcoming");
+});
+
+test("the template declares utf-8", () => {
+  assert.match(html.slice(0, 200), /<meta charset="utf-8">/i);
+});
