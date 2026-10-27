@@ -28,8 +28,8 @@ The layout:
 A repo that has not rolled out is read at its legacy folders, the ones each tool read before the
 layout. So no tool changes its verdict on a repo before that repo moves its own files. A kind that one
 repo keeps in a place of its own (q_max's `specs/todo.md`) is read there through the layout's
-`legacy-repos` map, keyed by the repo's GitHub name, until that repo moves it. That repo's extras file
-may repeat that path, never name another. The last roll-out deletes both legacy maps.
+`legacy-repos` map, keyed by the repo's GitHub name, until that repo moves it. A rolled-out repo's extras
+file may repeat a path that map keeps for the kind, never name another. The last roll-out deletes both legacy maps.
 
 - Owner ruling, 2026-10-22: the same folders in every repo, not a per-repo declaration.
 - Owner ruling, 2026-10-17: claude-settings moves first. Each child repo moves in its own roll-out.
