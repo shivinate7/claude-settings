@@ -89,10 +89,12 @@ button:focus-visible, input:focus-visible, .opt:focus-within { outline: 2px soli
 </div></div>
 
 <script>
-const state = { items: [], answers: {}, meta: null, draft: {}, db: null, showDone: false };
+const state = { items: [], answers: {}, meta: null, draft: {}, notice: {}, db: null, showDone: false };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 try { state.showDone = localStorage.getItem("waiting.showDone") === "1"; } catch (e) {}
 const $ = (id) => document.getElementById(id);
+const NONE = "none";
+const choiceText = (k) => (k === NONE ? "none of these" : k);
 $("showDone").checked = state.showDone;
 $("showDone").addEventListener("change", (e) => { state.showDone = e.target.checked; try { localStorage.setItem("waiting.showDone", e.target.checked ? "1" : "0"); } catch (x) {} render(); });
 
@@ -116,13 +118,27 @@ function card(it) {
     (it.options || []).forEach((o) => {
       const lab = el("label", "opt" + (chosen === o.key ? " picked" : ""));
       const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.value = o.key; r.id = "o-" + it.id + "-" + o.key; r.checked = chosen === o.key;
-      r.addEventListener("change", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { choice: o.key }); saveDraft(); render(); });
+      r.addEventListener("change", () => {
+        const next = Object.assign({}, state.draft[it.id], { choice: o.key });
+        // A saved "none" note says what the owner wants instead. It does not carry over to an option.
+        if (ans && ans.choice === NONE && next.note == null) next.note = "";
+        state.draft[it.id] = next; saveDraft(); render();
+      });
       const head = el("span", "lab", o.key + ") " + o.label);
       if (o.key === it.pick) head.append(el("span", "tag", "my pick"));
       lab.append(r, head);
       [["How it works", o.how], ["You gain", o.gain], ["You lose", o.lose]].forEach(([k, v]) => { const p = el("div", "d"); p.append(el("b", null, k + ": "), document.createTextNode(v)); lab.append(p); });
       opts.append(lab);
     });
+    {
+      // "none" is reserved: no item may use it as an option key (skill waiting-page, "Add an item").
+      const lab = el("label", "opt" + (chosen === NONE ? " picked" : ""));
+      const r = document.createElement("input"); r.type = "radio"; r.name = "o-" + it.id; r.value = NONE; r.id = "o-" + it.id + "-" + NONE; r.checked = chosen === NONE;
+      r.addEventListener("change", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { choice: NONE }); saveDraft(); render(); setTimeout(() => { const n = $("n-" + it.id); if (n) n.focus(); }, 0); });
+      lab.append(r, el("span", "lab", "None of these"));
+      lab.append(el("div", "d", "Say in the note what you want instead, or what is missing. The owning session comes back with new options."));
+      opts.append(lab);
+    }
     c.append(opts);
     const why = el("p", "why"); why.append(el("b", null, "My pick: " + it.pick + ". "), document.createTextNode(it.why)); c.append(why);
   } else {
@@ -130,16 +146,38 @@ function card(it) {
   }
   if (it.links && it.links.length) { const l = el("div", "links"); it.links.forEach((k) => { const a = el("a", null, k.label + " ↗"); a.href = k.url; a.target = "_blank"; a.rel = "noopener"; l.append(a); }); c.append(l); }
   const foot = el("div", "foot");
-  const note = document.createElement("input"); note.type = "text"; note.id = "n-" + it.id; note.placeholder = it.kind === "task" ? "Optional note, e.g. what you saw" : "Optional note or your own answer";
+  const note = document.createElement("input"); note.type = "text"; note.id = "n-" + it.id; note.placeholder = it.kind === "task" ? "Optional note, e.g. what you saw" : (d.choice === NONE ? "Required: what you want instead" : "Optional note or your own answer");
   note.value = d.note != null ? d.note : (ans && ans.note) || "";
   note.addEventListener("input", () => { state.draft[it.id] = Object.assign({}, state.draft[it.id], { note: note.value }); saveDraft(); });
   const btn = el("button", null, it.kind === "task" ? (ans ? "Update" : "Mark done") : (ans ? "Update answer" : "Save answer"));
   btn.type = "button";
-  btn.disabled = !state.db || (it.kind === "decision" && !(d.choice || (ans && ans.choice)) && !note.value);
-  note.addEventListener("input", () => { if (it.kind === "decision") btn.disabled = !state.db || (!(state.draft[it.id] || {}).choice && !(ans && ans.choice) && !note.value); });
-  const st = el("span", "status" + (ans ? " ok" : ""), ans ? ("Saved " + fmtTime(ans.at) + (ans.choice ? ", answer " + ans.choice : "") + (ans.done ? ", done" : "") + ". Goes to: " + it.owner) : "Goes to: " + it.owner);
+  // A decision saves with a choice or a note. "None of these" also needs a note.
+  const blocked = () => {
+    if (it.kind !== "decision") return false;
+    const choice = (state.draft[it.id] || {}).choice || (ans && ans.choice) || "";
+    return choice === NONE ? !note.value.trim() : !choice && !note.value;
+  };
+  btn.disabled = !state.db || blocked();
+  note.addEventListener("input", () => { btn.disabled = !state.db || blocked(); clr.hidden = false; });
+  const notice = state.notice[it.id];
+  const st = el("span", "status" + (ans && !notice ? " ok" : ""), notice || (ans ? ("Saved " + fmtTime(ans.at) + (ans.choice ? ", answer " + choiceText(ans.choice) : "") + (ans.done ? ", done" : "") + ". Goes to: " + it.owner) : "Goes to: " + it.owner));
   btn.addEventListener("click", async () => { await save(it, btn, st); });
-  foot.append(note, btn, st);
+  // Clear removes the draft and the saved answer. A cleared item reads as unanswered.
+  const clr = el("button", "ghost", "Clear"); clr.type = "button";
+  clr.hidden = !ans && !d.choice && !d.note;
+  // The draft goes only once the saved answer is gone, so a failed Clear leaves the card as it was.
+  clr.addEventListener("click", async () => {
+    delete state.notice[it.id];
+    if (ans) {
+      try {
+        if (!state.db) throw { code: "no store" };
+        await state.db.collection("answers").doc(it.id).delete(); delete state.answers[it.id];
+      } catch (e) { state.notice[it.id] = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; render(); return; }
+    }
+    delete state.draft[it.id]; saveDraft();
+    render();
+  });
+  foot.append(note, btn, clr, st);
   c.append(foot);
   return c;
 }
@@ -150,10 +188,11 @@ async function save(it, btn, st) {
   const prev = state.answers[it.id] || {};
   const body = { item: it.id, n: it.n, at: new Date().toISOString(), note: (d.note != null ? d.note : prev.note || "") };
   if (it.kind === "decision") body.choice = d.choice || prev.choice || ""; else body.done = true;
+  if (body.choice === NONE && !body.note.trim()) { st.className = "status"; st.textContent = "Add a note saying what you want instead, then save."; const n = $("n-" + it.id); if (n) n.focus(); return; }
   btn.disabled = true; st.className = "status"; st.textContent = "Saving…";
   try {
     await state.db.collection("answers").doc(it.id).set(body);
-    delete state.draft[it.id]; saveDraft();
+    delete state.draft[it.id]; delete state.notice[it.id]; saveDraft();
   } catch (e) {
     btn.disabled = false; st.textContent = "Not saved (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " " + (body.choice || "done");
   }
@@ -186,7 +225,7 @@ function answerLine() {
     if (it.status === "closed") return;
     const a = state.answers[it.id], d = state.draft[it.id] || {};
     const choice = d.choice || (a && a.choice); const note = d.note != null ? d.note : (a && a.note);
-    if (it.kind === "decision" && choice) parts.push(it.n + " " + choice + (note ? " (" + note + ")" : ""));
+    if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "decision" && note) parts.push(it.n + ": " + note);
     else if (it.kind === "task" && a && a.done) parts.push(it.n + " done" + (note ? " (" + note + ")" : ""));
   });

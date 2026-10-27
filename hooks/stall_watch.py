@@ -43,7 +43,7 @@ Stop: stall_watch.py --stop
   A listed job shows the `until:` note from the description of the call that started it (Bash or
   PowerShell), read by guard_stream.until_note. The guard refuses a background server with no note.
 
-See decisions/stall-watch.md.
+See docs/decisions/stall-watch.md.
 """
 import json
 import os

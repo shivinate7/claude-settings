@@ -1,0 +1,43 @@
+# One layout for every repo
+
+## The ruling
+
+Every repo keeps each kind of file in the same place. One file in claude-settings, `lint/layout.json`,
+names each place. Every shared tool reads its paths from that file through `lint/layout.py`. No tool
+holds a record path of its own.
+
+Three questions place a file:
+
+1. Is it current truth or history? Git keeps history. A repo has no history folder (`FORMER/`,
+   `RETIRED/`, `archive/`).
+2. Does it die when its work ships? A plan dies. A spec stays.
+3. Does every repo have one? Then it is a core kind. Only repos with screens have a screen kind. Only
+   one repo has an extra kind.
+
+The layout:
+
+- Core, every repo: `CLAUDE.md`; `AGENTS.md`, a symlink to `CLAUDE.md`; `.claude/rules/`;
+  `docs/decisions/`; `docs/debts/` with `README.md` and `notes.md`; `docs/plans/`, each plan deleted
+  when its work ships; `docs/specs/`, how a shipped feature works now; `docs/records.md`, generated.
+- Repos with screens add: `docs/design/` (`DESIGN.md`, `mockups/`, `reference/`); `tokens/tokens.json`;
+  `shots/`, ignored by git.
+- A repo names its own extra kinds (home's `records/`) in its extras file, `.claude/layout-extras.json`.
+  An extra kind never replaces a core or screen kind. The extras file also marks the repo as rolled out.
+
+A repo that has not rolled out is read at its legacy folders, the ones each tool read before the
+layout. So no tool changes its verdict on a repo before that repo moves its own files. The last
+roll-out deletes the legacy map.
+
+- Owner ruling, 2026-10-22: the same folders in every repo, not a per-repo declaration.
+- Owner ruling, 2026-10-17: claude-settings moves first. Each child repo moves in its own roll-out.
+- Owner ruling, 2026-10-20: no copied `DESIGN.md` template. Each repo's `DESIGN.md` points at the shared
+  design ideas.
+- A move keeps each file name. No record is renumbered or renamed (one-shared-record-stamp).
+
+Reason: the tools disagreed on where records live. `lint/ste_lint.py` read `docs/decisions` by default,
+and this repo keeps its records in `docs/decisions/`, so its gloss collapse never ran here. Four tools held
+four copies of the path (building-allow-list-is-the-constant).
+
+Kind: process
+Home: lint/layout.json
+Home: lint/check_layout.py
