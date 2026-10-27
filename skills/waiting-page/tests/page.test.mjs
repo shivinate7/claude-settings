@@ -288,7 +288,9 @@ test("a saved answer from an earlier page shows as a receipt and nothing is writ
 test("the receipt trail lights Read and Filed from receipts and shows only Saved without them", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
   const lit = () => card(page, DECISION).locator(".trail li.on").allTextContents();
-  assert.deepEqual((await lit()).map((x) => x.trim()), ["Saved"]);
+  const first = (await lit()).map((x) => x.trim());
+  assert.equal(first.length, 1);
+  assert.match(first[0], /^Saved /);
   await page.close();
   const page2 = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } });
   const on = (await card(page2, DECISION).locator(".trail li.on").allTextContents()).map((x) => x.trim());
@@ -677,5 +679,5 @@ test("Undo tells Claude the answers are withdrawn", async (t) => {
   await told(page, "Claude was told");
   await page.locator("#undoBtn").click();
   await page.waitForFunction(() => window.__sent.length === 2);
-  assert.match((await sent(page))[1].text, /Undone on the waiting page\. Items: 27/);
+  assert.match((await sent(page))[1].text, /Undone on the waiting page\. Owners: test thread\. Items: 27 are open again\./);
 });
