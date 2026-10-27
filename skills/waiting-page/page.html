@@ -87,9 +87,10 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
 .pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
 .pairchips .nchip { height: 28px; width: 44px; }
-@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .list { grid-column: 1; } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
 .list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
 .tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
 .tier > header { display: flex; align-items: center; }
 .tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
@@ -735,7 +736,7 @@ function renderSent() {
     h("div", { class: "sent-head" }, h("span", { class: "stamp" }, "Sent", h("small", {}, fmt(p.at, false))),
       h("div", {}, h("b", {}, n + (n === 1 ? " answer" : " answers") + " sent. "), h("span", { id: "sentStatus" }, p.status),
         blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null)),
-    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = state.receipts[w.it.id] || {}; return h("li", {}, h("span", { class: "no" }, "No. " + w.it.n), h("span", {}, w.it.owner), h("span", { class: "dstate" + (rc.read || rc.filed ? " on" : "") }, rc.filed ? "Filed" : rc.read ? "Read" : "Sent")); })),
+    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = state.receipts[w.it.id] || {}; return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
     h("div", { class: "row" }, p.left > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, "Undo send (" + p.left + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
 }
 // Undo puts back what each write replaced: the earlier answer, or nothing. The owner's picks come back as drafts.
