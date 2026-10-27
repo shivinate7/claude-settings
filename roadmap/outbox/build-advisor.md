@@ -1,3 +1,0 @@
-- Closes (2026-10-27 00:41 CDT): batch #677 merged as 92bb864 with c111 (#672), c110 (#675), c103 (#674), c106 (#673); lane PRs closed as replaced. Pace: 1 h 11 min from first lane commit (04:30 UTC) to merge; 4 lanes, 4 at once.
-- Batch #678 (c109 #676 alone) opened on 92bb864.
-- Note: a batch may not commit docs/records.md (records-page guard); the merge tool rebuilds it. hook_catalog --check reads it as stale until then.
