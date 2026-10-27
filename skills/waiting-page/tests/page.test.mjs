@@ -419,14 +419,72 @@ test("a design shows in a sandboxed frame on its card, and the Designs tab pages
 const LOOK_OPTS = ["a", "b", "c"].map((k) => ({ key: k, label: "Layout " + k, how: "h", gain: "g", lose: "l", design: "price-" + k }));
 const GITHUB_FOLDER = "Mockups: https://github.com/shivinate7/banchi/tree/main/docs/mockups/price-history";
 
-test("a look question with three options, a GitHub folder link and no designs shows a warning in place of the picture", async (t) => {
+test("a look question with three options, a GitHub folder link and no designs shows a warning inside each option card", async (t) => {
   const it = mk("price-history-where", 30, { context: GITHUB_FOLDER, options: LOOK_OPTS, pick: "a" });
   const page = await open(t, { items: [it] }); if (!page) return;
-  const warn = card(page, it).locator(".dwarn");
-  assert.equal(await warn.count(), 1, "no warning line");
-  assert.match(await warn.textContent(), /picture/i);
+  assert.equal(await card(page, it).locator(".opt .dwarn").count(), 3, "no warning in an option card");
+  assert.equal(await card(page, it).locator(".dwarn").count(), 3, "a warning sits outside the option cards");
+  assert.match(await card(page, it).locator(".opt .dwarn").first().textContent(), /picture/i);
   assert.equal(await card(page, it).locator("iframe.dframe").count(), 0);
 });
+
+const PICS = { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" };
+const picItem = (id, n) => mk(id, n, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })) });
+
+test("each option's picture is inside its own option card, and a tap on the picture picks the option", async (t) => {
+  const it = picItem("with-pictures", 31);
+  const page = await open(t, { items: [it], designData: PICS }); if (!page) return;
+  assert.equal(await card(page, it).locator(".dwarn").count(), 0, "a warning shows although every picture is there");
+  for (const o of LOOK_OPTS) assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-${o.key}"] .opic iframe.dframe`).count(), 1, "no picture in option " + o.key);
+  assert.equal(await card(page, it).locator(".dprev").count(), 0, "a picture named by an option also shows at the front");
+  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the picture did not pick the option");
+  assert.equal(await card(page, it).locator(".opt iframe.dframe").first().evaluate((f) => getComputedStyle(f).pointerEvents), "none", "the frame swallows the click");
+});
+
+test("a design that names no option shows at the front of the item, before the options", async (t) => {
+  const it = mk("loose-design", 34, { designs: [{ slug: "s1", label: "Overview" }] });
+  const page = await open(t, { items: [it], designData: { s1: "<p>one</p>" } }); if (!page) return;
+  const first = await card(page, it).evaluate((c) => { const f = c.querySelector(".dprev"), o = c.querySelector(".opts"); return !!f && !!o && !!(f.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING); });
+  assert.equal(first, true);
+});
+
+test("an item with some designs but not every option's design warns in the option cards that lack one", async (t) => {
+  const it = mk("half-pictures", 32, { options: LOOK_OPTS, pick: "a", designs: [{ slug: "price-a", label: "Layout a" }] });
+  const page = await open(t, { items: [it], designData: { "price-a": "<p>a</p>" } }); if (!page) return;
+  assert.equal(await card(page, it).locator(".opt .dwarn").count(), 2);
+  assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dwarn`).count(), 0);
+});
+
+for (const width of [390, 1440]) {
+  test(`a tall mockup is never cropped, at ${width} wide`, async (t) => {
+    const it = picItem("tall", 35);
+    const tall = '<body style="margin:0"><div style="height:1200px;background:#2a6">tall</div></body>';
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": tall }, viewport: { width, height: 900 } }); if (!page) return;
+    const wrap = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dfitwrap`);
+    await page.waitForFunction((sel) => document.querySelector(sel).getBoundingClientRect().height > 300, `#item-${it.id} label.opt .dfitwrap`);
+    const m = await wrap.evaluate((w) => { const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect(); return { wrapW: r.width, wrapH: r.height, frameW: f.width, frameH: f.height }; });
+    const scale = m.frameW / 390;
+    assert.ok(Math.abs(m.frameH - 1200 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${1200 * scale}`);
+    assert.ok(m.wrapH >= m.frameH - 1, "the wrapper cuts the bottom of the mockup");
+    assert.ok(m.frameW <= m.wrapW + 1, "the mockup is wider than the card");
+  });
+
+  test(`a long option key stays on one line and never overlaps the title, at ${width} wide`, async (t) => {
+    const it = mk("long-key", 36, { options: [
+      { key: "feed-near", label: "Show the price history near the feed in a sheet", how: "h", gain: "g", lose: "l" },
+      { key: "feed-far-away-key", label: "Far", how: "h", gain: "g", lose: "l" }], pick: "feed-near" });
+    const page = await open(t, { items: [it], viewport: { width, height: 900 } }); if (!page) return;
+    for (const o of it.options) {
+      const m = await card(page, it).locator(`label.opt[for="o-${it.id}-${o.key}"]`).evaluate((l) => {
+        const k = l.querySelector(".key"), b = l.querySelector(".lab");
+        return { ws: getComputedStyle(k).whiteSpace, k: k.getBoundingClientRect().toJSON(), b: b.getBoundingClientRect().toJSON() };
+      });
+      assert.equal(m.ws, "nowrap", "the chip wraps");
+      assert.ok(m.k.right <= m.b.left + 1 || m.k.bottom <= m.b.top + 1, `the chip overlaps the title for ${o.key}`);
+    }
+  });
+}
 
 test("a long link in the context never widens the page on a phone", async (t) => {
   const it = mk("price-history-link", 33, { context: GITHUB_FOLDER, options: LOOK_OPTS, pick: "a" });
