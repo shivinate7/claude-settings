@@ -162,9 +162,23 @@ class RmTree(unittest.TestCase):
         with open(path, "w") as f:
             f.write("x")
         os.chmod(path, stat.S_IREAD)
-        os.chmod(os.path.join(self.tree, "objects"), stat.S_IREAD | stat.S_IEXEC)  # POSIX: unlink needs write here
         tracked_tree.rm_tree(self.tree)
         self.assertFalse(os.path.exists(self.tree))
+
+    def test_handler_clears_the_bit_before_the_retry(self):
+        # Bites on any OS and as root, where a read-only file still unlinks and the case above proves nothing.
+        path = os.path.join(self.tree, "objects", "pack")
+        with open(path, "w") as f:
+            f.write("x")
+        os.chmod(path, stat.S_IREAD)
+        seen = []
+
+        def func(p):
+            seen.append(bool(os.stat(p).st_mode & stat.S_IWRITE))
+            os.unlink(p)
+        tracked_tree.clear_readonly(func, path, None)
+        self.assertEqual(seen, [True])
+        self.assertFalse(os.path.exists(path))
 
     def test_a_file_that_vanishes_mid_delete_does_not_raise(self):
         path = os.path.join(self.tree, "objects", "pack")
