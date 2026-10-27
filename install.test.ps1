@@ -200,7 +200,7 @@ try {
     & $PsHost -NoProfile -File (Join-Path $Co4 'install.ps1') *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 1 exited $LASTEXITCODE"; $Failed++ }
 
-    $SkillBaks1 = @(Get-ChildItem -Path (Join-Path $Cfg4 'skills') -Filter 'sample-skill.bak.*' -ErrorAction SilentlyContinue)
+    $SkillBaks1 = @(Get-ChildItem -Path (Join-Path (Join-Path $Cfg4 'backups') 'skills') -Filter 'sample-skill.*' -ErrorAction SilentlyContinue)
     $AgentBaks1 = @(Get-ChildItem -Path $CfgAgentDir -Filter 'sample-agent.md.bak.*' -ErrorAction SilentlyContinue)
 
     Check "firstinstall1: exactly one skill backup after run 1" ($SkillBaks1.Count -eq 1)
@@ -222,7 +222,7 @@ try {
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: firstinstall1 run 2 exited $LASTEXITCODE"; $Failed++ }
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
 
-    $SkillBaks2 = @(Get-ChildItem -Path (Join-Path $Cfg4 'skills') -Filter 'sample-skill.bak.*' -ErrorAction SilentlyContinue)
+    $SkillBaks2 = @(Get-ChildItem -Path (Join-Path (Join-Path $Cfg4 'backups') 'skills') -Filter 'sample-skill.*' -ErrorAction SilentlyContinue)
     $AgentBaks2 = @(Get-ChildItem -Path $CfgAgentDir -Filter 'sample-agent.md.bak.*' -ErrorAction SilentlyContinue)
     Check "firstinstall1: run 2 makes no new skill backup" ($SkillBaks2.Count -eq 1)
     Check "firstinstall1: run 2 makes no new agent backup" ($AgentBaks2.Count -eq 1)

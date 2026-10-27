@@ -543,7 +543,7 @@ try {
 
         $rcL1 = Invoke-Install $L1.Clone 'lock1-run1.log'
         Write-Host "info: lock1 run 1 exit $rcL1"
-        $BakL1    = @(Get-ChildItem -LiteralPath (Join-Path $L1.Cfg 'skills') -Directory -Filter 'lockskill.bak.*' -ErrorAction SilentlyContinue)
+        $BakL1    = @(Get-ChildItem -LiteralPath (Join-Path $L1.Cfg 'backups\skills') -Directory -Filter 'lockskill.*' -ErrorAction SilentlyContinue)
         $MarkerL1 = Test-Path -LiteralPath $L1Marker
         Check "lock1: run 1 leaves a .bak of the skill, or no copy marker ($($BakL1.Count) bak, marker $MarkerL1)" (($BakL1.Count -gt 0) -or (-not $MarkerL1))
     } finally {
@@ -557,7 +557,7 @@ try {
     } finally {
         Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     }
-    $L1Roots   = @($L1Skill) + @(Get-ChildItem -LiteralPath (Join-Path $L1.Cfg 'skills') -Directory -Filter 'lockskill.bak.*' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    $L1Roots   = @($L1Skill) + @(Get-ChildItem -LiteralPath (Join-Path $L1.Cfg 'backups\skills') -Directory -Filter 'lockskill.*' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
     $NotesKept = @($L1Roots | Where-Object { (Test-Path -LiteralPath (Join-Path $_ 'my-notes.md')) -and ((Get-Content -Raw -LiteralPath (Join-Path $_ 'my-notes.md')).Trim() -eq "person's own notes") }).Count -gt 0
     $SkillKept = @($L1Roots | Where-Object { (Test-Path -LiteralPath (Join-Path $_ 'SKILL.md')) -and ((Get-Content -Raw -LiteralPath (Join-Path $_ 'SKILL.md')).Trim() -eq "person's own skill") }).Count -gt 0
     Check "lock1: run 2 keeps the person's my-notes.md at the skill dir or in a .bak, never pruned" $NotesKept

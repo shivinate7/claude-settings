@@ -1091,13 +1091,13 @@ skills_case2() {
 
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         bash ./install.sh --cloud 2>&1); rc=$?
-  bak=$(ls -d "$cfg/skills/"fresh-prose.bak.* 2>/dev/null | head -n1)
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
   own_content=$(cat "$cfg/skills/my-own/SKILL.md" 2>/dev/null)
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
   elif [ -z "$bak" ]; then
-    bad "$name" "no fresh-prose.bak.* directory was created; the old content was dropped"
+    bad "$name" "no backup under backups/skills; the old content was dropped"
   elif [ "$(cat "$bak/SKILL.md" 2>/dev/null)" != "old content a person may have edited" ]; then
     bad "$name" "backed-up directory does not hold the pre-existing content"
   elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "new content" ]; then
@@ -1109,6 +1109,90 @@ skills_case2() {
   else
     ok "$name"
   fi
+  rm -rf "$h"
+}
+
+# ---- skills backups, cloud mode: a repeat run replaces its own copy, and a needed backup lands outside skills/ ----
+# Each cloud run installs again, so a backup inside skills/ piled up and loaded as one more skill each.
+skills_bak_setup() {
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/$1-checkout"
+  make_checkout "$co" "# $1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  mkdir -p "$co/skills/fresh-prose"
+  printf 'v1\n' > "$co/skills/fresh-prose/SKILL.md"
+}
+skills_bak_run() {
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash ./install.sh --cloud 2>&1); rc=$?
+}
+
+skills_bak1() {
+  name="skills_bak1: two cloud runs leave no backup anywhere"
+  skills_bak_setup skills_bak1
+  skills_bak_run; skills_bak_run
+  stray=$(find "$cfg" -name '*.bak.*' ! -name 'settings.json.bak.*' ! -name 'CLAUDE.md.bak.*' 2>/dev/null | head -n3)
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ -n "$stray" ] || [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "a backup was made: $stray $(ls "$cfg/backups/skills" 2>/dev/null)"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill content wrong"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+skills_bak2() {
+  name="skills_bak2: a hand-edited skill copy is backed up under backups/, not in skills/"
+  skills_bak_setup skills_bak2
+  skills_bak_run
+  printf 'hand edit\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  skills_bak_run
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then bad "$name" "no backup under $cfg/backups/skills; skills/ holds: $(ls "$cfg/skills")"
+  elif [ "$(cat "$bak/SKILL.md" 2>/dev/null)" != "hand edit" ]; then bad "$name" "backup lost the hand edit"
+  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v1" ]; then bad "$name" "skill was not refreshed"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+skills_bak3() {
+  name="skills_bak3: a source change between cloud runs makes no backup"
+  skills_bak_setup skills_bak3
+  skills_bak_run
+  printf 'v2\n' > "$co/skills/fresh-prose/SKILL.md"
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "a backup was made: $(ls "$cfg/backups/skills")"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md")" != "v2" ]; then bad "$name" "skill was not refreshed to v2"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+skills_bak4() {
+  name="skills_bak4: an old skills/x.bak.* is moved to backups/skills, content kept"
+  skills_bak_setup skills_bak4
+  mkdir -p "$cfg/skills/fresh-prose.bak.20260101000000"
+  printf 'old backup\n' > "$cfg/skills/fresh-prose.bak.20260101000000/SKILL.md"
+  skills_bak_run
+  moved=$(ls -d "$cfg/backups/skills/"fresh-prose.bak.20260101000000 2>/dev/null | head -n1)
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ still holds a .bak.* entry: $(ls "$cfg/skills")"
+  elif [ -z "$moved" ] || [ "$(cat "$moved/SKILL.md" 2>/dev/null)" != "old backup" ]; then bad "$name" "old backup not found intact under backups/skills"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+skills_bak5() {
+  name="skills_bak5: a copy identical to the source, with no record, is replaced with no backup"
+  skills_bak_setup skills_bak5
+  mkdir -p "$cfg/skills/fresh-prose"
+  printf 'v1\n' > "$cfg/skills/fresh-prose/SKILL.md"
+  skills_bak_run
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -n "$(ls "$cfg/skills" | grep '\.bak\.')" ]; then bad "$name" "skills/ holds a .bak.* entry"
+  elif [ -n "$(ls "$cfg/backups/skills" 2>/dev/null)" ]; then bad "$name" "a backup was made: $(ls "$cfg/backups/skills")"
+  else ok "$name"; fi
   rm -rf "$h"
 }
 
@@ -2637,6 +2721,11 @@ run prune_case5
 run prune_case6
 run skills_case1
 run skills_case2
+run skills_bak1
+run skills_bak2
+run skills_bak3
+run skills_bak4
+run skills_bak5
 run copymode_case1
 run backup_case1
 run backup_case2

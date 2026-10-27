@@ -619,6 +619,17 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
     # entry this repo does not ship (a person's own skill) is never touched: the loop only
     # ever looks at names under $srcDir, so a name absent there is never a candidate.
     if ($sub -eq 'skills') {
+        # A skill backup never lands in skills\ or any folder Claude Code scans: it would load as
+        # one more skill. Backups go to backups\skills\<name>.<time>; an older installer's
+        # skills\<name>.bak.* is moved there too, never deleted.
+        $skillBakDir = Join-Path (Join-Path $ClaudeDir 'backups') 'skills'
+        foreach ($old in @(Get-ChildItem -LiteralPath $destDir -Directory -Filter '*.bak.*' -Force -ErrorAction SilentlyContinue)) {
+            New-Item -ItemType Directory -Force -Path $skillBakDir | Out-Null
+            $to = Join-Path $skillBakDir $old.Name
+            if (Test-Path -LiteralPath $to) { $to = "$to.$PID" }
+            try { Move-Item -LiteralPath $old.FullName -Destination $to; Log "old backup $($old.FullName) moved to $to" }
+            catch { Log "could not move $($old.FullName) to $to ($($_.Exception.Message)); left in place" }
+        }
         foreach ($src in @(Get-ChildItem -Path $srcDir -Directory -ErrorAction SilentlyContinue)) {
             $dest = Join-Path $destDir $src.Name
             $cur  = Get-Item $dest -ErrorAction SilentlyContinue
@@ -629,8 +640,9 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             # machine where the symlink attempt below fell back to Copy-Item: replace it,
             # no backup (D: copy-mode-overwrites-no-backup). Install-Dir swaps by rename,
             # so the skill is never absent.
-            $bak  = "$dest.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+            $bak  = Join-Path $skillBakDir "$($src.Name).$(Get-Date -Format yyyyMMddHHmmss)"
             $keep = [bool]($cur -and $FirstLocalRun)
+            if ($keep) { New-Item -ItemType Directory -Force -Path $skillBakDir | Out-Null }
             $old  = if ($keep) { $bak } else { "$dest.cs-old" }
             $how  = Install-Dir $src.FullName $dest $old $keep
             if ($how -eq 'failed') { $AgentFailed = $true; continue }
