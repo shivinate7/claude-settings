@@ -589,3 +589,4 @@
 - shared-owner-git-case: the owner check rejects a trailing ".git" in lower case only, so "me/x.GIT" passes (lint/layout.py shared_resources)
 - shared-name-padding: a name with padding (" a" beside "a") counts as unique (lint/layout.py shared_resources)
 - shared-dotted-owner-untested: no green case for a dotted owner such as "me/home.app" (lint/test_check_shared_resources.py)
+- main-ref-url-forms-untested: no test covers an scp-style or credentialed origin URL in the FETCH_HEAD match; a wrong normalisation refuses, the old behaviour (githooks/main-ref/reference-transaction fetched)

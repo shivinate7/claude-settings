@@ -406,6 +406,7 @@ jobs:
       - name: STE lint action fixture suite
         run: python3 actions/ste-lint/test_action.py
 
+      # Its own 4 min watchdog reads a hang red, names the hung test and prints the process tree.
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
 
@@ -763,8 +764,8 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
-      # Own cap: this suite takes 1.5 min at most (28 of 30 runs), and one run hung 23 min until the job cap.
-      # A hang now reads red at this step.
+      # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
+      # prints the process tree and kills it. timeout-minutes is the backstop.
       - name: Record stamp engine fixture suite
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -1255,8 +1256,8 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_install_schtasks.py
 
-      # Own cap: this suite takes 1.5 min at most (28 of 30 runs), and one run hung 23 min until the job cap.
-      # A hang now reads red at this step.
+      # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
+      # prints the process tree and kills it. timeout-minutes is the backstop.
       - name: Record stamp engine fixture suite
         if: ${{ !cancelled() }}
         timeout-minutes: 5
