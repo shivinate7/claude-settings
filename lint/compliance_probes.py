@@ -24,9 +24,10 @@ lanecap: a guessed lane cap in a brief or a plan (rule parallelism-no-guessed-la
   of quotes is cited, and passes.
 playwright: a Playwright install that also runs apt (`--with-deps`, `install-deps`) in a workflow, an
   action, a Makefile, a shell script, a Dockerfile, a justfile, a Taskfile, a dev container file or a
-  package.json script. The runner image already has the
-  browsers' libraries, and that apt step once timed a job out on a slow mirror. The shared
-  actions/playwright-setup installs with no apt step. Comments do not count.
+  package.json script. The runner image already has Chromium's libraries, and that apt step once
+  timed a job out on a slow mirror. The shared actions/playwright-setup runs no apt for Chromium.
+  WebKit and Firefox opt in through its `system-deps` input, which this probe does not flag.
+  Comments do not count.
 ios: drift from the iOS standard of skills/ios-apps, one item per line: the make targets, the ship
   path, the project file, the Kit package, Swift 6, the CI runner, the CI checks, slow tests on each
   pull request, and account IDs in the repo. A repo with no iOS app is n/a. Comments do not count.

@@ -1,8 +1,10 @@
 name: Playwright setup
 description: >
-  Installs the Playwright that a lockfile pins, and its browsers, with no apt step. The runner image
-  already has the browsers' system libraries, and `--with-deps` once spent more than 11 min on a slow
-  apt mirror. A missing library fails the suite when it cannot launch a browser, never skips it.
+  Installs the Playwright that a lockfile pins, and its browsers. By default it runs no apt step. The
+  runner image already has Chromium's system libraries, and `--with-deps` once spent more than 11 min
+  on a slow apt mirror. WebKit and Firefox lack libraries there, so a caller may opt in with
+  `system-deps`. That apt step runs on Linux only, under a 5 min cap.
+  A missing library fails the suite when it cannot launch a browser, never skips it.
   The browser download is cached by the pinned Playwright version.
   It needs playwright-core reachable from package-dir, so a pnpm strict layout is not supported.
 inputs:
@@ -14,6 +16,10 @@ inputs:
     description: "Space-separated browser names for `playwright install`."
     required: false
     default: "chromium"
+  system-deps:
+    description: "Opt-in apt. Space-separated browsers whose system libraries to install, on Linux only: webkit, firefox. Chromium or any other name fails the job. Default empty: no apt."
+    required: false
+    default: ""
   npm-ci:
     description: "Set to false when an earlier step already ran npm ci in package-dir."
     required: false
@@ -50,3 +56,31 @@ runs:
       run: |
         # shellcheck disable=SC2086  # BROWSERS is a space-separated list, split on purpose
         node "$CLI" install $BROWSERS
+
+    # Opt-in apt for WebKit and Firefox only: ubuntu-latest lacks their libraries (libgtk-4, gstreamer).
+    # CAP is 300 s. The slow mirror on 2026-10-26 ran past 11 min, so the cap ends that case in under
+    # half the time. The normal apt time is unmeasured. Composite steps have no timeout-minutes.
+    - name: Install the system libraries
+      if: ${{ inputs.system-deps != '' }}
+      shell: bash
+      env:
+        CLI: ${{ steps.pin.outputs.cli }}
+        DEPS: ${{ inputs.system-deps }}
+        CAP: "300"
+      run: |
+        # A blank value would run install-deps with no names, which installs every browser's libraries.
+        [ -n "${DEPS//[[:space:]]/}" ] || { echo "::error::system-deps holds no browser name. Name webkit or firefox, or leave it unset."; exit 1; }
+        for b in $DEPS; do
+          case "$b" in
+            webkit|firefox) ;;
+            *) echo "::error::system-deps takes webkit or firefox only, not '$b'. Chromium needs no apt."; exit 1 ;;
+          esac
+        done
+        [ "$RUNNER_OS" = Linux ] || exit 0
+        # shellcheck disable=SC2086  # DEPS is a space-separated list, split on purpose
+        # -k 30: a process that ignores SIGTERM at the cap is killed 30 s later.
+        timeout -k 30 "$CAP" node "$CLI" install-deps $DEPS || {
+          rc=$?
+          [ "$rc" = 124 ] && echo "::error::system-deps apt step passed its $CAP s cap." >&2
+          exit "$rc"
+        }
