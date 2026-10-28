@@ -1,0 +1,9 @@
+{
+ "title": "code check skips data, config and image files",
+ "phase": "cleanup",
+ "status": "doing",
+ "order": 103.3757,
+ "why": "From c127's banchi lane, Oct 28 08:51 CDT (orchestrator): banchi's code-check run is red because the shared code check has no not_code row for .env.example, .worktreeinclude, .webmanifest, .csv or .jpg.",
+ "note": "Orchestrator's slug: c127-notcode. Add not_code rows to actions/code-check for .env.example, .worktreeinclude, .webmanifest, .csv and .jpg. Red first on a fixture repo with each. Touches actions/code-check/ only. Needs no answer. Port: yes, every repo that runs code-check (banchi first). Placed ahead of c127 (triage 11, Oct 28): banchi's c127 PR #993 waits on this main commit to re-pin; #993 also fixes 3 ShellCheck defects in banchi's own files. Doing: lane session_013NEJL1dXiDjyXqDPAFyuWK, branch code-check-notcode-rows, started 08:51 CDT; joins the batch after batch 10.",
+ "updatedAt": "2026-10-28T13:55:00Z"
+}
