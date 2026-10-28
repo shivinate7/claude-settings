@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banchi phone, blind 1</title>
+<style>
+:root{
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;--space-10:40px;
+  --radius:8px;
+  --font:-apple-system,system-ui,"SF Pro Text",Inter,"Helvetica Neue",Arial,sans-serif;
+  --surface:#ffffff;--surface-2:#f3f4f7;--surface-3:#e4e7ed;
+  --text:#14161b;--text-2:#4b515e;
+  --line:#e0e3e9;--edge:#767d8c;
+  --accent:#3d5af1;--on-accent:#ffffff;--accent-text:#2c46d6;--accent-weak:#e8ecfe;
+  --vf:#0b0d12;--on-vf:#ffffff;--on-vf-2:#c3c8d2;
+  --photo-1:#d3d7df;--photo-2:#9ea5b3;--photo-3:#b9bfcb;
+  --scrim:rgba(10,12,18,.45);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --surface:#111318;--surface-2:#1a1d24;--surface-3:#272b35;
+    --text:#eef0f4;--text-2:#aeb4c0;
+    --line:#2d313b;--edge:#868d9c;
+    --accent:#3d5af1;--on-accent:#ffffff;--accent-text:#a3afff;--accent-weak:#1f274f;
+    --photo-1:#3b404b;--photo-2:#5d6473;--photo-3:#4a505c;
+    --scrim:rgba(0,0,0,.6);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --surface:#111318;--surface-2:#1a1d24;--surface-3:#272b35;
+  --text:#eef0f4;--text-2:#aeb4c0;
+  --line:#2d313b;--edge:#868d9c;
+  --accent:#3d5af1;--on-accent:#ffffff;--accent-text:#a3afff;--accent-weak:#1f274f;
+  --photo-1:#3b404b;--photo-2:#5d6473;--photo-3:#4a505c;
+  --scrim:rgba(0,0,0,.6);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--surface);color:var(--text);font:16px/1.4 var(--font)}
+button{font:inherit;color:inherit}
+h1,h2,h3,p{margin:0}
+svg{display:block}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- gallery chrome ---------- */
+.gal{padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-8);max-inline-size:1640px;margin-inline:auto}
+.gal-top{display:flex;flex-direction:column;gap:var(--space-2)}
+.gal-top h1{font-size:24px}
+.lane-line{font-weight:600}
+.cluster{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+.stack{display:flex;flex-direction:column;gap:var(--space-3)}
+.gbtn{min-height:44px;padding:0 var(--space-4);border:1px solid var(--edge);border-radius:var(--radius);background:var(--surface);cursor:pointer}
+.gbtn[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.dir{display:flex;flex-direction:column;gap:var(--space-4);border-top:2px solid var(--line);padding-top:var(--space-6)}
+.dir[hidden]{display:none}
+.dir-head{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;justify-content:space-between}
+.dir-head h2{font-size:22px}
+.idea{color:var(--text-2);max-inline-size:70ch}
+.row-title{font-size:15px;font-weight:600;color:var(--text-2)}
+.frames{display:flex;flex-wrap:wrap;gap:var(--space-6);max-inline-size:100%;min-width:0;overflow-x:auto;padding:2px}
+.dir,.gal{min-width:0}
+.gal{overflow-x:clip}
+figure{margin:0;display:flex;flex-direction:column;gap:var(--space-2)}
+figcaption{font-size:14px;color:var(--text-2);display:flex;gap:var(--space-2);flex-wrap:wrap}
+figcaption a{color:var(--accent-text)}
+.gal .frame{outline:1px solid var(--edge);border-radius:20px}
+
+/* ---------- device frame ---------- */
+.frame{position:relative;width:360px;height:780px;overflow:hidden;background:var(--surface);color:var(--text);display:flex;flex-shrink:0}
+.frame.unf{width:760px}
+.page{position:relative;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;container-type:inline-size}
+.frame.unf .page{width:380px;flex:none}
+.frame.unf .page + .hinge + .page{border-left:0}
+.hinge{position:absolute;top:0;bottom:0;left:376px;width:8px;z-index:5;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(0,0,0,.14) 45%,rgba(0,0,0,.22) 50%,rgba(0,0,0,.14) 55%,transparent)}
+.status{height:28px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 var(--space-5);font-size:13px;font-weight:600}
+.hd{flex:none;padding:var(--space-2) var(--space-4) var(--space-3);display:flex;flex-direction:column;gap:var(--space-1)}
+.hd-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-height:44px}
+.hd h1{font-size:26px;line-height:1.15;font-weight:700}
+.hd .sub{color:var(--text-2);font-size:15px}
+.body{flex:1;min-height:0;overflow:hidden;padding:0 var(--space-4) var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)}
+.foot{flex:none;padding:var(--space-3) var(--space-4) var(--space-4);display:flex;flex-direction:column;gap:var(--space-2);border-top:1px solid var(--line);background:var(--surface)}
+.muted{color:var(--text-2)}
+.small{font-size:14px}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.btn{min-height:48px;padding:0 var(--space-4);border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface);display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);font-weight:600;font-size:16px;cursor:pointer;white-space:nowrap}
+.btn-p{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-w{width:100%}
+.btn-big{min-height:56px;font-size:18px}
+.btn-q{border-color:transparent;background:transparent;color:var(--accent-text)}
+.btn svg{width:20px;height:20px;flex:none}
+.cand svg{width:20px;height:20px;flex:none;color:var(--text-2)}
+.icon-btn{width:44px;height:44px;border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.icon-btn svg{width:22px;height:22px}
+.back{display:inline-flex;align-items:center;gap:var(--space-1);min-height:44px;padding:0 var(--space-2) 0 0;border:0;background:none;color:var(--accent-text);font-weight:600}
+.back svg{width:22px;height:22px}
+
+/* tab bar */
+.tabs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface-2);padding-bottom:var(--space-2)}
+.tab{position:relative;min-height:60px;border:0;background:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:13px;font-weight:600;color:var(--text-2)}
+.tab svg{width:24px;height:24px}
+.tab[aria-current="page"]{color:var(--accent-text)}
+.tab[aria-current="page"]::before{content:"";position:absolute;top:0;left:20%;right:20%;height:3px;border-radius:0 0 3px 3px;background:var(--accent)}
+.tab .badge{position:absolute;top:6px;left:calc(50% + 6px)}
+.badge{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+
+/* card photo */
+.photo{--w:40px;width:var(--w);height:calc(var(--w) * 1.4);flex:none;border-radius:calc(var(--w) / 14);background:var(--photo-1);border:1px solid var(--edge);position:relative;overflow:hidden}
+.photo::before{content:"";position:absolute;left:9%;right:9%;top:13%;height:42%;border-radius:2px;background:linear-gradient(var(--a,135deg),var(--photo-2),var(--photo-3))}
+.photo::after{content:"";position:absolute;left:9%;right:9%;top:62%;height:24%;border-radius:2px;background:repeating-linear-gradient(180deg,var(--photo-2) 0 2px,transparent 2px 6px);opacity:.7}
+.photo .pn{position:absolute;left:8%;right:8%;top:3%;font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.photo.unsure{border:2px dashed var(--edge)}
+
+/* pull rows (D1, D3) */
+.group{display:flex;flex-direction:column;gap:var(--space-2)}
+.ghead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2);padding-top:var(--space-1)}
+.ghead b{font-size:17px}
+.prow{display:flex;align-items:center;gap:var(--space-3);min-height:72px;padding:var(--space-2) 0;border-bottom:1px solid var(--line)}
+.pmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pname{font-weight:600;font-size:16px}
+.pmeta{font-size:14px;color:var(--text-2)}
+.pplace{font-size:14px}
+.pplace b{font-weight:700}
+.tick{width:44px;height:44px;flex:none;border:0;background:none;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.tick span{width:30px;height:30px;border-radius:50%;border:2px solid var(--edge);display:flex;align-items:center;justify-content:center;color:var(--on-accent)}
+.tick span svg{width:18px;height:18px;opacity:0}
+.tick.on span{background:var(--accent);border-color:var(--accent)}
+.tick.on span svg{opacity:1}
+.done .pname,.done .pmeta,.done .pplace{color:var(--text-2)}
+.hint{display:flex;gap:var(--space-2);align-items:center;font-size:15px;padding:var(--space-2) var(--space-3);background:var(--surface-2);border-radius:var(--radius)}
+.hint .tick{width:28px;height:28px}
+.hint .tick span{width:22px;height:22px}
+
+/* states */
+.empty{flex:1;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:var(--space-4);padding:var(--space-4) 0}
+.empty p{font-size:18px;max-inline-size:28ch}
+.err{display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-4);border:2px solid var(--edge);border-radius:var(--radius);background:var(--surface-2)}
+.err-t{display:flex;gap:var(--space-2);align-items:flex-start;font-size:16px;font-weight:600}
+.err-t svg{width:22px;height:22px;flex:none}
+.why summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--accent-text);font-size:15px}
+.why code{font-size:13px;word-break:break-all}
+.sk{background:var(--surface-3);border-radius:6px}
+.sk-row{display:flex;gap:var(--space-3);align-items:center;min-height:72px;border-bottom:1px solid var(--line)}
+.sk-lines{flex:1;display:flex;flex-direction:column;gap:var(--space-2)}
+.loading-note{display:flex;gap:var(--space-2);align-items:center;font-size:15px;color:var(--text-2)}
+.spin{width:18px;height:18px;border-radius:50%;border:3px solid var(--surface-3);border-top-color:var(--accent);animation:sp 1s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.stale{font-size:14px;padding:var(--space-2) var(--space-3);border-radius:var(--radius);border:1px dashed var(--edge);color:var(--text-2)}
+
+/* camera */
+.vf{position:relative;background:var(--vf);color:var(--on-vf);border-radius:var(--radius);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.vf .guide{position:relative;width:176px;height:246px;border-radius:10px;display:flex;align-items:center;justify-content:center}
+.vf .guide i{position:absolute;width:26px;height:26px;border:3px solid #fff}
+.vf .guide i:nth-child(1){top:-6px;left:-6px;border-right:0;border-bottom:0}
+.vf .guide i:nth-child(2){top:-6px;right:-6px;border-left:0;border-bottom:0}
+.vf .guide i:nth-child(3){bottom:-6px;left:-6px;border-right:0;border-top:0}
+.vf .guide i:nth-child(4){bottom:-6px;right:-6px;border-left:0;border-top:0}
+.vf .ov{position:absolute;left:var(--space-3);right:var(--space-3);display:flex;justify-content:space-between;gap:var(--space-2);font-size:15px}
+.vf .ov.top{top:var(--space-3)}
+.vf .ov.bot{bottom:var(--space-3)}
+.pill{background:rgba(0,0,0,.6);color:#fff;padding:var(--space-1) var(--space-3);border-radius:16px;font-weight:600;white-space:nowrap}
+.shoot-row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:var(--space-3)}
+.shutter{width:76px;height:76px;border-radius:50%;border:4px solid var(--accent);background:var(--surface);display:flex;align-items:center;justify-content:center}
+.shutter span{width:58px;height:58px;border-radius:50%;background:var(--accent)}
+.reads{display:flex;gap:var(--space-2);align-items:flex-end}
+.read{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--text-2)}
+.read .photo{--w:44px}
+.chip{min-height:44px;padding:0 var(--space-3);border-radius:22px;border:1px solid var(--edge);display:inline-flex;align-items:center;gap:var(--space-1);font-size:14px;font-weight:600;background:var(--surface)}
+.chip.on{background:var(--accent-weak);border-color:var(--accent);color:var(--accent-text)}
+
+/* candidates */
+.cand{display:flex;align-items:center;gap:var(--space-3);min-height:64px;padding:var(--space-2) var(--space-3);border:1px solid var(--edge);border-radius:var(--radius);background:var(--surface);text-align:left;width:100%}
+.cand .photo{--w:36px}
+.cand .pmain{gap:0}
+.price{font-variant-numeric:tabular-nums;font-weight:600}
+
+/* summary blocks */
+.sum{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-4);border-radius:var(--radius);background:var(--surface-2)}
+.big-n{font-size:34px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.line-item{display:flex;gap:var(--space-3);align-items:center;justify-content:space-between;min-height:56px;border-bottom:1px solid var(--line)}
+.line-item p{min-width:0}
+
+/* D2 jobs */
+.job{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-4);border-radius:12px;border:1px solid var(--line);background:var(--surface-2)}
+.job h2{font-size:19px;display:flex;align-items:center;gap:var(--space-2)}
+.job h2 svg{width:22px;height:22px;flex:none}
+.job p{font-size:16px;color:var(--text-2)}
+.job.first{background:var(--accent-weak);border-color:var(--accent)}
+.step-top{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-1) var(--space-4) var(--space-3)}
+.bar{height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.boxbig{display:flex;flex-direction:column;gap:2px;padding:var(--space-4);border-radius:12px;background:var(--surface-2)}
+.boxbig .lab{font-size:15px;color:var(--text-2);font-weight:600}
+.boxbig .num{font-size:44px;font-weight:800;line-height:1.05}
+.boxbig .nm{font-size:18px;font-weight:600}
+.find{display:flex;flex-direction:column;gap:var(--space-3)}
+.find .lab{font-size:15px;color:var(--text-2);font-weight:600}
+.find .say{font-size:20px;line-height:1.3;font-weight:600}
+.cardrow{display:flex;gap:var(--space-3);align-items:flex-start}
+.nbrs{display:flex;align-items:center;justify-content:center;gap:var(--space-2)}
+.nbrs .col{display:flex;flex-direction:column;align-items:center;gap:var(--space-1);font-size:13px;color:var(--text-2);text-align:center;width:96px}
+.nbrs .col.me{color:var(--text);font-weight:700}
+.nbrs .col.me .photo{border:3px solid var(--accent)}
+.env{position:relative;width:200px;height:132px;border-radius:8px;border:2px solid var(--edge);background:var(--surface-2);overflow:hidden;align-self:center}
+.env::before{content:"";position:absolute;left:-2px;right:-2px;top:-70px;height:130px;border-bottom:2px solid var(--edge);transform:skewY(0);clip-path:polygon(0 50%,50% 100%,100% 50%,100% 100%,0 100%);}
+.slots{display:flex;gap:var(--space-2);justify-content:center}
+.slot{width:28px;height:40px;border-radius:4px;border:2px dashed var(--edge)}
+.slot.in{border:2px solid var(--accent);background:var(--accent)}
+
+/* D3 shelf */
+.shelf{display:flex;flex-direction:column;gap:var(--space-1)}
+.shelf-lab{font-size:14px;font-weight:600;color:var(--text-2)}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-2)}
+.tile{position:relative;height:60px;border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0}
+.tile b{font-size:20px;line-height:1.1}
+.tile small{font-size:12px;color:var(--text-2);font-weight:600}
+.tile.lit{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.tile.lit small{color:var(--on-accent)}
+.tile.wait{border:2px dashed var(--edge)}
+.tile.unk{border-style:dashed;color:var(--text-2)}
+.tile .badge{position:absolute;top:-7px;right:-5px;background:var(--surface);color:var(--accent-text);border:2px solid var(--accent)}
+.tile.sk{background:var(--surface-3);border:0}
+.tile.ghost{border:1px dashed var(--line);background:transparent}
+.table-tile{display:flex;align-items:center;gap:var(--space-3);min-height:56px;padding:0 var(--space-3);border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface-2);text-align:left;width:100%}
+.table-tile svg{width:24px;height:24px;flex:none}
+.legend{display:flex;flex-wrap:wrap;gap:var(--space-3);font-size:14px;color:var(--text-2)}
+.legend span{display:inline-flex;gap:var(--space-1);align-items:center}
+.legend i{width:16px;height:16px;border-radius:4px;display:inline-block}
+.act3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-2)}
+.act3 .btn{padding:0 var(--space-2);flex-direction:column;gap:0;min-height:56px;font-size:14px}
+.act3 .btn svg{width:20px;height:20px;flex:none}
+.cand svg{width:20px;height:20px;flex:none;color:var(--text-2)}
+
+/* box drawing */
+.boxdraw{display:flex;flex-direction:column;border:2px solid var(--edge);border-radius:10px;overflow:hidden}
+.boxdraw .front{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-2);text-align:center;padding:2px;background:var(--surface-3)}
+.sec{position:relative;border-top:1px solid var(--edge);background:var(--surface-2)}
+.sec .dv{position:absolute;left:var(--space-2);top:4px;font-size:13px;font-weight:600;color:var(--text-2)}
+.mark{position:absolute;z-index:2;left:0;right:0;height:0;border-top:3px solid var(--accent)}
+.mark span{position:absolute;right:var(--space-2);top:-11px;max-width:60%;overflow:hidden;text-overflow:ellipsis;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap}
+.mark.q{border-top:3px dashed var(--edge)}
+.mark.q span{background:var(--surface);color:var(--text);border:1px dashed var(--edge)}
+.fillbar{position:relative;height:28px;border-radius:6px;border:1px solid var(--edge);background:var(--surface-2);overflow:hidden}
+.fillbar i{position:absolute;left:0;top:0;bottom:0;background:var(--accent-weak);border-right:3px solid var(--accent)}
+.fillbar span{position:absolute;left:var(--space-2);top:3px;font-size:13px;font-weight:600}
+
+/* sheet */
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:4;background:var(--surface);border-radius:16px 16px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.25);padding:var(--space-3) var(--space-4) var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)}
+.sheet .grab{width:40px;height:5px;border-radius:3px;background:var(--surface-3);align-self:center}
+.scrim{position:absolute;inset:0;background:var(--scrim);z-index:3}
+.env-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2)}
+.envt{display:flex;flex-direction:column;gap:var(--space-1);padding:var(--space-3);border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface);min-height:84px;text-align:left}
+.envt b{font-size:16px}
+.dots{display:flex;gap:4px}
+.dots i{width:12px;height:12px;border-radius:50%;border:2px solid var(--edge)}
+.dots i.in{background:var(--accent);border-color:var(--accent)}
+.envt.sealed{background:var(--surface-2)}
+.explain{display:flex;flex-direction:column;gap:var(--space-4);padding-top:var(--space-4)}
+.explain li{font-size:16px}
+.explain ol{margin:0;padding-left:var(--space-5);display:flex;flex-direction:column;gap:var(--space-3)}
+.ovw{display:flex;gap:16px;padding:16px;background:var(--surface)}
+.ovw figure figcaption{font-size:16px;font-weight:600;color:var(--text)}
+.shot{display:block}
+.ovw.shot{display:flex}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+/* ============ data (made up, realistic shapes) ============ */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd=mulberry32(20261028);
+const ri=(a,b)=>a+Math.floor(rnd()*(b-a+1));
+const pk=a=>a[Math.floor(rnd()*a.length)];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ord=n=>{const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])};
+
+const GAMES={
+ PKM:{label:"Pokémon",prints:["Holo","Reverse Holo","Normal"],names:["Iono","Charizard ex","Pikachu ex","Gardevoir ex","Miraidon ex","Arven","Boss’s Orders","Rare Candy","Mew ex","Snorlax","Eevee","Umbreon ex","Greninja ex","Pidgeot ex","Dragapult ex","Chien-Pao ex","Roaring Moon ex","Iron Valiant ex","Nest Ball","Ultra Ball","Penny","Terapagos ex","Lugia V"]},
+ MTG:{label:"Magic",prints:["Foil","Nonfoil"],names:["Mabel’s Mettle","Season of Loss","Fabled Passage","Llanowar Elves","Counterspell","Valley Questcaller","Maelstrom Pulse","Sol Ring","Lightning Bolt","Enduring Curiosity","Up the Beanstalk","Kitsa, Otterball Elite","Beza, the Bounding Spring","Cyclonic Rift","Hare Apparent","Sunfall","Bloodthirsty Conqueror"]},
+ LOR:{label:"Lorcana",prints:["Foil","Normal"],names:["Elsa – Spirit of Winter","Stitch – Rock Star","Mickey Mouse – Brave Tailor","Ursula – Power Hungry","Maleficent – Monstrous Dragon","Belle – Strange but Special","Tinker Bell – Giant Fairy","Hades – King of Olympus","Jafar – Wicked Sorcerer","Moana – Of Motunui","Genie – On the Job","Rapunzel – Gifted with Healing"]}
+};
+const DP=["Rares","Reverse Holo","Normal A–F","Normal G–L","Normal M–R","Normal S–Z"],DM=["Rares","Foils","Uncommons","Commons A–H","Commons I–P","Commons Q–Z"],DL=["Legendary","Foils","Rare","Uncommon","Common A–L","Common M–Z"],DA=["A–C","D–F","G–I","J–L","M–O","P–R","S–U","V–Z"];
+const BOXDEF=[
+ ["PKM","SVI","Scarlet & Violet",DP],["PKM","PAL","Paldea Evolved",DP],["PKM","OBF","Obsidian Flames",DP],["PKM","MEW","Pokémon 151",DP],["PKM","PAR","Paradox Rift",DP],
+ ["PKM","PAF","Paldean Fates",DP],["PKM","TEF","Temporal Forces",DP],["PKM","TWM","Twilight Masquerade",DP],["PKM","SCR","Stellar Crown",DP],["PKM","SSP","Surging Sparks",DP],
+ ["PKM","PRE","Prismatic Evolutions",DP],["PKM","HOL","Pokémon holo bulk",DA],["PKM","BK1","Pokémon bulk 1",DA],["PKM","BK2","Pokémon bulk 2",DA],["MTG","BLB","Bloomburrow",DM],
+ ["MTG","DSK","Duskmourn",DM],["MTG","FDN","Foundations",DM],["MTG","DFT","Aetherdrift",DM],["MTG","TDM","Tarkir Dragonstorm",DM],["MTG","FIN","Final Fantasy",DM],
+ ["MTG","EOE","Edge of Eternities",DM],["MTG","CM1","Magic commons 1",DA],["MTG","CM2","Magic commons 2",DA],["MTG","FOL","Magic foils",DA],["LOR","TFC","The First Chapter",DL],
+ ["LOR","ROF","Rise of the Floodborn",DL],["LOR","ITI","Into the Inklands",DL],["LOR","URR","Ursula’s Return",DL],["LOR","SSK","Shimmering Skies",DL],["LOR","AZS","Azurite Sea",DL]];
+const SHELVES=["Top shelf","Middle shelf","Bottom shelf"];
+const BOXES=BOXDEF.map((b,i)=>{
+  const count=ri(240,620);const w=b[3].map((_,j)=>j===0?0.6:1);const tw=w.reduce((a,c)=>a+c,0);
+  let left=count;const secs=b[3].map((nm,j)=>{const n=j===b[3].length-1?left:Math.round(count*w[j]/tw);left-=n;return{name:nm,n}});
+  return{i,no:i+1,game:b[0],code:b[1],name:b[2],count,secs,shelf:SHELVES[Math.floor(i/10)],pos:(i%10)+1};
+});
+BOXES[14].count=300;BOXES[14].secs=[{name:"Rares",n:38},{name:"Foils",n:46},{name:"Uncommons",n:72},{name:"Commons A–H",n:50},{name:"Commons I–P",n:48},{name:"Commons Q–Z",n:46}];
+const where=(box,place)=>{let acc=0;for(const s of box.secs){if(place<=acc+s.n)return{sec:s.name,k:place-acc};acc+=s.n}return{sec:box.secs.at(-1).name,k:1}};
+const posText=b=>`${b.shelf}, ${ord(b.pos)} from the left`;
+const CONDS=["Near Mint","Near Mint","Near Mint","Near Mint","Lightly Played","Lightly Played","Moderately Played"];
+function makeCard(box,place){
+  const g=GAMES[box.game];const name=pk(g.names);
+  const w=where(box,place);
+  return{name,set:box.code,num:String(ri(1,230)).padStart(3,"0"),print:pk(g.prints),cond:pk(CONDS),price:(ri(49,4200)/100),box,place,sec:w.sec,k:w.k,a:ri(0,359)+"deg"};
+}
+const BUYERS=["Maya R.","Dev P.","Tomás G.","Aiko S.","Grant W.","Lena K.","Omar F.","Priya N.","Sam B.","Hollis T.","Rosa M.","Ben C.","Ines D.","Kwame A.","Nora J.","Felix H.","Jun L.","Carla V."];
+const hex=n=>Array.from({length:n},()=>"0123456789ABCDEF"[ri(0,15)]).join("");
+const ORDERS=BUYERS.map((b,i)=>{
+  const n=[1,1,1,2,2,2,3,4][ri(0,7)];
+  const cards=Array.from({length:n},()=>{const bx=BOXES[pk([1,1,3,4,6,9,10,14,15,16,19,24,25,27])];return makeCard(bx,ri(4,bx.count-4))});
+  const state=i<5?"packed":i<7?"pack":"pull";
+  cards.forEach((c,j)=>{c.pulled=state!=="pull"||(j===0&&n>1&&rnd()<.6);c.order=null});
+  const o={buyer:b,no:`${hex(8)}-${hex(6)}-${hex(5)}`,cards,state};cards.forEach(c=>c.order=o);return o;
+});
+// fix the first pull card so the story reads well
+ORDERS[7].buyer="Maya R.";ORDERS[0].buyer="Ana W.";
+const PULL=ORDERS.filter(o=>o.state==="pull").flatMap(o=>o.cards).sort((a,b)=>a.box.i-b.box.i||a.place-b.place);
+const TOPULL=PULL.filter(c=>!c.pulled);
+const PULL_BOXES=[...new Set(TOPULL.map(c=>c.box))];
+const PULL_ORDERS=ORDERS.filter(o=>o.state==="pull");
+const PACK=ORDERS.filter(o=>o.state==="pack");
+const BOX_PULLS=b=>TOPULL.filter(c=>c.box===b);
+const NOW={date:"Wed 28 Oct",time:"9:41",stale:"8:05"};
+// sitting into box 15 (Bloomburrow)
+const SIT=BOXES[14];
+const SIT_DONE=212, SIT_UNSURE=9;
+const SENDN={ready:236,sum:"$517.84",under:47,floor:"$0.49",wait:17,named:283,read:"9:30"};
+const UNSURE={name:"Mabel’s Mettle",set:"BLB",num:"021",place:118,cands:[
+  {name:"Mabel’s Mettle",set:"BLB 021",print:"Nonfoil",price:"$0.31"},
+  {name:"Mabel’s Mettle",set:"BLB 021",print:"Foil",price:"$1.12"},
+  {name:"Mabel’s Mettle",set:"BLB 302",print:"Showcase, Nonfoil",price:"$0.88"}]};
+const SERVER="GET /orders?status=Ready → 503 Service Unavailable (api.tcgplayer.com, 09:41:07)";
+
+/* ============ small parts ============ */
+const P={
+ back:"M15 5l-7 7 7 7",camera:"M4 8h3l2-3h6l2 3h3v11H4zM12 9.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z",
+ box:"M3 8l9-4 9 4v9l-9 4-9-4zM3 8l9 4 9-4M12 12v9",ask:"M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6V14M12 17v.5",
+ send:"M4 12l16-8-6 16-3-7z",search:"M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13zM15.5 15.5L20 20",alert:"M12 3l10 18H2zM12 10v5M12 18v.5",
+ env:"M3 6h18v12H3zM3 6l9 7 9-7",check:"M5 12.5l4.5 4.5L19 7.5",stop:"M7 7h10v10H7z",chev:"M9 5l7 7-7 7",shelf:"M3 4h18M3 12h18M3 20h18M5 4v16M19 4v16",down:"M12 4v14M6 12l6 6 6-6",swap:"M7 7h11l-3-3M17 17H6l3 3"
+};
+const ic=(n,sw=2)=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const photo=(c,w=40,label=false,cls="")=>`<div class="photo ${cls}" style="--w:${w}px;--a:${c&&c.a||"135deg"}" aria-hidden="true">${label?`<span class="pn">${esc(c.name)}</span>`:""}</div>`;
+const status=()=>`<div class="status" aria-hidden="true"><span>${NOW.time}</span><span>5G ▮▮▮ 82%</span></div>`;
+const tick=(on,label)=>`<button class="tick${on?" on":""}" aria-label="${esc(label)}" aria-pressed="${on}"><span>${ic("check",3)}</span></button>`;
+const why=()=>`<details class="why"><summary>What the server said</summary><code>${esc(SERVER)}</code></details>`;
+const errBox=(t,btn="Try again")=>`<div class="err" role="alert"><p class="err-t">${ic("alert")}<span>${t}</span></p><div class="cluster"><button class="btn btn-p">${btn}</button></div>${why()}</div>`;
+const skRows=n=>Array.from({length:n},(_,i)=>`<div class="sk-row"><div class="sk" style="width:40px;height:56px"></div><div class="sk-lines"><div class="sk" style="height:14px;width:${60+(i*13)%30}%"></div><div class="sk" style="height:12px;width:${45+(i*17)%30}%"></div><div class="sk" style="height:12px;width:55%"></div></div><div class="sk" style="width:30px;height:30px;border-radius:50%"></div></div>`).join("");
+const loadNote=t=>`<p class="loading-note" role="status"><span class="spin" aria-hidden="true"></span>${t}</p>`;
+const page=(inner)=>inner;
+const cardMeta=c=>`${c.set} ${c.num} · ${c.print} · ${c.cond}`;
+const placeLine=c=>`<b>Card ${c.place}</b> · ${ord(c.k)} after “${esc(c.sec)}” · for ${esc(c.order.buyer)}`;
+const explainer=(title)=>`<div class="explain"><h2 style="font-size:20px">${title}</h2><ol>
+  <li>Sort a box by hand, in the order you like. Put dividers in it.</li>
+  <li>Photograph each card in that order. Banchi reads each photograph.</li>
+  <li>Look at the cards Banchi is not sure of. Then send the rest to TCGplayer in one send.</li>
+  <li>When a card sells, Banchi tells the helper which box and which card to pull.</li></ol></div>`;
+
+/* ============ D1 · Four tabs ============ */
+const tabs=(cur,badges=true)=>`<nav class="tabs" aria-label="Main">
+ ${[["Pull","box",badges?TOPULL.length:0],["Shoot","camera",0],["Check","ask",badges?SENDN.wait:0],["Send","send",0]].map(([n,i,b])=>`<button class="tab" ${cur===n?'aria-current="page"':""}>${ic(i)}<span>${n}</span>${b?`<span class="badge" aria-label="${b} waiting">${b}</span>`:""}</button>`).join("")}
+</nav>`;
+function d1Pull(s){
+  const sub={list:`${TOPULL.length} cards in ${PULL_BOXES.length} boxes, for ${PULL_ORDERS.length} orders`,loading:"",empty:"",error:`Last list at ${NOW.stale}`}[s];
+  let body="";
+  if(s==="list"){
+    const groups=[...new Set(PULL.map(c=>c.box))];
+    body=`<p class="hint">${tick(false,"Example circle")}<span>Tap the circle when the card is in your hand.</span></p>`+
+    groups.map(b=>`<section class="group" aria-label="Box ${b.no}"><div class="ghead"><b class="ell">Box ${b.no} · ${esc(b.name)}</b><span class="small muted" style="flex:none">${b.shelf.replace(" shelf","")}, ${ord(b.pos)}</span></div>
+      ${PULL.filter(c=>c.box===b).map(c=>`<div class="prow${c.pulled?" done":""}">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pmeta ell">${cardMeta(c)}</div><div class="pplace">${placeLine(c)}</div></div>${tick(c.pulled,`${c.name}, card ${c.place} in box ${b.no}: pulled`)}</div>`).join("")}</section>`).join("");
+  }else if(s==="empty"){
+    body=`<div class="empty"><p>No cards to pull. When a card sells, it shows here.</p><button class="btn btn-p">Check for sales now</button></div>`;
+  }else if(s==="loading"){
+    body=`${loadNote("Getting today’s sales from TCGplayer…")}<div class="group"><div class="sk" style="height:18px;width:60%"></div>${skRows(3)}</div><div class="group"><div class="sk" style="height:18px;width:50%"></div>${skRows(3)}</div>`;
+  }else{
+    body=errBox("Banchi could not get today’s sales from TCGplayer. Cards that sold after 8:05 may be missing.")+
+    `<p class="small muted">Cards from the list at ${NOW.stale}:</p>`+
+    PULL.slice(0,3).map(c=>`<div class="prow${c.pulled?" done":""}">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pplace ell">Box ${c.box.no} · ${placeLine(c)}</div></div>${tick(c.pulled,`${c.name}: pulled`)}</div>`).join("");
+  }
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Pull</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div>${sub?`<p class="sub">${sub}</p>`:""}</header><div class="body">${body}</div>${tabs("Pull",s==="list"||s==="error")}`;
+}
+function boxDrawing(box,cards,h=300,unsure=[]){
+  const tot=box.count;let acc=0;
+  return `<div class="boxdraw" role="img" aria-label="Box ${box.no} seen from above, front at the top. ${cards.length} cards to pull.">
+  <div class="front">Front of box</div>
+  ${box.secs.map(s=>{let hh=Math.max(40,Math.round(h*s.n/tot));const start=acc;acc+=s.n;
+    const items=[...cards.filter(c=>c.place>start&&c.place<=start+s.n).map(c=>({p:c.place,t:`${c.place} · ${esc(c.name)}`,q:false})),...unsure.filter(p=>p>start&&p<=start+s.n).map(p=>({p,t:`${p} · ?`,q:true}))].sort((x,y)=>x.p-y.p);
+    let prev=4;items.forEach(it=>{it.y=Math.max(Math.round(26+(hh-36)*(it.p-start)/s.n),prev+24);prev=it.y});
+    if(items.length)hh=Math.max(hh,prev+18);
+    const ms=items.map(it=>`<div class="mark${it.q?" q":""}" style="top:${it.y}px"><span>${it.t}</span></div>`).join("");
+    return `<div class="sec" style="height:${hh}px"><span class="dv">${esc(s.name)} · ${s.n}</span>${ms}</div>`}).join("")}
+  </div>`;
+}
+function d1BoxRight(s){
+  if(s==="empty")return `${status()}<div class="body">${explainer("How Banchi works")}</div>`;
+  if(s==="loading")return `${status()}<header class="hd"><div class="sk" style="height:28px;width:60%"></div><div class="sk" style="height:16px;width:40%"></div></header><div class="body"><div class="sk" style="height:300px"></div>${skRows(2)}</div>`;
+  const b=PULL_BOXES[0];const cs=BOX_PULLS(b);
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Box ${b.no}</h1></div><p class="sub">${esc(b.name)} · ${posText(b)}</p></header>
+  <div class="body">${s==="error"?`<p class="stale">From the list at ${NOW.stale}.</p>`:""}${boxDrawing(b,cs,s==="error"?250:300)}
+  ${cs.map(c=>`<div class="prow">${photo(c,56,true)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pmeta ell">${cardMeta(c)}</div><div class="pplace">${placeLine(c)}</div></div></div>`).join("")}</div>`;
+}
+function d1Shoot(){
+  const last=[205,206,207,208,209,210,211,212].slice(-5).map((p,i)=>({p,c:makeCard(SIT,p),u:i===2}));
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Shoot</h1><span class="chip on" role="switch" aria-checked="true">Auto</span></div><p class="sub">Box 15 · Bloomburrow · next is card 213</p></header>
+  <div class="body"><div class="vf" style="height:340px"><div class="guide"><i></i><i></i><i></i><i></i>${photo(makeCard(SIT,213),150,false)}</div>
+   <div class="ov bot"><span class="pill">Hold still</span><span class="pill">213</span></div></div>
+   <div class="reads" aria-label="Last five photographs">${last.map(r=>`<div class="read">${photo(r.c,44,false,r.u?"unsure":"")}<span>${r.p}${r.u?" ?":""}</span></div>`).join("")}</div>
+   <p class="small muted">${SIT_DONE} photographed · ${SIT_UNSURE} wait for you in Check</p>
+   <div class="shoot-row"><button class="btn">${ic("stop")}End sitting</button><button class="shutter" aria-label="Take photograph of card 213"><span></span></button><span></span></div>
+  </div>${tabs("Shoot")}`;
+}
+function candList(){return UNSURE.cands.map(c=>`<button class="cand">${photo({a:"200deg"},36)}<span class="pmain"><span class="pname ell">${esc(c.print)}</span><span class="pmeta ell">${c.set} · market ${c.price}</span></span>${ic("chev")}</button>`).join("")}
+function d1Check(){
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Check</h1><span class="muted">1 of ${SENDN.wait}</span></div><p class="sub">Banchi is not sure which printing this is.</p></header>
+  <div class="body"><div class="cardrow">${photo({name:UNSURE.name,a:"200deg"},120,true)}<div class="stack" style="gap:4px;min-width:0"><b>${UNSURE.name}</b><span class="small muted">Box 15 · card ${UNSURE.place}</span><span class="small muted">Photographed 9:22</span></div></div>
+  <h2 style="font-size:17px">Which one is it?</h2><div class="stack" style="gap:8px">${candList()}</div></div>
+  <div class="foot"><div class="act3" style="grid-template-columns:1fr 1fr"><button class="btn">Hold back</button><button class="btn">Skip for now</button></div></div>${tabs("Check")}`;
+}
+function d1Send(){
+  const top=Array.from({length:5},(_,i)=>makeCard(BOXES[[14,15,1,24,9][i]],ri(1,60))).map((c,i)=>(c.price=[38.5,21.75,14.2,9.99,7.4][i],c));
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Send</h1></div><p class="sub">Market prices read at ${SENDN.read} today</p></header>
+  <div class="body"><div class="sum"><span class="big-n">${SENDN.ready} cards</span><span>ready to list, ${SENDN.sum} at market price</span></div>
+  <div class="line-item"><p>${SENDN.under} cards under ${SENDN.floor} stay on the shelf, not listed.</p><button class="btn btn-q">Change floor</button></div>
+  <div class="line-item"><p>${SENDN.wait} cards still wait in Check.</p><button class="btn btn-q">Open Check</button></div>
+  <p class="small muted">Highest prices in this send</p>
+  ${top.map(c=>`<div class="line-item" style="min-height:48px"><span class="ell">${esc(c.name)} <span class="muted small">${c.set} · ${c.print}</span></span><span class="price">$${c.price.toFixed(2)}</span></div>`).join("")}
+  </div><div class="foot"><button class="btn btn-p btn-w btn-big">${ic("send")}Send ${SENDN.ready} listings</button></div>${tabs("Send")}`;
+}
+const D1={name:"Four tabs",idea:"A plain tab bar: Pull, Shoot, Check, Send. One tab per act. The first tab is Pull, so the helper opens the app where the helper works.",
+ fold:s=>d1Pull(s),
+ unf:s=>[d1Pull(s),d1BoxRight(s)],
+ views:{shoot:d1Shoot,check:d1Check,send:d1Send}};
+
+/* ============ D2 · Today ============ */
+function d2Today(s){
+  let body="";
+  const pullJob=`<section class="job first"><h2>${ic("box")}Pull sold cards</h2><p>${TOPULL.length} cards in ${PULL_BOXES.length} boxes, for ${PULL_ORDERS.length} orders. Banchi walks you to each one.</p><button class="btn btn-p btn-big btn-w">Start pulling</button></section>`;
+  const rest=`<section class="job"><h2>${ic("ask")}Cards that wait for you</h2><p>${SENDN.wait} cards from the Bloomburrow sitting. Banchi is not sure what they are.</p><button class="btn btn-w">Look at them</button></section>
+   <section class="job"><h2>${ic("send")}Send to TCGplayer</h2><p>${SENDN.ready} cards ready, ${SENDN.sum} at market price.</p><button class="btn btn-w">Review the send</button></section>
+   <section class="job"><h2>${ic("camera")}Photograph a box</h2><p>Box 15 stopped at card ${SIT_DONE}.</p><div class="act3" style="grid-template-columns:1fr 1fr"><button class="btn">Go on</button><button class="btn">Other box</button></div></section>`;
+  if(s==="list")body=pullJob+rest;
+  else if(s==="empty")body=`<div class="empty"><p>Your shelf is empty. Photograph your first box to fill it.</p><button class="btn btn-p btn-big">${ic("camera")}Photograph a box</button></div>`;
+  else if(s==="loading")body=`<section class="job" style="height:172px">${loadNote("Getting today’s sales…")}<div class="sk" style="height:16px;width:80%"></div><div class="sk" style="height:56px"></div></section>`+[1,2].map(()=>`<section class="job" style="height:150px"><div class="sk" style="height:20px;width:60%"></div><div class="sk" style="height:16px;width:85%"></div><div class="sk" style="height:48px"></div></section>`).join("");
+  else body=`<section class="job"><h2>${ic("box")}Pull sold cards</h2>${errBox("Banchi could not get today’s sales from TCGplayer. You can still pull the cards from the 8:05 list.")}<button class="btn btn-w">Pull from the 8:05 list</button></section>`+rest;
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Today</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div><p class="sub">${NOW.date}</p></header><div class="body">${body}</div>`;
+}
+function d2Step(variant="b",stale=false){
+  const c=TOPULL[3]||TOPULL[0];const b=c.box;const idx=TOPULL.indexOf(c)+1;
+  let find="";
+  if(variant==="a")find=`<p class="say">Count <b>${c.place}</b> cards from the front of the box.</p>`;
+  else if(variant==="b")find=`<p class="say">Find the divider “${esc(c.sec)}”. Take the <b>${ord(c.k)}</b> card after it.</p>`;
+  else{const p=makeCard(b,c.place-1),n=makeCard(b,c.place+1);
+    find=`<p class="say">It sits between these two cards.</p><div class="nbrs"><div class="col">${photo(p,64,true)}<span class="ell" style="max-width:96px">${esc(p.name)}</span></div><div class="col me">${photo(c,80,true)}<span>This one</span></div><div class="col">${photo(n,64,true)}<span class="ell" style="max-width:96px">${esc(n.name)}</span></div></div>`;}
+  const showCard=variant!=="c";
+  return `${status()}<div class="step-top"><div class="hd-row"><button class="back">${ic("back")}Today</button><span class="muted">Card ${idx} of ${TOPULL.length}</span></div><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${TOPULL.length}" aria-valuenow="${idx-1}"><i style="width:${(idx-1)/TOPULL.length*100}%"></i></div></div>
+  <div class="body">${stale?`<p class="stale">From the list at ${NOW.stale}.</p>`:""}
+   <div class="boxbig"><span class="lab">Open this box</span><span class="num">Box ${b.no}</span><span class="nm">${esc(b.name)}</span><span class="muted">${posText(b)}</span></div>
+   <div class="find"><span class="lab">Then find this card</span>${find}
+   ${showCard?`<div class="cardrow">${photo(c,96,true)}<div class="stack" style="gap:2px;min-width:0"><b style="font-size:18px">${esc(c.name)}</b><span class="muted">${c.set} ${c.num} · ${c.print}</span><span class="muted">For ${esc(c.order.buyer)}</span></div></div>`:""}</div>
+  </div>
+  <div class="foot"><button class="btn btn-p btn-big btn-w">${ic("check")}I have it</button><button class="btn btn-q btn-w">I cannot find it</button></div>`;
+}
+function d2Pack(){
+  const o=ORDERS.find(o=>o.state==="pull"&&o.cards.length>=3)||PULL_ORDERS[0];const n=o.cards.length;
+  return `${status()}<div class="step-top"><div class="hd-row"><button class="back">${ic("back")}Today</button><span class="muted">Card 5 of ${TOPULL.length}</span></div><div class="bar"><i style="width:${4/TOPULL.length*100}%"></i></div></div>
+  <div class="body"><h1 style="font-size:24px">Put the card in the envelope for ${esc(o.buyer)}</h1>
+  <p class="muted">Write “${esc(o.buyer)}” on the envelope if it is new.</p>
+  <div class="env" aria-hidden="true"></div>
+  <div class="stack" style="gap:6px;align-items:center"><div class="slots">${o.cards.map((_,i)=>`<i class="slot${i<n-1?" in":""}"></i>`).join("")}</div><p>${n-1} of ${n} cards in this envelope.</p></div>
+  <p class="muted">When all ${n} are in, Banchi asks you to seal it.</p></div>
+  <div class="foot"><button class="btn btn-p btn-big btn-w">${ic("env")}It is in the envelope</button></div>`;
+}
+function d2Shoot(sheet=false){
+  return `<div class="vf" style="position:absolute;inset:0;border-radius:0;flex-direction:column">
+   <div class="ov top" style="top:36px"><span class="pill">Box 15 · Bloomburrow</span><span class="pill">Next 213</span></div>
+   <div class="guide"><i></i><i></i><i></i><i></i>${photo(makeCard(SIT,213),150)}</div>
+   <div style="position:absolute;left:16px;right:16px;bottom:24px;display:flex;flex-direction:column;gap:16px">
+    <p style="text-align:center;color:var(--on-vf-2)">${SIT_DONE} photographed · ${SIT_UNSURE} to check later</p>
+    <div class="shoot-row"><button class="btn" style="background:#fff;color:#14161b;border-color:#fff">${ic("stop")}End</button><button class="shutter" style="background:#0b0d12;border-color:#fff" aria-label="Take photograph of card 213"><span style="background:#fff"></span></button><span class="chip on" style="justify-self:end">Auto</span></div>
+   </div></div>
+   ${sheet?`<div class="scrim"></div><div class="sheet" role="dialog" aria-label="Which printing"><div class="grab"></div><h2 style="font-size:19px">Card 212: which printing?</h2><p class="muted small">Banchi stopped the camera. Answer, then go on.</p><div class="stack" style="gap:8px">${candList()}</div><button class="btn btn-w">Hold it back and go on</button></div>`:""}`;
+}
+function d2Check(){
+  return `${status()}<div class="step-top"><div class="hd-row"><button class="back">${ic("back")}Today</button><span class="muted">1 of ${SENDN.wait}</span></div><div class="bar"><i style="width:0%"></i></div></div>
+  <div class="body"><h1 style="font-size:24px">Which printing is this?</h1>
+  <div class="cardrow">${photo({name:UNSURE.name,a:"200deg"},128,true)}<div class="stack" style="gap:4px;min-width:0"><b>${UNSURE.name}</b><span class="small muted">Box 15, card ${UNSURE.place}</span><span class="small muted">Banchi is sure of the name, not the printing.</span></div></div>
+  <div class="stack" style="gap:8px">${candList()}</div></div>
+  <div class="foot"><button class="btn btn-w">Not one of these: hold it back</button></div>`;
+}
+function d2Send(heldAll=false){
+  return `${status()}<div class="step-top"><div class="hd-row"><button class="back">${ic("back")}Today</button></div></div>
+  <div class="body"><h1 style="font-size:24px">Send to TCGplayer</h1>
+  <div class="sum"><span class="big-n">${SENDN.ready} cards</span><span>${SENDN.sum} at market price, read ${SENDN.read} today</span></div>
+  <ul class="stack" style="margin:0;padding-left:20px;gap:8px">
+   <li>${SENDN.under} cards under ${SENDN.floor} stay on the shelf. They are not listed.</li>
+   ${heldAll?`<li><b>${SENDN.wait} cards Banchi could not name are held back.</b> They stay on the shelf, not listed, with their photographs. Nobody looks at them in this send.</li>`:`<li>${SENDN.wait} cards wait for you. They are not in this send.</li>`}
+   <li>Each card keeps its box and place.</li></ul>
+  ${heldAll?"":`<button class="btn btn-w">Look at the ${SENDN.wait} cards first</button>`}
+  <button class="btn btn-q" style="align-self:flex-start">Change the floor</button></div>
+  <div class="foot"><button class="btn btn-p btn-big btn-w">${ic("send")}Send ${SENDN.ready} listings</button></div>`;
+}
+function d2Right(s){
+  if(s==="empty")return `${status()}<div class="body">${explainer("How Banchi works")}</div>`;
+  if(s==="loading")return `${status()}<div class="body" style="padding-top:16px"><div class="sk" style="height:140px"></div><div class="sk" style="height:28px;width:70%"></div><div class="sk" style="height:134px;width:96px"></div></div>`;
+  return d2Step("b",s==="error");
+}
+function d2Helper(){
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Sold cards</h1></div><p class="sub">${NOW.date}</p></header>
+  <div class="body"><section class="job first" style="gap:12px"><p style="font-size:20px;color:var(--text)">${TOPULL.length} cards have sold. They are in ${PULL_BOXES.length} boxes.</p><p>Banchi shows you one card at a time: which box to open, and which card to take out.</p><button class="btn btn-p btn-big btn-w">Start pulling</button></section>
+  <section class="job"><h2>${ic("env")}Envelopes to seal</h2><p>${PACK.length} envelopes have all their cards.</p><button class="btn btn-w">Seal them</button></section></div>
+  <div class="foot"><button class="btn btn-q btn-w">${ic("swap")}I am the seller</button></div>`;
+}
+const D2={name:"Today",idea:"No tabs. One home that lists today’s jobs as plain sentences, each with one button. A job opens a guided walk, one thing per screen, and returns home when done.",
+ fold:s=>d2Today(s),
+ unf:s=>[d2Today(s),d2Right(s)],
+ views:{pull:()=>d2Step("b"),pack:d2Pack,shoot:()=>d2Shoot(false),check:d2Check,send:()=>d2Send(false)}};
+
+/* ============ D3 · Shelf (bold) ============ */
+function tiles(s){
+  return SHELVES.map((sh,si)=>`<div class="shelf"><span class="shelf-lab">${sh}</span><div class="tiles">${BOXES.slice(si*10,si*10+10).map(b=>{
+    if(s==="loading")return `<div class="tile sk" style="border:0"></div>`;
+    const n=BOX_PULLS(b).length;const w=b===SIT;
+    if(s==="error")return `<button class="tile unk" aria-label="Box ${b.no}, sales not known"><b>${b.no}</b><small>${b.code}</small></button>`;
+    return `<button class="tile${n?" lit":""}${w&&!n?" wait":""}" aria-label="Box ${b.no}, ${esc(b.name)}${n?`, ${n} to pull`:""}${w?`, ${SENDN.wait} wait for you`:""}"><b>${b.no}</b><small>${b.code}</small>${n?`<span class="badge" aria-hidden="true">${n}</span>`:""}</button>`}).join("")}</div></div>`).join("");
+}
+function d3Shelf(s){
+  let body="",foot="";
+  if(s==="empty"){
+    body=`<div class="shelf"><span class="shelf-lab">${SHELVES[0]}</span><div class="tiles">${Array.from({length:5},()=>`<div class="tile ghost"></div>`).join("")}</div></div><div class="empty" style="justify-content:flex-start"><p>Your shelf has no boxes yet. Add your first box, then photograph its cards.</p><button class="btn btn-p btn-big">${ic("box")}Add a box</button></div>`;
+  }else{
+    const lead={list:`<p class="hint" style="background:var(--accent-weak)">Blue boxes hold sold cards. Tap one to open it.</p>`,loading:loadNote("Getting today’s sales…"),error:errBox("Banchi could not get today’s sales, so it cannot light the boxes.")}[s];
+    body=lead+(s==="error"?"":tiles(s))+(s==="error"?`<div class="legend"><span>Boxes below: sales not known</span></div>`+tiles(s):"")+
+      (s==="list"?`<div class="legend"><span><i style="background:var(--accent)"></i>sold cards inside</span><span><i style="border:2px dashed var(--edge)"></i>cards wait for you</span></div>`:"")+
+      (s==="loading"?"":`<button class="table-tile">${ic("env")}<span class="pmain"><b>Packing table</b><span class="small muted">${PACK.length} envelopes ready to seal · ${PULL_ORDERS.length} filling</span></span>${ic("chev")}</button>`);
+    foot=`<div class="foot"><div class="act3"><button class="btn">${ic("camera")}Photograph</button><button class="btn">${ic("ask")}Check ${SENDN.wait}</button><button class="btn">${ic("send")}Send ${SENDN.ready}</button></div></div>`;
+  }
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Shelf</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div>${s==="empty"?"":`<p class="sub">30 boxes · 9,214 cards</p>`}</header><div class="body">${body}</div>${foot}`;
+}
+function d3Box(b,opts={}){
+  b=b||PULL_BOXES[0];const cs=BOX_PULLS(b);
+  return `${status()}<header class="hd"><div class="hd-row"><button class="back">${ic("back")}Shelf</button><span class="muted small">${b.count} cards</span></div><h1>Box ${b.no} · ${esc(b.name)}</h1><p class="sub">${posText(b)}</p></header>
+  <div class="body">${opts.stale?`<p class="stale">From the list at ${NOW.stale}.</p>`:""}${boxDrawing(b,cs,250,opts.unsure||[])}
+   ${opts.unsure?"":`<p class="hint">${tick(false,"Example circle")}<span>Take out each blue card. Tap its circle.</span></p>`+cs.map(c=>`<div class="prow">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pplace">${placeLine(c)}</div></div>${tick(false,`${c.name}, card ${c.place}: pulled`)}</div>`).join("")}
+  </div>${opts.foot===false?"":`<div class="foot"><button class="btn btn-w">${ic("camera")}Photograph more cards into this box</button></div>`}`;
+}
+function d3Shoot(){
+  return `${status()}<header class="hd"><div class="hd-row"><button class="back">${ic("back")}Shelf</button><span class="chip on">Auto</span></div><h1>Filling Box 15</h1></header>
+  <div class="body"><div class="vf" style="height:300px"><div class="guide" style="width:150px;height:210px"><i></i><i></i><i></i><i></i>${photo(makeCard(SIT,213),126)}</div><div class="ov bot"><span class="pill">Card 213</span></div></div>
+  <div class="fillbar" role="img" aria-label="${SIT_DONE} cards in box 15 so far"><i style="width:${SIT_DONE/300*100}%"></i><span>${SIT_DONE} cards in Box 15 so far</span></div>
+  <p class="small muted">Section now: Commons I–P. ${SIT_UNSURE} cards wait for you; they keep their place.</p>
+  <div class="shoot-row"><button class="btn">${ic("stop")}End sitting</button><button class="shutter" aria-label="Take photograph of card 213"><span></span></button><span></span></div></div>`;
+}
+function d3Check(){
+  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${d3Box(SIT,{unsure:[37,61,118,140,177,203],foot:false})}</div>
+  <div class="scrim"></div><div class="sheet" role="dialog" aria-label="Card 118"><div class="grab"></div>
+  <div class="cardrow">${photo({name:UNSURE.name,a:"200deg"},72,true)}<div class="stack" style="gap:2px;min-width:0"><b>Card 118 · ${UNSURE.name}</b><span class="small muted">Which printing is it? 1 of ${SENDN.wait}</span></div></div>
+  <div class="stack" style="gap:8px">${candList()}</div><button class="btn btn-w">Not one of these: hold it back</button></div>`;
+}
+function d3Pack(){
+  const os=ORDERS.filter(o=>o.state!=="packed").slice(0,10);
+  return `${status()}<header class="hd"><div class="hd-row"><button class="back">${ic("back")}Shelf</button></div><h1>Packing table</h1><p class="sub">One envelope per order. Dots are its cards.</p></header>
+  <div class="body"><div class="env-grid">${os.map(o=>{const n=o.cards.length,inn=o.cards.filter(c=>c.pulled).length;const ready=inn===n;
+   return `<button class="envt${ready?" sealed":""}" aria-label="${esc(o.buyer)}, ${inn} of ${n} cards in"><b class="ell">${esc(o.buyer)}</b><span class="dots">${o.cards.map(c=>`<i class="${c.pulled?"in":""}"></i>`).join("")}</span><span class="small ${ready?"":"muted"}">${ready?"Seal it":`${n-inn} to pull`}</span></button>`}).join("")}</div></div>`;
+}
+function d3Send(){
+  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${d3Shelf("list")}</div><div class="scrim"></div>
+  <div class="sheet" role="dialog" aria-label="Send to TCGplayer"><div class="grab"></div><h2 style="font-size:20px">Send to TCGplayer</h2>
+  <div class="sum"><span class="big-n">${SENDN.ready} cards</span><span>from 4 boxes, ${SENDN.sum} at market</span></div>
+  <p>${SENDN.under} under ${SENDN.floor} stay on the shelf. ${SENDN.wait} wait for you and stay too.</p>
+  <button class="btn btn-p btn-big btn-w">${ic("send")}Send ${SENDN.ready} listings</button><button class="btn btn-q">Not now</button></div>`;
+}
+function d3Right(s){
+  if(s==="empty")return `${status()}<div class="body">${explainer("How the shelf works")}</div>`;
+  if(s==="loading")return `${status()}<header class="hd"><div class="sk" style="height:28px;width:60%"></div></header><div class="body"><div class="sk" style="height:280px"></div>${skRows(2)}</div>`;
+  if(s==="error")return d3Pack();
+  return d3Box(PULL_BOXES[0]);
+}
+const D3={name:"Shelf (bold)",idea:"The app is a drawing of the real shelf. No tabs and no order list. Thirty box tiles sit where the boxes sit. Sold cards light their box; you zoom in from shelf to box to card. The packing table is one more place on the shelf.",
+ fold:s=>d3Shelf(s),
+ unf:s=>[d3Shelf(s),d3Right(s)],
+ views:{box:()=>d3Box(PULL_BOXES[0]),shoot:d3Shoot,check:d3Check,pack:d3Pack,send:d3Send}};
+
+const DIRS=[D1,D2,D3];
+const STATES=["empty","loading","list","error"];
+const PICKS={
+ "2a":()=>d2Step("a"),"2b":()=>d2Step("b"),"2c":()=>d2Step("c"),
+ "3a":()=>d2Shoot(true),"3b":d2Check,"3c":()=>d2Send(true),
+ "4a":()=>d2Today("list"),"4b":d2Helper};
+const PICK_LABEL={"2a":"Count from the front","2b":"Count from a divider","2c":"Show the two neighbours","3a":"Ask during the sitting","3b":"Pile them up for after","3c":"Hold them all back","4a":"One home for both people","4b":"Helper home, seller behind a switch"};
+
+/* ============ frames and routing ============ */
+function frame(d,s,size,v,pick){
+  if(pick)return `<div class="frame"><section class="page">${PICKS[pick]()}</section></div>`;
+  const D=DIRS[d-1];
+  if(v)return `<div class="frame"><section class="page">${D.views[v]()}</section></div>`;
+  if(size==="unfolded"){const [l,r]=D.unf(s);return `<div class="frame unf"><section class="page">${l}</section><div class="hinge" aria-hidden="true"></div><section class="page">${r}</section></div>`}
+  return `<div class="frame"><section class="page">${D.fold(s)}</section></div>`;
+}
+const link=o=>"#"+Object.entries(o).map(([k,v])=>`${k}=${v}`).join("&");
+function gallery(){
+  const theme=document.documentElement.dataset.theme||"system";
+  return `<main class="gal"><header class="gal-top">
+   <h1>Banchi phone: blind directions</h1>
+   <p class="lane-line">Lane kind: blind</p>
+   <p class="lane-line">Assumed Duo size: 360x780 folded, 760x780 unfolded (no size written anywhere; to confirm)</p>
+   <p class="muted">Lane banchi-phone-blind-1. All cards, orders and buyers are made up. Deep link one frame with #d=1..3&amp;s=empty|loading|list|error&amp;size=folded|unfolded&amp;t=light|dark.</p>
+   <div class="cluster" role="group" aria-label="Theme">${["system","light","dark"].map(t=>`<button class="gbtn" data-theme-set="${t}" aria-pressed="${theme===t}">${t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
+   <div class="cluster" id="hidden-list"></div>
+  </header>
+  ${DIRS.map((D,i)=>{const d=i+1;return `<section class="dir" id="dir-${d}" data-dir="${d}"><div class="dir-head"><h2>D${d} · ${D.name}</h2><button class="gbtn" data-hide="${d}">Hide D${d}</button></div><p class="idea">${D.idea}</p>
+   <p class="row-title">Duo folded, 360 × 780</p><div class="frames">${STATES.map(s=>`<figure>${frame(d,s,"folded")}<figcaption><span>${s}</span><a href="${link({d,s,size:"folded",t:"light"})}">light</a><a href="${link({d,s,size:"folded",t:"dark"})}">dark</a></figcaption></figure>`).join("")}</div>
+   <p class="row-title">Duo unfolded, 760 × 780 (two pages of 380, hinge between)</p><div class="frames">${STATES.map(s=>`<figure>${frame(d,s,"unfolded")}<figcaption><span>${s}</span><a href="${link({d,s,size:"unfolded",t:"light"})}">light</a><a href="${link({d,s,size:"unfolded",t:"dark"})}">dark</a></figcaption></figure>`).join("")}</div>
+   <p class="row-title">More screens of D${d}, folded</p><div class="frames">${Object.keys(D.views).map(v=>`<figure>${frame(d,null,"folded",v)}<figcaption><span>${v}</span><a href="${link({d,v,size:"folded",t:"light"})}">link</a></figcaption></figure>`).join("")}</div>
+  </section>`}).join("")}
+  <section class="dir"><div class="dir-head"><h2>Pictures for the picks</h2></div><p class="idea">One picture per option of each question in the notes. Question 1 uses each direction’s four folded states above.</p>
+   <div class="frames">${Object.keys(PICKS).map(k=>`<figure>${frame(0,null,"folded",null,k)}<figcaption><span>Q${k[0]} ${k[1].toUpperCase()}: ${PICK_LABEL[k]}</span><a href="${link({pick:k,t:"light"})}">link</a></figcaption></figure>`).join("")}</div></section>
+  </main>`;
+}
+const hidden=new Set();
+function wire(){
+  document.querySelectorAll("[data-theme-set]").forEach(b=>b.onclick=()=>{const t=b.dataset.themeSet;if(t==="system")delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t;document.querySelectorAll("[data-theme-set]").forEach(x=>x.setAttribute("aria-pressed",x===b))});
+  document.querySelectorAll("[data-hide]").forEach(b=>b.onclick=()=>{hidden.add(b.dataset.hide);sync()});
+  sync();
+}
+function sync(){
+  document.querySelectorAll(".dir[data-dir]").forEach(s=>s.hidden=hidden.has(s.dataset.dir));
+  const hl=document.getElementById("hidden-list");if(!hl)return;
+  hl.innerHTML=[...hidden].sort().map(d=>`<button class="gbtn" data-show="${d}">Show D${d}</button>`).join("");
+  hl.querySelectorAll("[data-show]").forEach(b=>b.onclick=()=>{hidden.delete(b.dataset.show);sync()});
+}
+function render(){
+  const q=new URLSearchParams(location.hash.slice(1));
+  const app=document.getElementById("app");
+  if([...q.keys()].length){
+    const t=q.get("t");if(t)document.documentElement.dataset.theme=t;
+    const d=+q.get("d")||1,s=q.get("s")||"list",size=q.get("size")||"folded";
+    if(q.get("ov")){app.innerHTML=`<div class="ovw shot">${STATES.map(st=>`<figure><figcaption>D${d} · ${st}</figcaption>${frame(d,st,"folded")}</figure>`).join("")}</div>`;return}
+    app.innerHTML=`<div class="shot">${frame(d,s,size,q.get("v"),q.get("pick"))}</div>`;
+  }else{app.innerHTML=gallery();wire()}
+}
+window.addEventListener("hashchange",render);
+render();
+</script>
+</body>
+</html>
