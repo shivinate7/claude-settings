@@ -56,8 +56,8 @@ def main(argv, gh=run_gh):
             print(f"protect: {a.branch} already requires {', '.join(checks)}. Nothing to set.")
             return 0
         call, body = ["-X", "PATCH", base + "/required_status_checks"], {"contexts": checks}
-        what = f"set the required checks of {a.branch} to {', '.join(checks)} (now: {', '.join(held) or 'none'})"
-    elif "404" in out:
+        what = f"set the required checks of {a.branch} to {', '.join(checks)} (now: {', '.join(held) or 'none'}{'; drops: ' + ', '.join(sorted(set(held) - set(checks))) if set(held) - set(checks) else ''})"
+    elif "HTTP 404" in out:
         code, whole = gh(["-X", "GET", base])  # a 404 also answers "protected, but no check rule": a PUT would replace its other rules
         if code == 0:
             try:
@@ -66,7 +66,7 @@ def main(argv, gh=run_gh):
                 rules = "unreadable rules"
             print(f"protect: {a.branch} is protected without a check rule ({rules}). A PUT would replace them, so nothing was set. Add the checks by hand.", file=sys.stderr)
             return 1
-        if "404" not in whole:
+        if "HTTP 404" not in whole:
             print(f"protect: cannot read the protection of {a.branch}: {whole}", file=sys.stderr)
             return 1
         call = ["-X", "PUT", base]

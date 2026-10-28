@@ -5389,6 +5389,10 @@ class LockHolder(Env):
     def test_the_lock_records_the_boot(self):
         self.assertIn(f"boot: {merge.boot_stamp()}", self.peek()[0].splitlines())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the pid namespace link is Linux's")
+    def test_the_linux_boot_stamp_names_the_pid_namespace(self):  # the same boot id runs under any container's own pid numbers
+        self.assertIn(os.readlink("/proc/self/ns/pid"), merge.boot_stamp())
+
     def test_a_dead_holder_on_another_host_stays_refused(self):
         out = self.held(self.new_message("some-other-host-xyz", dead_pid()))
         self.assertNotIn("took over", out)
@@ -8647,6 +8651,26 @@ class RedMainBrake(Env):
         self.assertIn("run 901", line[0])
         self.assertIn("--confirm refuses it", line[0])
 
+class PinnedMismatchStopsMain(Env):
+    """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
+    def test_main_refuses_before_taking_the_lock(self):
+        fake = self.host
+        def refuse():
+            raise merge.Stop("merge.requiredChecks pins gates, but the branch protection of main requires checks.")
+        fake.refuse_pinned_mismatch = refuse
+        with unittest.mock.patch.object(merge, "Host", lambda: fake):
+            out_buf, err = io.StringIO(), io.StringIO()
+            cwd = os.getcwd()
+            os.chdir(self.co)
+            try:
+                with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err):
+                    rc = merge.main(["7", "--confirm"], lock=self.lock)
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(rc, 1, out_buf.getvalue() + err.getvalue())
+        self.assertIn("pins gates", err.getvalue())
+        self.assertFalse(self.lock_ref())
+
 class ProtectionHost(merge.Host):
     """Host whose branch protection read answers `contexts` (a list) or fails (None); no gh."""
     def __init__(self, required, contexts):
@@ -8711,7 +8735,7 @@ class SignalReleasesLock(Env):
     def test_sigterm_releases_the_lock(self):
         self.stop_with(signal.SIGTERM)
 
-    def test_sigint_releases_the_lock(self):
+    def test_sigint_releases_the_lock(self):  # a control: Python's own KeyboardInterrupt already unwinds the finally; only SIGTERM needs the handler
         self.stop_with(signal.SIGINT)
 
 

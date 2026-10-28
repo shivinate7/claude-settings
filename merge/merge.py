@@ -281,13 +281,15 @@ def boot_stamp():
     try:
         if sys.platform.startswith("linux"):
             with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
-                return f.read().strip()
+                return f.read().strip() + ":" + os.readlink("/proc/self/ns/pid")  # a container's pid numbers are its own, on the same boot
         if sys.platform == "darwin":
             m = re.search(r"sec = (\d+)", sh(["sysctl", "-n", "kern.boottime"], timeout=10)[1])
             return m.group(1) if m else ""
         if os.name == "nt":
             import ctypes
-            return str(int(time.time() - ctypes.WinDLL("kernel32").GetTickCount64() / 1000))
+            tick = ctypes.WinDLL("kernel32").GetTickCount64
+            tick.restype = ctypes.c_ulonglong  # the default c_int wraps after 24.9 days
+            return str(int(time.time() - tick() / 1000))
     except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
         pass
     return ""
