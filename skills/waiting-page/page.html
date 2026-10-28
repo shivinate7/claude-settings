@@ -70,7 +70,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
 .ov-prog { display: grid; gap: 8px; }
 .ov-prog .big { font: 700 15px/1.3 var(--body); }
-.ov-prog .big b { font: 700 26px/1 var(--body); font-variant-numeric: tabular-nums; color: var(--acc); margin-right: 4px; }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
 .ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
 .ov-prog .sub.none { visibility: hidden; }
 .ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
@@ -89,6 +89,14 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .nchip.sent::before { content: "\2713"; margin-right: 3px; }
 .pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
 .pairchips .nchip { height: 28px; width: 44px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; align-items: stretch; }
+  .nchip, .pairchips .nchip { width: 100%; height: 30px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
 .list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
@@ -113,7 +121,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .stake.holds .g.holds { background: var(--on-holds); }
 .stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
 .stake.due b { color: var(--due); }
-.ctx { margin: 0; max-width: 70ch; white-space: pre-line; }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
 .ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
 .about { margin: 0; font-size: 14px; color: var(--muted); }
@@ -127,38 +135,22 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 
 /* Options side by side; each card's rows line up so lose sits beside lose. */
 .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
-/* .optw wraps one option, so the open button sits beside the label, never inside it. */
-.optw { display: grid; gap: 8px; grid-template-rows: auto auto 1fr auto; min-width: 0; }
-.opts.withd .optw { grid-template-rows: auto auto auto 1fr auto; }
-@supports (grid-template-rows: subgrid) {
-  .opts { grid-auto-rows: auto; }
-  .optw { grid-row: span 4; grid-template-rows: subgrid; }
-  .opts.withd .optw { grid-row: span 5; grid-template-rows: subgrid; }
-}
-.opt { grid-area: 1 / 1 / -1 / -1; position: relative; display: grid; grid-template-rows: inherit; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; min-width: 0; }
-@supports (grid-template-rows: subgrid) { .opt { grid-template-rows: subgrid; } }
-/* An option's mockup: a 4:3 slot, so it has its size before the frame loads. The frame ignores the pointer, so a tap on it picks the option. */
-.oshot { display: block; aspect-ratio: 4 / 3; min-width: 0; }
-.oframe { display: block; width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; pointer-events: none; }
-.opt.sel .oframe { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
-.oshot.none .slot { display: block; height: 100%; border: 1.5px dashed var(--line); border-radius: 8px; }
-.opts.withd { container-type: inline-size; }
-/* 710px is three 230px columns and two 10px gaps. Below it a lone no-design option can sit in its own row, and the shared rows still line up without the slot, so it folds away. */
-@container (width < 710px) { .opts.withd .oshot.none { aspect-ratio: auto; height: 0; } .oshot.none .slot { display: none; } }
-.ofull { grid-area: 2 / 1; align-self: start; justify-self: end; margin-right: 16px; position: relative; z-index: 1; width: 44px; height: 44px; padding: 0; border: 0; background: none; cursor: zoom-in; display: grid; place-items: center; }
-.ofull .ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); color: var(--ink); border: 1px solid var(--faint); box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
-.ofull:hover .ic { border-color: var(--acc); }
-.ofull:focus-visible { outline: none; }
-/* The halo keeps the ring readable on the mockup's white. */
-.ofull:focus-visible .ic { outline: 2px solid var(--acc); outline-offset: 2px; box-shadow: 0 0 0 6px var(--surface); }
-/* Without subgrid, row 2 of .optw is not the picture row, so the button would cover the label. The Designs tab still opens each option's mockup. */
-@supports not (grid-template-rows: subgrid) { .ofull { display: none; } }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
 .opt:hover { border-color: var(--faint); }
 .opt input { position: absolute; opacity: 0; pointer-events: none; }
 .opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
 .opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
-.opt .head { display: flex; gap: 10px; align-items: flex-start; }
-.key { flex: none; width: 26px; height: 26px; border-radius: 7px; border: 1.5px solid var(--line); display: grid; place-items: center; font: 600 13px var(--mono); color: var(--muted); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: block; position: relative; cursor: zoom-in; min-height: 40px; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 40px; margin-top: 6px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
 .opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
 .opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
@@ -168,10 +160,10 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .tr .gain .s { color: var(--good); }
 .opt .tr .lose .s { color: var(--holds); }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
-.opt .pick b { font: 700 15px/1.25 var(--body); color: var(--gold-ink); }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
 .opt .nopick { align-self: end; }
 
-.ready { min-height: 1.55em; margin: 0; font-size: 14.5px; color: var(--muted); }
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
 .ready.on { color: var(--good); font-weight: 600; }
 .ready.on::before { content: "\2713  "; }
 /* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
@@ -192,6 +184,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 .dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
 .status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
 
 /* Receipt: the card stays where it was and shows what happened to the answer. */
@@ -235,17 +228,26 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .dprev .dbar .sp { flex: 1; }
 .dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
-.card .dframe { height: 340px; }
-.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-rows: auto 1fr; }
+.dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap.inert .dframe { pointer-events: none; }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
-.dsh-head .in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-block: 8px; }
-.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 220px; }
-.dsh-head .btn { min-height: 40px; border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
 .dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
 .dsh-head .btn.quiet { color: var(--on-hdr); }
-.dsh-body { position: relative; min-height: 0; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
-.dsh-body .dframe { position: absolute; inset: 0; width: 100%; height: 100%; }
-.dsh-body .dframe.off { visibility: hidden; }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
 body.sheet-open { overflow: hidden; }
 </style>
 
@@ -273,11 +275,12 @@ body.sheet-open { overflow: hidden; }
 <div class="dsheet" id="dsheet" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
   <div class="dsh-head"><div class="in">
     <h2 id="dTitle"></h2><span id="dPos"></span>
-    <button class="btn quiet" type="button" id="dPrev">Prev</button><button class="btn quiet" type="button" id="dNext">Next</button>
+    <button class="btn quiet" type="button" id="dPrev" aria-label="Previous design"><span class="lg">Prev</span><span class="sm" aria-hidden="true">&#8249;</span></button><button class="btn quiet" type="button" id="dNext" aria-label="Next design"><span class="lg">Next</span><span class="sm" aria-hidden="true">&#8250;</span></button>
     <button class="btn quiet" type="button" id="dBack"></button>
-    <button class="btn" type="button" id="dClose">Close</button>
+    <button class="btn quiet" type="button" id="dFull" aria-label="Open full size"><span class="lg">Open full size</span><span class="sm" aria-hidden="true">&#10530;</span></button>
+    <button class="btn" type="button" id="dClose" aria-label="Close"><span class="lg">Close</span><span class="sm" aria-hidden="true">&#10005;</span></button>
   </div></div>
-  <div class="dsh-body" id="dStage"></div>
+  <div class="dsh-body" id="dStage"><p class="dcap" id="dCap"></p></div>
 </div>
 
 <!-- A session that adds designs republishes this page with {slug: whole mockup HTML}, "<" written as <. -->
@@ -289,6 +292,10 @@ try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); }
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
 const choiceText = (k) => (k === NONE ? "none of these" : k);
+// The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
+const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
+const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
+const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o ? shorten(String(o.label), 28) : ""; };
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v === true) n.setAttribute(k, ""); else if (v !== false && v != null) n.setAttribute(k, v); }
@@ -391,10 +398,13 @@ function sorted() {
   const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
   const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
   const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
-  by.holds.sort(byAge);
-  by.due.sort((a, b) => dl(a) - dl(b) || byAge(a, b));
-  by.calm.sort((a, b) => (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1));
-  by.stands.sort(byAge);
+  // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
+  const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
+  const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
+  by.holds.sort((a, b) => byRank(a, b) || byAge(a, b));
+  by.due.sort((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b));
+  by.calm.sort((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1));
+  by.stands.sort((a, b) => byRank(a, b) || byAge(a, b));
   return by;
 }
 
@@ -402,23 +412,54 @@ function sorted() {
 const byId = (id) => state.items.find((i) => i.id === id);
 const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
 // The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
-const eff = (it) => state.draft[it.id] || (standsOk(it) && !state.answers[it.id] ? { choice: it.pick, auto: true, stood: true } : undefined);
+const stoodNow = (it) => standsOk(it) && !state.answers[it.id];
+const eff = (it) => {
+  const d = state.draft[it.id];
+  if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: it.pick, auto: true, stood: true };
+  return d || (stoodNow(it) ? { choice: it.pick, auto: true, stood: true } : undefined);
+};
 function draftReady(it) {
-  const d = eff(it); if (!d) return false;
+  const d = eff(it); if (!d || blocked(it)) return false;
   if (it.kind === "task") return !!d.done;
-  if (d.choice === NONE) return !!(d.note || "").trim();
+  if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
   return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
 }
+// What is wrong with an item, as { text, blocks }, or null. One home for every check.
+// The page keys on the database key. A bad id field only warns: the answer still lands at answers/<key>.
+// Anything else the session could not read back safely blocks Send.
+function problem(it) {
+  const okN = typeof it.n === "number" && isFinite(it.n);
+  const fix = " Ask the session to fix " + (okN ? "item " + it.n : "this item") + ".";
+  if (!okN) return { text: "This item has no number, so it cannot be answered." + fix, blocks: true };
+  if (it.kind !== "decision" && it.kind !== "task") return { text: "This item is neither a decision nor a task, so it cannot be answered." + fix, blocks: true };
+  if (it.kind === "decision") {
+    if (it.optionsBad) return { text: "The options of this decision are not a list, so it cannot be answered." + fix, blocks: true };
+    const ks = (it.options || []).map((o) => o && o.key);
+    if (!ks.length) return { text: "This decision has no options, so it cannot be answered." + fix, blocks: true };
+    if (ks.some((k) => !k)) return { text: "An option of this decision has no key, so it cannot be answered." + fix, blocks: true };
+    const dup = ks.find((k, i) => ks.indexOf(k) !== i);
+    if (dup !== undefined) return { text: "Two options of this decision share the key " + dup + ", so it cannot be answered." + fix, blocks: true };
+    if (ks.includes(NONE)) return { text: "An option of this decision uses the key none, so it cannot be answered." + fix, blocks: true };
+  }
+  // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
+  if (it.rawId !== it.id) return { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false };
+  return null;
+}
+const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
 const staged = () => state.items.filter((it) => !isSaved(it) && draftReady(it));
+// A changed answer whose draft the owner emptied: Send withdraws the saved record.
+const withdrawing = (it) => !!state.answers[it.id] && !!state.changing[it.id] && !state.draft[it.id];
+const withdrawn = () => state.items.filter(withdrawing);
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
-  if (!next.choice && !next.done && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
+  if (!next.choice && !next.done && !next.unstood && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
   saveDraft();
 }
 function choose(it, key) {
   const cur = state.draft[it.id] || {};
   // A "none" note says what the owner wants instead. It does not carry over to an option.
   const patch = { choice: key, auto: false };
+  if (key === null && stoodNow(it)) patch.unstood = true; // else my pick would stand again
   if (cur.choice === NONE && key !== NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
   if (key === NONE) { const t = $("n-" + it.id); if (t) t.focus(); }
@@ -426,7 +467,7 @@ function choose(it, key) {
 function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
-  if (it.kind === "decision") body.choice = d.choice; else body.done = true;
+  if (it.kind === "decision") body.choice = d.choice || NONE; else body.done = true;
   return body;
 }
 const edited = () => { state.barNote = ""; state.copyOffer = false; };
@@ -436,29 +477,45 @@ const glyph = (k) => h("span", { class: "g " + k, "aria-hidden": "true" });
 function linkIcon() { const d = document.createElement("span"); d.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>'; return d.firstChild; }
 function readyText(it) {
   const d = eff(it) || {};
+  if (blocked(it)) return "This item cannot be sent.";
   if (it.kind === "task") return d.done ? "Ready to send: done." : "";
   if (d.stood) return "My pick goes with your next Send.";
-  if (!d.choice) return "";
+  if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
-  return "Ready to send: " + d.choice.toUpperCase() + (d.auto ? ", my pick." : ", your choice.");
+  return "Ready to send: " + pickName(it, d.choice) + (d.auto ? ", my pick." : ", your choice.");
 }
-const ICON_FULL = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/></svg>';
-// withd: some option of this item has a mockup, so every option keeps a picture row (an empty slot when it has none).
-function optCard(it, o, chosen, withd) {
-  const id = "o-" + it.id + "-" + o.key, lid = "l-" + it.id + "-" + o.key, K = o.key.toUpperCase();
-  const shot = !withd ? null : o.design
-    ? h("span", { class: "oshot" }, frame(o.design, "Mockup for option " + K, { class: "oframe", tabindex: "-1" }))
-    : h("span", { class: "oshot none", "aria-hidden": "true" }, h("span", { class: "slot" }));
-  const label = h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
-    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": lid, "aria-describedby": "h-" + it.id + "-" + o.key + " t-" + it.id + "-" + o.key + (o.key === it.pick ? " p-" + it.id + "-" + o.key : ""), checked: chosen === o.key, onchange: () => choose(it, o.key) }),
-    h("span", { class: "head" }, h("span", { class: "key" }, K), h("span", { class: "lab", id: lid }, o.label)),
-    shot,
-    h("p", { class: "how", id: "h-" + it.id + "-" + o.key }, o.how),
-    h("div", { class: "tr", id: "t-" + it.id + "-" + o.key }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
-    o.key === it.pick ? h("div", { class: "pick", id: "p-" + it.id + "-" + o.key }, h("b", { "aria-label": "My pick", title: "My pick" }, "★"), it.why) : h("span", { class: "nopick" }));
-  const full = !o.design ? null : h("button", { class: "ofull", type: "button", "aria-label": "Open full size: option " + K, onclick: (e) => { e.preventDefault(); e.stopPropagation(); openDesign(o.design); } });
-  if (full) full.innerHTML = '<span class="ic">' + ICON_FULL + "</span>";
-  return h("div", { class: "optw" }, label, full);
+// The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
+function sparkle() {
+  const b = h("b", { class: "spark", "aria-label": "My pick", title: "My pick" });
+  b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
+  return b;
+}
+const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design) || designsOf(it).some((d) => d.option);
+// An option names its picture with `design`, a slug of the item's `designs`. The picture sits at the top of the option card and a tap on it picks the option.
+// A question about how something looks sets `look`: an option card with no picture then shows a warning.
+// An item's designs. An older item has no `designs` and names `design` on its options only: each of those counts as one design. An item that lists `designs` is read as written, so an option naming a design it lacks warns.
+const designsOf = (it) => (it.designs && it.designs.length) ? it.designs : (it.options || []).filter((o) => o.design).map((o) => ({ slug: o.design, label: o.label }));
+const optionDesigns = (it, o) => { const all = designsOf(it), first = all.filter((d) => d.slug === o.design), more = all.filter((d) => d.option === o.key && d.slug !== o.design); return [...first, ...more]; };
+function optPic(it, o) {
+  const mine = optionDesigns(it, o), has = mine.length > 0;
+  if (!has && !it.look) return h("span", { class: "opic" });
+  if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
+  const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
+  return h("span", { class: "opic", role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen", onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
+    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn), h("span", { class: "view", "aria-hidden": "true" }, "View"));
+}
+// Designs that no option names show at the front of the item.
+const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
+function optCard(it, o, chosen) {
+  const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key;
+  return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
+    hasPics(it) ? optPic(it, o) : null,
+    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": "h-" + sfx + " t-" + sfx + (o.key === it.pick ? " p-" + sfx : ""), checked: chosen === o.key, onchange: () => choose(it, o.key),
+      onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
+    h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab", id: "l-" + sfx }, o.label)),
+    h("p", { class: "how", id: "h-" + sfx }, o.how),
+    h("div", { class: "tr", id: "t-" + sfx }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
+    o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 function receipt(it) {
@@ -466,7 +523,7 @@ function receipt(it) {
   let what;
   if (it.kind === "task") what = "Marked done";
   else if (sv.choice === NONE) what = "None of these";
-  else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + String(sv.choice || "").toUpperCase() + (o ? ": " + o.label : ""); }
+  else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
   const steps = [["Saved " + fmt(sv.at, false), true], ["Read by " + it.owner + (rc.read ? " " + fmt(rc.read, false) : ""), !!rc.read], ["Filed in " + it.home + (rc.filed ? " " + fmt(rc.filed, false) : ""), !!rc.filed]];
   return h("div", { class: "receipt" },
     h("div", { class: "line" }, glyph("done"), h("b", {}, what + "."), h("span", {}, fmt(sv.at)),
@@ -475,17 +532,17 @@ function receipt(it) {
     h("ol", { class: "trail", "aria-label": "Where the answer is" }, steps.map(([s, on]) => h("li", { class: on ? "on" : "" }, h("span", { class: "dot" }), s))));
 }
 function designPreview(it) {
-  const box = h("div", { class: "dprev" }); let i = 0;
+  const list = looseDesigns(it), box = h("div", { class: "dprev" }); let i = 0;
   const draw = () => {
-    const d = it.designs[i];
+    const d = list[i];
     const bar = h("div", { class: "dbar" }, h("span", {}, d.label));
-    if (it.designs.length > 1) {
-      bar.append(h("span", {}, (i + 1) + " of " + it.designs.length),
-        h("button", { class: "btn quiet", type: "button", "aria-label": "Previous design", onclick: () => { i = (i + it.designs.length - 1) % it.designs.length; draw(); } }, "Prev"),
-        h("button", { class: "btn quiet", type: "button", "aria-label": "Next design", onclick: () => { i = (i + 1) % it.designs.length; draw(); } }, "Next"));
+    if (list.length > 1) {
+      bar.append(h("span", {}, (i + 1) + " of " + list.length),
+        h("button", { class: "btn quiet", type: "button", "aria-label": "Previous design", onclick: () => { i = (i + list.length - 1) % list.length; draw(); } }, "Prev"),
+        h("button", { class: "btn quiet", type: "button", "aria-label": "Next design", onclick: () => { i = (i + 1) % list.length; draw(); } }, "Next"));
     }
     bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", onclick: () => openDesign(d.slug) }, "Open full size"));
-    box.replaceChildren(bar, frame(d.slug, d.label));
+    box.replaceChildren(bar, fitFrame(d.slug, d.label, false));
   };
   draw(); return box;
 }
@@ -496,8 +553,10 @@ function buildCard(it) {
   if (it.minutes) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
+  const bad = problem(it);
+  if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));
   if (saved) { card.append(receipt(it)); return card; }
-  if (it.designs && it.designs.length) card.append(designPreview(it));
+  if (looseDesigns(it).length) card.append(designPreview(it));
   if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));
   if (it.by && validT(it.by)) {
     const left = Date.parse(it.by) - Date.now();
@@ -509,25 +568,23 @@ function buildCard(it) {
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
   const noteShown = !!(state.noteOpen[it.id] || d.choice === NONE || d.note);
-  const clearable = !!(d.choice || d.done || d.note || state.changing[it.id]) && !d.stood;
   const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
-  const clear = h("button", { class: "btn quiet clearbtn" + (clearable ? "" : " gone"), type: "button", id: "b-clear-" + it.id, onclick: () => clearItem(it) }, "Clear");
   const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   if (it.kind === "decision") {
-    const withd = (it.options || []).some((o) => o.design);
-    const opts = h("div", { class: "opts" + (withd ? " withd" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": withd ? it.options.map((o) => o.key + ":" + (o.design || "")).join() : null });
-    (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice, withd)));
+    // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
+    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "")).join("+")).join() : null });
+    (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
     card.append(opts, ready,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
-        addNote, h("span", { class: "sp" }), clear,
-        h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + String(it.pick).toUpperCase() + ")")));
+        addNote,
+        h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + pickName(it, it.pick) + ")")));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
     card.append(ready, h("div", { class: "alts" },
       h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),
-      addNote, h("span", { class: "sp" }), clear));
+      addNote));
   }
   if (noteShown) {
     const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
@@ -538,27 +595,32 @@ function buildCard(it) {
       nb.classList.toggle("need", need && !ta.value.trim());
       const dd = eff(it) || {}, rd = ta.closest(".card").querySelector(".ready");
       rd.textContent = readyText(it); rd.classList.toggle("on", draftReady(it));
-      clear.classList.toggle("gone", !((dd.choice || dd.done || dd.note || state.changing[it.id]) && !dd.stood));
       renderRail(); renderBar();
     });
     nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
     card.append(nb);
   }
+  if (blocked(it)) card.querySelectorAll(".opts input, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
-// Clear drops the draft. On a changed answer it also withdraws the saved record, and the draft stays if the store refuses.
-async function clearItem(it) {
-  delete state.notice[it.id]; edited();
-  if (state.answers[it.id]) {
+// Withdraw deletes the saved record of each changed answer left empty. The page cannot pin a delete to a version,
+// so it re-reads the record first and leaves one that is no longer the answer it holds. A refused delete keeps the answer.
+async function withdrawAll() {
+  const done = [];
+  for (const it of withdrawn()) {
+    const prior = state.answers[it.id];
     try {
       if (!state.db) throw { code: "no store" };
-      await state.db.collection("answers").doc(it.id).delete();
-      delete state.answers[it.id];
-    } catch (e) { state.notice[it.id] = "Not cleared (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " clear"; repaint(it); return; }
+      const ref = state.db.collection("answers").doc(it.id), cur = await ref.get();
+      if (cur.exists && (cur.data() || {}).at !== prior.at) { state.notice[it.id] = "This answer changed since this page read it. Reload before you withdraw it."; continue; }
+      await ref.delete();
+    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
+    delete state.answers[it.id]; delete state.changing[it.id]; delete state.noteOpen[it.id]; delete state.notice[it.id];
+    done.push({ it, prior, draft: null, changing: false, withdrawn: true });
   }
-  delete state.changing[it.id]; delete state.draft[it.id]; delete state.noteOpen[it.id]; saveDraft();
-  repaint(it);
+  saveDraft();
+  return done;
 }
 
 /* ---------- Painting: a card is rebuilt only when what it shows changed, and a live design preview is never detached ---------- */
@@ -582,9 +644,9 @@ function graft(old, keeps, nu) {
 // Same options and designs: keep the live frames and rebuild everything around each one.
 function syncOpts(old, nu) {
   copyAttrs(old, nu);
-  [...old.children].forEach((w, i) => {
-    const ol = w.querySelector(":scope > label"), nl = nu.children[i].querySelector(":scope > label");
-    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .oshot"), nl.querySelector(":scope > .oshot")]], nl);
+  [...old.children].forEach((ol, i) => {
+    const nl = nu.children[i];
+    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic")]], nl);
   });
 }
 function patch(old, nu) {
@@ -673,7 +735,7 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ", sent" : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, String(it.n));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ", sent" : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, it.title));
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
     const open = list.filter((i) => !isSaved(i)).length, row = h("div", { class: "chips-n" }), seen = new Set();
@@ -701,8 +763,9 @@ function renderBar() {
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
   $("barStatus").replaceChildren(...parts);
-  sa.disabled = !state.db || state.sending || !st.length;
-  sa.textContent = st.length ? "Send " + st.length + (st.length === 1 ? " answer" : " answers") : "Send answers";
+  const wd = withdrawn().length;
+  sa.disabled = !state.db || state.sending || !(st.length || wd);
+  sa.textContent = !st.length && wd ? (wd === 1 ? "Withdraw answer" : "Withdraw " + wd + " answers") : st.length ? "Send " + st.length + (st.length === 1 ? " answer" : " answers") : "Send answers";
   $("copy").hidden = !(state.db === false || state.copyOffer);
 }
 
@@ -750,9 +813,12 @@ async function notifyClaude(text, can) {
 
 async function sendAll() {
   if (!state.db || state.sending) return;
-  const st = staged(); if (!st.length) return;
+  const st = staged();
+  if (!st.length && !withdrawn().length) return;
   state.sending = true; edited(); renderBar();
-  const wrote = [], entries = [];
+  const gone = withdrawn().length ? await withdrawAll() : [];
+  if (!st.length) { if (gone.length) openSent(gone, new Date().toISOString()); render(); state.sending = false; renderBar(); return; }
+  const wrote = [...gone], entries = [];
   try {
     const can = await canTell();
     const at = new Date().toISOString();
@@ -767,7 +833,7 @@ async function sendAll() {
     saveDraft();
     if (wrote.length) openSent(wrote, at);
     render();
-    if (wrote.length) {
+    if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
       setSentStatus(told ? TOLD : NOT_TOLD);
     }
@@ -780,7 +846,7 @@ let undoTimer, closeTimer;
 const undoLeft = (p) => Math.max(0, Math.ceil((Date.parse(p.at) + UNDO_S * 1000 - Date.now()) / 1000));
 function openSent(wrote, at) {
   clearInterval(undoTimer); clearTimeout(closeTimer);
-  state.sentPanel = { wrote, at, status: "Telling Claude…" };
+  state.sentPanel = { wrote, at, status: wrote.some((w) => !w.withdrawn) ? "Telling Claude…" : "" };
   renderSent();
   undoTimer = setInterval(() => { const p = state.sentPanel; if (!p) return clearInterval(undoTimer); if (undoLeft(p) <= 0) clearInterval(undoTimer); renderSent(); }, 1000);
   closeTimer = setTimeout(closeSent, 20000);
@@ -791,13 +857,14 @@ function renderSent() {
   const p = state.sentPanel, box = $("sent");
   box.hidden = !p;
   if (!p) { $("sentIn").replaceChildren(); return; }
-  const n = p.wrote.length, blk = p.wrote.filter((w) => w.it.holds).length;
+  const n = p.wrote.filter((w) => !w.withdrawn).length, wd = p.wrote.length - n, blk = p.wrote.filter((w) => w.it.holds && !w.withdrawn).length;
+  const said = [n ? n + (n === 1 ? " answer sent." : " answers sent.") : "", wd ? wd + (wd === 1 ? " answer withdrawn." : " answers withdrawn.") : ""].filter(Boolean).join(" ") + " ";
   $("sentIn").replaceChildren(
-    h("div", { class: "sent-head" }, h("span", { class: "stamp" }, "Sent", h("small", {}, fmt(p.at, false))),
-      h("div", {}, h("b", {}, n + (n === 1 ? " answer" : " answers") + " sent. "), h("span", { id: "sentStatus" }, p.status),
+    h("div", { class: "sent-head" }, h("span", { class: "stamp" }, n ? "Sent" : "Withdrawn", h("small", {}, fmt(p.at, false))),
+      h("div", {}, h("b", {}, said), h("span", { id: "sentStatus" }, p.status),
         blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null)),
     h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = state.receipts[w.it.id] || {}; return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
-    h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, "Undo send (" + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
+    h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, (n ? "Undo send (" : "Undo withdraw (") + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
 }
 // Undo puts back what each write replaced: the earlier answer, or nothing. The owner's picks come back as drafts.
 async function undoSend() {
@@ -821,15 +888,17 @@ async function undoSend() {
   }
   if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + late.map((n) => "No. " + n).join(" and ") + "."; }
   saveDraft(); closeSent(); render();
-  if (undone.length) {
+  const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
+  if (told.length) {
     const can = await canTell();
-    await notifyClaude(noticeText(undone.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
+    await notifyClaude(noticeText(told.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
   }
 }
 
 function answerLine() {
   const parts = [];
   state.items.slice().sort((a, b) => a.n - b.n).forEach((it) => {
+    if (blocked(it)) return;
     const a = state.answers[it.id], d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
@@ -848,29 +917,80 @@ $("send").addEventListener("click", sendAll);
 /* ---------- Designs: each mockup is stored whole in this page and shown in a sandboxed frame ---------- */
 let DESIGN_HTML = {};
 try { DESIGN_HTML = JSON.parse($("designData").textContent) || {}; } catch (e) {}
-// An item's designs, then one per option that carries a design (the sheet labels it "A: Red").
-const designsOf = (it) => [...(it.designs || []), ...(it.options || []).filter((o) => o.design).map((o) => ({ slug: o.design, label: o.key.toUpperCase() + ": " + o.label }))];
 const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
-function frame(slug, title, attrs) {
-  const f = h("iframe", { class: "dframe", title, sandbox: "allow-scripts", loading: "lazy", ...attrs });
-  f.srcdoc = DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>";
-  return f;
+// A mockup is drawn 390 wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
+const FIT_W = 390;
+let FITS = [];
+// Sizes the mockups reported, by slug plus focus. They are kept in this browser, so the next load reserves the height before the mockup loads.
+let FIT = {};
+try { FIT = JSON.parse(localStorage.getItem("waiting.fit") || "{}") || {}; } catch (e) {}
+const saveFit = () => { try { localStorage.setItem("waiting.fit", JSON.stringify(FIT)); } catch (e) {} };
+// The mockup reports its height and, when a `focus` selector names an element, that element's box.
+const fitScript = (focus) => '<script>(function(){var F=' + JSON.stringify(focus || "").replace(/</g, "\\u003c") + ';function s(){var f=null;try{var e=F&&document.querySelector(F);if(e){var r=e.getBoundingClientRect();f={x:r.left+scrollX,y:r.top+scrollY,w:r.width,h:r.height}}}catch(x){}parent.postMessage({dfit:1,h:Math.ceil(document.documentElement.scrollHeight),f:f},"*")}addEventListener("load",s);if(window.ResizeObserver)new ResizeObserver(s).observe(document.documentElement)})()<\/script>';
+// `size` ({w, h}) is the declared size of what the card shows: the focused element, else the whole mockup. It holds the height until the mockup reports its own.
+// `drawn` is the width in mockup pixels the design is laid out at (default FIT_W). The frame has that width, and the scale is the width it has divided by it.
+// `head` (the viewer's) runs before each fit, and the same observer watches the viewer title, so a caption shown or hidden is fitted around.
+function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head) {
+  const DW = drawn > 0 ? drawn : FIT_W, key = slug + "|" + (focus || "");
+  const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
+  f.srcdoc = (DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>") + fitScript(focus);
+  f.style.width = DW + "px";
+  const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
+  const fit = () => {
+    if (head) head();
+    const c = FIT[key], ww = wrap.clientWidth || DW;
+    const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
+    const ht = c ? c.h : (!focus && size ? size.h : 200);
+    const sc = Math.min(maxScale || 1, ww / (box ? Math.max(box.w, 1) : DW));
+    f.style.height = ht + "px";
+    f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
+    if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px"; }
+    else {
+      // Declared size only: the height follows the width by aspect ratio, so the first paint is already the right height.
+      const dw = focus ? size.w : DW;
+      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.ceil(size.h * (maxScale || 1)) + "px";
+    }
+  };
+  FITS.push({ f, key, fit });
+  if (window.ResizeObserver) { const ro = new ResizeObserver(fit); ro.observe(wrap); if (head) ro.observe($("dTitle")); }
+  fit(); return wrap;
 }
+window.addEventListener("message", (e) => {
+  const d = e.data; if (!d || d.dfit !== 1 || typeof d.h !== "number") return;
+  FITS = FITS.filter((x) => x.f.isConnected);
+  const m = FITS.find((x) => x.f.contentWindow === e.source); if (!m) return;
+  FIT[m.key] = { h: Math.max(40, Math.min(d.h, 20000)), f: d.f && typeof d.f.w === "number" ? d.f : null }; saveFit();
+  FITS.filter((x) => x.key === m.key).forEach((x) => x.fit());
+});
 // The sheet's frames are built once and only shown or hidden, so paging never reloads a mockup and closing leaves the list where it was.
 let dList = [], dAt = 0, dFrom = null, dY = 0;
 const STAGE = {};
-function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = frame(d.slug, d.label); STAGE[d.slug].removeAttribute("loading"); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
+// The caption repeats the title only while the head cuts it.
+function capFit() { const t = $("dTitle"); $("dCap").classList.toggle("on", t.scrollWidth > t.clientWidth); }
+function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = fitFrame(d.slug, d.label, false, "", 2, null, d.drawn, capFit); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
-  Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off");
-  $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + " of " + dList.length;
+  // The head fields come first: they set the head's width, and the fit reads the stage's width.
+  $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
+  $("dCap").textContent = d.label;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
+  Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off"); FITS.forEach((x) => x.fit()); // a frame fitted while hidden has no width; fit now, not at a later resize callback
 }
-function openDesign(slug) {
-  dList = allDesigns(); if (!dList.length) return;
+// The viewer of one item: every option's design at every width the item carries, in option order.
+function openViewer(it, o) {
+  const list = (it.options || []).flatMap((x) => optionDesigns(it, x).map((d) => ({ ...d, label: x.label + " (" + (d.width || "Phone") + ")", it, optKey: x.key })));
+  const at = list.findIndex((d) => d.optKey === o.key);
+  openDesign(null, list, Math.max(0, at));
+}
+$("dFull").onclick = () => {
+  const d = dList[dAt]; if (!d) return;
+  try { window.open(URL.createObjectURL(new Blob([DESIGN_HTML[d.slug] || ""], { type: "text/html" })), "_blank", "noopener"); } catch (e) {}
+};
+function openDesign(slug, list, at) {
+  dList = list || allDesigns(); if (!dList.length) return;
   dFrom = document.activeElement; dY = scrollY; document.body.classList.add("sheet-open"); $("dsheet").hidden = false;
-  showDesign(Math.max(0, dList.findIndex((d) => d.slug === slug))); $("dClose").focus();
+  showDesign(at != null ? at : Math.max(0, dList.findIndex((d) => d.slug === slug))); $("dClose").focus();
 }
 function closeDesign(toItem) {
   $("dsheet").hidden = true; document.body.classList.remove("sheet-open");
@@ -900,6 +1020,7 @@ document.addEventListener("keydown", (e) => {
 
 function render() {
   renderList(); renderRail(); renderBar(); renderSent();
+  FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
   const nd = allDesigns().length;
   $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => designsOf(i).length);
 }
@@ -912,7 +1033,7 @@ render();
   state.db = db;
   try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   const map = (s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); return m; };
-  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => d.data()).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
+  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});

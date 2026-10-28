@@ -97,7 +97,9 @@ Other tools, in `judge` order:
   agent-model-floor, roles-third-try-steps-up
                        deny. A spawn below the model floor, or a round or try on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
-                       `agentType` keys in each `agent()` call. A model set through a variable,
+                       `agentType` keys, and a literal prompt, in each `agent()` call. A template
+                       prompt reads its static text only. A step-up call whose prompt or model is
+                       not a literal passes. A model set through a variable,
                        a spread, an alias, a concatenation, a template `${}`, a ternary, a computed key or a
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
@@ -1711,6 +1713,77 @@ def script_opts(text: str, start: int):
         yield "".join(flat)
 
 
+SCRIPT_KEY = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:(.*)\Z", re.DOTALL)
+SCRIPT_TOKEN = re.compile(r"\s*\x00(\d+)\x00\s*\Z")
+SCRIPT_FIRST_ARG = re.compile(r"\s*\x00(\d+)\x00")
+SCRIPT_ARG_END = re.compile(r"\s*[,)]")
+SCRIPT_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
+SCRIPT_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "v": "\v", "f": "\f", "b": "\b", "0": "\0", "\n": ""}
+
+
+def script_group_end(text: str, i: int) -> int:
+    """The index after the balanced "(...)" group that opens at i, or -1."""
+    if i < 0 or not text.startswith("(", i):
+        return -1
+    depth = 0
+    for j in range(i, len(text)):
+        depth += {"(": 1, ")": -1}.get(text[j], 0)
+        if depth == 0:
+            return j + 1
+    return -1
+
+
+def script_agent_calls(script: str):
+    """Yield (prompt, bodies) for each agent() call in a Workflow script. `prompt` is the first argument when
+    it is one string literal, or the `prompt` key of a first-argument options object; else None. A template's
+    `${...}` reads as a \\x00, so only its static text can hold a marker. Escapes are decoded, so a `\\n`
+    starts a line. `bodies` holds (keys, unseen, literals) per options object: `keys` maps each key to its
+    string-literal value; `unseen` names each key whose value is not one plain string literal, plus "..." for
+    a spread, shorthand, computed key or method; `literals` maps each key whose value is one string or
+    template literal to its masked entry."""
+    text, strings = mask_script(script)
+
+    def read(k):
+        v = strings[int(k)]
+        return v if isinstance(v, str) else script[v[0]:v[1]]
+
+    def plain(v):
+        v = v if isinstance(v, str) else v[2]
+        return SCRIPT_ESCAPE.sub(lambda m: SCRIPT_ESCAPES.get(m.group(1), m.group(1)), v)
+
+    for call in AGENT_CALL.finditer(text):
+        bodies = []
+        for body in script_opts(text, call.end()):
+            keys, unseen, literals = {}, set(), {}
+            for name, quoted, value in SCRIPT_PAIR.findall(body):
+                keys[name or read(quoted)] = read(value)
+            for part in filter(None, (p.strip() for p in body.split(","))):
+                pair = SCRIPT_KEY.match(part)
+                token = pair and SCRIPT_TOKEN.match(pair.group(3))
+                if not pair:
+                    unseen.add("...")
+                    continue
+                key = pair.group(1) or read(pair.group(2))
+                if token:
+                    literals[key] = strings[int(token.group(1))]
+                if not token or not isinstance(strings[int(token.group(1))], str):
+                    unseen.add(key)
+            bodies.append((keys, unseen, literals))
+        first, prompt = SCRIPT_FIRST_ARG.match(text, call.end()), None
+        if first:
+            entry, end = strings[int(first.group(1))], first.end()
+            # mask_script leaves each `${...}` of a template as one "(code)" group after its token
+            for _ in range(0 if isinstance(entry, str) else entry[2].count("\x00")):
+                end = script_group_end(text, end)
+            if end >= 0 and SCRIPT_ARG_END.match(text, end):
+                prompt = plain(entry)
+        elif text[call.end():].lstrip().startswith("{") and bodies:
+            _, unseen, literals = bodies[0]
+            if "prompt" in literals and "..." not in unseen:
+                prompt = plain(literals["prompt"])
+        yield prompt, bodies
+
+
 def below_the_floor(model) -> bool:
     return "haiku" in str(model).lower()
 
@@ -1725,18 +1798,8 @@ def floor_hit(tool: str, tool_input) -> str:
         if below_the_floor(tool_input.get("model")):
             return str(tool_input.get("model"))
     elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
-        script = tool_input["script"]
-        text, strings = mask_script(script)
-
-        def read(k):
-            v = strings[int(k)]
-            return v if isinstance(v, str) else script[v[0]:v[1]]
-
-        for call in AGENT_CALL.finditer(text):
-            for body in script_opts(text, call.end()):
-                keys = {}
-                for name, quoted, value in SCRIPT_PAIR.findall(body):
-                    keys[name or read(quoted)] = read(value)
+        for _, bodies in script_agent_calls(tool_input["script"]):
+            for keys, _, _ in bodies:
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
                     return keys["model"]
     return ""
@@ -1745,15 +1808,31 @@ def floor_hit(tool: str, tool_input) -> str:
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 
 
+# A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker line and model disagree, or "". Only a line
     that is the marker counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
     frontmatter model is haiku, so a reviewer round 2 must name sonnet and round 3 must name sonnet or opus."""
-    if tool not in SPAWN_TOOLS or not isinstance(tool_input.get("prompt"), str):
-        return ""
-    model = str(tool_input.get("model") or "").lower()
-    role = tool_input.get("subagent_type")
-    for kind, n in STEP_UP_MARKER.findall(tool_input["prompt"]):
+    if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
+        return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
+    if tool == "Workflow" and isinstance(tool_input.get("script"), str):
+        for prompt, bodies in script_agent_calls(tool_input["script"]):
+            keys, unseen = {}, set()
+            for k, u, _ in bodies:
+                keys.update(k)
+                unseen |= u
+            if prompt is None or "model" in unseen or "..." in unseen:
+                continue
+            role = None if "agentType" in unseen else keys.get("agentType")
+            reason = step_up_reason(prompt, role, keys.get("model"))
+            if reason:
+                return reason
+    return ""
+
+
+def step_up_reason(prompt: str, role, model) -> str:
+    model = str(model or "").lower()
+    for kind, n in STEP_UP_MARKER.findall(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."

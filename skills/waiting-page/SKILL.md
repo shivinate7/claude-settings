@@ -4,10 +4,16 @@ description: Use when a session has a question, a decision or a task for the own
 ---
 
 The waiting page is one private page per repo or project. It holds every item that waits on the
-owner, from every session. Every repo's page is the same template. The page is fixed. All content
-lives in its database, through the ArtifactData tool. The one exception is a design mockup: it is
-stored in the page itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each question
-here. Decision `questions-go-to-owner` holds the rulings.
+owner. Only a session that reads its own answers at a wake writes an item.
+
+A lane never writes an item. A lane is a background agent, or a lane session that ends. It puts its
+question in its report. The orchestrator writes the item with itself as `owner`. It routes the
+answer back to the lane or its next try.
+
+Every repo's page is the same template. The page is fixed. All content lives in its database,
+through the ArtifactData tool. The one exception is a design mockup: it is stored in the page
+itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each
+question here. Decision `questions-go-to-owner` holds the rulings.
 
 ## Find the page
 
@@ -20,7 +26,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 ## The database
 
-- `items/<id>`: one per waiting item. Fields: `id`, `n` (a stable number the owner answers by),
+- `items/<id>`: one per waiting item. The database key and the `id` field must be the same
+  string. The page keys on the database key, and warns on an item whose `id` field is missing or
+  different. Fields: `id`, `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `owner` (the session that reads the answer at its wake), `home` (the step, PR or
   record the answer goes to), `context` (plain text, line breaks kept).
@@ -29,11 +37,17 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
+  - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
+    (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
+    ranked items, oldest first. A group sits together at its best member's `rank`.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
-  - `designs` (a list of `{slug, label}`) shows mockups beside the question (see "Add a design").
-  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, each with an optional
-    `design`, a slug), `pick` (the key you recommend) and `why`. Never use the key `none`. The
-    page adds its own "None of these" option with that key. The page never preselects an option: it stars `pick` and offers "Take my pick".
+  - `look: true` marks a question about how something looks. Every option card with no picture then
+    shows a warning. Never set it on any other question.
+  - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
+    and the picture sits at the top of that option's card.
+  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question), `pick` (the key you
+    recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
+    with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
     (a number, or text such as `3 min`).
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
@@ -42,12 +56,17 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   time), `note`, and `choice` (a decision) or `done: true` (a task). "Take my pick", and a pick that
   stands, write `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
-  instead. Change then Clear deletes `answers/<id>`. Undo (8 seconds after a Send) deletes the
+  instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
+  On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
+  A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
+  deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
+  has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
   records that Send wrote, or puts back the answer they replaced.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
   them as the delivery trail on the answered card. Without a record the trail shows only "Saved".
-- `meta/page`: `checked` (what the items were measured against), `parked` (a list of
+- `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
+  `checked` (what the items were measured against), `parked` (a list of
   `{ref, note}`) and `identity` (`{name, mark, brand, face}`).
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
@@ -59,12 +78,32 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 The page hides an item with status `closed`. It shows an item as answered, in place, when
 `answers/<id>` exists. It stays on the page until the owning session closes the item.
 
+## The writer
+
+Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
+project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
+it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
+into `meta/page`.
+
+- Every other session and every lane sends its question to the writer. The writer writes the item.
+  `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
+- The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
+  write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
+  the page, not only its own. It re-ranks when it adds, updates or closes an item.
+
 ## Add an item
 
-1. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
+0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
+   `owner`. Never tell a lane to write an item: it has no wake after it ends, so it cannot read the
+   answer, and two writers clash on the design republish (see "Add a design").
+1. Only the writer does this step. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
-   or fewer. Never reuse an `id`. If a slug is taken, add a suffix.
+   or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
+   and make it equal to the key. After the `set`, read the item back (`ArtifactData get
+   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
+   unique key, and no key `none`. If a check fails, fix the item at once. The page refuses to send an
+   answer to a broken item.
    - Fill `holds` whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
@@ -106,14 +145,14 @@ relays an answer. An answer typed in the chat counts the same.
 - An answer saved on the page counts as the owner's grant for the item it names, and only for that
   item (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
   the later one wins: compare the answer's `at` with the time of the terminal answer.
-- A cleared answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
-  the owner cleared it: the item is still open, and nothing is ruled.
+- A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
+  the owner withdrew it: the item is still open, and nothing is ruled.
 - `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
   answer for item 27.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
   later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
-- Never write `answers/`. Only the owner's Send, Undo or Clear changes it. A session that writes it forges the
+- Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
 
@@ -155,25 +194,42 @@ unmeasured.
 
 ## Add a design
 
-An item may carry mockups. The owner sees each one in a sandboxed frame, and the Designs tab pages
-through every mockup whose question is open.
+A question about how something looks carries one design per option. The owner picks by looking, so
+a link to a folder, a repo, a file or another artifact does not count. The Designs tab pages through
+every mockup whose question is open. Each option's picture sits at the top of its
+own option card. A tap on an option's picture opens the viewer. A tap on the rest of the card
+picks the option. A "View" control, 40px or more high, sits in a row under the picture. It never covers the picture. A design that no option names shows at the front
+of the item, before the options. An option that names a design (`design`) which the item does not
+carry shows a warning line in its card in place of the picture.
 
-- A decision whose options differ in how something looks carries one mockup per option before it
-  is added: `design` on each option. Its mockup shows inside that option's card. An option with
-  nothing to draw, such as "changes in my note", needs none. A link to a folder, a file or another
-  artifact does not count as a mockup.
-- `designs` on the item holds mockups that belong to the whole question.
-- An option's mockup shows at 4:3. Draw it as one SVG with `viewBox="0 0 400 300"`,
-  `preserveAspectRatio="xMidYMid meet"` and `width:100%;height:100vh`. Crop to the part that shows
-  the difference. The card shows it about 233 px wide, so keep key labels at font size 19 or more.
-
-1. Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-2. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
+1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
+   phone width for a web app. Draw it 390 wide. The page scales it to the card and shows all of it,
+   never cropped. The full mockup stays one tap away ("Open full size").
+2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
+   what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
+   Put the whole mockup in one HTML string. Write `<` as `\u003c`.
+3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
    JSON in `<script type="application/json" id="designData">`.
-3. Add `design: "<slug>"` to its option, or `designs: [{slug, label}]` to the item.
-4. Republish the page to the same URL with the same capabilities. The database stays.
+4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
+   - A design may carry `focus`, a selector of an element inside the mockup. The option card then
+     shows that element whole, scaled to fit the card, so the part being decided is in frame.
+     Without `focus` the card shows the whole mockup.
+   - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
+     focused element, else the whole mockup). The card reserves that height before the mockup loads,
+     so the first paint does not jump.
+   - A design may carry `drawn` (a number, the width in mockup pixels it is laid out at; default 390).
+     The page draws the mockup that wide and scales it to the width it has, so a 1200 wide design
+     shows whole. Set it on any design wider than a phone.
+   - A design may carry `option` (an option's `key`) and `width` (a name such as `Wide`). Each extra
+     width of an option is one more design with that `option`. The first design of an option is its
+     picture on the card.
+   - The viewer lists every option's designs at every width, in option order. Its label reads
+     "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
+     wrap at the ends. A width with no name reads `Phone`.
+5. Republish the page to the same URL with the same capabilities. The database stays.
    A republish replaces the whole page, so run this step in one session at a time. A second session
-   that read the page earlier would overwrite the first one's mockups.
+   that read the page earlier would overwrite the first one's mockups. A lane never does this step:
+   the orchestrator does (see "Add an item").
 
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
