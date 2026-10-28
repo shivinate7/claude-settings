@@ -22,6 +22,9 @@ set -u
 
 # A git hook may export these. The fixtures must not inherit them.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+# A cloud session exports this, and install.sh then writes settings.json as a file, not a link.
+# Case 24 sets it itself.
+unset CLAUDE_CODE_REMOTE
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"

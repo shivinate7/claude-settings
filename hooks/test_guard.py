@@ -15819,12 +15819,19 @@ children = []
 sleeps = []
 time.sleep = lambda seconds: sleeps.append(seconds)   # counted, never waited on
 real_popen = subprocess.Popen
+in_popen = [0]
 
 
+# Python 3.13+ may start a Popen child through os.posix_spawn, so the os-level counters skip calls made
+# inside a counted Popen: one child counts once.
 class CountingPopen(real_popen):
     def __init__(self, *args, **kwargs):
         children.append(str(args[0] if args else kwargs.get("args"))[:80])
-        super().__init__(*args, **kwargs)
+        in_popen[0] += 1
+        try:
+            super().__init__(*args, **kwargs)
+        finally:
+            in_popen[0] -= 1
 
 
 subprocess.Popen = CountingPopen
@@ -15832,7 +15839,8 @@ subprocess.Popen = CountingPopen
 
 def counted(name, real):
     def call(*args, **kwargs):
-        children.append(name)
+        if not in_popen[0]:
+            children.append(name)
         return real(*args, **kwargs)
     return call
 

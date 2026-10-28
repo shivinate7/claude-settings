@@ -11,7 +11,7 @@ A press, a load or a change of state moves no other content.
 Check: press each control and load each state. Pass when no other element moves or resizes. A
 loading area keeps its loaded size, and a control keeps the box of its widest label or icon.
 Source: banchi D118 (a press never moves other content) and D313 (nothing moves unless moved);
-home-app `SPEC.md` "Look and feel" (owner, 2026-10-11); q_max D-684 (a pick moves nothing beside
+home `SPEC.md` "Look and feel" (owner, 2026-10-11); q_max D-684 (a pick moves nothing beside
 it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
 
 ## ux-order-holds-still
@@ -135,7 +135,7 @@ Source: q_max D-319.
 A status summary names only what is not normal. When nothing is not normal, it says "All is well."
 Check: pass when a status summary lists only the items that are not normal. With no such item, it
 shows "All is well." and no other item.
-Source: home-app `SPEC.md`.
+Source: home `SPEC.md`.
 
 ## ux-thumb-zone
 
