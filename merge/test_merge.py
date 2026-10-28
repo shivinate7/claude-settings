@@ -1053,8 +1053,8 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
 
-    def test_a_lint_step_with_a_missing_tool_is_refused(self):
-        self.scoped(workflow=GATES_YML + "      - name: Missing\n        run: no-such-tool-c150 --check\n")
+    def test_a_lint_step_ci_job_cannot_read_is_refused(self):
+        self.scoped(workflow=GATES_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
 
