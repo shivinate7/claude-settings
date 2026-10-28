@@ -26,4 +26,10 @@ Lanes L1 (rules, glossary), L2 (skills), L3 (session-start guard) start after ba
 
 Open: item 50 (lane sessions Sonnet or Opus, pick a recommended); whether he answers triage directly more often; a per-tier context limit (Oct 28 15:08): local launches and agent files can set their own window, cloud has no documented per-session setting, so waiting-page item 53 asks whether to test one cloud environment per tier.
 
+Oct 28 16:15 CDT (shiv, waiting page): item 50 b, lane sessions run Opus; they keep themselves light but need top reasoning on what they are asked (coordinator puts it in session-tiers.md, PR #788). Item 53 a: test the cloud route; his step is item 58, one extra cloud environment with CLAUDE_CODE_AUTO_COMPACT_WINDOW set. Item 59 (helper-agent model and effort for an Opus lane) stays open.
+
+Fact for the rotation want (coordinator, measured Oct 28 16:18 CDT): get_session on a child returns external_metadata.context_usage {used_tokens, max_tokens} and autocompact_state {threshold, effective_window}. The q_max lane read 171216 of 500000, threshold 384000. So the coordinator reads each standing session's tally itself, with no self-report.
+
+Item 51 a's prose lane starts after batch 13 merges, because it edits #780's words, which are not on main yet.
+
 Placed after c200 (triage 12, Oct 28).
