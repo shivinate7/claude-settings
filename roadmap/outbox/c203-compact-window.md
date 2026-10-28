@@ -1,0 +1,8 @@
+# c203 compact-window-off-tracked-file (lane session_013NEJL4Ghu7Kthvr3kBsiVR)
+
+Measured 2026-10-28, Claude Code 2.1.312, scratch config dir:
+- `/autocompact 300k` always writes user settings, as `modelSettings.<model>.autoCompactWindow`. It writes through a symlink, so the link target's repo shows ` M settings.json`.
+- With `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set, `/autocompact` refuses ("is set and takes precedence") and writes nothing.
+- Claude Code reads one user-scope settings file only, so the write cannot move to another user file.
+
+- Deferred: why. Defect 1 needs `~/.claude/settings.json` to stop being a link into the pinned checkout. That departs from merge-reinstalls-from-main (installs link into the pin) ruling 1, "The links in `~/.claude` point at one pinned checkout", and from copy-mode-overwrites-no-backup (copy-mode backups), "a repeat install that finds a plain file there, not the link, moves it to a new `settings.json.bak.<time>`". Outcome they protect: a merge reaches `~/.claude` with no hand install, and no tool edit is lost silently. Proposal A (recommended): install.sh, install.ps1 and its post-merge copy write `~/.claude/settings.json` as a generated copy of the repo file, and carry over only `modelSettings.*.autoCompactWindow` from the old copy. Each merge still refreshes it. Other Claude Code writes (for example "always allow") are lost at the next merge, as today: each merge makes a fresh pin worktree. Proposal B: no code change. shiv sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` per machine or environment and stops using `/autocompact`, which then refuses. Meanwhile the lane builds defect 2 (the handoff hook reads the window in use) and the red test for defect 1.
