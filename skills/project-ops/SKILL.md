@@ -1,6 +1,6 @@
 ---
 name: project-ops
-description: Use when the owner asks to give a repo standing roles, counted hand-offs, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and hand-off templates. Not for ordinary code edits.
+description: Use when the owner asks to give a repo standing roles, counted handoffs, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and hand-off templates. Not for ordinary code edits.
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
@@ -12,7 +12,7 @@ per role. Without a project, each role is one Claude Code session, and the owner
 ## What it packages
 
 - **Standing roles.** Triage, build advisor, local liaison and merge hand. `templates/operating-model.md`
-  says what each role owns and the handoff rule that replaces it.
+  says what each role owns and the hand-off rule that replaces it.
 - **The roster.** One list of who holds each role now. `templates/roster.md`.
 - **Autopilot.** A step that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.

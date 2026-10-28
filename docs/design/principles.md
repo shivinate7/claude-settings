@@ -30,7 +30,7 @@ ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unkno
 
 ## ux-statements-are-true
 
-Screen copy states only what the product does and what the owner confirmed.
+Screen copy claims only what the product does and what the owner confirmed.
 Check: pass when each promise (a search scope, a feature, a figure, a trust line) is true now.
 Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
 `docs/product/screens.md` (search copy promises notes that search does not read); q_max

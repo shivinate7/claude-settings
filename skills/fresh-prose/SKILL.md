@@ -16,7 +16,7 @@ For each claim, take the first rung that holds.
    source. CI runs the script and fails if the file changes.
 4. **Run it.** CI runs the command in a clean checkout. A command that cannot run, for
    example a deploy, gets a short note that says why.
-5. **Check it.** CI fails if a stated path, link, or reference does not resolve. For links,
+5. **Check it.** CI fails if a claimed path, link, or reference does not resolve. For links,
    adopt claude-settings' `actions/readme-links`. A cite to a record in a wrong wrapper, such
    as ``D`slug` ``, is a near-miss. The stamp rewrite never matches it, so the cite stays dead
    text until someone writes the cite form. For cites, adopt the near-miss check of
