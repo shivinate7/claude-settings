@@ -32,7 +32,7 @@ and the reviewer flags any test path in your diff. A refusal is final. Never wri
 path another way, such as with a shell command or a script. A test-author writes the new cases
 first and shows them red. Report any other test change you need.
 
-A test is a claim, not law. When your change breaks one, sort the failure into one class.
+A test is a statement, not law. When your change breaks one, sort the failure into one class.
 (a) The subject still holds, and only its route changed. Re-point the check. Show it red,
 then green. (b) The failure found a real defect. Fix the code. (c) The rule may be stale.
 STOP. Bring the owner the record id, its gloss, and the stale sentence. Name the outcome it

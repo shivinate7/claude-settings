@@ -26,7 +26,7 @@ One run, 10 mutants per file, 3 suites at a time. The gold standard is the guard
 | `lint/check_silent_undo.py` | 10 | 6 | 0 | 4 | 60% | 100% |
 | `hooks/guard_wsl.py` (same engine) | UNKNOWN | | | | UNKNOWN | |
 
-Suites that killed none of the 10 mutants of their file:
+Suites that killed none of the 10 mutants of their file. None is un-run or unread: each runs in CI and goes red on a planted failure (record `c197-silent-tests`). They test other things, so the report's attribution of them to these files is a misattribution, not a gap:
 
 - `lint/report_guard.py`: `hooks/test_reply_judge.py`, `hooks/test_wrappers.py`, `lint/test_rule_audit.py`, `lint/test_settings_matcher.py`. Only `lint/test_report_guard.py` kills.
 - `hooks/feedback_guard.py`: `lint/test_settings_matcher.py`. Only `hooks/test_feedback_inbox.py` kills.

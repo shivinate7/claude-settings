@@ -135,13 +135,14 @@ Fork PRs run code you did not write. Apply these to a public repo. See `snippets
 Branch protection decides if a skipped job counts as passing. Read the protection rules first.
 See `snippets.md`.
 
-The required check names are a copy of `merge.requiredChecks` in `.github/stamp.json`. A rename
-edits both. A PUT on the protection API replaces the whole rule, so it drops any field you leave
-out. (Decision main-branch-protection: the required checks on main.)
+The required check names live in the branch protection, and `merge.requiredChecks` in `.github/stamp.json`
+says `"protection"`, so `merge` reads them from there. A repo that pins a list in `stamp.json` instead must keep it
+equal to the protection: `merge` refuses a disagreement. A rename edits the protection. A PUT on the protection API
+replaces the whole rule, so it drops any field you leave out. (Decision main-branch-protection: the required checks on main.)
 
 ## Docs
 
-CI claims in README or docs go stale too. See the `fresh-prose` skill.
+CI statements in README or docs go stale too. See the `fresh-prose` skill.
 
 ## Opt-in templates
 

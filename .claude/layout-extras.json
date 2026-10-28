@@ -1,5 +1,19 @@
 {
-  "kinds": {},
+  "kinds": {
+    "actions": {"path": "actions"},
+    "agents": {"path": "agents"},
+    "bin": {"path": "bin"},
+    "githooks": {"path": "githooks"},
+    "hooks": {"path": "hooks"},
+    "janitor": {"path": "janitor"},
+    "lint": {"path": "lint"},
+    "merge": {"path": "merge"},
+    "mods": {"path": "mods"},
+    "output-styles": {"path": "output-styles"},
+    "skills": {"path": "skills"},
+    "testing": {"path": "testing"},
+    "tools": {"path": "tools"}
+  },
   "rolled-out": true,
   "visibility": "public",
   "waiting-page": "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"

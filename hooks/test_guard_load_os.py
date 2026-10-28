@@ -9,7 +9,7 @@ Run it from the repository root, on a real Windows or Mac host:
 On any other platform each case prints SKIP and the run passes. GUARD_UNDER_TEST points the run at
 another copy of the guard, as in hooks/test_guard.py.
 
-THE CLAIM. The load brake in hooks/guard.py judges a lane-start call from memory and disk. A reading
+WHAT IT PROVES. The load brake in hooks/guard.py judges a lane-start call from memory and disk. A reading
 that is off by a wide margin brakes a healthy machine or lets a full one run, and the unit cases in
 hooks/test_guard.py cannot see it, because they replace the reader. Here the real reader runs and
 each reading is compared with the OS's own tool, taken a moment later, within a tolerance. The

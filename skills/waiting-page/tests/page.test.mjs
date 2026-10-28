@@ -1840,3 +1840,14 @@ test("an option that widens a shared tool says it goes against the uniform rulin
   assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your uniform ruling (t18)");
   assert.equal(await b.locator(".widens").count(), 0, "an option that does not widen is labelled");
 });
+
+test("a decision card with no differs mark shows no stray null or undefined text", async (t) => {
+  const page = await open(t); if (!page) return;
+  const stray = await page.evaluate((id) => {
+    const w = document.createTreeWalker(document.getElementById("item-" + id), NodeFilter.SHOW_TEXT);
+    const bad = [];
+    for (let n = w.nextNode(); n; n = w.nextNode()) { const s = n.textContent.trim(); if (s === "null" || s === "undefined") bad.push(s); }
+    return bad;
+  }, DECISION.id);
+  assert.deepEqual(stray, [], "stray text in the decision card");
+});

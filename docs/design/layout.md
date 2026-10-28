@@ -25,7 +25,7 @@ container, pass.
 
 When one item needs a larger space before it, split the list into two stacks inside an outer
 stack with the larger gap. Do not give that item a margin.
-Source: mailaudit record spacing-on-4px-grid (claim 14 reads margin, padding and gap). q_max
+Source: mailaudit record spacing-on-4px-grid (statement 14 reads margin, padding and gap). q_max
 `src/index.css` `.aq-stack` spaces its children with `margin-top` and a larger margin before
 `.aq-section-divided`. That is the pattern this rule replaces. Do not migrate it on sight: move it
 when a lane changes that screen.

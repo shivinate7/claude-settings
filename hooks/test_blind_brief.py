@@ -8,9 +8,10 @@ Run it from the repository root:
 Contract (the module's own docstring):
 - `brief_faults(text, current=())` lists the faults of one blind brief. A clean brief has none.
   A brief must follow skills/design-explore/blind-brief.md: a `Lane kind: blind` line, a `Lane:` line,
-  the free sections Job, Device and Palette, and the fixed sections House rules and Deliver word for
-  word. A free section may not name the current product, a screenshot or mockup, a path or link, the
-  spec or tokens, or a keep or match rule. `current` names views of today's product, refused as words.
+  the free sections Job and Device, and the fixed sections House rules and Deliver word for word. A
+  free section may not name the current product, a screenshot or mockup, a path or link, the spec or
+  tokens, or a keep or match rule, and holds no colour, font or spacing value. A Palette section, or any
+  other colour, font or spacing section, is refused. `current` names views of today's product, refused as words.
 - `run_faults(texts, owner_none="")` lists the faults of one explore run: a brief with no kind line,
   each blind brief's faults, and a run with no blind lane unless the owner's words for none are given.
 - `--run DIR` checks every *.md brief in DIR: exit 0 clean, 1 with one line per fault, 2 unreadable.
@@ -63,7 +64,11 @@ DEVICE = """A folding phone with two 5.8 inch screens and a hinge between them. 
 book, folded as a tent on a desk, one screen alone, and a small outer screen when closed. Touch
 only."""
 
-PALETTE = "Parchment #F4ECD8, ink #2B2118, gold #B08D57, green #2F6B3F."
+# The d4 incident (roadmap step c191): the blind brief carried a brand palette, and the designer's notes
+# said "Banchi blue #3d5af1", the hex of banchi's entry in docs/design/repo-colours.json.
+PALETTE = "Banchi blue #3d5af1, ink #14161f, surface #f6f7fb."
+FONTS = "Headings in Inter 600, body in system-ui, mono in JetBrains Mono."
+SPACING = "Spacing uses a 4 px step, cards have 12 px padding and an 8 px radius."
 
 
 def fixed(name):
@@ -75,13 +80,13 @@ def fixed(name):
     return body.split("\n## ", 1)[0].strip()
 
 
-def brief(job=JOB, device=DEVICE, palette=PALETTE, header="Lane kind: blind\nLane: packages-blind-1",
+def brief(job=JOB, device=DEVICE, palette=None, header="Lane kind: blind\nLane: packages-blind-1",
           extra=""):
     return "\n".join([
         header, "",
         "## Job", job, "",
         "## Device", device, "",
-        "## Palette", palette, "",
+        "## Palette\n" + palette + "\n" if palette is not None else "",
         "## House rules", fixed("House rules"), "",
         "## Deliver", fixed("Deliver"), "",
         extra,
@@ -108,7 +113,7 @@ class BriefFaults(unittest.TestCase):
         with open(TEMPLATE, encoding="utf-8") as handle:
             text = handle.read()
         text = text.replace("<screen>-blind-<n>", "packages-blind-1")
-        for name, body in (("Job", JOB), ("Device", DEVICE), ("Palette", PALETTE)):
+        for name, body in (("Job", JOB), ("Device", DEVICE)):
             head = "## " + name + "\n"
             start = text.index(head) + len(head)
             end = text.index("\n## ", start)
@@ -173,8 +178,115 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertTrue(codes(self.m.brief_faults(brief(job=JOB + "\n" + line))) & {"spec", "path"})
 
-    def test_palette_section_is_scanned_too(self):
-        self.assertIn("spec", codes(self.m.brief_faults(brief(palette="Take the colours from the tokens file."))))
+    def test_d4_brief_with_a_palette_section_is_refused(self):
+        found = codes(self.m.brief_faults(brief(palette=PALETTE)))
+        self.assertTrue({"section-extra", "token-section"} <= found, found)
+
+    def test_palette_section_is_refused_even_when_it_says_none(self):
+        self.assertIn("token-section", codes(self.m.brief_faults(brief(palette="None."))))
+
+    def test_colour_values_are_refused_in_a_free_section(self):
+        for line in ("The accent is #3d5af1.", "Ink is #14161F80.", "The alert colour is #fa0.",
+                     "Surface rgb(246, 247, 251).", "Text hsl(220 20% 10%).", "Accent oklch(0.6 0.2 260)."):
+            for where in ("job", "device"):
+                with self.subTest(line=line, where=where):
+                    text = brief(**{where: (JOB if where == "job" else DEVICE) + "\n" + line})
+                    self.assertIn("token-colour", codes(self.m.brief_faults(text)))
+
+    def test_font_values_are_refused_in_a_free_section(self):
+        for line in (FONTS, "font-family: Roboto", "Set it in SF Pro.", "Use a serif typeface.",
+                     "Body is Helvetica Neue.", "Text in system-ui."):
+            with self.subTest(line=line):
+                self.assertIn("token-font", codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_spacing_values_are_refused_in_a_free_section(self):
+        for line in (SPACING, "Gaps of 16px.", "Use --space-2 between rows.", "An 8-point grid.",
+                     "Margin is 24 px.", "A 4 px step.", "Radius 12px."):
+            with self.subTest(line=line):
+                self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_extra_colour_font_or_spacing_sections_are_refused(self):
+        for name in ("Colours", "Colors", "Brand", "Fonts", "Typography", "Spacing", "Tokens", "Style"):
+            with self.subTest(name=name):
+                self.assertIn("token-section", codes(self.m.brief_faults(brief(extra="## %s\nAny." % name))))
+
+    def test_plain_job_words_about_looks_pass(self):
+        for line in ("He wears gloves, so touch targets are big.", "The mailbox is 30 inches deep.",
+                     "Order #1234 arrived; envelope #12 is lost.", "Cards are 63 x 88 mm.",
+                     "He reads at arm's length, in a dim room.", "A card costs 5 dollars.",
+                     "The font on the envelope is hard to read.", "Inter-city mail takes 3 days."):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
+    def test_more_font_spacing_and_colour_leaks_are_refused(self):
+        for key, line in (("token-font", "Headings in Satoshi, body in Lora."),
+                          ("token-font", "The font is set in Fraunces."),
+                          ("token-font", "Use Inter."), ("token-spacing", "Body text is 16px."),
+                          ("token-spacing", "8px rounded corners."), ("token-spacing", "Leave 1.5rem between cards."),
+                          ("token-spacing", "Padding of 12 pt."), ("token-colour", "Accent rgb (61,90,241)."),
+                          ("token-colour", "Text colour #333."), ("token-colour", "Ink #333333."),
+                          ("token-colour", "Surface hsl 220 90 60.")):
+            with self.subTest(line=line):
+                self.assertIn(key, codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_ids_names_and_plain_scales_in_a_job_pass(self):
+        for line in ("Order #123456 arrived.", "Order #A123 is late.", "Lot #B12 is lost.", "Bin #C1D2 is full.",
+                     "Invoice #12345678 is paid.", "He grades cards on a 10-point scale.",
+                     "Inter Miami cards are rare.", "Gotham City cards sell fast.", "Menlo Park sellers ship late.",
+                     "Rubik cards are rare.", "A serif logo is on the seal.", "The typeface on the card is old.",
+                     "Profit margin is 5 percent.", "A step in the process takes 5 minutes."):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
+    def test_round_three_false_refusals_pass(self):
+        for where, line in (("job", "A customer gets a text about order #1234."), ("job", "A paper slip #1234 comes in."),
+                            ("job", "Each card has a title in English."), ("job", "The heading in German is odd."),
+                            ("job", "A courier in San Francisco ships it."), ("job", "Montserrat sellers ship late."),
+                            ("job", "Order #1A2B3C arrived."), ("device", "The lab (north wing) holds a phone.")):
+            with self.subTest(line=line):
+                text = brief(**{where: (JOB if where == "job" else DEVICE) + "\n" + line})
+                self.assertEqual(self.m.brief_faults(text), [])
+
+    def test_round_three_leaks_are_refused(self):
+        for key, line in (("token-colour", "A solid #121212 background."), ("token-colour", "Mid #888888 for lines."),
+                          ("token-colour", "A grid #333333 under it."), ("token-font", "The brand font is Inter."),
+                          ("token-font", "The typeface is Lato."), ("token-font", "Font: Lato."),
+                          ("token-font", "Use font Lato.")):
+            with self.subTest(line=line):
+                self.assertIn(key, codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_device_gap_inset_and_scale_sizes_pass(self):
+        for line in ("8 px gap at the hinge.", "Hinge gap: 8 pt.", "Safe area: 47 pt top inset.",
+                     "1114 x 705 pt, a grid of two screens.", "240 pt, one step down.",
+                     "1114 x 705 pt in 2x scale."):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\n" + line)), [])
+
+    def test_device_still_refuses_colour_and_font(self):
+        for key, line in (("token-colour", "The shell is #3d5af1."), ("token-font", "Labels in Roboto.")):
+            with self.subTest(line=line):
+                self.assertIn(key, codes(self.m.brief_faults(brief(device=DEVICE + "\n" + line))))
+
+    def test_text_on_the_kind_line_or_a_second_kind_line_is_refused(self):
+        for header in ("Lane kind: blind, accent #3d5af1\nLane: packages-blind-1",
+                       "Lane kind: blind\nLane kind: blind #3d5af1\nLane: packages-blind-1",
+                       "Lane kind: blind\nLane kind: blind\nLane: packages-blind-1"):
+            with self.subTest(header=header):
+                self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
+
+    def test_long_digit_run_is_fast(self):
+        import time
+        start = time.time()
+        self.m.brief_faults(brief(job=JOB + "\n" + "1" * 20000))
+        self.assertLess(time.time() - start, 2)
+
+    def test_device_written_sizes_pass(self):
+        line = "iPhone Duo, 1114 x 705 pt open, 540 x 720 px per screen."
+        self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\n" + line)), [])
+
+    def test_house_rules_text_names_no_palette_and_closes_the_token_files(self):
+        self.assertNotIn("Palette", fixed("House rules"))
+        self.assertIn("repo-colours.json", fixed("House rules"))
 
     def test_changed_fixed_section_is_refused(self):
         text = brief().replace(fixed("Deliver"), fixed("Deliver") + " Keep it close to today.")
@@ -184,7 +296,7 @@ class BriefFaults(unittest.TestCase):
         self.assertIn("section-extra", codes(self.m.brief_faults(brief(extra="## Current screens\nThree tabs."))))
 
     def test_missing_section_is_refused(self):
-        text = brief().replace("## Palette\n" + PALETTE + "\n", "")
+        text = brief().replace("## Device\n" + DEVICE + "\n", "")
         self.assertIn("section-missing", codes(self.m.brief_faults(text)))
 
     def test_empty_free_section_is_refused(self):
@@ -196,9 +308,6 @@ class BriefFaults(unittest.TestCase):
 
     def test_missing_lane_line_is_refused(self):
         self.assertIn("lane", codes(self.m.brief_faults(brief(header="Lane kind: blind"))))
-
-    def test_hex_first_palette_lines_pass(self):
-        self.assertEqual(self.m.brief_faults(brief(palette="#F4ECD8 parchment\n#2B2118 ink")), [])
 
     def test_sub_heading_inside_job_passes(self):
         self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n### On mail day\nHe sorts by seller.")), [])

@@ -5,7 +5,7 @@ See docs/decisions/memory-is-never-a-rulings-only-home.md (on branch claude/ruli
 finding this counts. It reads Claude Code transcripts under a projects root. It writes no
 file. Its only outside call is a local `git log`, per repo, to run the reach test. On a
 partial clone, `git log -S` can make git fetch a missing blob over the network, so this is
-not a blanket claim of "no network call": it depends on the repo `git log` runs against.
+not a blanket statement of "no network call": it depends on the repo `git log` runs against.
 
 Run it from the repository root:
 

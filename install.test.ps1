@@ -690,7 +690,7 @@ try {
         Check "$hkName fixture: settings.json is a link, so link mode ran" $hkLinked
         Check "${hkName}: install.ps1 exits 0" ($hkRes.Exit -eq 0)
         Check "${hkName}: a post-merge hook without the marker stays, byte for byte" ($hkGot -eq $hkWant)
-        Check "${hkName}: the install log's hook= field does not claim a removal" ((Get-InstallLogHookMode $HkCfg) -ne 'removed')
+        Check "${hkName}: the install log's hook= field does not state a removal" ((Get-InstallLogHookMode $HkCfg) -ne 'removed')
         if ($hkRes.Exit -ne 0) { Write-Host "  $hkName output: $($hkRes.Text)" }
     }
 } finally {
@@ -776,7 +776,7 @@ try {
         Check "hookgonefail1 fixture: the hook is still there, so its delete failed" ($null -ne $hfText)
         $hfNamed = @($hfLines | Where-Object { $_ -match '(?i)hook.*(fail|could not|cannot|error)' }).Count -ge 1
         Check "hookgonefail1: install.ps1 still writes its run summary line to the install log" ($null -ne $hfMode)
-        Check "hookgonefail1: the summary line's hook= field does not claim a removal" ($null -ne $hfMode -and $hfMode -ne 'removed')
+        Check "hookgonefail1: the summary line's hook= field does not state a removal" ($null -ne $hfMode -and $hfMode -ne 'removed')
         Check "hookgonefail1: the install log names the hook and says the delete failed" $hfNamed
         if (-not $hfNamed -or $null -eq $hfMode) { Write-Host "  hookgonefail1: exit $($hfRes.Exit); log hook= '$hfMode'; install log: $($hfLines -join ' | ')" }
     }

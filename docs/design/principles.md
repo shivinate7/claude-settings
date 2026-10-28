@@ -28,13 +28,13 @@ Check: force a failed read and an unknown state. Pass when neither shows as empt
 Source: q_max D-255 (never assert an unreached state) and D-233 (a failed history read says so);
 ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unknown states).
 
-## ux-claims-are-true
+## ux-statements-are-true
 
-Screen copy claims only what the product does and what the owner confirmed.
+Screen copy states only what the product does and what the owner confirmed.
 Check: pass when each promise (a search scope, a feature, a figure, a trust line) is true now.
-Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
+Source: joyous `docs/design-brief.md` move 6 (no unsourced statement); sillage
 `docs/product/screens.md` (search copy promises notes that search does not read); q_max
-`docs/rules/ui-primitives.md` W1 (the weights screen's claim matches whether the blend runs).
+`docs/rules/ui-primitives.md` W1 (the weights screen's statement matches whether the blend runs).
 
 ## ux-machine-text-hidden
 

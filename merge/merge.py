@@ -14,7 +14,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -274,12 +274,42 @@ def refuse_old_lock(b, old, now):
     if old and old[1] > now:
         raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53.")
 
+def boot_stamp():
+    """One text per boot of this machine, or "" when it cannot be read. Cloud VMs share a hostname and each has its own pid numbers, so a pid
+    absent here proves a holder dead only on the machine that booted when the lock was taken. Linux: the boot id. macOS: kern.boottime
+    seconds. Windows: boot time from the tick count (seconds; same_boot allows the drift)."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
+                return f.read().strip() + ":" + os.readlink("/proc/self/ns/pid")  # a container's pid numbers are its own, on the same boot
+        if sys.platform == "darwin":
+            m = re.search(r"sec = (\d+)", sh(["sysctl", "-n", "kern.boottime"], timeout=10)[1])
+            return m.group(1) if m else ""
+        if os.name == "nt":
+            import ctypes
+            tick = ctypes.WinDLL("kernel32").GetTickCount64
+            tick.restype = ctypes.c_ulonglong  # the default c_int wraps after 24.9 days
+            return str(int(time.time() - tick() / 1000))
+    except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+        pass
+    return ""
+
+def same_boot(a, b):
+    """Both stamps read, and equal. Number stamps (macOS, Windows) may differ by two minutes of clock drift."""
+    if not a or not b:
+        return False
+    if a.isdigit() and b.isdigit():
+        return abs(int(a) - int(b)) <= 120
+    return a == b
+
 def lock_message(ttl, now, holder=None):
     """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
     lines = [f"merge lock\nexpires: {int(now + ttl)}\nowner: {uuid.uuid4().hex}"]
     if holder:
         lines += [f"pr: {holder['pr']}", "branch: " + " ".join(str(holder["branch"]).split()), f"host: {socket.gethostname()}", f"platform: {sys.platform}",
                   f"pid: {os.getpid()}", f"started: {int(now)}"]
+        if boot_stamp():
+            lines.append("boot: " + boot_stamp())
         session = " ".join(holder.get("session", "").split())[:SESSION_MAX]  # fold first, then test: a blank one writes no line
         if session:
             lines.append("session: " + session)
@@ -323,12 +353,51 @@ def holder_text(b, held, now):
     if started_ok:
         text += ", started " + time.strftime("%H:%M:%SZ", time.gmtime(int(f["started"])))
     text += f", expires in {held[1] - now:.0f}s." if held[1] != float("inf") else ", never expires."
+    state = holder_state(held)
+    if state == "alive":
+        return text + " The holder is alive. Wait for it, or ask its session."
+    if state == "dead":
+        return text + " The holder is dead. The next merge run takes the lock over."
+    return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
+
+def holder_state(held):
+    """-> "alive", "dead" or "unknown" for the holder of a lock `held` (read()'s (sha, expiry, message)). Dead only for a pid on this host, platform and boot:
+    a lock with no boot line, or one from another boot, reads unknown."""
+    f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
+    started_ok = re.fullmatch(r"[0-9]{1,10}", f.get("started", ""))  # a garbled field means a forged lock: trust none of it
     pid = int(f["pid"]) if re.fullmatch(r"[0-9]{1,10}", f.get("pid", "")) else 0
     if f.get("host") == socket.gethostname() and f.get("platform") == sys.platform and started_ok and 0 < pid < 2 ** 31:  # a pid from another OS reads nothing
         if pid_alive(pid):
-            return text + " The holder is alive. Wait for it, or ask its session."
-        return text + " The holder is dead. Run: merge --unlock"
-    return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
+            return "alive"
+        return "dead" if same_boot(f.get("boot", ""), boot_stamp()) else "unknown"
+    return "unknown"
+
+def refuse_or_take_over(b, held, now):
+    """A live lock stops the run (Held), unless its holder's pid is dead on this host: then one line says so and the take goes on, as for an expired lock."""
+    if holder_state(held) != "dead":
+        raise Held(holder_text(b, held, now))
+    f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
+    say(f"merge: took over the merge lock on {b}: its holder, PR #{f.get('pr', '?')} (branch {f.get('branch', '?')}), pid {f['pid']} on {f['host']}, is dead.")
+
+@contextlib.contextmanager
+def release_on_signals():
+    """SIGTERM and SIGINT end the run through its `finally`, which releases the merge lock. A second signal while it releases is ignored.
+    Where signal handlers cannot be set (another thread), nothing changes."""
+    names = [signal.SIGTERM, signal.SIGINT]
+    def stop(sig, frame):
+        for n in names:
+            signal.signal(n, signal.SIG_IGN)
+        raise SystemExit(128 + sig)
+    try:
+        before = {n: signal.signal(n, stop) for n in names}
+    except ValueError:
+        yield
+        return
+    try:
+        yield
+    finally:
+        for n, h in before.items():
+            signal.signal(n, h)
 
 class Lock:
     """What both backends share: a release that reports and never raises (it runs in a `finally`)."""
@@ -398,7 +467,7 @@ class GitLock(Lock):
         ref = lock_ref(b)
         cur = self.read(b)
         if cur and cur[1] > self.now():
-            raise Held(holder_text(b, cur, self.now()))
+            refuse_or_take_over(b, cur, self.now())
         refuse_old_lock(b, self.read(b, old_lock_ref(b)), self.now())
         tree = git(self.root, "mktree", input="")[1]
         now = self.now()  # read once: the text and `until` come from this one value
@@ -490,8 +559,8 @@ class GhLock(Lock):
     def acquire(self, b, ttl):
         cur = self.read(b)
         if cur and cur[1] > self.now():
-            raise Held(holder_text(b, cur, self.now()))
-        if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
+            refuse_or_take_over(b, cur, self.now())
+        if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock (or of a live lock whose holder is dead) to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
             if c and not self.gone(out):
                 raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock: " + out)
@@ -669,6 +738,22 @@ class Host:
                        "The tool never merges with nothing to wait for. Name the checks.")
         return names
 
+    def refuse_pinned_mismatch(self):
+        """A pinned merge.requiredChecks list must equal a non-empty branch protection list: a copy that drifted waits on checks no run reports (#746).
+        An empty or unreadable protection leaves the pinned list in force; an unreadable one says so."""
+        if not isinstance(self.required, list):
+            return
+        c, out = self.gh(["api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
+        try:
+            held = json.loads(out) if not c else None
+        except ValueError:
+            held = None
+        if held is None:
+            say(f"merge: cannot read the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
+        elif held and set(held) != set(self.required):
+            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)}. "
+                       'Set merge.requiredChecks to "protection" so the protection list is the one source.')
+
     # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
     CONCLUSION_BUCKET = {"success": "pass", "neutral": "skipping", "skipped": "skipping", "cancelled": "cancel"}
     STATE_BUCKET = {"success": "pass", "pending": "pending"}
@@ -721,7 +806,7 @@ class Host:
         names = self.required_names()
         base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
-        settled = False
+        settled, absent_seen = False, None
         if not listed:
             say("merge: required: " + ", ".join(names))
         said, said_at = None, self.now()  # the text last printed, and when (the wait's start before any line)
@@ -751,6 +836,15 @@ class Host:
             red, pending = self.settle(red, pending, *self.run_state(sha))
             if red:
                 return False, "a check is red: " + "; ".join(red)
+            absent = sorted(k for k in names if not got.get(k))
+            if absent and got and pending == absent:  # every reported check and run has ended; only a required name nobody reports is left
+                if absent_seen != absent:  # ponytail: a job that waits on another, or a status from outside Actions, can appear after the last check ends. One minute covers that; one later still stops the run, which is rerun.
+                    absent_seen = absent
+                    self.pause(self.minute)  # a status from outside Actions can post a minute after the last job ends
+                    continue
+                return False, ("no run reports the required check " + ", ".join(absent) + f" on this head, and every check that did report has ended. "
+                               f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names.")
+            absent_seen = None
             if not pending and not settled:
                 # ponytail: a workflow GitHub has not created yet still reads as green. The runs read and this settle read close most of the window. Ceiling: a workflow that appears after SETTLE_SECONDS.
                 if self.now() - said_at + SETTLE_SECONDS > 120:  # the settle pause would break the 120 s rhythm
@@ -2198,7 +2292,11 @@ def main(argv, host=None, lock=None):
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
-        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
+            h.refuse_pinned_mismatch()
+        if a.confirm:
+            with release_on_signals():
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
+        return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard.", file=sys.stderr)
         return 1

@@ -6,7 +6,7 @@ rules for the main session's replies. The anchors of all files form one list, so
 used in two files reads as a duplicate.
 
 CLAUDE.md says to turn each rule into a hook or a check, and calls itself "the fallback, not
-the enforcement". Nothing measured that claim. This is the measurement. It runs in CI only,
+the enforcement". Nothing measured that statement. This is the measurement. It runs in CI only,
 never at Stop: the map does not change turn to turn, so there is nothing to gain from paying
 its cost on every reply.
 

@@ -14,12 +14,15 @@ worktree (`parallelism-each-own-checkout`).
 
 - **Blind lane.** Build the brief from the template `blind-brief.md` beside this file, and from
   nothing else. It holds the user's job in their own words and the things the job handles. It
-  also holds the device and its poses, the brand palette, and fixed House rules and Deliver text. It never names the current
+  also holds the device and its poses, and fixed House rules and Deliver text. It never names the current
   screen, a view of today's product or its code. It never names a screenshot, a mockup, a path or
-  link, the spec, the tokens, or a keep or match rule. The orchestrator reads the job and the data from the spec or the
+  link, the spec, the tokens, or a keep or match rule. It holds no colour, font or spacing value of
+  the repo, so it has no Palette section (the d4 designer drew "Banchi blue #3d5af1" from one). The orchestrator reads the job and the data from the spec or the
   owner's words, and writes them in plain words. A blind lane shows ideas the repo's habits would
   hide. Each designer's worktree holds the code, spec, tokens and mockups, and the guard
   `designer-scope` limits writes only, so the brief and the designer's own instruction keep it blind.
+  Colour, type and spacing come from the house `tokens.md` only. The orchestrator checks a finished
+  blind mockup for a repo hex before it shows it to the owner.
 - **Informed lane.** The brief gives the current screen, its mockups, the spec and the tokens. Its
   second line is `Blind lanes: <n>`, the count of the run's blind lanes.
 - **Directed lane.** An informed lane plus one named direction, such as denser, phone first, or one
@@ -52,7 +55,9 @@ designer.
    prints its lane kind on the page. A directed mockup also prints its direction.
 4. **Spawn all lanes together.** The lanes share no input, so they run in parallel. Lanes never talk
    to each other (`parallelism-no-mid-task-talk`).
-5. **Collect.** Read each report, never a transcript. Then run the structure check of skill
+5. **Collect.** Read each report, never a transcript. Grep each blind mockup for the repo's own colour
+   (`python3 ~/.claude/lint/repo_colour.py <repo root>`). Grep it also for each colour in the repo's token
+   files, as hex, rgb() and hsl(). One hit means that the lane leaked, so redo it. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
 6. **Gather.** Each lane pushes its own branch. The orchestrator copies every lane's pair onto the
@@ -67,7 +72,7 @@ designer.
 ## Rules
 
 - A blind brief that leaves the template, or names the current screen, its code, a mockup, the spec,
-  the tokens or a keep or match rule, is a defect. The hook `blind_brief.py` refuses the spawn
+  the tokens or a keep or match rule, or holds a colour, font or spacing value, is a defect. The hook `blind_brief.py` refuses the spawn
   (decision blind-briefs-use-a-template). Re-brief the lane.
 - A set whose mockups all share today's structure is flagged at the top of the owner's list, with
   an offer of one more round of blind lanes (skill `design-review`, Mockup set check).

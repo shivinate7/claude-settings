@@ -27,7 +27,7 @@ A size that grows with its box is a clamp() token. Rules: `layout.md` ux-fluid-t
 - The name gives the two ends, as steps: `--space-fluid-<low>-<high>`.
 - Both ends are fixed space tokens, so they sit on the 4 px step. Between the ends the value is
   fluid and can fall off the step. A repo whose check needs every gap on the step, such as
-  mailaudit's claim 14, keeps fixed tokens.
+  mailaudit's statement 14, keeps fixed tokens.
 - The middle term uses `cqi` (the query container's inline size), so the size follows the box.
   With no query container, `cqi` reads the small viewport. Use `vi` only for page-frame tokens.
 
