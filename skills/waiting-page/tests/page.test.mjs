@@ -1929,7 +1929,7 @@ test("a receipt wholly below the screen drops its height without moving the page
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
-// Part 3, set by the designer (docs/design/c193-sizes.md item 3): a picture is at most 480px high, scaled to its card, and centred.
+// A phone mockup shows whole, so the design caps its height at 480px (docs/design/c193-sizes.md item 3); it scales to its card and stays centred.
 for (const width of SIZES) test(`an option's picture is at most 480px high and centred in its card at ${width}px wide`, async (t) => {
   const it = mk("cap-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
   const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
@@ -1944,7 +1944,7 @@ for (const width of SIZES) test(`an option's picture is at most 480px high and c
   }
 });
 
-// Part 5, set by the designer (item 4): the SENT stamp settles in 200ms with no overshoot, and reduced motion shows it still.
+// The stamp settles in 200ms with no overshoot, and reduced motion shows it still (docs/design/c193-sizes.md item 4), so the bar is calm and still reads as sent.
 const sentPage = async (t, reduce) => {
   const page = await open(t); if (!page) return null;
   if (reduce) await page.emulateMedia({ reducedMotion: "reduce" });
@@ -1970,7 +1970,7 @@ test("the Sent bar keeps its parts on the page's spacing steps", async (t) => {
   assert.deepEqual(m, { pad: 16, head: 16, what: 8, stamp: 48, inList: true, li: 28 });
 });
 
-// Part 4 (orchestrator, Oct 28): one containment sweep. A new item state is one row in STATES, a new width one entry in SWEEP_WIDTHS.
+// One containment sweep catches overflow of any kind on every state and width. A new item state is one row in STATES, a new width one entry in SWEEP_WIDTHS.
 const SWEEP_WIDTHS = [320, 390, 768, 1024, 1280, 1600, 2200, 2560];
 const LONGT = "A very long title that runs across the whole width of the rail and then some more ";
 const TALL = '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>';
@@ -2015,7 +2015,7 @@ test("containment sweep: nothing crosses its card, the rail or the Sent bar, not
   assert.deepEqual(failures, []);
 });
 
-// Review round 2 findings (c193).
+// Edge cases the sweep's fixed fixtures miss: resizing a card, a very tall mockup, the stamp across Undo ticks, a bar that must not jump.
 const growItem = () => mk("grow-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
 const growData = (h) => Object.fromEntries(LOOK_OPTS.map((o) => [o.design, `<body style="margin:0"><div style="width:390px;height:${h}px;background:#eee"></div></body>`]));
 const picBox = (page) => page.evaluate(() => [...document.querySelectorAll("#item-grow-pics label.opt")].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.querySelector(".opic").getBoundingClientRect(); return { w: Math.round(w.width), over: Math.round(Math.max(b.left - w.left, w.right - b.right, 0)) }; }));
@@ -2047,7 +2047,7 @@ test("the SENT stamp is the same element, not rebuilt, as the Undo count ticks",
   assert.match(await page.locator("#undoBtn").textContent(), /Undo send \(\d\)/);
 });
 
-for (const width of [390, 1280]) test(`the Sent bar keeps its height when the Undo button goes, at ${width}px wide`, async (t) => {
+for (const width of [390, 500, 600, 1280]) test(`the Sent bar keeps its height when the Undo button goes, at ${width}px wide`, async (t) => {
   const page = await open(t, { viewport: { width, height: 900 } }); if (!page) return;
   await takePick(page, DECISION); await send(page);
   await page.locator("#undoBtn").waitFor();
@@ -2088,4 +2088,21 @@ test("an option that widens a shared tool says it goes against the uniform rulin
 test("the answered pill keeps a 6px gap between its wrapped rows, as the design draws it", async (t) => {
   const page = await open(t, { answers: SAVED_A, viewport: { width: 390, height: 900 } }); if (!page) return;
   assert.equal(await card(page, DECISION).locator(".ans").evaluate((e) => getComputedStyle(e).rowGap), "6px");
+});
+
+test("option pictures of different heights keep the View bars at 44px", async (t) => {
+  const it = growItem();
+  const data = Object.fromEntries(LOOK_OPTS.map((o, i) => [o.design, `<body style="margin:0"><div style="width:390px;height:${[844, 300, 560][i]}px;background:#eee"></div></body>`]));
+  const it2 = { ...it, designs: it.designs.map((d, i) => ({ ...d, size: { w: 390, h: [844, 300, 560][i] } })) };
+  const page = await open(t, { items: [it2], designData: data, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await page.waitForTimeout(400);
+  const hs = await page.evaluate(() => [...document.querySelectorAll("#item-grow-pics .opic .view")].map((v) => Math.round(v.getBoundingClientRect().height)));
+  assert.deepEqual(hs, [44, 44, 44]);
+});
+
+test("a long unbroken receipt label wraps clear of Change at 320px", async (t) => {
+  const it = { ...DECISION, options: [{ key: "a", label: "skills/waiting-page/tests/page.test.mjs-and-more", how: "h", gain: "g", lose: "l" }, DECISION.options[1]] };
+  const page = await open(t, { items: [it], answers: SAVED_A, viewport: { width: 320, height: 900 } }); if (!page) return;
+  const m = await card(page, it).locator(".receipt .line").evaluate((l) => ({ b: l.querySelector("b").getBoundingClientRect().right, c: l.querySelector(".changebtn").getBoundingClientRect().left }));
+  assert.ok(m.b <= m.c + 1, "the label runs under Change: " + JSON.stringify(m));
 });

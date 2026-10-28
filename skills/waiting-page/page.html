@@ -152,7 +152,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
 .key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
 .opt .lab { min-width: 0; overflow-wrap: anywhere; }
-.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
 .opt .opic .dfitwrap { justify-self: center; }
 .opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
 .opts.pics { grid-auto-rows: auto; }
@@ -215,7 +215,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .receipt .line .read { grid-column: 2; grid-row: 2; }
 .receipt .line .changebtn { grid-column: 3; grid-row: 1; }
 .receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
-.receipt .line b { color: var(--good); }
+.receipt .line b { overflow-wrap: anywhere; color: var(--good); }
 .receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
 .card.answered { border-left: 6px solid var(--good); }
 .ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
@@ -252,7 +252,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
 .dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
 .dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
-.sent .row { display: flex; flex: none; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
+.sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
 #undoBtn { font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
 
