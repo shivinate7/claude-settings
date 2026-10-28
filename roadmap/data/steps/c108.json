@@ -1,9 +1,9 @@
 {
  "title": "The decision watch says once, plainly, when a folder has no git repo",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.398,
  "why": "Your gripe (cmsg_01DoF7thf3iq2Srr1UsfXgh2TkqfzhdXsXZHkAN93aqYpf): every turn in a folder that is not a git repo shows \"UNKNOWN, git status could not be read\".",
- "note": "Checked main e305bdb: hooks/decision_watch.py's changed_this_turn gives no answer when the folder is not a git work tree, and test case_not_a_repo pins that on purpose. On your Mac, /Users/shivinate/Developer, _targets, beli-export and degen-scratch are not repos; every repo there reads git status in under 2.2 s (10 s timeout), so a timeout is not the cause (measured Oct 27). A notice that repeats every turn teaches you to scroll past it. Ruling, Oct 27 23:48 CDT (shiv, waiting page item 8, a, accepted pick): say it once per session in plain words, then stay quiet. Next cloud lane: hooks/decision_watch.py notes the no-repo case once per session; case_not_a_repo changes to expect one line, then silence; red first on today's every-turn notice. Needs no answer. Port: no; it lives in claude-settings, so every repo gets it. Placed after c104 (triage, Oct 27).",
- "updatedAt": "2026-10-28T04:55:00Z"
+ "note": "Checked main e305bdb: hooks/decision_watch.py's changed_this_turn gives no answer when the folder is not a git work tree, and test case_not_a_repo pins that on purpose. On your Mac, /Users/shivinate/Developer, _targets, beli-export and degen-scratch are not repos; every repo there reads git status in under 2.2 s (10 s timeout), so a timeout is not the cause (measured Oct 27). A notice that repeats every turn teaches you to scroll past it. Ruling, Oct 27 23:48 CDT (shiv, waiting page item 8, a, accepted pick): say it once per session in plain words, then stay quiet. Doing: lane started Oct 28 CDT, branch c108-no-repo-once from main e0f9e2d, Opus builder; touches only hooks/decision_watch.py and its test. Lane: notes the no-repo case once per session; case_not_a_repo changes to expect one line, then silence; red first on today's every-turn notice. Needs no answer. Port: no; it lives in claude-settings, so every repo gets it. Placed after c104 (triage, Oct 27).",
+ "updatedAt": "2026-10-28T05:15:00Z"
 }
