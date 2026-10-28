@@ -331,6 +331,17 @@ test("a read but unfiled answer shows Read by the owner beside Change", async (t
   assert.match((await c.locator(".ans").textContent()).trim(), /^Answered, filing pending /);
 });
 
+test("a receipt older than the answer is ignored: a changed answer reads filing pending", async (t) => {
+  const later = { [DECISION.id]: { ...SAVED_A[DECISION.id], at: "2026-10-26T04:00:00Z" } };
+  const page = await open(t, { answers: later, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } }); if (!page) return;
+  const c = card(page, DECISION);
+  assert.match((await c.locator(".ans").textContent()).trim(), /^Answered, filing pending /);
+  assert.equal(await c.locator(".ans.filed").count(), 0);
+  assert.equal(await c.locator(".receipt .read").count(), 0);
+  assert.doesNotMatch(await page.locator("#c-" + DECISION.id).getAttribute("class"), /filed/);
+  assert.match(await page.locator("#c-" + DECISION.id).getAttribute("aria-label"), /filing pending$/);
+});
+
 test("times are 24-hour Chicago time with the zone named", async (t) => {
   const page = await open(t, { items: [mk("timed", 1, { by: "2099-10-27T14:45:00Z" })] }); if (!page) return;
   const f = await page.evaluate(() => [fmt("2026-10-26T20:00:00-05:00"), fmt("2026-12-01T06:05:00Z"), fmt("2026-10-27T05:07:00Z", false)]);
@@ -1023,10 +1034,13 @@ test("the faint text reaches 4.5:1 on chips and the ground, for any brand", asyn
   assert.deepEqual(bad, []);
 });
 
-test("a sent chip in the overview carries a check mark, so it differs from ready by more than colour", async (t) => {
+test("a sent chip carries a mark, a ring while filing is pending and a check once filed, so it differs from ready by more than colour", async (t) => {
+  const mark = (page) => page.evaluate((id) => getComputedStyle(document.getElementById("c-" + id), "::before").content, DECISION.id);
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
-  const content = await page.evaluate((id) => getComputedStyle(document.getElementById("c-" + id), "::before").content, DECISION.id);
-  assert.match(content, /✓/);
+  assert.match(await mark(page), /○/);
+  await page.close();
+  const page2 = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { filed: "2026-10-26T03:00:00Z" } } }); if (!page2) return;
+  assert.match(await mark(page2), /✓/);
 });
 
 test("an invalid added or by date shows no NaN and no Invalid", async (t) => {

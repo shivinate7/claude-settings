@@ -87,6 +87,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
 .nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
 .pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
 .pairchips .nchip { height: 28px; width: 44px; }
 .nchip .nt { display: none; }
@@ -193,10 +194,11 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .receipt .line b { color: var(--good); }
 .receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
 .card.answered { border-left: 6px solid var(--good); }
-.ans { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px; border-radius: 999px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
 .ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
 .ans.filed { background: var(--good); color: var(--surface); }
 .ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
 .receipt .read { color: var(--muted); font-size: 14.5px; }
 .nchip.sent.filed { background: var(--good); color: var(--surface); }
 
@@ -521,8 +523,15 @@ function optCard(it, o, chosen) {
     o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
+// A receipt from an earlier answer says nothing about a changed one, so only a receipt at or after the answer counts.
+function rcOf(it) {
+  const sv = state.answers[it.id], r = state.receipts[it.id] || {};
+  if (!sv) return r;
+  const ok = (t) => !t || !(Date.parse(t) < Date.parse(sv.at));
+  return { read: ok(r.read) ? r.read : undefined, filed: ok(r.filed) ? r.filed : undefined };
+}
 function receipt(it) {
-  const sv = state.answers[it.id], rc = state.receipts[it.id] || {};
+  const sv = state.answers[it.id], rc = rcOf(it);
   let what;
   if (it.kind === "task") what = "Marked done";
   else if (sv.choice === NONE) what = "None of these";
@@ -549,10 +558,10 @@ function designPreview(it) {
   draw(); return box;
 }
 function buildCard(it) {
-  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = state.receipts[it.id] || {};
+  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it);
   const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
-    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " + fmt(rc.filed) : "Answered, filing pending " + fmt(state.answers[it.id].at)) : h("span", {}, waited(it.added)));
+    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(state.answers[it.id].at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
@@ -738,7 +747,7 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + ((state.receipts[it.id] || {}).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ((state.receipts[it.id] || {}).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, it.title));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, it.title));
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
     const open = list.filter((i) => !isSaved(i)).length, row = h("div", { class: "chips-n" }), seen = new Set();
@@ -866,7 +875,7 @@ function renderSent() {
     h("div", { class: "sent-head" }, h("span", { class: "stamp" }, n ? "Sent" : "Withdrawn", h("small", {}, fmt(p.at, false))),
       h("div", {}, h("b", {}, said), h("span", { id: "sentStatus" }, p.status),
         blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null)),
-    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = state.receipts[w.it.id] || {}; return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
+    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = rcOf(w.it); return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
     h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, (n ? "Undo send (" : "Undo withdraw (") + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
 }
 // Undo puts back what each write replaced: the earlier answer, or nothing. The owner's picks come back as drafts.
