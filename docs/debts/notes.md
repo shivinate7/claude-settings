@@ -586,3 +586,6 @@
 - waiting-cap-left-wide: at 1440 the viewer caption sits left at x=20 while the mockup is centred (skills/waiting-page/page.html .dcap)
 - waiting-dpos-stale-form: after a resize, `#dPos` keeps its old form ("1/3" or "1 of 3") until the next page turn (skills/waiting-page/page.html showDesign)
 - waiting-head-midwidth-untested: no test runs the viewer head at 521-900 px with a wide font, where the buttons keep their long labels (skills/waiting-page/tests/page.test.mjs)
+- shared-owner-git-case: the owner check rejects a trailing ".git" in lower case only, so "me/x.GIT" passes (lint/layout.py shared_resources)
+- shared-name-padding: a name with padding (" a" beside "a") counts as unique (lint/layout.py shared_resources)
+- shared-dotted-owner-untested: no green case for a dotted owner such as "me/home.app" (lint/test_check_shared_resources.py)
