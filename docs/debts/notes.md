@@ -589,3 +589,4 @@
 - port-question-url-forms: the guard matches the waiting-page url as an exact string, so a query string, a fragment or the claude.ai/code/artifact form is not judged (hooks/guard.py port-question; decision port-keeps-behaviour)
 - port-question-cwd-untested: no guard case runs a trailing-slash url, a subfolder cwd or a worktree cwd, though the code handles each (hooks/test_guard.py port-question)
 - port-question-redesign-word: "redesign" in a blocking item that ports nothing is refused until the writer sets `port: false` (hooks/guard.py PORT_WORD; decision port-keeps-behaviour)
+- main-ref-url-forms-untested: no test covers an scp-style or credentialed origin URL in the FETCH_HEAD match; a wrong normalisation refuses, the old behaviour (githooks/main-ref/reference-transaction fetched)

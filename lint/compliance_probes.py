@@ -97,9 +97,10 @@ def read(root, rel):
 
 
 def finish(group, lines, verdict, code):
+    # The group line comes first, as the skill writes it: scorecard files each item under the group line above it.
+    print("%s: %s" % (group, verdict))
     for line in lines:
         print(line)
-    print("%s: %s" % (group, verdict))
     return code
 
 
@@ -451,9 +452,9 @@ UI_GAP_ROW = ("STE lint on UI files", "partial", "UI text the lint does not read
 
 
 def scorecard(root):
-    """Rewrite the one scorecard file from the group lines on stdin. A probe prints its item lines
-    before its own group line, named in lower case as in GROUPS; the skill writes them after."""
-    rows, notes, held, group = [], [], [], None
+    """Rewrite the one scorecard file from the group lines on stdin. Each item line belongs to the group
+    line above it, as a probe prints it and as the skill writes it; an item above any group line is a note."""
+    rows, notes, group = [], [], None
 
     def item_row(name, line):
         graded = ITEM_LINE.match(line)
@@ -462,29 +463,18 @@ def scorecard(root):
         finding = FINDING_LINE.match(line)
         return ("%s: %s" % (name, finding.group(1)), "finding", finding.group(2), None)
 
-    def flush(name):
-        if name is None:
-            notes.extend(line.strip() for line in held)
-        else:
-            rows.extend(item_row(name, line) for line in held)
-        del held[:]
-
     for line in sys.stdin.read().splitlines():
         found = GROUP_LINE.match(line)
         if found:
-            name = found.group(1)
-            if name in GROUPS and held:
-                rows.append((name, found.group(2), found.group(3) or "", found.group(4)))
-                flush(name)
-            else:
-                flush(group)
-                rows.append((name, found.group(2), found.group(3) or "", found.group(4)))
-            group = name
+            group = found.group(1)
+            rows.append((group, found.group(2), found.group(3) or "", found.group(4)))
         elif ITEM_LINE.match(line) or FINDING_LINE.match(line):
-            held.append(line)
+            if group is None:
+                notes.append(line.strip())
+            else:
+                rows.append(item_row(group, line))
         elif line.strip():
             notes.append(line.strip())
-    flush(group)
     rows.append(UI_GAP_ROW)
     text = "# Compliance scorecard\n\nRewritten in place on each run by compliance-check.\n\n"
     text += "| Group | Score | Gold standard | Gap | Source |\n| --- | --- | --- | --- | --- |\n"
