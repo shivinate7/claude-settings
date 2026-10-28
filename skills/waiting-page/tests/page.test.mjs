@@ -1200,10 +1200,14 @@ for (const width of [390, 1440]) {
   test(`the viewer head is one row, and the mockup is whole and centered, at ${width} wide`, async (t) => {
     const it = viewerItem();
     const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 } }); if (!page) return;
+    // Stand-in for CI's wider fallback font: the one-row head is then wider than a phone.
+    await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
     await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
     await page.waitForFunction(() => { const f = document.querySelector("#dStage .dframe:not(.off)"); return f && f.getBoundingClientRect().height > 60; });
-    const m = await page.evaluate(() => { const f = document.querySelector("#dStage iframe").getBoundingClientRect(), h = document.querySelector(".dsh-head").getBoundingClientRect(); return { left: f.left, right: f.right, headH: h.height, vw: innerWidth }; });
+    const m = await page.evaluate(() => { const f = document.querySelector("#dStage iframe").getBoundingClientRect(), h = document.querySelector(".dsh-head").getBoundingClientRect(); return { left: f.left, right: f.right, headH: h.height, close: document.querySelector("#dClose").getBoundingClientRect().right, sheetW: document.querySelector("#dsheet").scrollWidth, vw: innerWidth }; });
     assert.ok(m.headH < 70, "the viewer head is " + m.headH + "px high");
+    assert.ok(m.close <= m.vw + 0.5, "Close is cut off: its right edge is " + m.close);
+    assert.ok(m.sheetW <= m.vw, "the viewer scrolls sideways: " + m.sheetW + " in " + m.vw);
     assert.ok(m.right <= m.vw + 0.5 && m.left >= -0.5, "the mockup is cut: " + m.left + " to " + m.right);
     if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "the mockup is not centered");
     for (const id of ["dPrev", "dNext", "dFull", "dClose"]) assert.ok((await page.locator("#" + id).boundingBox()).height >= 40, id + " is under 40px");
@@ -1332,11 +1336,15 @@ for (const width of [390, 1440]) {
   test(`the viewer is fitted the moment it opens, not after a later resize callback, at ${width} wide`, async (t) => {
     const it = viewerItem();
     const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 } }); if (!page) return;
+    // Stand-in for CI's wider fallback font: the one-row head is then wider than a phone.
+    await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
     const m = await page.evaluate((id) => {
       document.querySelector(`#item-${id} label.opt .opic`).click();
       const f = document.querySelector("#dStage iframe").getBoundingClientRect();
-      return { left: f.left, right: f.right, vw: innerWidth };
+      return { left: f.left, right: f.right, close: document.querySelector("#dClose").getBoundingClientRect().right, sheetW: document.querySelector("#dsheet").scrollWidth, vw: innerWidth };
     }, it.id);
+    assert.ok(m.close <= m.vw + 0.5, "Close is cut off on open: its right edge is " + m.close);
+    assert.ok(m.sheetW <= m.vw, "the viewer scrolls sideways on open: " + m.sheetW + " in " + m.vw);
     assert.ok(m.right <= m.vw + 0.5 && m.left >= -0.5, `cut on open: ${m.left} to ${m.right}`);
     if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "not centered on open");
   });
