@@ -1,9 +1,9 @@
 {
  "title": "home drops its stale copy of degen's deploy script",
  "phase": "rollout",
- "status": "todo",
+ "status": "doing",
  "order": 304.5,
  "why": "From c141's degen lane, Oct 28: degen owns tools/deploy-degen (ruling Oct 27 13:22 CDT, on c140: each user repo owns its own deploy scripts), yet home still carries tools/deploy-degen.sh.",
- "note": "Next cloud lane, small, in shivinate7/home (grant: waiting page item 2, a; read home's open branches and PRs first, touch no file they change): delete tools/deploy-degen.sh, and point any home doc or script that names it at degen's copy. Red first: a grep for deploy-degen in home finds the copy. Needs no answer. Port: this is home's part of c141. Placed ahead of r5, after c141 (triage 10, Oct 28): two copies of one deploy script drift.",
- "updatedAt": "2026-10-28T11:05:09Z"
+ "note": "Next cloud lane, small, in shivinate7/home (grant: waiting page item 2, a; read home's open branches and PRs first, touch no file they change): delete tools/deploy-degen.sh, and point any home doc or script that names it at degen's copy. Red first: a grep for deploy-degen in home finds the copy. Needs no answer. Port: this is home's part of c141. Placed ahead of r5, after c141 (triage 10, Oct 28): two copies of one deploy script drift. Green: home#372 (7090f7b9; one round, Sonnet approves), merging on green. Follow-up: c178.",
+ "updatedAt": "2026-10-28T11:08:17Z"
 }
