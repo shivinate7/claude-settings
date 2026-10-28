@@ -284,7 +284,7 @@ class CodeNameTests(Fixture):
         self.green("actions/x.mjs", "const renderBlock = 1;\n")
 
     def test_this_sense_word_is_left_out_of_paths_anchors_and_slugs(self):
-        """Owner ruling 2026-10-28 16:15 CDT (waiting-page item 51 a): a "(this sense)" name is never read."""
+        """A "(this sense)" name is read nowhere, so a path, anchor or slug that uses its word passes."""
         self.green("hooks/deny.py", "x = 1\n")
         self.green("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:two-deny-rule -->\n")
         self.green("docs/notes.md", "See `stop-blocks-live-tasks`.\n")
@@ -610,8 +610,8 @@ class RepoGlossaryTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_real_not_names_use_this_sense_only_and_keep_gap_try_claim_plain(self):
-        """The real GLOSSARY.md, read through the check's own rows(). Owner ruling 2026-10-28 16:15 CDT
-        (waiting-page item 51 a): the one tag is (this sense), and gap, try and claim are plain words."""
+        """The real GLOSSARY.md, read through the check's own rows(): each tag is (this sense), and gap,
+        try and claim are everyday words, so no "not" name may be one of them."""
         check = load_check()
         with open(os.path.join(os.path.dirname(HERE), "GLOSSARY.md"), encoding="utf-8") as f:
             table = check.rows(f.read())
