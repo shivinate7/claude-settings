@@ -2823,6 +2823,9 @@ if a[:1] != ["api"]:
             print(rf[0]); sys.exit(1)
         if S.get("runs_fail"):  # the text of every failing `gh run list`
             print(S["runs_fail"]); sys.exit(1)
+        commit = a[a.index("--commit") + 1] if "--commit" in a else ""
+        if commit and commit in {r[1] for r in S.get("open_prs", [])} and commit != feat_head():  # another open pull request's head, read by the batch brake: its own runs, and the head's script is not used
+            print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in S.get("other_runs", {}).get(commit, [])])); sys.exit(0)
         seq = S.get("runs_seq") or [[]]; cur = seq.pop(0) if len(seq) > 1 else seq[0]; save()
         print(json.dumps([{"name": n, "status": st, "conclusion": c} for n, st, c in cur]))
         sys.exit(0)
@@ -2938,9 +2941,11 @@ try:
 
     elif method == "GET" and (m_run or m_sta):
         sha = (m_run or m_sta).group(1)
-        if sha != feat_head() and sha in {r[1] for r in rows}:  # another open pull request's head, read by the batch brake: nothing running on it, and the read does not count against the head's script
+        if sha != feat_head() and sha in {r[1] for r in rows}:  # another open pull request's head, read by the batch brake: its check rows as the case set them (default: the required check passed), and the read does not count against the head's script
+            other = S.get("other_rows", {}).get(sha, [("checks", "pass", "")])
             if m_run:
-                finish(listing([check_run(("checks", "pass", ""), 0)], "check_runs", params, flags, jq, cap, {"total_count": 1}), 0, include)
+                crs = [check_run(r, k) for k, r in enumerate(other)]
+                finish(listing(crs, "check_runs", params, flags, jq, cap, {"total_count": len(crs)}), 0, include)
             finish(listing([], "statuses", params, flags, jq, cap, {"state": "pending", "sha": sha, "total_count": 0}), 0, include)
         if sha not in set(S.get("shown", [])) | {feat_head()}:
             raise Refused(api_error(422, "No commit found for SHA: " + sha))
@@ -3286,6 +3291,39 @@ class GhHalf(Env):
         lines = self.calls().splitlines()
         put = next(i for i, l in enumerate(lines) if l.startswith(MERGE_CALL))
         self.assertEqual([l for l in lines[put + 1:] if l.startswith(LIST_CALL)], [], self.calls())
+
+    def other_pr(self, runs, rows=(), ignore=None):
+        """Pull request 8 on main, ready, with its own check rows and workflow runs: the other half of the batch brake. -> the Host for run_merge."""
+        other = "c" * 40
+        self.set(open_prs=[["feat2", other, "main", 8]], other_rows={other: list(rows)}, other_runs={other: list(runs)})
+        return self.gh_host(ignore=ignore)
+
+    def test_confirm_refuses_while_a_workflow_runs_before_its_required_check_reports(self):
+        # scope runs first, so checks has no row yet: the workflow run in progress must still hold the merge
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "in_progress", None)], rows=[("scope", "pending", "")]))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("#8", out)
+        self.assertIn("ci-checks", out)
+        self.assertNotIn("PUT pulls/7/merge", self.calls())
+        self.assertEqual(self.refs(), before)
+
+    def test_confirm_refuses_a_queued_workflow_with_no_check_rows_on_another_ready_pr(self):
+        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "queued", None)]))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("ci-checks", out)
+        self.assertNotIn("PUT pulls/7/merge", self.calls())
+
+    def test_confirm_merges_when_the_other_pr_workflows_have_finished(self):
+        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("ci-checks", "completed", "success")], rows=[("checks", "pass", "")]))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUT pulls/7/merge", self.calls())
+
+    def test_confirm_merges_past_an_ignored_running_workflow_on_another_ready_pr(self):
+        rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[("sync", "in_progress", None)], rows=[("checks", "pass", "")],
+                                                                      ignore={"sync": "the sync job is advisory"}))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUT pulls/7/merge", self.calls())
 
     def test_5_base_aware_protection_mode_reads_the_protection_of_the_base(self):
         sh(self.other, "git", "fetch", "-q", "origin")
@@ -8774,10 +8812,16 @@ def batch_run(name, status="in_progress", conclusion=None):
 
 class PullsHost(merge.Host):
     """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, and the check runs and statuses of each head."""
-    def __init__(self, pulls, runs, pulls_error=None, required=("checks",)):
-        super().__init__(list(required), base="main", minute=60, pause=lambda s: None)
-        self.pulls, self.runs, self.pulls_error = pulls, runs, pulls_error
+    def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None):
+        super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
+        self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
+        self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.reads = []
+
+    def gh(self, args, cwd=None):
+        if args[:2] == ["run", "list"]:
+            return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
+        raise AssertionError("unexpected gh call: " + " ".join(args))
 
     def pages(self, rel, key=None, fields=None):
         self.reads.append(rel)
@@ -8787,7 +8831,7 @@ class PullsHost(merge.Host):
             return self.pulls
         m = re.fullmatch(r"commits/([^/]+)/check-runs", rel)
         if m:
-            return self.runs.get(m.group(1), [])
+            return self.check_rows.get(m.group(1), [])
         if re.fullmatch(r"commits/[^/]+/status", rel):
             return []
         raise AssertionError("unexpected read: " + rel)
@@ -8830,6 +8874,34 @@ class BatchRunningReads(unittest.TestCase):
         host = PullsHost([], {}, pulls_error="reading pulls from GitHub failed: boom")
         with self.assertRaises(merge.Stop):
             host.batch_running(1, "main")
+
+    def test_a_running_workflow_blocks_before_its_required_check_reports(self):
+        # scope runs first and checks needs it: the workflow is in progress, no required row exists yet, only the non-required scope row is pending
+        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("scope")]},
+                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "in_progress", "conclusion": None}]})
+        blockers = host.batch_running(1, "main")
+        self.assertEqual(len(blockers), 1, blockers)
+        self.assertIn("#2", blockers[0])
+        self.assertIn("ci-checks", blockers[0])
+
+    def test_a_queued_workflow_with_no_check_rows_blocks(self):
+        host = PullsHost([batch_pull(2, OTHER_SHA)], {},
+                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "queued", "conclusion": None}]})
+        blockers = host.batch_running(1, "main")
+        self.assertEqual(len(blockers), 1, blockers)
+        self.assertIn("#2", blockers[0])
+        self.assertIn("ci-checks", blockers[0])
+
+    def test_finished_workflows_with_the_required_check_passed_do_not_block(self):
+        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success")]},
+                         workflow_runs={OTHER_SHA: [{"name": "ci-checks", "status": "completed", "conclusion": "success"}]})
+        self.assertEqual(host.batch_running(1, "main"), [])
+
+    def test_an_ignored_running_workflow_does_not_block(self):
+        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success")]},
+                         workflow_runs={OTHER_SHA: [{"name": "sync", "status": "in_progress", "conclusion": None}]},
+                         ignore={"sync": "the sync job is advisory"})
+        self.assertEqual(host.batch_running(1, "main"), [])
 
 class BatchBrake(Env):
     """confirm reads the other ready pull requests before anything is pushed, and again before the PUT. preview prints the read."""

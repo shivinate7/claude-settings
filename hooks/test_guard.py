@@ -411,12 +411,17 @@ GHNOPROT = os.path.join(ROOT, "ghnoprot")        # no branch protection: pull re
 GHNOPROTDONE = os.path.join(ROOT, "ghnoprotdone")  # the same, with pull request 2's check passed
 GHPROT500 = os.path.join(ROOT, "ghprot500")      # the protection read fails with a server error, and pull request 2's check passed
 GHPROTNET = os.path.join(ROOT, "ghprotnet")      # the protection read fails on the network, and pull request 2's check passed
+GHRUNBLOCK = os.path.join(ROOT, "ghrunblock")    # pull request 2's workflow `ci-checks` runs, and only its non-required scope job has a row
+GHRUNNONE = os.path.join(ROOT, "ghrunnone")      # pull request 2's workflow `ci-checks` is queued, and it has no check rows at all
+GHRUNDONE = os.path.join(ROOT, "ghrundone")      # pull request 2's workflow finished, and its required check passed
+GHRUNIGNORED = os.path.join(ROOT, "ghrunignored")  # pull request 2's only running workflow is `sync`, which STAMPIGNORE ignores
 
 
-def batch_other(*checks):
-    """Pull request 2 on main, ready, with (name, bucket) check rows on its head: the other half of the batch brake."""
+def batch_other(*checks, runs=None):
+    """Pull request 2 on main, ready, with (name, bucket) check rows and workflow runs on its head: the other half of the batch brake."""
     return [{"number": 2, "head": "pr-two-head", "draft": False,
-             "checks": [{"name": name, "bucket": bucket, "link": "https://github.com/y/x/actions/runs/88"} for name, bucket in checks]}]
+             "checks": [{"name": name, "bucket": bucket, "link": "https://github.com/y/x/actions/runs/88"} for name, bucket in checks],
+             "runs": list(runs or [])}]
 GHPAGE2 = os.path.join(ROOT, "ghpage2")        # the failed check run is on the second page of the check runs
 CURREPO = os.path.join(ROOT, "currepo")        # a checkout on the branch `feat`, the head of the one pull request the fake gh lists
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
@@ -848,7 +853,9 @@ if state["broken"]:
 if not args:
     print(json.dumps({"base": state["pr"]["base"]["ref"]}))
 elif args[:2] == ["run", "list"]:
-    print(json.dumps(state["runs"]))
+    commit = args[args.index("--commit") + 1] if "--commit" in args else ""
+    others_runs = {o["head"]: o.get("runs", []) for o in state["others"]}  # another open pull request's runs; the head's are state["runs"]
+    print(json.dumps(others_runs[commit] if commit in others_runs else state["runs"]))
 elif args[:1] != ["api"]:
     print(GRAPHQL)  # gh pr ..., gh repo view: GraphQL, which a Claude Code cloud session refuses
     sys.exit(1)
@@ -1113,6 +1120,10 @@ def build_fixtures():
     make_fake_gh(GHNOPROTDONE, "main", others=batch_other(("sync", "pass")), protection="absent")
     make_fake_gh(GHPROT500, "main", others=batch_other(("checks", "pass")), protection="server")
     make_fake_gh(GHPROTNET, "main", others=batch_other(("checks", "pass")), protection="network")
+    make_fake_gh(GHRUNBLOCK, "main", others=batch_other(("scope", "pending"), runs=[{"name": "ci-checks", "status": "in_progress", "conclusion": None}]))
+    make_fake_gh(GHRUNNONE, "main", others=batch_other(runs=[{"name": "ci-checks", "status": "queued", "conclusion": None}]))
+    make_fake_gh(GHRUNDONE, "main", others=batch_other(("checks", "pass"), runs=[{"name": "ci-checks", "status": "completed", "conclusion": "success"}]))
+    make_fake_gh(GHRUNIGNORED, "main", others=batch_other(("checks", "pass"), runs=[{"name": "sync", "status": "in_progress", "conclusion": None}]))
     # merge.py's shared_deadline splits one budget across the read's calls (c53: four on REST: the pull request, the check
     # runs, the commit statuses, the workflow runs), so a delay only a little past the per-call figure that used to be the
     # cutoff no longer exhausts it. 20s per call outruns the whole shared budget on its own, whichever call absorbs the
@@ -7689,6 +7700,16 @@ sh("merge-batch: a protection read that fails with a server error is unknown, an
    "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROT500 + os.pathsep + PY_PATH)
 sh("merge-batch: a protection read that fails on the network is unknown, and denies gh pr merge",
    "gh pr merge 1 --squash", "deny", "merge-checks", carries="unknown", cwd=NOGIT, env_path=GHPROTNET + os.pathsep + PY_PATH)
+# A running workflow on another ready pull request holds the merge before its required check reports: scope runs first and checks needs it.
+sh("merge-batch: gh pr merge is refused while another ready pr's workflow runs, before its required check reports",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
+add("merge-batch: the merge tool of the host is refused while another ready pr's workflow runs", "deny", "merge-checks",
+    carries=("#2", "ci-checks"), tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+    env_path=GHRUNBLOCK + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is refused while another ready pr's workflow is queued with no check rows",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNNONE + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is allowed when the other ready pr's workflow has finished",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNDONE + os.pathsep + PY_PATH)
 NEED_ON = GHNEED + os.pathsep + PY_PATH
 sh("merge-checks: the pull request and repo of the call are the ones read",
    "gh pr merge 12 --squash -R y/x", "allow", silent=True, cwd=NOGIT, env_path=NEED_ON,
@@ -7782,12 +7803,17 @@ STAMPBAD = os.path.join(ROOT, "stamp_bad")           # stamp.json that is not JS
 STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: it cannot be read
 STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
 STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
+STAMPIGNORE = os.path.join(ROOT, "stamp_ignore")     # stamp.json whose merge block ignores the `sync` check
 
 
 def _build_stamp_repos():
     stamp = {"defaultBranch": "main", "kinds": [], "merge": {
         "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}}
     make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    ignoring = {"defaultBranch": "main", "kinds": [], "merge": {
+        "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True,
+        "ignoreChecks": [{"name": "sync", "reason": "the sync job is advisory"}]}}
+    make_repo(STAMPIGNORE, {".github/stamp.json": json.dumps(ignoring) + "\n"})
     make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
     make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
     make_repo(STAMPBAD, {".github/stamp.json": '{"defaultBranch": "main", "merge": {"method": \n'})
@@ -7798,8 +7824,11 @@ def _build_stamp_repos():
         os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
 
 
-lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK],
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE],
              _build_stamp_repos)
+add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
+    tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
+    env_path=GHRUNIGNORED + os.pathsep + PY_PATH)
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
 add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending gate on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
