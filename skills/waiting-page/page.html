@@ -231,7 +231,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
 .dfitwrap.inert .dframe { pointer-events: none; }
-.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-rows: auto 1fr; }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
 .dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
 .dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -966,10 +966,11 @@ const STAGE = {};
 function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = fitFrame(d.slug, d.label, false, "", 2); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
-  Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off"); FITS.forEach((x) => x.fit()); // a frame fitted while hidden has no width; fit now, not at a later resize callback
+  // The head fields come first: they set the head's width, and the fit reads the stage's width.
   $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
+  Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off"); FITS.forEach((x) => x.fit()); // a frame fitted while hidden has no width; fit now, not at a later resize callback
 }
 // The viewer of one item: every option's design at every width the item carries, in option order.
 function openViewer(it, o) {
