@@ -721,9 +721,10 @@ class Host:
         return heads
 
     def batch_running(self, n, base, unprotected_counts_all=False):
-        """-> one line per other open, ready pull request on `base` whose head has a required check reported and not completed (rule
-        git-no-merge-during-batch-ci). A required name with no entry on that head does not count: a ready PR whose CI never reports
-        would block every merge. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red.
+        """-> one line per other open, ready pull request on `base` whose head has a workflow run not completed, or a required check
+        reported and not completed (rule git-no-merge-during-batch-ci). The run counts because a required job can wait on another job
+        (checks.yml's `checks` needs `scope`), so it has no row yet. A required name with no entry and no running workflow on that head
+        does not count: a ready PR whose CI never reports would block every merge. merge.ignoreChecks runs and checks never count. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red.
         The required names are a pinned list, else the branch protection. `unprotected_counts_all` (the guard's mode): a base with no
         branch protection counts every reported pending check, and an empty protection list counts none. Without it, required_names rules."""
         others = [d for d in self.pages("pulls", fields={"state": "open"})
@@ -740,8 +741,10 @@ class Host:
             _, pending, _ = self.classify(got, names or [], self.ignore)
             hits = [f"`{k}` is pending: " + next((l for b, l in got[k] if b == "pending"), "")
                     for k in pending if (names is None or k in names) and got.get(k)]
-            if hits:
-                blockers.append(f"#{d['number']} ({d['head']['ref']}) required check " + "; ".join(hits))
+            running = self.judge_runs(self.runs(d["head"]["sha"]))[1]
+            parts = (["required check " + "; ".join(hits)] if hits else []) + [w + " is not completed" for w in running]
+            if parts:
+                blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
 
     def protection_names(self):
@@ -1013,7 +1016,7 @@ class Host:
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows.
-        batch: the head is settled, but another ready PR on its base has a required check pending (batch_running).
+        batch: the head is settled, but another ready PR on its base has a workflow run or a required check pending (batch_running).
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
         a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
@@ -2083,12 +2086,12 @@ def red_base(root, host, base, red_ok=""):
     raise Stop(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
 
 def batch_refusal(host, n, base):
-    """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a required check pending,
+    """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a workflow run or a required check pending,
     else None. A failed read raises Stop. No reason flag lifts it: a merge under a running batch moves the base that run tests."""
     blockers = host.batch_running(n, base)
     if not blockers:
         return None
-    return (f"#{n} does not merge to {base} while another ready PR's required check runs: " + "; ".join(blockers) + ".\n"
+    return (f"#{n} does not merge to {base} while another ready PR's CI runs: " + "; ".join(blockers) + ".\n"
             "Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again.")
 
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):

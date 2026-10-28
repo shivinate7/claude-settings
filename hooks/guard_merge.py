@@ -70,7 +70,8 @@ MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector; a settled head adds the
-# batch read: the open pull list, then the protection and 2 calls per other ready PR on the base) that split this one
+# batch read: the open pull list, then, when another ready PR is on the base, the protection (none with a pinned list) and
+# 3 calls per such PR: its check runs, its commit statuses and its workflow run list) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a
 # hung `gh` to this one budget (pinned in test_guard.py), so a merge with a dead `gh` is refused fast instead of waiting out
 # each call. From a Linux cloud session, REST calls take 0.3-0.7 s. Windows REST is unmeasured, so the
@@ -162,7 +163,7 @@ def has_workflows(where: str) -> bool:
 
 def merge_check(selector, repo: str, where: str):
     """Return (verdict, detail) for the head of the named pull request: green, pending, red,
-    batch (another ready PR on the base has a required check pending), or unknown. One read, no
+    batch (another ready PR on the base has a workflow run or a required check pending), or unknown. One read, no
     wait, run in `where` so `gh` names the repo the command names."""
     module = merge_module()
     if module is None:
