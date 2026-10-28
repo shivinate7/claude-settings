@@ -141,7 +141,7 @@ out. (Decision main-branch-protection: the required checks on main.)
 
 ## Docs
 
-CI claims in README or docs go stale too. See the `fresh-prose` skill.
+CI statements in README or docs go stale too. See the `fresh-prose` skill.
 
 ## Opt-in templates
 

@@ -2,7 +2,7 @@
 """CI check: a read that could not run is reported as unknown, never as clear or broken.
 
 THE CONTRACT, stated once so a later addition has a rule to meet rather than a pattern to
-copy. CLAUDE.md: "Verify a claim before you rely on it, and report a read that could not
+copy. CLAUDE.md: "Verify a statement before you rely on it, and report a read that could not
 run as unknown, never as clear or broken." A caller that cannot read a subject has exactly
 three honest answers: the subject is clear, the subject is not clear, or the read itself
 failed and the caller does not know which. Folding that third answer into either of the

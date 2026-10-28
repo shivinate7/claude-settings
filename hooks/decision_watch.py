@@ -574,7 +574,7 @@ JUDGE_INSTRUCTIONS = (
 # undocumented parse of an empty string was not acceptable. This hook now passes
 # `--tools ""`, the documented empty-disables-all form, plus `--safe-mode`, documented to
 # disable every plugin, MCP server, hook, skill and custom command for the session, which
-# `--tools` alone does not claim to reach.
+# `--tools` alone does not say it reaches.
 #
 # Copying `os.environ` and subtracting names cannot
 # be complete, the same shape `docs/decisions/predicate-is-the-act.md` already names for a

@@ -432,7 +432,7 @@ def premise_note(path, everyone):
         note = " The handoff has no Working premises section. Add it per step 4."
     else:
         weak = ["%s (%s)" % (i, k or "no kind") for i, k in prem if everyone or k != PREMISE_KINDS[0]]
-        note = (" Premises are claims. Check each before you act on it, then rewrite its "
+        note = (" Premises are statements. Check each before you act on it, then rewrite its "
                 "line: %s." % ", ".join(weak)) if weak else ""
     if not everyone:
         note += " Facts in the compaction summary are notes until checked."

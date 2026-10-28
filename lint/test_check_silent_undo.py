@@ -586,7 +586,7 @@ class Value(unittest.TestCase):
 
 
 class Flips(unittest.TestCase):
-    """Lines that look alike but claim something else must not pass as a rewrite."""
+    """Lines that look alike but state something else must not pass as a rewrite."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
 
     def resolve(self, base_line, a_line, result_line):

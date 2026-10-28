@@ -208,14 +208,19 @@ class GlossaryTests(Fixture):
 
 class CodeNameTests(Fixture):
     """The widened check: identifiers, rule anchors, record slugs and hook messages on added lines."""
-    REFUSE = "| refuse | What a guard does. | `rule:one-rule` | `deny`, `block` |\n"
+    EXTRA = ("| refuse | What a guard does. | `rule:one-rule` | `deny (prose)`, `block (prose)` |\n"
+             "| agent | Anything the Agent tool starts. | `rule:one-rule` | `subagent` |\n")
 
     def setUp(self):
         super().setUp()
-        self.put("GLOSSARY.md", HEAD + ROWS + self.REFUSE)
+        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA)
 
     def change(self, rel, text):
-        self.base_repo()
+        """Commit the fixture as the base once, then add one file as the change. Each call reads only that file's diff."""
+        if not os.path.isdir(os.path.join(self.tree, ".git")):
+            self.base_repo()
+        else:
+            self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.put(rel, text)
         self.commit()
         return self.run_check()
@@ -258,8 +263,18 @@ class CodeNameTests(Fixture):
         self.green("actions/x.mjs", "// a handover\n/* the bundle\n   of lanes */\nconst a = 1;\n")
 
     def test_platform_names_pass_and_compounds_fail(self):
-        self.green("hooks/x.py", 'deny = "deny"\nblock = {"decision": "block"}\n')
-        self.red("hooks/y.py", "deny_reason = 1\n", "hooks/y.py:1")
+        self.green("hooks/x.py", 'subagent_type = "subagent_type"\nSubagentStop = 1\n')
+        self.green("hooks/y.py", 'import os\nos.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "x"\n')
+        self.red("hooks/z.py", "subagent_count = 1\n", "hooks/z.py:1")
+
+    def test_prose_tagged_word_is_left_out_of_code_names(self):
+        self.green("hooks/x.py", 'deny = 1\nblock_it = 2\nMSG = "The guard will deny it."\n')
+        self.green("actions/x.mjs", "const renderBlock = 1;\n")
+
+    def test_prose_tagged_word_is_read_in_a_path_anchor_and_slug(self):
+        self.red("hooks/deny.py", "x = 1\n", "hooks/deny.py")
+        self.red("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:two-deny-rule -->\n", "deny")
+        self.red("docs/notes.md", "See `stop-blocks-live-tasks`.\n", "block")
 
     def test_issues_key_passes_in_yaml_only(self):
         self.put("GLOSSARY.md", HEAD + ROWS + "| finding | A report. | `rule:one-rule` | `issue` |\n")
@@ -323,8 +338,8 @@ class CodeNameTests(Fixture):
     def test_hook_message_with_not_name_fails(self):
         self.red("hooks/guard.py", 'MSG = "Refused: this handover is stale."\n', "hooks/guard.py:1", "handover")
 
-    def test_hook_message_with_retired_platform_word_fails(self):
-        self.red("hooks/guard.py", 'MSG = "The guard will deny it."\n', "hooks/guard.py:1")
+    def test_hook_pattern_string_passes(self):
+        self.green("hooks/guard.py", 'PAT = r"(?im)^[ \\t]*(bundle|round)[ \\t]+(\\d)"\n')
 
     def test_hook_message_f_string_fails(self):
         self.red("hooks/guard.py", 'def m(x):\n    return f"Refused {x}: a bundle."\n', "hooks/guard.py:2")
@@ -334,6 +349,9 @@ class CodeNameTests(Fixture):
 
     def test_test_fixture_message_passes(self):
         self.green("hooks/test_guard.py", 'MSG = "Refused: this handover is stale."\n')
+
+    def test_mutation_test_snippet_passes(self):
+        self.green("hooks/mutate_guard.py", 'M = "return bundle(x)  # a bundle"\n')
 
     def test_message_outside_hooks_passes(self):
         self.green("lint/x.py", 'MSG = "a handover line"\n')

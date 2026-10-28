@@ -41,7 +41,7 @@ The handoff holds these sections, in this order:
   message and its date).
 - Working premises: the facts the next steps lean on, at most about 15, under the heading
   `## Working premises`. One line each, in this form:
-  `- P1 [ruling|measured|read|notes|assumed] <claim>. Source: <where>. Checked <date or never>.`
+  `- P1 [ruling|measured|read|notes|assumed] <statement>. Source: <where>. Checked <date or never>.`
   The kinds and what each means: docs/decisions/premise-format.md. A fact with no source is
   `assumed`.
 - Where things stand: the branch, the head commit, open PRs, and their CI state.
@@ -52,8 +52,8 @@ The handoff holds these sections, in this order:
 
 ## 5. Check premises
 
-A premise is a claim, not a fact. After a compaction, a /clear or a fork, treat every
-premise as a claim, and every fact in the compaction summary as `notes`. Before you act on a
+A premise is a statement, not a fact. After a compaction, a /clear or a fork, treat every
+premise as a statement, and every fact in the compaction summary as `notes`. Before you act on a
 weak or stale premise, check it. Then rewrite its line with the new source and date. When
 the check shows it wrong, delete the line or replace it with the true fact and its source.
 Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If

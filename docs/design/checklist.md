@@ -9,7 +9,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load?
 - [ ] ux-order-holds-still: Do the rows keep their order after an act on one row?
 - [ ] ux-unknown-is-not-empty: Do a failed read and an unknown state each show their own words?
-- [ ] ux-claims-are-true: Is each promise in the copy true of the product now?
+- [ ] ux-statements-are-true: Is each promise in the copy true of the product now?
 - [ ] ux-machine-text-hidden: Is each code, path, id and server text behind a closed disclosure?
 - [ ] ux-no-dead-end: Does each refusal, error and end page have a control that leads on?
 - [ ] ux-empty-one-action: Is each empty state one sentence and one control? With no data, are filters hidden? After a filter empties the list, do filters show with a clear control?

@@ -1,22 +1,22 @@
 ---
 name: fresh-prose
-description: Use when a session writes or updates a README, docs, CLAUDE.md, agent files, or decision records, or when the user says "stale docs" or "fresh-prose". Makes prose hard to go stale, by binding each claim to a check.
+description: Use when a session writes or updates a README, docs, CLAUDE.md, agent files, or decision records, or when the user says "stale docs" or "fresh-prose". Makes prose hard to go stale, by binding each statement to a check.
 ---
 
-Every claim in prose can go stale. Give each claim a checked reader, so a stale claim gets
+Every statement in prose can go stale. Give each statement a checked reader, so a stale statement gets
 caught, not read past.
 
 ## The ladder
 
-For each claim, take the first rung that holds.
+For each statement, take the first rung that holds.
 
-1. **Delete it.** A claim nobody needs cannot go stale.
-2. **Link to the source**, instead of stating the claim.
+1. **Delete it.** A statement nobody needs cannot go stale.
+2. **Link to the source**, instead of stating the statement.
 3. **Generate it.** Mark the block. One script regenerates every marked block from its
    source. CI runs the script and fails if the file changes.
 4. **Run it.** CI runs the command in a clean checkout. A command that cannot run, for
    example a deploy, gets a short note that says why.
-5. **Check it.** CI fails if a claimed path, link, or reference does not resolve. For links,
+5. **Check it.** CI fails if a stated path, link, or reference does not resolve. For links,
    adopt claude-settings' `actions/readme-links`. A cite to a record in a wrong wrapper, such
    as ``D`slug` ``, is a near-miss. The stamp rewrite never matches it, so the cite stays dead
    text until someone writes the cite form. For cites, adopt the near-miss check of
@@ -27,7 +27,7 @@ only if a small script cannot do the job, and name each dependency you add, with
 
 ## Prose types and their rung
 
-| Prose | Claims that rot | Rung that fits |
+| Prose | Statements that rot | Rung that fits |
 | --- | --- | --- |
 | README | see `readme.md` in this skill | see `readme.md` |
 | CLAUDE.md, agent files | "the guard refuses X", file paths | Check it: link each rule to a test that runs and goes red. `lint/rule_audit.py` checks only that the test exists and is collected. The red runs are in `lint/test_rule_audit.py` and `hooks/mutate_guard.py` |
@@ -45,7 +45,7 @@ is not yet on the ladder.
 
 ## Superseded text
 
-When a fact changes, rewrite the claim in place. Keep only what is true now, in the fewest
+When a fact changes, rewrite the statement in place. Keep only what is true now, in the fewest
 words. Never add a "was X, now Y" line or a history. Git keeps the history
 (`speak-rewrite-superseded-in-place`). A decision record whose ruling changes is rewritten in
 its own record (`git-one-record-per-question`).

@@ -4,7 +4,7 @@
 Both files run the same shape of mutation test: apply one literal string replacement to a
 source file, run a fixture suite against the mutated copy, and classify the result as KILLED,
 SURVIVED, or WRONG CAUSE (a red suite whose FAIL lines never name the case the mutation's label
-claims to break). Before this module, `safe_name`, `job_count`, `skip_reason`, and the
+says it breaks). Before this module, `safe_name`, `job_count`, `skip_reason`, and the
 SURVIVED / WRONG CAUSE verdict-and-tally printing were each written out twice, and the two
 copies had already started to drift: janitor/mutate_sweep.py's own `safe_name` lacked the
 digest suffix hooks/mutate_guard.py's carries (see `safe_name` below), so the exact filename
