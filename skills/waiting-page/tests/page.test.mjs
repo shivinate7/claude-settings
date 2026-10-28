@@ -491,6 +491,21 @@ test("an icon with no name or mark still shows", async (t) => {
   assert.equal((await markState(page)).hidden, false);
 });
 
+test("a meta write with the same icon keeps it shown, with no flash of the letter", async (t) => {
+  const icon = svgIcon("#11151b");
+  const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  const flashed = await page.evaluate(async (icon) => {
+    const m = document.getElementById("mark"); let lost = false;
+    new MutationObserver(() => { if (!m.classList.contains("icon") || !m.querySelector("img")) lost = true; }).observe(m, { attributes: true, childList: true });
+    state.meta = { identity: { name: "Compass", brand: "#f47820", icon } }; applyIdentity();
+    await new Promise((r) => setTimeout(r, 200));
+    return lost;
+  }, icon);
+  assert.equal(flashed, false);
+  assert.equal((await markState(page)).img, icon);
+});
+
 test("a decode that finishes after a newer identity is ignored", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
   await named(page, "Compass");

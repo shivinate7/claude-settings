@@ -115,8 +115,9 @@ def name_of(root):
     return found.rsplit("/", 1)[-1] if found else os.path.basename(os.path.abspath(root))
 
 
-def icon_max(page=PAGE):
+def icon_max(page=None):
     """The page's ICON_MAX, the longest icon data URI it shows."""
+    page = page or PAGE
     with open(page, encoding="utf-8") as f:
         hit = re.search(r"\bICON_MAX = (\d+)", f.read())
     if not hit:
@@ -143,7 +144,11 @@ def icon_uri(root):
         return None, "%s cannot be read: %s" % (rel, e)
     if kind == "image/png" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
         return None, "%s is not a PNG" % rel
-    uri, most = "data:%s;base64,%s" % (kind, base64.b64encode(data).decode("ascii")), icon_max()
+    try:
+        most = icon_max()
+    except (OSError, ValueError) as e:
+        return None, "the page's ICON_MAX cannot be read: %s" % e
+    uri = "data:%s;base64,%s" % (kind, base64.b64encode(data).decode("ascii"))
     if len(uri) > most:
         return None, "%s is %d characters as a data URI, over the page's ICON_MAX %d" % (rel, len(uri), most)
     return uri, None
@@ -167,6 +172,37 @@ def _hex(value):
     return v.lower()
 
 
+def _uncommented(text):
+    """`text` with /* */, // and <!-- --> comments blanked, in one pass that skips string literals.
+    A ' or " string ends at its line's end, so a lone quote in text (<p>Don't</p>) hides no comment
+    on later lines; a ` template literal may span lines. A // right after ":" is a URL, not a comment."""
+    out, i, n, quote = [], 0, len(text), None
+    while i < n:
+        c = text[i]
+        if quote:
+            if c == "\\" and i + 1 < n:
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if c == quote or (c == "\n" and quote != "`"):
+                quote = None
+            out.append(c)
+            i += 1
+            continue
+        for opener, closer in (("/*", "*/"), ("<!--", "-->"), ("//", "\n")):
+            if text.startswith(opener, i) and not (opener == "//" and i and text[i - 1] == ":"):
+                end = text.find(closer, i + len(opener))
+                i = n if end < 0 else end + (0 if closer == "\n" else len(closer))
+                out.append(" ")
+                break
+        else:
+            if c in "\"'`":
+                quote = c
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def accent(root, source):
     """The hex at the registry's accent `source` ({file, token}) in the checkout at `root`."""
     path = os.path.join(root, *layout._safe(source["file"], "accents").split("/"))
@@ -177,7 +213,7 @@ def accent(root, source):
         for key in source["token"].split("."):
             value = value[key]
         return _hex(value)
-    hit = re.search(r"(?<![\w-])%s\s*:\s*([^;}\n]*)" % re.escape(source["token"]), text)
+    hit = re.search(r"(?<![\w-])%s\s*:\s*([^;}\n]*)" % re.escape(source["token"]), _uncommented(text))
     if not hit:
         raise ValueError("%s declares no %s" % (source["file"], source["token"]))
     return _hex(hit.group(1))

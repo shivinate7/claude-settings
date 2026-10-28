@@ -401,10 +401,15 @@ function applyIdentity() {
   }
   const f = FACES[id.face] || FACES.sans, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
   st.setProperty("--wm", f[0]); st.setProperty("--wmw", f[1]); st.setProperty("--wmls", f[2]);
-  $("mark").textContent = (typeof id.mark === "string" && id.mark.trim() ? id.mark.trim() : name).slice(0, 1).toUpperCase();
-  $("mark").hidden = !$("mark").textContent;
-  $("mark").classList.remove("icon"); $("mark").style.removeProperty("--tile");
-  applyIcon(id.icon);
+  // A meta write that keeps the icon shown leaves it in place, so the letter never flashes; the new token drops any older decode.
+  const shown = $("mark").classList.contains("icon") && $("mark").querySelector("img");
+  if (shown && iconOk(id.icon) && shown.getAttribute("src") === id.icon) iconSeq++;
+  else {
+    $("mark").textContent = (typeof id.mark === "string" && id.mark.trim() ? id.mark.trim() : name).slice(0, 1).toUpperCase();
+    $("mark").hidden = !$("mark").textContent;
+    $("mark").classList.remove("icon"); $("mark").style.removeProperty("--tile");
+    applyIcon(id.icon);
+  }
   $("repoName").textContent = name || "Waiting on you";
   $("repoSub").hidden = !name;
   document.title = name ? name + ": waiting on you" : "Waiting on you";

@@ -262,6 +262,18 @@ class Identity(unittest.TestCase):
                 self.assertNotIn("icon", got)
                 self.assertIn("icon", err)
 
+    def test_an_unreadable_page_loses_only_the_icon(self):
+        from unittest import mock
+        co = Checkout(self, "degen").extras(**{"waiting-page-colour": "#a82830", "waiting-page-icon": "i.svg"}).put("i.svg", SVG)
+        no_const = os.path.join(co.root, "page.html")
+        with open(no_const, "w", encoding="utf-8") as f:
+            f.write("<p>no constant</p>")
+        for page in (os.path.join(co.root, "missing.html"), no_const):
+            with self.subTest(page=page), mock.patch.object(self.rc, "PAGE", page):
+                found, why = self.rc.identity(co.root)
+                self.assertEqual(found, {"brand": "#a82830"})
+                self.assertIn("ICON_MAX", why)
+
     def test_an_invalid_extras_colour_is_unknown(self):
         co = Checkout(self, "banchi").extras(**{"waiting-page-colour": "blue"})
         out = run("identity", co.root)
@@ -293,6 +305,22 @@ class Drift(unittest.TestCase):
     def test_clean_is_0(self):
         out = run("drift", self.banchi(self.reg["repos"]["banchi"].upper()).root)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+
+    def test_comments_and_strings_never_give_a_false_value(self):
+        # Each file's first raw "--bn-accent:" is #ff0000 inside a comment; the real one matches the registry.
+        reg = self.reg["repos"]["banchi"]
+        files = {
+            "block comment": "/* old --bn-accent: #ff0000; */\n:root { --bn-accent: %s; }\n",
+            "line comment": "// --bn-accent: #ff0000;\n:root { --bn-accent: %s; }\n",
+            "comment opener in a string": ':root { content: "/*"; }\n:root { --bn-accent: %s; }\n',
+            "multi-line template literal": "const s = `a\n/* not a comment\n`;\n:root { --bn-accent: %s; }\n",
+            "lone quote in text": "<p>Don't</p>\n<!-- --bn-accent: #ff0000; -->\n<style>:root { --bn-accent: %s; }</style>\n",
+        }
+        for why, text in files.items():
+            with self.subTest(why=why):
+                co = Checkout(self, "banchi").put("app/src/tokens.css", text % reg)
+                out = run("drift", co.root)
+                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
 
     def test_a_changed_accent_is_1_and_named(self):
         out = run("drift", self.banchi("#ff0000").root)
