@@ -22,6 +22,8 @@ step changes, the risks, and the check that proves each step done. Cite file:lin
 claim about the code. Say "unknown" for anything you could not find. Surface ambiguity
 instead of resolving it silently. Never guess an answer the code should give you.
 
+On a port or redesign, the existing app's behaviour is the default (`building-port-keeps-behaviour`). Cite file and symbol for each choice. Ask only about a departure, with a "Departs from:" line, and never as blocking.
+
 You cannot spawn agents. If the task is too large for one plan, report PARTIAL with the
 slices you planned and the slices you propose.
 

@@ -68,6 +68,7 @@ Method: read the transcript JSONL. Take each `assistant` entry's `message.usage`
 
 - A guard hook that already runs may read the last `assistant` usage from `transcript_path` on demand. It starts no process and writes no file (rule `outcomes-mechanize-rules`, the CLAUDE.md rule that tracking reads on demand inside a process already running).
 - Total context is exact: the usage sum. Message tokens are a proxy only. Step 2 should say which one it uses.
+- Step 2 uses the proxy in the Stop nudge: messages = last usage sum minus first usage sum, read from the transcript the hook already opens.
 - `statusLine` gave total context with no transcript read in interactive runs. The transcript gave the same numbers in every run made. Whether a guard hook can get the `statusLine` fields is unknown.
 
 Raw captures: the scratch folder `c151` under the session scratchpad. Not tracked.
