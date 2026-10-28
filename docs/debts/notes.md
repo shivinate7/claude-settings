@@ -578,3 +578,4 @@
 - waiting-opt-id-namespace: the trade-off id `t-<item>-<key>` shares a namespace with the title id `t-<item>`, so items `foo` and `foo-a` would both own `t-foo-a` (skills/waiting-page/page.html optCard)
 - waiting-sheet-brand-border: with a brand colour the Designs sheet's 50% `--on-hdr` button border can fall under 3:1 (about 18% of 648 sampled brands); the ring stays 4.5:1 or better (skills/waiting-page/page.html .dsh-head .btn)
 - scorecard-indented-caution-row: an indented `x: y` line, such as an indented Caution line, becomes a `finding` row on the group before it, not a Notes line. Nothing is dropped (lint/compliance_probes.py FINDING_LINE)
+- try-marker-sunset: hooks/guard.py still reads the old builder marker `Try 3 of 3` beside `Round 3 of 3`, so a brief sent before the rename is not refused. Remove `"try"` from BUILDER_MARKERS, its mutant and its cases 14 days after this lands. Decision: agent-model-cap

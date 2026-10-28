@@ -11851,6 +11851,19 @@ add("floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, 
     model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
+# The builder marker is `Round 3 of 3` (owner ruling 2026-10-26, plan o13 group 9: a review and its fix is a
+# round). The old `Try 3 of 3` still counts until the try-marker-sunset note removes it.
+add("floor step-up: builder Round 3 of 3 on sonnet is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
+add("floor step-up: builder Round 3 of 3 with no model is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", subagent_type="builder")
+add("floor step-up: builder Round 3 of 3 on opus is allowed (standing grant)", "allow",
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="opus", subagent_type="builder")
+add("floor step-up: builder Round 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
+add("floor step-up: builder Round 1 of 3 on opus asks (only round 3 is a standing grant)", "ask",
+    "agent-model-cap", tool="Agent", prompt="Round 1 of 3. Start the fix.", model="opus",
+    subagent_type="builder")
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
 # Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing grant
@@ -11890,6 +11903,9 @@ add("ceiling: Agent builder Try 3 of 3 on the full opus id is allowed (standing 
     subagent_type="builder")
 # The marker is a line of its own, as step_up_hit reads it. A lone quote and comment openers in the
 # lines above it hide nothing.
+add("ceiling: Agent builder Round 3 of 3 on the full opus id is allowed (standing grant)", "allow",
+    tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="claude-opus-5-5",
+    subagent_type="builder")
 add("ceiling: Agent builder Try 3 of 3 on line two after a lone quote and comment openers is allowed",
     "allow", tool="Agent", prompt="Don't skip /* the // check # now.\nTry 3 of 3. Finish the fix.",
     model="opus", subagent_type="builder")
@@ -11898,7 +11914,8 @@ for _role, _brief in (
         ("reviewer", "Try 3 of 3. Finish the fix."),
         ("general-purpose", "Try 3 of 3. Finish the fix."),
         ("test-author", "Try 3 of 3. Finish the fix."),
-        ("builder", "Round 3 of 3. Finish the fix."),
+        ("builder", "Round 2 of 3. Finish the fix."),
+        ("reviewer", "Round 3 of 3. Finish the fix."),
         ("builder", "Try 2 of 3. Finish the fix."),
         ("builder", "This is not try 3 of 3, only the first pass."),
         ("builder", "Plan: Try 3 of 3 later, after the review.")):

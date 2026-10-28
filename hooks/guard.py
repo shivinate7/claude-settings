@@ -1743,6 +1743,14 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
+# A builder's third round reads `Round 3 of 3`. The old `Try 3 of 3` still counts until note try-marker-sunset.
+BUILDER_MARKERS = ("round", "try")
+
+
+def builder_third_round(brief) -> bool:
+    """True when a brief holds a builder's third-round marker line, in either spelling."""
+    return isinstance(brief, str) and any(
+        kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in STEP_UP_MARKER.findall(brief))
 
 
 def step_up_hit(tool: str, tool_input) -> str:
@@ -1759,8 +1767,8 @@ def step_up_hit(tool: str, tool_input) -> str:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
         if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
             return "Reviewer round 3 runs on Sonnet or Opus. Spawn it with model sonnet or opus."
-        if role == "builder" and kind == "try" and n == "3" and "opus" not in model:
-            return "Builder try 3 runs on Opus. Spawn it with model opus."
+    if role == "builder" and builder_third_round(tool_input["prompt"]) and "opus" not in model:
+        return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
 
 
@@ -1936,8 +1944,7 @@ def opus_spawn_hit(tool: str, tool_input) -> str:
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
     if role in OPUS_STANDING_ROLES:
         return ""
-    if role == "builder" and isinstance(brief, str) and any(
-            kind.lower() == "try" and n == "3" for kind, n in STEP_UP_MARKER.findall(brief)):
+    if role == "builder" and builder_third_round(brief):
         return ""
     return str(tool_input.get("model"))
 
