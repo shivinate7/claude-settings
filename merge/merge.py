@@ -94,9 +94,10 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None):
+def sh(args, cwd=None, input=None, env=None, timeout=None):
     args = [resolve_program(args[0], env), *args[1:]]
-    timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else SH_TIMEOUT
+    limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
+    timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -1023,18 +1024,103 @@ def records_proof(wt, base_ref):
             git(wt, "reset", "--hard", "-q", "HEAD")  # also ends a merge in progress
             git(wt, "clean", "-fdq")
 
-def holds_base(wt, base_ref, sha):
-    """-> None when sha holds the tip of base_ref, else why not. The checks ran on sha, so a sha without that tip was
-    never tested against the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
+CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
+CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
+LINT_SECONDS = 1200  # the bound on one lint run of the merge result; the lock is extended to cover it first
+# The `gates` suites outside `ci-job --lint` that read tracked docs, not fixtures: every decision record, and the designer
+# agent with the design-explore skill. ci-job picks lint steps from the workflow, so these two are named here. A run skips a missing one.
+DOC_SUITES = ("hooks/test_precompact_handoff.py", "hooks/test_blind_brief.py")
+_SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read after the wait does not repeat a proof it already holds
+
+def small_base_move(wt, base_ref, sha, before_run=None):
+    """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T.
+    It stands only when main's paths since the merge base M share no path with the batch's (the records page aside: the
+    generator proves it on the merge), the merge of sha and T is clean, the repo's ci-scope.sh turns on no job and no suite
+    for main's paths, and the `gates` lint steps and DOC_SUITES pass on that merge. Anything unread refuses.
+    The worktree goes back to its HEAD. Cost per call: about 10 git starts, one ci-scope.sh run, one ci-job run (two
+    starts per lint step) and one start per doc suite; one temp output file, and one ci-job log, kept only on a failure."""
+    c, tip = git(wt, "rev-parse", base_ref)
+    if c:
+        return False, f"cannot read {base_ref}"
+    key = (wt, sha, tip)
+    if key in _SMALL_MOVES:
+        return _SMALL_MOVES[key]
+    c, m = git(wt, "merge-base", sha, tip)
+    if c or not m:
+        return False, "the merge base cannot be read"
+    reads = [git(wt, "diff", "--name-only", "--no-renames", "-z", m, x) for x in (tip, sha)]  # --no-renames: a moved file names both paths
+    count = git(wt, "rev-list", "--count", f"{sha}..{tip}")
+    if any(c for c, _ in reads) or count[0]:
+        return False, "the paths of main or of the batch cannot be read"
+    theirs, ours = ({p for p in out.split("\0") if p} for _, out in reads)
+    shared = sorted((theirs & ours) - {RECORDS_PAGE})
+    if not theirs or shared:
+        return False, "main and the batch both change " + ", ".join(shared) if shared else "main's commits change no path"
+    c, head = git(wt, "rev-parse", "HEAD")
+    if c:
+        return False, "the worktree's HEAD cannot be read"
+    fd, out_file = tempfile.mkstemp(prefix="merge-scope-")
+    os.close(fd)
+    fd, log = tempfile.mkstemp(prefix="merge-lint-", suffix=".log")
+    os.close(fd)
+    keep = False
+    try:
+        c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", f"Merge {base_ref} to read the lints", tip)
+        if c:
+            return False, f"the head does not merge cleanly with {base_ref}"
+        if not os.path.isfile(os.path.join(wt, *CI_SCOPE.split("/"))):
+            return False, f"the repo has no {CI_SCOPE} to say which jobs read main's paths"
+        # On the merge, sha...HEAD is main's paths: the same set as M..T, because the two sides share none
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
+        c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
+        with open(out_file, encoding="utf-8") as f:
+            flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        on = sorted(k for k, v in flags.items() if v != "false")
+        if c or not flags or on:
+            return False, f"{CI_SCOPE} turns on " + (", ".join(on) if flags else "every job (it gave no answer)") + " for main's paths"
+        if before_run:
+            before_run(LINT_SECONDS)  # extends the merge lock past the run, or stops with a NetStop
+        # --base is the base tip, as a pull request run reads its base: it checks the merge against main as it is now
+        c, out = sh([sys.executable, CI_JOB, "gates", "--lint", "--base", base_ref], cwd=wt, env={**env, "VERDICT_LOG": log}, timeout=LINT_SECONDS)
+        if c:
+            keep = True
+            bad = [l.strip() for l in out.splitlines() if l.startswith(("FAIL", "unknown"))]
+            return False, f"the lints of the merge are not all PASS ({'; '.join(bad[:3]) or 'exit ' + str(c)}; full output: {log})"
+        for suite in DOC_SUITES:
+            if os.path.isfile(os.path.join(wt, *suite.split("/"))):
+                c, out = sh([sys.executable, suite], cwd=wt, env=env, timeout=LINT_SECONDS)
+                if c:
+                    return False, f"{suite} fails on the merge"
+        n = int(count[1])
+        verdict = True, f"{base_ref.split('/', 1)[-1]} moved by {n} commit{'s' * (n != 1)} touching only paths no job of this batch reads; the lints pass on the merge"
+        _SMALL_MOVES[key] = verdict
+        return verdict
+    except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+        return False, f"the proof could not run ({type(e).__name__})"
+    finally:
+        git(wt, "merge", "--abort")
+        git(wt, "reset", "--hard", "-q", head)
+        git(wt, "clean", "-fdq")
+        for f in (out_file, *(() if keep else (log,))):
+            with contextlib.suppress(OSError):
+                os.remove(f)
+
+def holds_base(wt, base_ref, sha, before_run=None):
+    """-> (None, None) when sha holds the tip of base_ref; (None, why) when it does not but its green run still stands
+    (small_base_move); else (why not, None). The checks ran on sha, so a sha without that tip was never tested against
+    the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
     c, out = git(wt, "merge-base", "--is-ancestor", base_ref, sha)
     if c == 0:
-        return None
+        return None, None
     if c == 1:
+        ok, why = small_base_move(wt, base_ref, sha, before_run)
+        if ok:
+            return None, why
         tip = git(wt, "rev-parse", "--short=9", base_ref)[1]
         base = base_ref.split("/", 1)[-1]
         return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
-                f"Merge {base} into the branch, push, and run again.")
-    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}"
+                f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}."), None
+    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}", None
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -1552,8 +1638,9 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
-            current = holds_base(wt, f"origin/{base}", info["head"])
+            current, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = current and ("BEHIND: " if "does not hold" in current else "UNKNOWN: ") + current + " --confirm refuses it."
+            current = current or stands and stands + ". The green run stands."
         except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
             say("BLOCKED: " + " ".join(str(e).splitlines()[:-1]).replace("  ", " ").strip())
             raise
@@ -1598,9 +1685,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
         refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok)
-        stale = holds_base(wt, base_ref, info["head"])
+        stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
+        if stands:
+            say(f"merge: {stands}. The green run stands.")
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
@@ -1689,9 +1778,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     return proof
                 if proof == "stale":
                     stop(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again.")
-                stale = holds_base(wt, base_ref, sha)  # the base moved during the wait: the green run did not test it
+                stale, stands = holds_base(wt, base_ref, sha, host.before_wait)  # the base moved during the wait: the green run did not test it
                 if stale:
                     stop(stale)
+                if stands:
+                    say(f"merge: {stands}. The green run stands.")
                 return proof
 
             if prove(fail) == "healed":  # the page conflicted with the base: the merge commit carries a rebuilt page, so it is pushed and its checks wait
