@@ -2,7 +2,8 @@ name: README link check
 description: >
   Checks the external https links in a markdown file (stdlib python3, no install). Run it from
   a weekly `schedule` workflow, never per pull request: a flaky site must not turn a PR red.
-  With `open-issue: true` a dead link opens or updates one issue (needs `issues: write`). The
+  Links CI cannot reach by design (localhost, private IPs, *.local, *.home.arpa, *.internal) are
+  skipped and printed as `SKIP`. With `open-issue: true` a dead link opens or updates one issue (needs `issues: write`). The
   caller needs actions/checkout.
 inputs:
   file:
@@ -26,6 +27,6 @@ runs:
         rc=${PIPESTATUS[0]}
         if [ "$rc" -ne 0 ] && [ "$OPEN_ISSUE" = true ]; then
           bash "${{ github.action_path }}/../ci-alarm/issue.sh" "README link dead" \
-            "$(printf 'Dead links in %s:\n\n%s\n\nRun: %s/%s/actions/runs/%s' "$FILE" "$(sed 's/^/- /' links.txt)" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+            "$(printf 'Dead links in %s:\n\n%s\n\nRun: %s/%s/actions/runs/%s' "$FILE" "$(grep '^DEAD' links.txt | sed 's/^/- /')" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
         fi
         exit "$rc"
