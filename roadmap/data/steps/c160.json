@@ -2,8 +2,8 @@
  "title": "main-ref's stale origin/main case passes on every git version",
  "order": 103.33899985,
  "why": "c159's lane (Oct 28): githooks/main-ref/test_hook.sh case \"fetch origin main:main, origin/main stale\" is red on untouched main e0f9e2d under git 2.43 (cloud container): the hook refuses \"<sha> is not on origin/main\". CI (gates.yml line 420) passes it, so the guard's verdict depends on the git version.",
- "note": "Debt. Guess, unmeasured: a non-atomic fetch updates each ref in its own transaction, so the hook sees main move before origin/main does. Next cloud lane: read CI's git version, reproduce on 2.43, fix the reference-transaction hook logic so both versions agree; red first on today's case. Needs no answer. Port: no; the guard installs from claude-settings. Placed ahead of c107 (triage, Oct 28): a guard that refuses a correct fetch blocks work.",
+ "note": "Debt. Guess, unmeasured: a non-atomic fetch updates each ref in its own transaction, so the hook sees main move before origin/main does. Next cloud lane: read CI's git version, reproduce on 2.43, fix the reference-transaction hook logic so both versions agree; red first on today's case. Needs no answer. Port: no; the guard installs from claude-settings. Placed ahead of c107 (triage, Oct 28): a guard that refuses a correct fetch blocks work. Doing: lane started Oct 28 01:20 CDT (orchestrator, after batch 2).",
  "phase": "cleanup",
- "status": "todo",
- "updatedAt": "2026-10-28T06:45:00Z"
+ "status": "doing",
+ "updatedAt": "2026-10-28T06:55:00Z"
 }
