@@ -312,17 +312,52 @@ def case_last_human_reader_skips_a_peer_record():
 
 
 # --------------------------------------------------------------------------- case 6
-# git status fails (not a git work tree at all): UNKNOWN, never silent, never a flag.
+# A folder with no git repo: one plain line, once per session, then silence. A new session
+# hears it again. Never UNKNOWN jargon, never a flag. CLAUDE_CONFIG_DIR is isolated so the
+# per-session store never touches a real one.
 
 def case_not_a_repo():
     plain = os.path.join(ROOT, "not_a_repo")
     os.makedirs(plain, exist_ok=True)
     records = [human_record("hi", T0)]
     path = write_transcript(plain, records)
-    hook = {"transcript_path": path, "cwd": plain}
-    message = dw.run(hook, model_call=never_called())
-    check("not_a_repo: reads as UNKNOWN", message.startswith(dw.UNKNOWN_PREFIX), message)
-    check("not_a_repo: not silent", message != "", message)
+    hook = {"transcript_path": path, "cwd": plain, "session_id": "no-repo-session-1"}
+    line = getattr(dw, "NO_REPO_MESSAGE", "<NO_REPO_MESSAGE missing>")
+
+    scratch_cfg = os.path.join(ROOT, "cfg_not_a_repo")
+    os.makedirs(scratch_cfg, exist_ok=True)
+    prior = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = scratch_cfg
+    try:
+        first = dw.run(hook, model_call=never_called())
+        check("not_a_repo: first run says the plain line", first == line, first)
+        check("not_a_repo: no UNKNOWN jargon", "UNKNOWN" not in first, first)
+
+        second = dw.run(hook, model_call=never_called())
+        check("not_a_repo: second run, same session, silent", second == "", second)
+
+        other = dict(hook, session_id="no-repo-session-2")
+        third = dw.run(other, model_call=never_called())
+        check("not_a_repo: a new session hears the line again", third == line, third)
+
+        no_id = {"transcript_path": path, "cwd": plain}
+        check("not_a_repo: no session_id still says the line",
+              dw.run(no_id, model_call=never_called()) == line)
+
+        # A .git that git cannot read is a broken repo, not a folder with none: still UNKNOWN.
+        broken = os.path.join(ROOT, "broken_repo")
+        os.makedirs(broken, exist_ok=True)
+        write(os.path.join(broken, ".git"), "gitdir: %s\n" % os.path.join(ROOT, "no_such_gitdir"))
+        broken_hook = {"transcript_path": write_transcript(broken, records), "cwd": broken,
+                       "session_id": "no-repo-session-1"}
+        failed = dw.run(broken_hook, model_call=never_called())
+        check("not_a_repo: a git failure inside a repo stays UNKNOWN",
+              failed.startswith(dw.UNKNOWN_PREFIX), failed)
+    finally:
+        if prior is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = prior
 
 
 # --------------------------------------------------------------------------- case 7
