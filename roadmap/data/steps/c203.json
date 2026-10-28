@@ -1,0 +1,9 @@
+{
+ "title": "A per-session compaction window must not dirty settings.json; the handoff hook must read the window in use",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3389995,
+ "why": "shiv, Oct 28 15:20 CDT (via the coordinator): running /autocompact on a session to a value other than 500k writes it into his user settings, which on his machine is the repo's tracked settings.json, leaving a stray line change.",
+ "note": "Slug compact-window-off-tracked-file (coordinator's suggestion). Two defects. (1) When he runs /autocompact with a value other than 500000, Claude Code writes it into his user settings, which on his machine is the repo's tracked settings.json (autoCompactWindow, line 433 on main). The file shows a stray change, and he has to say \"leave it uncommitted\" to keep it out of a commit. A per-session window must not dirty the tracked file. (2) hooks/precompact_handoff.py reads only the top-level autoCompactWindow, so it misses a per-session or per-model value and can time the handoff nudge wrong; it must read the window the session really uses. Red first for each. Not measured yet: where Claude Code stores a per-session value, and whether the tracked file can be kept out of that write (for example a separate untracked user settings file); a lane reads the docs and a live session first. Related: waiting-page item 53 (a per-tier window), which shows the repo's 500k already reaches cloud sessions. Lane later; the coordinator briefs it. Port: yes, any repo whose user settings are tracked. Placed after c202 (triage 12, Oct 28).",
+ "updatedAt": "2026-10-28T20:50:00Z"
+}
