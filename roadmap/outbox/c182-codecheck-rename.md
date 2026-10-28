@@ -1,6 +1,6 @@
 # c182: code-check keeps a renamed module on the mypy list
 
-State: green and reviewed. Draft PR #777, head 49a306ca, branch c182-codecheck-rename.
+State: green and reviewed. Draft PR #777, head c3f8a3f9 (main f1f7fa92 merged in), branch c182-codecheck-rename.
 Builder opus. Round 1 reviewer opus asked for changes; round 2 reviewer sonnet approved.
 Local gates PASS, unittest 36 OK, silent-undo --strict exit 0.
 
