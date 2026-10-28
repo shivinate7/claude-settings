@@ -50,11 +50,12 @@ class Job(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
         self.log = os.path.join(self.root, "verdict.log")
 
-    def run_job(self, *steps, args=()):
+    def run_job(self, *steps, args=(), env=None):
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
-        env = dict(ENV, VERDICT_LOG=self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"})
+        env = dict(ENV, VERDICT_LOG=self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
+                   **(env or {}))
         done = subprocess.run([sys.executable, CI_JOB, "lane", "--workflow", path, *args], cwd=self.root,
                               capture_output=True, text=True, env=env, timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
@@ -371,11 +372,12 @@ class LintMode(unittest.TestCase):
                 m = re.match(r"^      - name: (.*?)\s*$", line)
                 if m:
                     name = m.group(1)
-                m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*)$", line)
+                m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
+                             r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
                 if m and "mutate" not in m.group(1):
                     want.append(name)
-                if re.match(r"^        uses: \S*actions/ste-lint\s*$", line):
-                    want.append(name)  # the STE action: ci-job runs bin/ste-changed in its place
+                if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check)\s*$", line):
+                    want.append(name)  # a known action: ci-job runs its one home's command in its place
         self.assertGreater(len(want), 20)
         done = subprocess.run([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", "origin/main"],
                               cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
@@ -385,6 +387,7 @@ class LintMode(unittest.TestCase):
             self.assertTrue(any(ln.split("  ", 1)[-1].startswith(expected) or ("  " + expected) in ln for ln in lines),
                             "missing %r in %s" % (expected, done.stdout))
         self.assertNotIn("test_guard", done.stdout)
+        self.assertTrue({"Code check", ZIZMOR} <= set(want), want)
 
     def test_a_new_lint_step_is_picked_up(self):
         code, lines, out = plan_lint(self.root, workflow(
@@ -461,6 +464,99 @@ class Shallow(Job):
         self.clone()
         rc, lines, out = self.run_job(step("ok", "true"))
         self.assertEqual((rc, self.verdicts(lines), self.shallow()), (0, ["PASS"], "true"), out)
+
+
+def gates_step(name):
+    """The gates job's step of this name, as text, so a pin is read from the workflow, never copied."""
+    sys.path.insert(0, HERE)
+    from workflow_steps import job_block, step_blocks, step_key
+    with open(GATES, encoding="utf-8") as f:
+        return next(st for st in step_blocks(job_block(f.read(), "gates")) if step_key(st, "name") == name) + "\n"
+
+
+NO_PIPX = {"PATH": os.pathsep.join(d for d in os.environ.get("PATH", "").split(os.pathsep)
+                                   if d and not os.path.exists(os.path.join(d, "pipx")))}
+ZIZMOR = "Workflow supply-chain audit (zizmor)"
+
+
+class LintTools(Job):
+    """--lint runs gates' Code check action (code_check.py, one home) and the pinned zizmor step. A planted bug
+    fails them; a missing pipx makes them unknown; neither may vanish from the lint run."""
+
+    CODE = step("Code check", uses="$/actions/code-check", **{"with": {"base": "${{ github.event.before }}"}})
+    INJECTION = ("on: issues\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+                 "      - run: echo \"${{ github.event.issue.title }}\"\n")
+    CLEAN = "on: push\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
+    ACTION = "name: a\ndescription: a\nruns:\n  using: composite\n  steps:\n    - run: echo hi\n      shell: bash\n"
+
+    def git(self, *a):
+        subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
+
+    def lane(self, files):
+        with open(os.path.join(self.root, "base.py"), "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-qb", "lane")
+        for rel, text in files.items():
+            os.makedirs(os.path.join(self.root, os.path.dirname(rel) or "."), exist_ok=True)
+            with open(os.path.join(self.root, rel), "w", encoding="utf-8") as f:
+                f.write(text)
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: code_check.py runs its pinned ruff through pipx")
+    def test_an_f541_in_a_tracked_py_fails_the_code_check(self):
+        self.lane({"a.py": 'print(f"no placeholders")\n'})
+        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+        self.assertIn("Code check", lines[0])
+
+    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: code_check.py runs its pinned ruff through pipx")
+    def test_clean_python_passes_the_code_check(self):
+        self.lane({"a.py": 'print("fine")\n'})
+        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_the_code_check_with_no_pipx_is_unknown(self):
+        self.lane({"a.py": 'print(f"no placeholders")\n'})
+        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"), env=NO_PIPX)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("pipx", lines[0])
+
+    def test_the_code_check_with_no_base_is_skipped(self):
+        rc, lines, out = self.run_job(self.CODE)
+        self.assertEqual(self.verdicts(lines), ["skipped"], out)
+
+    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the gates zizmor step runs through pipx")
+    def test_a_template_injection_fails_the_zizmor_step(self):
+        self.lane({".github/workflows/bad.yml": self.INJECTION, "actions/a/action.yml": self.ACTION})
+        rc, lines, out = self.run_job(gates_step(ZIZMOR), args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the gates zizmor step runs through pipx")
+    def test_a_clean_workflow_passes_the_zizmor_step(self):
+        self.lane({".github/workflows/ok.yml": self.CLEAN, "actions/a/action.yml": self.ACTION})
+        rc, lines, out = self.run_job(gates_step(ZIZMOR), args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_the_zizmor_step_with_no_pipx_is_unknown(self):
+        rc, lines, out = self.run_job(gates_step(ZIZMOR), args=("--lint", "--base", "origin/main"), env=NO_PIPX)
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("tool missing: pipx", lines[0])
+
+    def test_an_unpinned_or_chained_pipx_run_is_not_a_lint_step(self):
+        code, lines, out = plan_lint(self.root, workflow(step("loose", "pipx run zizmor .github/"),
+                                                         step("chained", "pipx run zizmor==1.0 . && rm -rf x"),
+                                                         step("pinned", "pipx run zizmor==1.0 .")))
+        self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines], ["pinned"], out)
+
+    def test_an_unknown_local_action_under_lint_is_one_unknown_line(self):
+        rc, lines, out = self.run_job(step("New check", uses="$/actions/new-check"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("New check", lines[0])
 
 
 if __name__ == "__main__":
