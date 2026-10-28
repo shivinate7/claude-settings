@@ -7,7 +7,10 @@
 # `prepared` aborts the transaction.
 #
 # Allowed: main untouched; main created where none exists; main moved to a commit that is an
-# ancestor of origin/main (`git pull` after a PR merged on GitHub); a pack-refs/gc no-op.
+# ancestor of origin/main (`git pull` after a PR merged on GitHub); `git fetch origin main:main`
+# with origin/main stale (the same transaction moves origin/main there, or FETCH_HEAD names
+# origin's main at that commit); a pack-refs/gc no-op.
+# Cost: local reads only; FETCH_HEAD and the origin URL are read only on the would-refuse path.
 # The `old` column is NOT evidence: git sends zeros when the caller states no expected value
 # (`branch -f`, `update-ref`, a delete). The decision uses `new` and the ref's value on disk.
 # It fails open on its own bugs: a hook that exits non-zero by mistake breaks git for every
@@ -28,6 +31,29 @@ case "$lines" in *"$ref"*) ;; *) exit 0 ;; esac
 zero_oid() { case "$1" in *[!0]*|"") return 1 ;; *) return 0 ;; esac; }
 
 current="$(git rev-parse --verify --quiet "$ref" 2>/dev/null)" || current=""
+
+# Fetch writes the URL with userinfo, trailing slashes and ".git" dropped; match that form.
+fetch_url() {
+  u="$(git remote get-url origin 2>/dev/null)" || return 1
+  case "$u" in
+    *://*@*) p="${u%%://*}://"; u="${u#*://}"; case "${u%%/*}" in *@*) u="${u#*@}" ;; esac; u="$p$u" ;;
+    [!/]*@*:*) case "${u%%:*}" in *@*) u="${u#*@}" ;; esac ;;
+  esac
+  while [ "${u%/}" != "$u" ]; do u="${u%/}"; done
+  printf '%s' "${u%.git}"
+}
+
+fetched() { # oid: FETCH_HEAD names origin's $branch at that commit
+  fh="$(git rev-parse --git-path FETCH_HEAD 2>/dev/null)" || return 1
+  [ -f "$fh" ] || return 1
+  want="branch '$branch' of $(fetch_url)" || return 1
+  tab="$(printf '\t')"
+  # Line: <oid> TAB [not-for-merge] TAB <what>. Tab is IFS whitespace, so split by hand.
+  while IFS= read -r l; do
+    [ "${l%%"$tab"*}" = "$1" ] && [ "${l##*"$tab"}" = "$want" ] && return 0
+  done <"$fh"
+  return 1
+}
 
 refuse() {
   {
@@ -65,6 +91,9 @@ while IFS=' ' read -r old new r rest; do
 $lines
 EOT
   [ -n "$tracked" ] && continue
+  # Older git (measured: 2.43) splits that fetch: main's transaction runs first, origin/main's
+  # after. FETCH_HEAD is already written then, so allow when it names origin's main at `new`.
+  fetched "$new" && continue
   refuse "$(git rev-parse --short "$new" 2>/dev/null || echo "$new") is not on origin/$branch."
 done <<EOF
 $lines
