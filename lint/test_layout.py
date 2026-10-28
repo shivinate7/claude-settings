@@ -165,7 +165,7 @@ class LayoutFile(Tree):
         self.assertEqual(self.layout.path(self.tree, "todo"), "docs/todo.md")
 
     def test_an_extras_todo_that_differs_from_the_repo_entry_is_an_error(self):
-        for url in ("https://github.com/shivinate7/home", "https://github.com/shivinate7/q_max"):
+        for url in ("https://github.com/shivinate7/home", "https://github.com/shivinate7/degen"):
             with self.subTest(url=url):
                 self.origin(url)
                 self.roll_out({"todo": {"path": "elsewhere"}})
