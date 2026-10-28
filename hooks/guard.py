@@ -2468,6 +2468,71 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
+# ------------------------------------------------------------------ a port question departs or is not asked
+#
+# docs/decisions/port-keeps-behaviour.md, rule `port-question`, built against a named incident
+# (owner, 2026-10-27 15:32 CDT; landed 2026-10-28): a waiting item about a port or redesign of an
+# existing app carries a "Departs from:" line and never holds work, since the existing app answers
+# the question. The item is read at the ArtifactData call that writes it.
+DATA_TOOL = "ArtifactData"
+WAITING_ITEMS = "items"
+PORT_WORD = re.compile(r"\b(?:ports?|ported|porting|redesign(?:s|ed)?)\b(?!\s*(?:\d|number))", re.I)
+DEPARTS_LINE = re.compile(r"^\s*Departs from:", re.I | re.M)
+PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
+               "departs from the app, and it never holds work. Add a line to context that starts "
+               "\"Departs from: <file>:<symbol> \u2014 <what changes>\", leave out holds, or set "
+               "port to false if this is not a port.")
+
+
+def _item_text(data) -> str:
+    return " ".join(str(data.get(k) or "") for k in ("title", "context", "holds"))
+
+
+def port_item_hit(op: str, data) -> str:
+    """The matched text when this write of a waiting item is a port question that skips the rule."""
+    if not isinstance(data, dict) or data.get("kind", "decision") not in ("decision", "task"):
+        return ""
+    if "port" in data:
+        on_port = bool(data["port"])
+    else:
+        on_port = op == "set" and bool(PORT_WORD.search(_item_text(data)))
+    if not on_port:
+        return ""
+    if data.get("holds"):
+        return "port item with holds"
+    if (op == "set" or "context" in data) and not DEPARTS_LINE.search(str(data.get("context") or "")):
+        return "port item with no Departs from line"
+    return ""
+
+
+def _write_data(entry):
+    """The data of one write: `data`, else the JSON in `file_path`. None when neither reads."""
+    data = entry.get("data")
+    path = entry.get("file_path")
+    if data is None and isinstance(path, str) and path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return None
+    return data
+
+
+def data_tool_hit(tool_input) -> str:
+    if not isinstance(tool_input, dict):
+        return ""
+    if tool_input.get("action") == "batch":
+        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
+    else:
+        entries = [(tool_input.get("action"), tool_input)]
+    for op, entry in entries:
+        if op in ("set", "update") and entry.get("collection") == WAITING_ITEMS:
+            hit = port_item_hit(op, _write_data(entry))
+            if hit:
+                return hit
+    return ""
+
+
 # ------------------------------------------------------------------ impeccable is review-only
 #
 # docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
@@ -2749,6 +2814,12 @@ def judge(payload) -> None:
         matched = impeccable_skill_hit(tool_input)
         if matched:
             refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
+        return
+
+    if tool == DATA_TOOL:
+        matched = data_tool_hit(tool_input)
+        if matched:
+            refuse(tool, "deny", "port-question", PORT_REASON, matched)
         return
 
     if tool in SHELL_TOOLS:

@@ -21,6 +21,8 @@ ambiguity instead of resolving it silently. Never drop an item without saying so
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
 
+On a port or redesign, the existing app's behaviour is the default (`building-port-keeps-behaviour`). Cite file and symbol for each choice. Ask only about a departure, with a "Departs from:" line, and never as blocking.
+
 If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet. Read `~/.claude/docs/design/principles.md` before you write any UI. Read `~/.claude/docs/design/tokens.md` for the house design values. When the step has a mockup in the repo's design folder, build to it, and report each place you differ from it.
 
 Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the findings from a FAIL at review round 1. Try 3 runs on Opus only after a FAIL at review round 2, by the owner's standing grant of 2026-10-12. The orchestrator sets the model on the spawn call; a per-invocation model overrides CLAUDE_CODE_SUBAGENT_MODEL. Your brief names your try on a line that starts with `Try N of 3`, and the guard reads that line. A build that started on Opus by the owner's grant has no step left.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against seven rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against seven rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on" or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -17,6 +17,10 @@ each handed-off step is checked for its reason and the check. It is also checked
 be undone, which the session takes and does not ask (rule questions-go-to-owner). The label is read in code, not by the
 model, from lint/report_gate.py LABEL_ORDER (the one home; lint/ lands beside hooks/). If that
 import fails, the Stop is judged and one stderr line says so.
+
+Blocked on: a reply that says "blocked on" (any case) is judged on every Stop too, so the model can
+check that the block is not a question about a port or redesign of an existing app, which the
+existing app's behaviour answers (rule questions-go-to-owner). Code finds the words; the model decides.
 
 Tables: a reply that holds a Markdown table (a separator row such as |---|---|) is judged on every
 Stop too, so the model can check that a comparison table carries a gold-standard or target
@@ -49,6 +53,7 @@ LEAD = re.compile(r"^[\s>]*(?:\*\*)?\s*")
 TAIL = re.compile(r"^\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*")
 EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
 TABLE_SEPARATOR = re.compile(r"^[\s>]*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", re.M)
+BLOCKED_ON = re.compile(r"blocked\s+on", re.I)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
@@ -82,6 +87,10 @@ INSTRUCTIONS = (
     "Also flag an Input Needed item that asks the owner to pick between visual options, a look or a layout, "
     "and only links to them, such as a link to a folder, a repo or a file; each option needs its own picture or design in the item. "
     "A reply that points to the waiting-page item that carries the designs is fine; never flag it. "
+    "Also flag a reply that marks work blocked on, or an Input Needed item as blocking, a question about a port or redesign "
+    "of an existing app; the existing app's behaviour answers it, so the session reads it and cites file and symbol. "
+    "Also flag such a port or redesign question that has no \"Departs from:\" line. "
+    "Never flag a question that says how the work departs from the existing behaviour and is not marked blocking. "
     "Running background work never makes a reply unfinished. "
     "style-limits-kept-silently: flag a reply that narrates a limit it kept or a check that passed, "
     "such as \"staying under the 15-line cap\" or \"rule X holds\". "
@@ -188,7 +197,8 @@ def main():
         if not isinstance(reply, str) or not reply.strip():
             return 0
         stop_n = count_this_stop(hook.get("session_id"))
-        if (stop_n - 1) % SAMPLE_EVERY and not TABLE_SEPARATOR.search(reply) and not has_input_needed(reply):
+        if (stop_n - 1) % SAMPLE_EVERY and not TABLE_SEPARATOR.search(reply) \
+                and not BLOCKED_ON.search(reply) and not has_input_needed(reply):
             return 0
         import decision_watch
         verdict, error = decision_watch.invoke_model(
