@@ -13062,7 +13062,7 @@ def worktree_home_cross_checkout_case():
     """Rule 0, `other-checkout`, beside `worktree-home`: any session, agent or not, may not write
     into a checkout of its clone other than the one its cwd stands in. A target in no checkout of
     the clone is allowed. A nested worktree belongs to itself, not to the primary that holds it.
-    Incident 2026-09-06 and the notes-folder refusal: docs/decisions/an-agent-outside-its-home-tree-must-stop.md."""
+    Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md."""
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xco")
     in_a = os.path.join(lane_a, "src", "app.py")
     in_b = os.path.join(lane_b, "src", "app.py")
