@@ -356,7 +356,7 @@ SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-
 # `--dry-run` moves nothing and stays allowed. Output sent to a FILE stays allowed: the owner held
 # that until measured.
 
-# git's OWN `-q`/`--quiet` flag is a narrower claim, and it does not read the same for every
+# git's OWN `-q`/`--quiet` flag is a narrower statement, and it does not read the same for every
 # subcommand. MEASURED 2026-09-19 and 2026-09-20, in throwaway repos under this session's
 # scratchpad, never in a shared checkout, `-q`/`--quiet` alone, no redirect, three states each: a
 # write that succeeds, one a hook refuses (a `pre-commit`/`pre-receive` hook, or the conflict

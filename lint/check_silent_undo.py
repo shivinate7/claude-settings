@@ -218,7 +218,7 @@ def rewritten(line, hs, base=(), modified=False):
     A new line that equals the base version, or that only adds trailing tokens or punctuation
     to it, is a restore, never a rewrite: A changed `timeout = 30` to 60, and a stale copy put
     `timeout = 30 #s` back. Whatever the ratio, a new line whose operators or negation differ
-    from the lost line is a different claim and never excuses it (`x < 5` to `x >= 5`, `do not`
+    from the lost line is a different statement and never excuses it (`x < 5` to `x >= 5`, `do not`
     to `do`). Numbers differ only in the `modified` case, the third value above."""
     num, ops, neg = kinds(line)
     for o, n in hs:

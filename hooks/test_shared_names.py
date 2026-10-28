@@ -6,7 +6,7 @@ Run it from the repository root:
 
     python hooks/test_shared_names.py
 
-THE CLAIM. `shared_names` holds the watched settings file names (`PROJECT_FROZEN_FILES`, with the
+WHAT IT PROVES. `shared_names` holds the watched settings file names (`PROJECT_FROZEN_FILES`, with the
 leading slash the guard matches on) and `config_dir`. It imports only the standard library, so the
 config watch's fast exit can read it before the guard loads. The guard's modules re-export those
 very objects, and `config_watch.py` holds no literal copy of a watched name.

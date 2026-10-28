@@ -484,7 +484,7 @@ class _Tokens(list):
 def _quoted_opens(segment: str, count: int):
     """Indexes of the tokens that start inside quotes. Reads the segment again with quotes kept
     (non-POSIX shlex): a token that starts with `'`, or with `"` not followed by `$(`, is quoted
-    text. When the two readings do not line up, claim nothing: a paren then counts as a subshell."""
+    text. When the two readings do not line up, state nothing: a paren then counts as a subshell."""
     try:
         raw = shlex.split(segment, posix=False)
     except ValueError:

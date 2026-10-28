@@ -643,7 +643,7 @@ def _require_status(where, expected):
 def _require_stash(where, count):
     """Stop the suite unless `where`'s stash stack really holds `count` entries.
 
-    A fixture that claims a one-entry stack and holds none would make the `stash drop` case pass
+    A fixture that says it has a one-entry stack and holds none would make the `stash drop` case pass
     for the wrong reason. MEASURED lesson from CI: `git stash push` writes a commit, so it needs
     a git identity, and a runner has none unless the call carries one.
     """
@@ -1607,7 +1607,7 @@ def _build_worktrees():
     # A RECYCLED-PID shape: the pid IS alive (this runner, again) and the cwd sits inside the
     # target tree, but the recorded start time does not match the live process's real start
     # time. A pid can be reused by an unrelated process after the session that recorded it
-    # exited, and this is exactly the claim that must not read as live.
+    # exited, and this is exactly the statement that must not read as live.
     os.makedirs(os.path.join(WTSTALESTARTCFG, "sessions"), exist_ok=True)
     write(
         os.path.join(WTSTALESTARTCFG, "sessions", "%d.json" % self_pid),
@@ -6060,7 +6060,7 @@ sh("delete: one scratch file", "rm -f /tmp/scratch.txt", "allow", cwd=NOGIT)
 # THE CMD.EXE VERBS. `rd`/`rmdir` and `del`/`erase` take `/s` (recurse) and `/q` (quiet,
 # optional, never required), never `rm`'s or `Remove-Item`'s dash flags. Each denied case here
 # has an rm or Remove-Item twin above that already denies, so the verdict carries over. Checked
-# under BOTH tool names, since the guard reads the command TEXT, not which shell claims to run
+# under BOTH tool names, since the guard reads the command TEXT, not which shell it says it runs
 # it.
 sh("delete: rd /s /q at a drive root, Bash", "rd /s /q C:\\", "deny", "destructive-delete",
    cwd=NOGIT)
@@ -9419,7 +9419,7 @@ sh("cap: an object as the model value still asks",
    "cat <<'JSON' > " + PROJ_SETTINGS + "\n{\"env\": {\"" + CAP_KEY + "\": {\"a\": 1}}}\nJSON",
    "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = (value unread)",))
 
-# THE OVER-ASK IS PINNED, because a comment claiming otherwise once stood here. A settings write
+# THE OVER-ASK IS PINNED, because a comment saying otherwise once stood here. A settings write
 # that names the variable only inside a permission string still asks: the bare-key pass fires on any
 # occurrence in the content. That is the safe direction, and the case exists so the behaviour and
 # the comment beside the rule cannot drift apart again.

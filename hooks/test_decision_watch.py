@@ -662,7 +662,7 @@ def case_cache_key_holds_the_repo_and_a_bounded_read():
 # --------------------------------------------------------------------------- case 9
 # invoke_model's real argv and kwargs, against a fake subprocess.run: the explicit empty
 # tool set, --permission-mode plan, and an isolated cwd/env are on the command line, not
-# only claimed in a docstring. A claim of "no tools" with an argv that grants every tool,
+# only stated in a docstring. A statement of "no tools" with an argv that grants every tool,
 # in this project's directory, inheriting its permissions.allow, must fail.
 
 class _FakeCompletedProcess:

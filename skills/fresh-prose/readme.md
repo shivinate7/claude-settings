@@ -1,6 +1,6 @@
 # README
 
-Write the best README the repo can have, and apply the ladder in SKILL.md to every claim in
+Write the best README the repo can have, and apply the ladder in SKILL.md to every statement in
 it.
 
 ## Content
@@ -46,7 +46,7 @@ Drop a section that is empty.
   path, one at a time, on a scratch copy, watch each guard fail, then restore it. Give the
   verdict of each in one line.
 - The README renders cleanly on GitHub. Check the headings, tables, and code blocks.
-- List every claim you deleted, every claim you replaced with a link, and every claim you
+- List every statement you deleted, every statement you replaced with a link, and every statement you
   left unchecked, with the reason.
 
 Read a fact about the repo from the code, never guess it (`building-never-guess-answer`). If

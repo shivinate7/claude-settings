@@ -5,7 +5,7 @@ Run it from the repository root:
 
     python hooks/test_config_watch_fast_exit.py
 
-THE CLAIM. The watch hashes the watched settings files on every call, BEFORE it imports the
+WHAT IT PROVES. The watch hashes the watched settings files on every call, BEFORE it imports the
 guard, and imports the guard only when a hash differs from the stored baseline. The hash is the
 only test of "unchanged": a same-size edit with its mtime reset must still count as changed. A
 missing or unreadable baseline record means "check now".

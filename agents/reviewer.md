@@ -27,9 +27,9 @@ the check that proves the task done. State each ruling in the fewest words. Hunt
 false alarms: probe single cases from a scratch copy. In any guard or check, a bypass counts as a safety hole only if Claude could write it by mistake or from a misread task. A form only an attacker would write is out of scope, in every round and in the net-value lines (`guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
 full suites and the mutation tests. The test-author's recorded red run is enough. Re-run
 it only when that record is missing or in doubt. A green check proves only its platform and fixture.
-Verify a claim before you rely on it. Never guess an answer the code should give you.
+Verify a statement before you rely on it. Never guess an answer the code should give you.
 
-A test is a claim, not law. When a CHANGES verdict turns on a broken test, state its class.
+A test is a statement, not law. When a CHANGES verdict turns on a broken test, state its class.
 (a) The subject still holds, and only its route changed: the check was re-pointed and shown
 red, then green. (b) The failure found a real defect, now fixed. (c) The rule may be stale:
 flag it to the owner instead of waving the test through or forcing a bypass. (d) The owner

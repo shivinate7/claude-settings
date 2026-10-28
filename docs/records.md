@@ -13,7 +13,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `outcomes-judge-by-outcome` | Judge every rule, check, and design by the outcome for the person the software serves. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-decision-is-argument` | Treat a recorded decision as an argument, not a law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-stale-decision-protocol` | When a decision looks stale, name the record and the sentence. | [`CLAUDE.md`](../CLAUDE.md) |
-| `outcomes-tests-are-claims` | A failing test is a claim, not law. | [`CLAUDE.md`](../CLAUDE.md) |
+| `outcomes-tests-are-statements` | A failing test is a statement, not law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-grant-covers-named-act` | My grant covers the act it names, never a variant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-mechanize-rules` | Once ready, turn each rule below into a hook or check. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-pick-mode-from-request` | Pick solo or orchestrate from my request. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -26,7 +26,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, and a builder's round 3 (`roles-third-round-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Owner raises Opus. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-brief-contents` | A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-claims`, and the check that proves the task done—in the fewest words. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-brief-contents` | A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-statements`, and the check that proves the task done—in the fewest words. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-each-layer-proves-once` | Each layer proves a change once. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-review-cap-three` | A change gets at most three review rounds. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-findings-are-debts-or-notes` | A finding is a debt only if Claude is likely to hit it in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -35,7 +35,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `parallelism-each-own-checkout` | Fan tasks out to agents now, each in its own checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-own-lane-orchestrator` | A read-only workflow agent shares the caller's checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-no-mid-task-talk` | Never let lanes talk mid-task. | [`CLAUDE.md`](../CLAUDE.md) |
-| `parallelism-argue-max-parallelism` | Argue "at max parallelism" by naming the open lanes, never by assuming the claim. | [`CLAUDE.md`](../CLAUDE.md) |
+| `parallelism-argue-max-parallelism` | Argue "at max parallelism" by naming the open lanes, never by assuming the statement. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-no-guessed-lane-cap` | A brief or plan never caps lanes on its own, by a guessed number such as "one or two at a time" or "at most N lanes". | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-keep-going` | When a lane ends, start in the same turn each queued item the owner asked for whose questions are all answered. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-no-destructive-git` | No destructive git. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -68,7 +68,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verification-never-dry-run-refusal-list` | Never dry-run a refusal list. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-newest-that-passes` | Take the newest version that passes its checks. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-checked-reader-for-numbers` | If this repo lints markdown, give every published number and path a checked reader. | [`CLAUDE.md`](../CLAUDE.md) |
-| `verification-report-unknown-reads` | Verify a claim before you rely on it, a document's own claims too. | [`CLAUDE.md`](../CLAUDE.md) |
+| `verification-report-unknown-reads` | Verify a statement before you rely on it, a document's own statements too. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-never-load-whole-doc` | Never load a long document whole. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-verdict-not-stream` | A verification command's answer is its verdict, not its stream. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-run-through-verdict` | Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -187,7 +187,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `port-keeps-behaviour` | Owner, 2026-10-27 15:32 CDT: when a session ports or redesigns an existing app, the working app already answers most questions. | [`docs/decisions/port-keeps-behaviour.md`](../docs/decisions/port-keeps-behaviour.md) |
 | `precompact-handoff` | Auto-compact drops detail. | [`docs/decisions/precompact-handoff.md`](../docs/decisions/precompact-handoff.md) |
 | `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`docs/decisions/predicate-is-the-act.md`](../docs/decisions/predicate-is-the-act.md) |
-| `premise-format` | A premise is a claim, not a fact. | [`docs/decisions/premise-format.md`](../docs/decisions/premise-format.md) |
+| `premise-format` | A premise is a statement, not a fact. | [`docs/decisions/premise-format.md`](../docs/decisions/premise-format.md) |
 | `question-reviewer-agent-hook` | Owner rulings, 2026-10-22 10:18 CDT: | [`docs/decisions/question-reviewer-agent-hook.md`](../docs/decisions/question-reviewer-agent-hook.md) |
 | `questions-go-to-owner` | Owner, 2026-10-26: a session with a question brings it to the owner. | [`docs/decisions/questions-go-to-owner.md`](../docs/decisions/questions-go-to-owner.md) |
 | `recovery-independent-of-state` | A recovery control exists for the moment its own precondition is false. | [`docs/decisions/recovery-independent-of-state.md`](../docs/decisions/recovery-independent-of-state.md) |
