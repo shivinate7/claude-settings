@@ -2,8 +2,8 @@
  "title": "code-check covers Astro files",
  "order": 103.3755,
  "why": "joyous's c127 lane, Oct 28: actions/code-check has no Astro row, so joyous's 27 .astro files go unchecked and its c127 roll-out is deferred.",
- "note": "Next cloud lane: actions/code-check gains an Astro row (an astro check runner, pinned in standard.json); the shared action still fails on a repo language with no row. Red first on a planted type error in an .astro file. Touches actions/code-check/ only. Needs no answer. Port: yes, joyous first, then any Astro repo. Placed ahead of c78, after c127 (triage, Oct 28): joyous's code-check waits on it. Green and reviewed: draft PR #756 (bbf71b8f; reviewer Opus round 1 approve), ready for batch 6. The row runs astro-check from @astrojs/check 0.9.12, since `astro check` without node_modules prompts and exits 0 (a false green). Notes: astro-check ignores .code-check.json excludes, as tsc does; Node 20 with @astrojs/check is unmeasured until the first CI run; gates.yml's npm install pins only top-level packages. Batch 6 dropped it on a zizmor red; fixed, batch 7. Note: a calling repo's npx install of @astrojs/check locks no nested dependencies (pipx tools alike).",
+ "note": "Next cloud lane: actions/code-check gains an Astro row (an astro check runner, pinned in standard.json); the shared action still fails on a repo language with no row. Red first on a planted type error in an .astro file. Touches actions/code-check/ only. Needs no answer. Port: yes, joyous first, then any Astro repo. Placed ahead of c78, after c127 (triage, Oct 28): joyous's code-check waits on it. Green and reviewed: draft PR #756 (bbf71b8f; reviewer Opus round 1 approve), ready for batch 6. The row runs astro-check from @astrojs/check 0.9.12, since `astro check` without node_modules prompts and exits 0 (a false green). Notes: astro-check ignores .code-check.json excludes, as tsc does; Node 20 with @astrojs/check is unmeasured until the first CI run; gates.yml's npm install pins only top-level packages. Batch 6 dropped it on a zizmor red; fixed. Done: merged in batch 7 (PR #763, main a64166ae, Oct 28 06:47 CDT). Note: a calling repo's npx install of @astrojs/check locks no nested dependencies (pipx tools alike).",
  "phase": "cleanup",
- "status": "doing",
- "updatedAt": "2026-10-28T10:46:54Z"
+ "status": "done",
+ "updatedAt": "2026-10-28T11:49:12Z"
 }

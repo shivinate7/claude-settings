@@ -1,9 +1,9 @@
 {
  "title": "A waiting-page answer is written into its item, never in a comment thread",
  "phase": "cleanup",
- "status": "doing",
+ "status": "done",
  "order": 103.338492,
  "why": "Ruling, Oct 28 02:44 CDT (shiv; recorded in decision questions-go-to-owner on branch rulings-oct28, PR #750, 515e916a): never answer a waiting-page comment with a thread reply, since a rebuilt page drops its threads; rewrite the item so its text carries the answer, then republish.",
- "note": "Applied by hand Oct 28 (triage 9): items 6, 7, 31, 32 and 34 now carry their answers in their text. Next cloud lane: skills/waiting-page/SKILL.md \"Read the answers\" and \"Route and close\" drop the thread reply and say to rewrite the item's context with the answer (or new options) and republish; the reply judge flags a thread reply on a waiting page; red first on today's SKILL.md text. #750 (the decision record) merged in batch 5, main 646d23c5. Shares skills/waiting-page/ with c147 (#753, batch 6): the lane keeps to SKILL.md and the reply judge, or merges main after #753. Needs no answer. Port: yes, one skill serves every page. Placed ahead of c147 (triage, Oct 28): it governs every answer on every page. Green and reviewed: PR #759 (076de1f; builder Opus, reviewers Opus then Sonnet, both approve), batch 7; no hunk overlaps #753. Note: a non-writer owner that rewrites an item may republish a design, which only the writer should do.",
- "updatedAt": "2026-10-28T10:46:54Z"
+ "note": "Applied by hand Oct 28 (triage 9): items 6, 7, 31, 32 and 34 now carry their answers in their text. Next cloud lane: skills/waiting-page/SKILL.md \"Read the answers\" and \"Route and close\" drop the thread reply and say to rewrite the item's context with the answer (or new options) and republish; the reply judge flags a thread reply on a waiting page; red first on today's SKILL.md text. #750 (the decision record) merged in batch 5, main 646d23c5. Shares skills/waiting-page/ with c147 (#753, batch 6): the lane keeps to SKILL.md and the reply judge, or merges main after #753. Needs no answer. Port: yes, one skill serves every page. Placed ahead of c147 (triage, Oct 28): it governs every answer on every page. Green and reviewed: PR #759 (076de1f; builder Opus, reviewers Opus then Sonnet, both approve), no hunk overlaps #753. Done: merged in batch 7 (PR #763, main a64166ae, Oct 28 06:47 CDT). Note: a non-writer owner that rewrites an item may republish a design, which only the writer should do.",
+ "updatedAt": "2026-10-28T11:49:12Z"
 }

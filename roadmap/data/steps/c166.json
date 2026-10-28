@@ -1,9 +1,9 @@
 {
  "title": "No batch merges onto a red main",
  "phase": "cleanup",
- "status": "doing",
+ "status": "done",
  "order": 103.30316,
  "why": "plans/c95-step2-escapes.md (Oct 28): main red does not stop merges; main's latest run was not green for 311 of 366 hours (Oct 13-28), and on Oct 13-14 merges kept landing through 14 red runs, so an escape costs hours, not minutes.",
- "note": "Next cloud lane: merge.py refuses a batch merge while main's latest completed full run has a red step (not a timeout or a cancel), and names the red job and run; an owner override lifts it for the batch that carries the fix. Red first on a merge attempt over today's kind of red main. Touches merge/merge.py and merge/test_merge.py, as c162 does, so it runs after c162 or in the same lane. Needs no answer. Port: yes, with merge.py's roll-out to each repo. Placed ahead of c154, after c162 (triage, Oct 28): it protects every CI step, 1 to 3. c162 merged in batch 5. Green and reviewed: PR #761 (fd7c1b0d; Opus round 1, 5 fixes; Sonnet round 2 approve), batch 7. Possible debt at port: in a repo whose push runs cancel in progress, a superseded run reads unknown and the check refuses until the newer run ends; fix: read it as pending while a newer run of that file runs. Notes: a workflow with no run in the newest 50 is not judged; action_required and stale read red. Batch 7 re-pushed with its F541 fix (fd4ccca1).",
- "updatedAt": "2026-10-28T10:53:55Z"
+ "note": "Next cloud lane: merge.py refuses a batch merge while main's latest completed full run has a red step (not a timeout or a cancel), and names the red job and run; an owner override lifts it for the batch that carries the fix. Red first on a merge attempt over today's kind of red main. Touches merge/merge.py and merge/test_merge.py, as c162 does, so it runs after c162 or in the same lane. Needs no answer. Port: yes, with merge.py's roll-out to each repo. Placed ahead of c154, after c162 (triage, Oct 28): it protects every CI step, 1 to 3. c162 merged in batch 5. Green and reviewed: PR #761 (fd7c1b0d; Opus round 1, 5 fixes; Sonnet round 2 approve), batch 7. Possible debt at port: in a repo whose push runs cancel in progress, a superseded run reads unknown and the check refuses until the newer run ends; fix: read it as pending while a newer run of that file runs. Notes: a workflow with no run in the newest 50 is not judged; action_required and stale read red. Done: merged in batch 7 (PR #763, main a64166ae, Oct 28 06:47 CDT). The red-main brake is live.",
+ "updatedAt": "2026-10-28T11:49:12Z"
 }
