@@ -4,9 +4,11 @@
 Decision blind-briefs-use-a-template. Standard library only.
 
 - A blind brief (first line `Lane kind: blind`) follows skills/design-explore/blind-brief.md: a `Lane:`
-  line, the free sections Job, Device and Palette, and the fixed sections House rules and Deliver word
-  for word. A free section may not name the current product, a screenshot or mockup, a path or link,
-  the spec or tokens, or a keep or match rule (brief_faults).
+  line, the free sections Job and Device, and the fixed sections House rules and Deliver word for
+  word. A free section may not name the current product, a screenshot or mockup, a path or link, the
+  spec or tokens, or a keep or match rule, and holds no colour, font or spacing value (brief_faults).
+  A blind brief has no Palette section: a section on colour, font, spacing or tokens is refused
+  (`token-section`). Roadmap step c191: the d4 brief's Palette held a repo's brand hex.
 - An informed or directed brief carries `Blind lanes: <n>` with n of 1 or more, or
   `Blind lanes: none, owner: "<the owner's words>"`.
 - A designer brief with no kind line is a small change outside design-explore, and passes.
@@ -35,10 +37,11 @@ if HERE not in sys.path:
 TEMPLATE = os.path.join(HERE, "..", "skills", "design-explore", "blind-brief.md")
 RULE = "blind-brief"
 SPAWN_TOOLS = ("Agent", "Task")
-FREE = ("Job", "Device", "Palette")
+FREE = ("Job", "Device")
 FIXED = ("House rules", "Deliver")
 
 KIND_LINE = re.compile(r"^lane kind:\s*(blind|informed|directed)\b", re.I)
+BLIND_KIND_ONLY = re.compile(r"^lane kind:\s*blind\s*$", re.I)
 LANE_LINE = re.compile(r"^Lane:\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
 BLIND_LANES = re.compile(r"^blind lanes:\s*(.*?)\s*$", re.I | re.M)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
@@ -84,7 +87,43 @@ PATTERNS = {
         r"(?<![\w-])--[a-z][a-z0-9]*-[\w-]+", r"\bstyle\s*guide\b",
     ],
 }
+# A repo's design values: colour, font and spacing. A brief that states one leaks the repo's look
+# (roadmap step c191), because the repo's own tokens hold the same value. A Device section is exempt from
+# token-spacing: it copies written device sizes, and a hinge gap or a safe-area inset is a device fact.
+_SPACE_WORD = r"(?:spacing|gaps?|padding|margins?|gutters?|radius|radii|insets?)"
+_COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|palette|tint|shade)"
+_ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
+            "number", "ref")
+_NOT_ID = "".join(r"(?<!\b%s )" % w for w in _ID_WORD)  # "order #123456" is an id, not a colour
+SPACING_EXEMPT = ("Device",)
+PATTERNS.update({
+    "token-colour": [
+        _NOT_ID + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
+        _NOT_ID + r"#(?:\d{6}|\d{8})\b",
+        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#[0-9a-f]{3,4}\b",
+        r"\b(?:rgba?|hsla?|hwb|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
+    ],
+    "token-font": [
+        r"\bfont-family\b", r"\bfont\s+(?:stack|family)\b", r"\b(?:sans-)?serif\s+(?:font|typeface)\b",
+        r"\bmonospace\b", r"\bsystem-ui\b", r"-apple-system",
+    ],
+    "token-spacing": [
+        r"--space-\d", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:px|rem|dp)\b",
+        r"\b" + _SPACE_WORD + r"\b\W+(?:\w+\W+){0,3}(?<![\w.])\d+(?:\.\d+)?\s?(?:pt|em)\b",
+        r"\b\d+[- ]?(?:point|pt)\s+(?:grid|baseline)\b", r"\bspacing\s+scale\b",
+    ],
+})
 COMPILED = {kind: [re.compile(p, re.I) for p in pats] for kind, pats in PATTERNS.items()}
+# Font names are capitalised words, so they match with case: "Inter 600" is a font, "Inter Miami" is not.
+COMPILED["token-font"] += [re.compile(p) for p in (
+    r"\b(?i:in|use|using|with|font|typeface)\s+Inter\b(?![-\w]|\s+[A-Z])", r"\bInter\s+\d{3}\b",
+    r"\b(?:Roboto|Helvetica|Arial|SF Pro|SF Mono|Avenir|Open Sans|Poppins|Nunito"
+    r"|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather|Garamond|Verdana"
+    r"|Tahoma|Segoe UI|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans|Figtree|Fraunces|Satoshi"
+    r"|General Sans)\b",
+    r"\b[Ff]onts?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
+    r"\b[Tt]ypefaces?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)")]
+TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
 
 
 def kind_of(text):
@@ -173,11 +212,17 @@ def brief_faults(text, current=(), template=None, devices=None):
         faults.append(("kind", "first line", lines[0] if lines else ""))
     if not any(LANE_LINE.match(line) for line in lines):
         faults.append(("lane", "header", "no Lane line"))
-    for line in lines:
-        if not KIND_LINE.match(line) and not LANE_LINE.match(line):
+    for index, line in enumerate(lines):
+        if KIND_LINE.match(line):
+            # The kind line holds the kind and nothing else, and only once: text after it hides a value.
+            if index > 0 or not BLIND_KIND_ONLY.match(line):
+                faults.append(("outside", "header", line))
+        elif not LANE_LINE.match(line):
             faults.append(("outside", "header", line))
     for code, name in extra:
         faults.append((code, "body", name))
+        if code == "section-extra" and TOKEN_SECTION.search(name):
+            faults.append(("token-section", "body", name))
     for name in repeated:
         faults.append(("section-extra", name, "repeated"))
     for name in FREE + FIXED:
@@ -201,6 +246,8 @@ def brief_faults(text, current=(), template=None, devices=None):
         if hit:
             faults.append(("placeholder", name, hit.group(0)))
         for kind, pats in COMPILED.items():
+            if kind == "token-spacing" and name in SPACING_EXEMPT:
+                continue
             for pat in pats:
                 hit = pat.search(body)
                 if hit:
@@ -248,8 +295,9 @@ def describe(faults):
 
 
 REFUSE_BLIND = ("this blind designer brief breaks the template: %s. Build it again from the "
-              "design-explore blind template: the job in the users' words, the device, the palette, and "
-              "the fixed House rules and Deliver text. Name nothing of today's product.")
+              "design-explore blind template: the job in the users' words, the device, and the fixed "
+              "House rules and Deliver text. Name nothing of today's product, and no colour, font or "
+              "spacing value.")
 REFUSE_COUNT = ("an informed or directed designer brief must carry a line `Blind lanes: <n>`, with n of 1 or "
               "more, or `Blind lanes: none, owner: \"<the owner's words>\"`. Start the run's blind lanes "
               "too (skill design-explore).")
