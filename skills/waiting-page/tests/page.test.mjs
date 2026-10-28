@@ -1979,6 +1979,7 @@ const STATES = [
   ["draft ready", () => ({ items: [DECISION, TASK] }), (page) => choose(page, DECISION, "a")],
   ["answered, filing pending", () => ({ items: [DECISION, TASK], answers: SAVED_A })],
   ["answered, filed", () => ({ items: [DECISION, TASK], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } })],
+  ["answered, read", () => ({ items: [DECISION, TASK], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } } })],
   ["bundle", () => ({ items: [1, 2, 3].map((n) => mk("sw-" + n, n, { group: "pair", title: LONGT + n })), groups: { pair: { title: "Answer these together", why: "Linked." } } })],
   ["pictures", () => ({ items: [mk("sw-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) })], designData: Object.fromEntries(LOOK_OPTS.map((o) => [o.design, TALL])) })],
   ["task", () => ({ items: [TASK] })],
@@ -2012,4 +2013,60 @@ test("containment sweep: nothing crosses its card, the rail or the Sent bar, not
     await page.close();
   }
   assert.deepEqual(failures, []);
+});
+
+// Review round 2 findings (c193).
+const growItem = () => mk("grow-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
+const growData = (h) => Object.fromEntries(LOOK_OPTS.map((o) => [o.design, `<body style="margin:0"><div style="width:390px;height:${h}px;background:#eee"></div></body>`]));
+const picBox = (page) => page.evaluate(() => [...document.querySelectorAll("#item-grow-pics label.opt")].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.querySelector(".opic").getBoundingClientRect(); return { w: Math.round(w.width), over: Math.round(Math.max(b.left - w.left, w.right - b.right, 0)) }; }));
+
+test("a capped picture grows back when its card widens and stays inside when it narrows", async (t) => {
+  const page = await open(t, { items: [growItem()], designData: growData(844), viewport: { width: 1070, height: 900 } }); if (!page) return;
+  await page.waitForTimeout(300);
+  const narrow = (await picBox(page))[0].w;
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForTimeout(400);
+  const wide = await picBox(page);
+  assert.ok(wide[0].w > narrow + 10, `the picture did not grow back: ${narrow} then ${wide[0].w}`);
+  await page.setViewportSize({ width: 1066, height: 900 });
+  await page.waitForTimeout(400);
+  for (const b of await picBox(page)) assert.ok(b.over <= 1, "the picture runs past its card after narrowing: " + b.over);
+});
+
+test("a very tall mockup with no focus is never a thin strip", async (t) => {
+  const page = await open(t, { items: [growItem()], designData: growData(3000), viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await page.waitForTimeout(400);
+  for (const b of await picBox(page)) assert.ok(b.w >= 120, "the picture is a strip, " + b.w + "px wide");
+});
+
+test("the SENT stamp is the same element, not rebuilt, as the Undo count ticks", async (t) => {
+  const page = await sentPage(t, false); if (!page) return;
+  await page.evaluate(() => { window.__stamp = document.querySelector("#sent .stamp"); });
+  await page.waitForTimeout(2300);
+  assert.equal(await page.evaluate(() => window.__stamp.isConnected && window.__stamp === document.querySelector("#sent .stamp")), true, "the stamp was rebuilt, so it settles again each second");
+  assert.match(await page.locator("#undoBtn").textContent(), /Undo send \(\d\)/);
+});
+
+for (const width of [390, 1280]) test(`the Sent bar keeps its height when the Undo button goes, at ${width}px wide`, async (t) => {
+  const page = await open(t, { viewport: { width, height: 900 } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").waitFor();
+  const h = () => page.locator("#sent").evaluate((e) => Math.round(e.getBoundingClientRect().height));
+  const before = await h();
+  await page.locator("#undoBtn").waitFor({ state: "detached", timeout: 9500 });
+  assert.ok(Math.abs((await h()) - before) <= 1, `the bar jumped from ${before} to ${await h()}`);
+});
+
+test("a receipt with no Read by centres its label and Change on one line", async (t) => {
+  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  const m = await card(page, DECISION).locator(".receipt .line").evaluate((l) => { const mid = (e) => { const r = e.getBoundingClientRect(); return (r.top + r.bottom) / 2; }; return [mid(l.querySelector("b")), mid(l.querySelector(".changebtn"))]; });
+  assert.ok(Math.abs(m[0] - m[1]) <= 2, "the label and Change are not level: " + m);
+});
+
+test("a related-item frame of seven wraps its chips on a phone and keeps each chip at 48px", async (t) => {
+  const items = Array.from({ length: 7 }, (_, i) => mk("w-" + i, i + 1, { group: "seven", title: "Item " + i }));
+  const page = await open(t, { items, viewport: { width: 390, height: 900 }, groups: { seven: { title: "Seven together", why: "Linked." } } }); if (!page) return;
+  const w = await page.evaluate(() => [...document.querySelectorAll(".rail .pairchips .nchip")].map((c) => Math.round(c.getBoundingClientRect().width)));
+  assert.equal(w.length, 7);
+  assert.ok(w.every((x) => x >= 48), "a chip shrank: " + w);
 });
