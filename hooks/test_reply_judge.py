@@ -1254,6 +1254,10 @@ def case_prompt_spares_a_reply_that_rewrote_the_item():
     sentences = rule_sentences(run, THREAD_REPLY)
     check("prompt: never flag a reply that says it rewrote or updated the waiting-page item",
           has_pin(sentences, ("never flag",), ("rewrote", "updated"), ("item",)), sentences)
+    check("prompt: the thread-reply example names the waiting-page thread",
+          has_pin(sentences, ("flag",), ("replied on the waiting-page thread",)), sentences)
+    check("prompt: never flag a reply in a PR review thread or on another artifact",
+          has_pin(sentences, ("never flag",), ("pr review thread",), ("another artifact",)), sentences)
 
 
 CASES = (
