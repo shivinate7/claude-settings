@@ -58,10 +58,10 @@ Method: read the transcript JSONL. Take each `assistant` entry's `message.usage`
 - How `used_percentage` rounds.
 - Whether the auto compaction completed in the work3 run.
 - How often `statusLine` fires.
-- `statusLine` in a session with subagents or after a compact: its `current_usage` there was not read.
+- `statusLine` in a session with agents or after a compact: its `current_usage` there was not read.
 - Whether `statusLine` or the transcript counts the system prompt and tools the same way `preTokens` does after a compact.
 - What `postTokens` counts.
-- Whether a long session (many tool calls, subagents) keeps the same `usage` shape.
+- Whether a long session (many tool calls, agents) keeps the same `usage` shape.
 - Whether the first-turn proxy holds on the owner's machine.
 
 ## What step 2 can build on
