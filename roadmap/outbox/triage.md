@@ -6,4 +6,4 @@
 - Overlaps to watch: o2 and c143 both edit lint/layout.json; c139, c122, c145, c147 wait on the c126/d9 lane (skills/waiting-page).
 - Waiting page (this account): https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx, made Oct 28 from skills/waiting-page/page.html (main e0f9e2d), db + comments, 12 items, owner "Triage the roadmap (9)". Read `answers` at each wake and route per the skill. Page source is scratch-only: on a republish, read the live page (Artifact read) and keep its designData block, which holds d4's option pictures (items 13-21, from designs/d4-banchi-phone/png, JPEG-shrunk). Answers routed Oct 28: items 4, 5, 8, 11 (closed). c82 waits on the ping verdict lines.
 - Owed: other-repo plan check (S6Eou4...) still unanswered.
-- Tally: 17 messages, 6 placements. Waiting page: items 1-35 written, 31 open (4 closed Oct 28); template from main b09aece (republished after batch 2); item 31 is c54 part 3.
+- Tally: 18 messages, 6 placements. Waiting page: items 1-35 written; 7 closed by triage Oct 28 (1, 3, 4, 5, 8, 11, 33); 32 and 35 answered and routed by the orchestrator; template from main b09aece (republished after batch 2); item 31 is c54 part 3.
