@@ -41,8 +41,9 @@ Limits: the designer's reads are barred by its own instruction, not by a hook: t
 limits writes only, and no hook knows the lane kind of a read. A designer that opens a barred file is
 caught only by the orchestrator's hex check of the finished mockup. The value patterns catch hex, rgb and
 hsl colours, named fonts and font-family words. They also catch a px, rem or dp value anywhere in the Job.
-They miss a paraphrase such as "Banchi blue" with no hex, a font that is not on the list and is not named
-after the word font, and a short hex such as #fff with no colour word before it. The word lists catch the common forms of a keep rule and of a current-view name, not every
+They miss a paraphrase such as "Banchi blue" with no hex. They miss a font that is not on the list and
+is not named after the word font. They miss a short hex such as #fff with no colour word before it. The
+word lists catch the common forms of a keep rule and of a current-view name, not every
 paraphrase. The check refuses a view name only when the orchestrator passes it with `--current`.
 The spawn hook does not know view names. The `Blind lanes:` line is the orchestrator's own
 count, not a count of spawned lanes.
