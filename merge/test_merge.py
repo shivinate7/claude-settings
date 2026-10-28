@@ -1043,7 +1043,8 @@ class SmallBaseMove(Env):
 
     def test_the_suites_a_doc_hits_come_from_the_gates_job(self):
         root = os.path.join(HERE, "..")
-        hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], set())]
+        lints = merge.lint_steps(root, "origin/main")
+        hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
         self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
         self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
         self.assertNotIn("hooks/test_sendmessage_state.py", hits("docs/guide-c150.md"))
