@@ -1,0 +1,5 @@
+# Outbox: c95 step 1b lane (Measure which tests catch a planted bug)
+
+- c95 step 1b, resume note: draft PR #721 (mutation report mode scores which tests catch a planted bug), branch `c95-test-value`, head 51e56c90. Parked under the usage freeze. Built (builder sonnet), review round 1 clear (reviewer sonnet), its four findings fixed as wording and notes. `bin/ci-job gates --lint --base origin/main` and `bin/ste-changed origin/main` passed on 51e56c90 against the main of Oct 27.
+- Left to do: merge main e0f9e2d into the branch (or rebase, the lane's own branch), resolve any conflict in `docs/debts/notes.md`, `docs/records.md` (regenerate, never by hand) and `.github/workflows/gates.yml`, re-run the two lint checks, then send the head to the build advisor for the next batch. No review round is owed unless the merge changes code in `hooks/mutate_shared.py` or `hooks/mutate_guard.py`.
+- Follow-ups already filed as notes in `docs/debts/notes.md` on the branch: the eight silent suites, `mutant-load-unproven` (add a whole-file break control per file) and `mutant-subprocess-throw-kill` (rates are an upper bound).
