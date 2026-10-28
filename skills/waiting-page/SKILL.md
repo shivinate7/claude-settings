@@ -149,8 +149,8 @@ relays an answer. An answer typed in the chat counts the same.
   below. If no item in the comment is yours, stay silent.
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
-  answer's note adds something to an item, rewrite that item with what the reply would have said,
-  as "Route and close" step 3 (new options) or step 4 (context) says. With no answer, there is no
+  answer's note adds something to an item, rewrite that item with what the reply would have said.
+  Do it as "Route and close" step 3 (new options) or step 4 (context) says. With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
