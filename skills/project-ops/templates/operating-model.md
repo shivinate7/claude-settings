@@ -11,6 +11,8 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
   writes each lane brief, starts each lane session in roadmap order, and talks with the owner. The load brake, not a
   number, decides how many lanes run at once. It does not rotate (see below).
+  It tags itself and each session it starts `cs-repo:<owner>/<repo>`, so another coordinator
+  can find it.
 - **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
   Only triage publishes the roadmap page, from the head of the record branch, with `--live` at each
@@ -28,7 +30,7 @@ When the owner names the wrong tier, or brings work that belongs to another tier
 says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
 
 A coordinator may work in another repo, by hand-off or by its own lane PR there. Before it acts,
-it checks whether that repo has an active coordinator. If one is active, it coordinates with it.
+it checks whether that repo has an active coordinator: it reads `list_sessions` for a session tagged `cs-repo:<owner>/<repo>`. If one is active, it coordinates with it.
 If none is active, it proceeds. It does not wait for a reply.
 
 ## Rotation of standing sessions

@@ -1,7 +1,8 @@
 # <step id>: <plain name of the step>
 
-<Who runs it: a cloud lane session, or a lane session on a named local machine.> Base: <branch and commit>. Never rebase
-onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
+<Who runs it: a cloud lane session, or a lane session on a named local machine.> The coordinator
+starts it with the tag `cs-repo:<owner>/<repo>`. Base: <branch and commit>. Never rebase onto main
+after review. Push record-branch edits to that branch only. Only triage publishes the page.
 
 ## Task
 
