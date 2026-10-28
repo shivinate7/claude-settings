@@ -1,9 +1,9 @@
 {
  "title": "The Windows stamp fixture suite never hangs past its cap",
  "phase": "cleanup",
- "status": "doing",
+ "status": "done",
  "order": 103.3034,
  "why": "c95 step 1a's lane (Oct 27): on run 40542065223 (push to main), the Windows \"Record stamp engine fixture suite\" hung 23 min; its normal maximum is 1.5 min (n=28).",
- "note": "Debt; cause unknown. #715 gives the step a 5 min cap, so the next hang reads red at its own step. Dropped from batch 2 (run 40639369770: 2 Windows proof tests red), fixed at cd69773 (PR #735): a node path with a space broke a regex; measured on Windows, spawnSync returns when the direct child exits even while a grandchild holds its pipe; the hold case is now proven red within its cap on windows-latest. Waits for batch 3. Fix: test_stamp.mjs re-runs itself under an out-of-process 240 s watchdog with piped stdio; on a hang it names the test, kills the tree and exits red; every spawn has a 60 s timeout; 144 of 144 green on Linux; timeout-minutes 5 stays. The hang's cause is unknown and does not reproduce on Linux; the next hang prints the test and the process tree. Unproven on Windows: the orphan sweep. Needs no answer. Port: no. Placed ahead of c82 (triage, Oct 28): it ate a full run's Windows time.",
- "updatedAt": "2026-10-28T06:45:00Z"
+ "note": "Debt; cause unknown. #715 gives the step a 5 min cap, so the next hang reads red at its own step. Dropped from batch 2 (run 40639369770: 2 Windows proof tests red), fixed at cd69773 (PR #735): a node path with a space broke a regex; measured on Windows, spawnSync returns when the direct child exits even while a grandchild holds its pipe; the hold case is now proven red within its cap on windows-latest. Waits for batch 3. Fix: test_stamp.mjs re-runs itself under an out-of-process 240 s watchdog with piped stdio; on a hang it names the test, kills the tree and exits red; every spawn has a 60 s timeout; 144 of 144 green on Linux; timeout-minutes 5 stays. The hang's cause is unknown and does not reproduce on Linux; the next hang prints the test and the process tree. Unproven on Windows: the orphan sweep. Needs no answer. Port: no. Placed ahead of c82 (triage, Oct 28): it ate a full run's Windows time. Merged in batch #741 (main 3bebbd34, Oct 28 02:02 CDT), PR #735.",
+ "updatedAt": "2026-10-28T07:30:00Z"
 }
