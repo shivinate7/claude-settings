@@ -119,6 +119,8 @@ class DeferredWithNoQuestion(unittest.TestCase):
 class NoteCapHook(unittest.TestCase):
     """A real git repo with the real hook and build.py, installed by the setup line in CLAUDE.md."""
 
+    SETUP = ("sh", "roadmap/hooks/install.sh")  # the setup line in CLAUDE.md
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = repo = pathlib.Path(self.tmp.name) / "r"
@@ -129,9 +131,16 @@ class NoteCapHook(unittest.TestCase):
         self.env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
                         GIT_COMMITTER_EMAIL="t@t", PYTHONDONTWRITEBYTECODE="1")
         self.git("init", "-q", "-b", "roadmap")
-        self.git("config", "core.hooksPath", "roadmap/hooks")  # the setup line in CLAUDE.md
-        self.git("add", "roadmap/build.py")
+        self.hooks = pathlib.Path(self.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()) / "hooks"
+        self.hooks.mkdir(exist_ok=True)
+        self.install()
+        self.git("add", "roadmap")
         self.commit("tools")
+
+    def install(self):
+        r = subprocess.run(self.SETUP, cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -331,6 +340,117 @@ class NoteCapHook(unittest.TestCase):
         self.step("c122", 240, where=wt)
         self.git("add", "-A", cwd=wt)
         self.assert_passed(self.commit("m", cwd=wt))
+
+    def hook(self, name, body):
+        """Install a hook straight into the common hooks dir, the way main's githooks/main-ref/install.sh does."""
+        path = self.hooks / name
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+
+    def sibling(self, name="wt", orphan=False):
+        """A sibling worktree of the same clone, on another branch; orphan: its tree has no roadmap/ at all."""
+        wt = pathlib.Path(self.tmp.name) / name
+        if orphan:
+            self.git("worktree", "add", "-q", "--detach", str(wt))
+            self.git("checkout", "-q", "--orphan", name, cwd=wt)
+            self.git("rm", "-rfq", ".", cwd=wt)
+        else:
+            self.git("worktree", "add", "-q", "-b", name, str(wt))
+        return wt
+
+    def test_main_ref_guard_still_fires_in_every_worktree(self):
+        marks = pathlib.Path(self.tmp.name) / "marks"
+        self.hook("reference-transaction", f'''[ "$1" = prepared ] || exit 0
+lines="$(cat)"
+echo "$PWD" >> "{marks}"
+case "$lines" in *refs/heads/main*) echo "main-ref: refused" >&2; exit 1 ;; esac
+exit 0
+''')
+        self.install()  # setup run again after main-ref is in place
+        self.seed(("c1", 10))
+        wt = self.sibling()
+        self.step("c2", 10, where=wt)
+        self.git("add", "-A", cwd=wt)
+        self.assert_passed(self.commit("m", cwd=wt))
+        seen = marks.read_text(encoding="utf-8").split()
+        self.assertIn(str(self.repo), seen)
+        self.assertIn(str(wt), seen)
+        for where in (self.repo, wt):
+            r = self.git("branch", "-f", "main", "HEAD", cwd=where, check=False)
+            self.assert_refused(r, "main-ref: refused")
+        self.assertEqual((self.hooks / "reference-transaction").read_text(encoding="utf-8").count("main-ref"), 1)
+        self.assertIsNone(self.git("config", "--get", "core.hooksPath", check=False).stdout.strip() or None)
+
+    def test_existing_pre_commit_is_chained(self):
+        ran = pathlib.Path(self.tmp.name) / "ran"
+        self.hook("pre-commit", f'''echo "$PWD" >> "{ran}"
+[ -e "$PWD/refuse" ] && {{ echo "local hook: refused" >&2; exit 3; }}
+exit 0
+''')
+        self.install()
+        self.step("c1", 10)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.assertEqual(ran.read_text(encoding="utf-8").split(), [str(self.repo)])
+        self.step("c2", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c2 (300 words)")
+        self.assertEqual(len(ran.read_text(encoding="utf-8").split()), 1, "cap refusal comes first")
+        (self.repo / "refuse").write_text("x\n", encoding="utf-8")
+        self.step("c2", 10)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "local hook: refused")
+
+    def test_install_twice_is_idempotent(self):
+        ran = pathlib.Path(self.tmp.name) / "ran"
+        self.hook("pre-commit", f'echo x >> "{ran}"\n')
+        self.install()
+        before = sorted(p.name for p in self.hooks.iterdir())
+        self.install()
+        self.install()
+        self.assertEqual(sorted(p.name for p in self.hooks.iterdir()), before)
+        (self.repo / "f").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.assertEqual(ran.read_text(encoding="utf-8"), "x\n", "the original hook runs exactly once")
+        self.step("c2", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c2 (300 words)")
+
+    def test_tree_without_roadmap_is_not_capped(self):
+        ran = pathlib.Path(self.tmp.name) / "ran"
+        self.hook("pre-commit", f'echo x >> "{ran}"\n')
+        self.install()
+        wt = self.sibling("main", orphan=True)
+        self.assertFalse((wt / "roadmap").exists())
+        (wt / "roadmap" / "data" / "steps").mkdir(parents=True)
+        self.step("c1", 300, where=wt)
+        self.git("add", "-A", cwd=wt)
+        self.assert_passed(self.commit("m", cwd=wt))
+        self.assertEqual(ran.read_text(encoding="utf-8"), "x\n", "the chained hook still runs there")
+        self.env = self.path_with()  # no python: a non-roadmap tree must not need it
+        (wt / "g").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A", cwd=wt)
+        self.assert_passed(self.commit("m", cwd=wt))
+
+    def test_old_hookspath_setup_is_refused(self):
+        self.git("config", "core.hooksPath", "roadmap/hooks")
+        r = subprocess.run(self.SETUP, cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("core.hooksPath", r.stderr)
+        self.assertEqual((self.repo / "roadmap" / "hooks" / "pre-commit").read_bytes(),
+                         (HERE / "hooks" / "pre-commit").read_bytes())
+
+    def test_relative_hookspath_elsewhere_is_honoured(self):
+        self.git("config", "core.hooksPath", "githooks")
+        sub = self.repo / "roadmap"
+        r = subprocess.run(("sh", "hooks/install.sh"), cwd=sub, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.repo / "githooks" / "pre-commit").is_file())
+        self.assertFalse((sub / "githooks").exists())
+        self.step("c2", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c2 (300 words)")
 
 
 if __name__ == "__main__":

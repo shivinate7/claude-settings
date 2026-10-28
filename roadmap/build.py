@@ -16,8 +16,8 @@ files waiting in roadmap/outbox/ (step c98). Cost: one git process per build, no
 Before it builds, it refuses a tree with git conflict markers (step c72) in any tracked file under
 SCANNED, and writes no page. Cost: one more git process and one read of each scanned file per build.
 
-`python roadmap/build.py --check-staged` is the pre-commit hook (roadmap/hooks/pre-commit, installed by
-`git config core.hooksPath roadmap/hooks`; step c138). It reads the step files from the index, not the
+`python roadmap/build.py --check-staged` is the pre-commit check (roadmap/hooks/pre-commit, installed by
+`sh roadmap/hooks/install.sh`, which never sets core.hooksPath; step c138). It reads the step files from the index, not the
 working tree, and refuses the commit when it adds or grows an open step's note past NOTE_WORDS words, or
 stages a symlink as a step file. A long note the commit leaves alone or trims passes, so one writer's
 note never blocks another's commit. It writes no page.

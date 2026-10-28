@@ -1,10 +1,24 @@
 #!/bin/sh
-# Refuse a commit that adds or grows an open step's note past build.NOTE_WORDS (step c138).
-# Installed by: git config core.hooksPath roadmap/hooks
-cd "$(git rev-parse --show-toplevel)" || exit 1
-for py in python3 python; do
-  command -v "$py" >/dev/null 2>&1 && exec "$py" roadmap/build.py --check-staged
-done
-echo "pre-commit: neither python3 nor python is on PATH, so the roadmap note cap (step c138) was not checked." >&2
-echo "Install Python, or commit with --no-verify if you must." >&2
-exit 1
+# roadmap-note-cap pre-commit dispatcher (step c138). Installed by: sh roadmap/hooks/install.sh
+# install.sh copies this file into the hooks dir git uses (core.hooksPath if set, else the common
+# .git/hooks shared by every worktree), moving any pre-commit already there to pre-commit.pre-c138.
+# In a roadmap checkout (roadmap/build.py and roadmap/hooks/pre-commit in the tree) it refuses a commit
+# that adds or grows an open step's note past build.NOTE_WORDS; anywhere else the cap is a no-op.
+# Then it runs pre-commit.pre-c138, if any, and returns its exit code. Other hooks are not touched.
+top="$(git rev-parse --show-toplevel)" || exit 1
+cd "$top" || exit 1
+if [ -f roadmap/build.py ] && [ -f roadmap/hooks/pre-commit ]; then
+  py=""
+  for p in python3 python; do
+    command -v "$p" >/dev/null 2>&1 && { py="$p"; break; }
+  done
+  if [ -z "$py" ]; then
+    echo "pre-commit: neither python3 nor python is on PATH, so the roadmap note cap (step c138) was not checked." >&2
+    echo "Install Python, or commit with --no-verify if you must." >&2
+    exit 1
+  fi
+  "$py" roadmap/build.py --check-staged || exit $?
+fi
+prev="$(dirname "$0")/pre-commit.pre-c138"
+[ -x "$prev" ] && exec "$prev" "$@"
+exit 0
