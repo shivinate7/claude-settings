@@ -8,11 +8,14 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - Solo. It builds the change itself.
   - One lane. It runs one line of work, and it orchestrates its own agents.
   - Coordinator. It runs a standing build. It starts triage and the batch runner, then lane sessions.
+  - The owner's ask (15:04): revise the solo-versus-orchestrate rules to match these tiers, with an Opus review. The roles rules in `CLAUDE.md` now carry the shapes.
   - The shape stays dynamic. A session may grow to a larger shape, as a solo session grows to orchestrate today (`roles-solo-grows-switch-to-orchestrate`). It says so in one line.
 - **Orchestrator, the catch-all word** (owner, 15:18). Any session that spawns agents is an orchestrator. Coordinator, triage, batch runner and lane session are kinds of orchestrator. Analogy: a square is a rectangle.
 - **A coordinator in another repo** (owner, 15:18). A coordinator may work in another repo, by hand-off or by its own lane PR there. No hard block applies. Before it acts, it checks whether that repo has an active coordinator. If one is active, it coordinates with that coordinator. If none is active, it proceeds. It does not hold back for lack of a reply.
 - **Who starts which session** (owner, 15:18). The coordinator is the one session that starts other sessions. It starts triage and the batch runner together, as a trio, before any lane session. This refines the triage-first ruling below.
 - **Rotation of standing sessions** (owner, 15:23). Triage and the batch runner each report a tally of their own use, in turns or context, to the coordinator. When a tally nears its limit, the coordinator has that session write its handoff, archives it, and starts a fresh one from the handoff. The coordinator writes its own handoffs and compacts as today.
+  - MEASURED (coordinator, 2026-10-28; the second reading at 17:53 CDT, the first's time not given): `get_session` on a child session returns `external_metadata.context_usage` (`used_tokens`, `max_tokens`) and `autocompact_state` (`threshold`, `effective_window`). The q_max lane read 171216 of 500000, threshold 384000. A lane in the owner's environment "lane test" read `max_tokens` 200000, so a per-environment context window works for a cloud lane.
+  - So the coordinator can read each standing session's tally itself. Dropping the self-report needs the owner's word.
 - **No coordinator succession** (owner, 15:24). Handing children to a new coordinator failed in the owner's runs, in two ways.
   - A child refused the new coordinator as not its parent. That was a safety reflex.
   - A child missed a message while busy, after the old coordinator archived itself.
@@ -27,7 +30,7 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - Triage is the only writer of the roadmap and the waiting page (owner, 2026-10-28, time not given).
 - **Lane session.** A lane session runs its own lane as an orchestrator. It spawns its own builder and reviewer agents under `agent-model-cap` (the model per role). It reports up to the coordinator. Owner, about 14:52, in short: sessions that spawn under a coordinator are their own orchestrators, reporting up to it.
 - **Lane session model** (owner, 16:15, waiting item 50, pick b). A lane session runs Opus. It keeps itself light, but it needs top reasoning on what it is asked.
-  - The helpers it starts, such as a builder or a designer, may run Sonnet at low effort. The owner has not decided that yet (waiting item 59).
+  - The helpers it starts, such as a builder or a designer, keep today's model and effort table in `agent-model-cap` (owner, 17:50, waiting item 59, pick a), until their cost and quality are measured.
 - **Overlapping files.** No coded guard and no file-ownership record covers lanes that touch the same file. A good brief is enough. Orchestrators resolve overlapping edits. The owner wants better file splitting (owner, 15:01). A false "done" is already covered. The shared merge tool, `merge/merge.py`, reads the head and CI from GitHub.
 - **Batch runner.** A third standing role (owner, 15:11): "B for sure actually". The batch runner owns:
   - the integration batch,
@@ -51,7 +54,9 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
 
 ## Open
 
-Open: per-tier context limits (waiting item 53). What the tally measures, and its limit. Helper model and effort under an Opus lane session (waiting item 59).
+Open: the context limit for each tier. The route works (waiting item 53, pick a, tested 17:46 and 17:53); the limit values are not ruled.
 
 Kind: process
 Home: docs/decisions/session-tiers.md
+Home: rule:roles-pick-mode-from-request
+Home: rule:style-wrong-tier-one-line

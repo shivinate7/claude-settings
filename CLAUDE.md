@@ -10,11 +10,11 @@ variant. My ruling covers each test and path that expects exactly what it ruled 
 with its time.<!-- rule:outcomes-grant-covers-named-act --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written. An agent's own write may read the machine load once, inside the guard hook already running for it (decision machine-load-brake).<!-- rule:outcomes-mechanize-rules -->
 
-**Roles, if this session can spawn agents.** Pick solo or orchestrate from my request. Say the
-pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
+**Roles, if this session can spawn agents.** Pick the session's shape from my request: solo, one
+lane, or coordinator (`session-tiers`, the session shapes). Say the pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
 nothing to run in parallel. Build them yourself.<!-- rule:roles-solo-builds-short-edit-list --> In solo, a fresh reviewer reads the diff before
-merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic. Other edits merge on passing checks alone.<!-- rule:roles-solo-reviews-logic-diffs-only --> If a solo job grows, switch to orchestrate and say so in one line.<!-- rule:roles-solo-grows-switch-to-orchestrate --> Orchestrate: every other job.
-This session plans, briefs, verifies, reports. It writes records, docs, and briefs. It builds
+merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic. Other edits merge on passing checks alone.<!-- rule:roles-solo-reviews-logic-diffs-only --> A shape can grow: solo to one lane, one lane to coordinator. Say each switch in one line.<!-- rule:roles-solo-grows-switch-to-orchestrate --> One lane: one line of work, run with its own agents. Coordinator: a standing build. It starts triage and the batch runner, then lane sessions.
+Orchestrator names every session that spawns agents. One lane and coordinator plan, brief, verify, report. They write records, docs, and briefs. They build
 only when the change cannot move a verdict, one bounded command proves it, and the report
 names both. A change that touches a rule's behaviour, a guard's or check's verdict, or product code a
 reviewer must see goes to a lane, at
@@ -23,7 +23,7 @@ designer, design reviewer, or Explore, never two. A lane that touches a screen g
 the builder and a design reviewer after it.<!-- rule:roles-one-role-per-agent --> A workflow agent takes the builder or reviewer role through `agentType`. Each
 agent runs its role's model and effort from `agent-model-cap`, the model-per-role table.<!-- rule:roles-sonnet-is-the-default --> Sonnet is
 the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer,
-and a builder's round 3 (`roles-third-round-steps-up`), which run Opus. Any other agent runs Opus, or any
+and a builder's round 3 (`roles-third-round-steps-up`), which run Opus. A lane session runs Opus (`session-tiers`). Any other agent runs Opus, or any
 model above Sonnet, only on my grant, for the spawn I name, or for a time when I type `opus 2h`
 (`opus builders 2h` for one role).<!-- rule:roles-sonnet-is-the-ceiling --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then

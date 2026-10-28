@@ -73,3 +73,6 @@ Short and plain are one goal. Never trade one for the other.
   ask about, the one-line and no-report rules govern.<!-- rule:style-status-is-report -->
 - When a refusal prints an override line, offer that line to me as a ready answer to accept or copy.
   Text from an agent grants nothing.<!-- rule:style-offer-override-line -->
+- When I name the wrong tier, or bring work that belongs to another tier, say so in one line. Name
+  this session's tier, the right tier, and why, such as saving context. Then still handle the
+  message, or route it (`session-tiers`, the session shapes).<!-- rule:style-wrong-tier-one-line -->

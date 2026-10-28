@@ -41,7 +41,11 @@ one name for each thing, and a list of names to avoid.
 | owner | The person who owns these repos. Only the owner makes a ruling or a grant. `CLAUDE.md` speaks as the owner. | `rule:outcomes-grant-covers-named-act` | — |
 | override | A prompt from the owner that starts with `override`, or `opus` and a length. The guard then lets a refusal or an ask through, once or for a set time. An Opus override lifts only the Opus spawn ask. | `docs/decisions/owner-override.md` | `override pass` |
 | grant | The owner's leave to do one act, once or standing. It covers the act it names, never a variant. A merge grant is one kind. Claude Code's own approve button is the platform's word, not a grant. | `rule:outcomes-grant-covers-named-act` | `owner word`, `approval` |
-| orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | — |
+| orchestrator | Any session that spawns agents. Coordinator, triage, batch runner and lane session are kinds of orchestrator. A one-lane or coordinator session builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds`, `docs/decisions/session-tiers.md` | — |
+| coordinator | The one standing session that runs a repo's build. It starts triage and the batch runner, then the lane sessions, and talks with the owner. | `docs/decisions/session-tiers.md` | — |
+| triage | The standing session that a coordinator starts first. It is the only writer of the roadmap and the waiting page. | `docs/decisions/session-tiers.md` | — |
+| batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving finished lanes. | `docs/decisions/session-tiers.md` | `branch manager` |
+| lane session | A session that a coordinator starts to run one lane. It spawns its own agents and reports up to the coordinator. | `docs/decisions/session-tiers.md` | `lane lead` |
 | builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
 | reviewer | An agent that judges the work of a builder against its brief and the governing decisions. A reviewer never edits. | `agents/reviewer.md` | — |
 | agent | Anything the Agent tool or a workflow starts. Claude Code's own names `SubagentStop`, `SubagentStart` and `subagent_type` stay as the platform spells them. | `rule:roles-one-role-per-agent` | `subagent`, `sub-agent`, `worker (prose)` |

@@ -41,13 +41,13 @@
     "roles-pick-mode-from-request": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook reads the owner's request and judges whether solo or orchestrate fits it, or checks that the session said its pick in one line first."
+        "reason": "No hook reads the owner's request and judges which shape (solo, one lane or coordinator) fits it, or checks that the session said its pick in one line first."
       }
     },
     "roles-solo-builds-short-edit-list": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Nothing counts the edits in a request or sees whether parts could run in parallel, so no check can tell a solo job from an orchestrate job."
+        "reason": "Nothing counts the edits in a request or sees whether parts could run in parallel, so no check can tell a solo job from a one-lane or coordinator job."
       }
     },
     "roles-solo-reviews-logic-diffs-only": {
@@ -59,7 +59,7 @@
     "roles-solo-grows-switch-to-orchestrate": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Nothing watches a solo job's edit count or parallel parts over time, or sees whether the session said its switch in one line."
+        "reason": "Nothing watches a session's edit count or parallel parts over time, or sees whether the session said its switch to a larger shape in one line."
       }
     },
     "roles-orchestrator-never-builds": {
@@ -699,6 +699,12 @@
       "mechanism": {
         "kind": "judgment",
         "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
+      }
+    },
+    "style-wrong-tier-one-line": {
+      "mechanism": {
+        "kind": "judgment",
+        "reason": "Whether the owner named the wrong tier, or brought work that belongs to another tier, is a content judgment. No check reads that."
       }
     },
     "style-offer-override-line": {
