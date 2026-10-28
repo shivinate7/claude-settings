@@ -1,1 +1,0 @@
-- d4: designer done, 3 directions (D1 Four tabs, D2 Today, D3 Shelf, bold), pushed 338327bb. Review round 1: FAIL, 8 findings (D3 box squashed and card drawn in wrong section, D3 first screen cut, wait counts disagree, D1 has no pack step, a 28 px dead hint button, a repeated stale label). All 11 option pictures pass c147. Designer fixing; round 2 next.

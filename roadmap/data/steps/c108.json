@@ -1,9 +1,9 @@
 {
-  "title": "The decision watch says once, plainly, when a folder has no git repo",
-  "phase": "cleanup",
-  "status": "todo",
-  "order": 103.398,
-  "why": "Your gripe (cmsg_01DoF7thf3iq2Srr1UsfXgh2TkqfzhdXsXZHkAN93aqYpf): every turn in a folder that is not a git repo shows \"UNKNOWN, git status could not be read\".",
-  "note": "Deferred (shiv, Oct 27): your pick on the fix. Asked: decision card in the thread \"Fix decision-watch's unknown git status\". Checked main e305bdb: hooks/decision_watch.py's changed_this_turn gives no answer when the folder is not a git work tree, and test case_not_a_repo pins that on purpose. On your Mac, /Users/shivinate/Developer, _targets, beli-export and degen-scratch are not repos; every repo there reads git status in under 2.2 s (10 s timeout), so a timeout is not the cause (measured Oct 27). A notice that repeats every turn teaches you to scroll past it. Proposed: say it once per session in plain words, then stay quiet. Port: no; it lives in claude-settings, so every repo gets it. Placed after c104 (triage, Oct 27): it waits on your pick.",
-  "updatedAt": "2026-10-27T02:45:00Z"
+ "title": "The decision watch says once, plainly, when a folder has no git repo",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.398,
+ "why": "Your gripe (cmsg_01DoF7thf3iq2Srr1UsfXgh2TkqfzhdXsXZHkAN93aqYpf): every turn in a folder that is not a git repo shows \"UNKNOWN, git status could not be read\".",
+ "note": "Deferred (shiv, Oct 27): your pick on the fix. Asked: waiting page item 8 (pick stands: say it once per session). Checked main e305bdb: hooks/decision_watch.py's changed_this_turn gives no answer when the folder is not a git work tree, and test case_not_a_repo pins that on purpose. On your Mac, /Users/shivinate/Developer, _targets, beli-export and degen-scratch are not repos; every repo there reads git status in under 2.2 s (10 s timeout), so a timeout is not the cause (measured Oct 27). A notice that repeats every turn teaches you to scroll past it. Proposed: say it once per session in plain words, then stay quiet. Port: no; it lives in claude-settings, so every repo gets it. Placed after c104 (triage, Oct 27): it waits on your pick.",
+ "updatedAt": "2026-10-28T05:10:00Z"
 }

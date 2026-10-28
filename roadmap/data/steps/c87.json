@@ -1,9 +1,9 @@
 {
-  "title": "Local sessions stop failing on the GitHub plugin's empty token",
-  "phase": "cleanup",
-  "status": "todo",
-  "order": 103.91,
-  "why": "A mailaudit session's finding, Oct 26: the GitHub plugin sends 'Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}' with the variable unset, so GitHub's MCP server refuses it on every local session.",
-  "note": "Ruling, Oct 27 12:07 CDT (shiv, waiting page item 35): (b), try a token once on the Mac and see what it adds before choosing. Finding, Oct 27 12:09 CDT (local liaison): the GitHub plugin is not on the Mac at all (plugin list, MCP list and every repo's settings checked), so the empty-token failure is on Windows. Asked: the local liaison's thread, (a) test on Windows, (b) install the plugin on the Mac to test, or (c) turn it off on Windows; waiting-page item c87-token-make is withdrawn until then. Waits on: a local session. Checked claude-settings main 54be9f1: its enabledPlugins does not list a GitHub plugin. The fix lands in claude-settings so every machine gets it. Port: no; global settings install everywhere. Placed ahead of c54, after c47 (triage, Oct 26): both are local setup on your machines.",
-  "updatedAt": "2026-10-27T17:12:00Z"
+ "title": "Local sessions stop failing on the GitHub plugin's empty token",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.91,
+ "why": "A mailaudit session's finding, Oct 26: the GitHub plugin sends 'Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}' with the variable unset, so GitHub's MCP server refuses it on every local session.",
+ "note": "Ruling, Oct 27 12:07 CDT (shiv, waiting page item 35): (b), try a token once on the Mac and see what it adds before choosing. Finding, Oct 27 12:09 CDT (local liaison): the GitHub plugin is not on the Mac at all (plugin list, MCP list and every repo's settings checked), so the empty-token failure is on Windows. Asked: waiting page item 7, (a) test on Windows, (b) install the plugin on the Mac to test, or (c) turn it off on Windows; waiting-page item c87-token-make is withdrawn until then. Waits on: a local session. Checked claude-settings main 54be9f1: its enabledPlugins does not list a GitHub plugin. The fix lands in claude-settings so every machine gets it. Port: no; global settings install everywhere. Placed ahead of c54, after c47 (triage, Oct 26): both are local setup on your machines.",
+ "updatedAt": "2026-10-28T05:10:00Z"
 }

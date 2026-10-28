@@ -1,9 +1,9 @@
 {
-  "title": "The layout knows docs/health, so the scorecard file does not fail Layout",
-  "phase": "organize",
-  "status": "todo",
-  "order": 103.338998,
-  "why": "Finding, Oct 27 (o4 scorecard lane, debt health-folder-not-in-layout, PR #709): lint/layout.json has no kind for docs/health, where the new scorecard file goes, so in a rolled-out repo Layout scores out because of the scorecard itself.",
-  "note": "Next cloud lane: add a health kind for docs/health/ to lint/layout.json (the one home, o2), point the scorecard writer at it, and close the debt; red first on a repo whose only finding is docs/health/. Blocks r1 (run compliance-check on each child repo). Needs no answer. Port: yes, at each repo's roll-out through the layout. Placed ahead of c107 (triage, Oct 27): small, and r1 cannot start without it.",
-  "updatedAt": "2026-10-27T18:36:00Z"
+ "title": "The layout knows docs/health, so the scorecard file does not fail Layout",
+ "phase": "organize",
+ "status": "doing",
+ "order": 103.338998,
+ "why": "Finding, Oct 27 (o4 scorecard lane, debt health-folder-not-in-layout, PR #709): lint/layout.json has no kind for docs/health, where the new scorecard file goes, so in a rolled-out repo Layout scores out because of the scorecard itself.",
+ "note": "Doing: lane started Oct 28 CDT, branch c143-docs-health-kind from main e0f9e2d, Sonnet builder and reviewer: add a health kind for docs/health/ to lint/layout.json (the one home, o2), point the scorecard writer at it, and close the debt; red first on a repo whose only finding is docs/health/. Blocks r1 (run compliance-check on each child repo). Needs no answer. Port: yes, at each repo's roll-out through the layout. Placed ahead of c107 (triage, Oct 27): small, and r1 cannot start without it.",
+ "updatedAt": "2026-10-28T05:10:00Z"
 }

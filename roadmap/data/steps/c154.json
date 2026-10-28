@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.3032,
  "why": "Finding, Oct 27 23:11 CDT (an audit session's report, relayed in cmsg_01DoF7thf3iq2Srr1UsfXgh23uGo4eqsUrqqbGKYMctN3n): install.sh near line 632 makes a cloud install replace every start-up hook with the refresh hook, so cloud sessions lose the hand-off hooks.",
- "note": "Debt, ruled a defect by the lane (Oct 28): no decision record covers it, and install.sh's \"stays hook-free\" comment predates the SessionStart hooks in settings.json. Fix: append the refresh hook to the repo's SessionStart list; red then green in hooks/test_install_src.sh. Doing: lane started Oct 28 CDT, branch c154-cloud-handoff-hooks, Opus builder. Ties to c54 part 3 (install claude-settings in cloud containers). Needs no answer. Port: no; install.sh lives here. Placed ahead of c82 (triage, Oct 28): every cloud session may lose its hand-off.",
- "updatedAt": "2026-10-28T04:45:00Z"
+ "note": "Debt, ruled a defect by the lane (Oct 28): no decision record covers it, and install.sh's \"stays hook-free\" comment predates the SessionStart hooks in settings.json. Fix: append the refresh hook to the repo's SessionStart list; red then green in hooks/test_install_src.sh. Green and reviewed: draft PR #726, head 9f5ab95 (Opus builder, Opus reviewer round 1 clear); waits for the next batch. Known false-red: cloud_settings1 if settings.json ever lacks a SessionStart key (fix: .hooks.SessionStart // []). Ties to c54 part 3 (install claude-settings in cloud containers). Needs no answer. Port: no; install.sh lives here. Placed ahead of c82 (triage, Oct 28): every cloud session may lose its hand-off.",
+ "updatedAt": "2026-10-28T05:10:00Z"
 }
