@@ -600,3 +600,7 @@
 - other-checkout-git-pointer: the `.git` exemption covers `<owner>/.git` for every checkout, so from the primary a Write to a linked worktree's `.git` pointer file passes; exempting only `git_common_dir` would close it (hooks/guard.py other_checkout_hit)
 - other-checkout-cp-source: `cd <sibling> && cp a.txt /tmp/o` is refused because the shell write reader treats every `cp` argument as a target, so a copy out of another checkout reads as a write into it (hooks/guard_frozen.py _shell_write_hit)
 - other-checkout-mkdir: `mkdir -p` into another checkout passes, because the shell write reader does not read `mkdir` targets (hooks/guard_frozen.py _shell_write_hit)
+- waiting-shown-fallback-sibling: two designs of one item share slug and state, and the shown one is renamed under a kept preview; the slug+state fallback opens its sibling. Fix: fall back only on exactly one match (skills/waiting-page/page.html openShown)
+- waiting-stale-preview-dead-button: a design removed or changed under a kept front preview leaves the preview stale, and its "Open this state" now does nothing; the stale keep is old (skills/waiting-page/page.html patch, openShown)
+- waiting-shown-fallback-untested: no test covers openShown's slug+state fallback or its no-match branch (skills/waiting-page/tests/page.test.mjs)
+- waiting-stage-key-label: the stage frame key includes the label, so the Designs tab and an option's View build separate frames for one design, and a live rename leaves a hidden frame; harm is extra iframes (skills/waiting-page/page.html showDesign)
