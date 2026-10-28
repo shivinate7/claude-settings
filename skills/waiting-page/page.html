@@ -150,6 +150,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
 @supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
 .opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
 .opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
 .opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
@@ -238,7 +239,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dsh-head .sm { display: none; }
 @media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
 .dsh-head .btn { min-height: 40px; }
-.dsh-head .btn.quiet { color: var(--on-hdr); border-color: color-mix(in srgb, var(--on-hdr) 40%, transparent); }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
 .dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
 .dsh-body .dfitwrap { width: min(100%, 780px); }
 .dsh-body .dfitwrap.off { display: none; }
@@ -484,10 +487,12 @@ function sparkle() {
   b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
   return b;
 }
-const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design) || (it.designs || []).some((d) => d.option);
+const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design) || designsOf(it).some((d) => d.option);
 // An option names its picture with `design`, a slug of the item's `designs`. The picture sits at the top of the option card and a tap on it picks the option.
 // A question about how something looks sets `look`: an option card with no picture then shows a warning.
-const optionDesigns = (it, o) => { const all = it.designs || [], first = all.filter((d) => d.slug === o.design), more = all.filter((d) => d.option === o.key && d.slug !== o.design); return [...first, ...more]; };
+// An item's designs. An older item has no `designs` and names `design` on its options only: each of those counts as one design. An item that lists `designs` is read as written, so an option naming a design it lacks warns.
+const designsOf = (it) => (it.designs && it.designs.length) ? it.designs : (it.options || []).filter((o) => o.design).map((o) => ({ slug: o.design, label: o.label }));
+const optionDesigns = (it, o) => { const all = designsOf(it), first = all.filter((d) => d.slug === o.design), more = all.filter((d) => d.option === o.key && d.slug !== o.design); return [...first, ...more]; };
 function optPic(it, o) {
   const mine = optionDesigns(it, o), has = mine.length > 0;
   if (!has && !it.look) return h("span", { class: "opic" });
@@ -497,17 +502,17 @@ function optPic(it, o) {
     fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size), h("span", { class: "view", "aria-hidden": "true" }, "View"));
 }
 // Designs that no option names show at the front of the item.
-const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return (it.designs || []).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
+const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
 function optCard(it, o, chosen) {
-  const id = "o-" + it.id + "-" + o.key;
+  const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key;
   return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
     hasPics(it) ? optPic(it, o) : null,
-    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, checked: chosen === o.key, onchange: () => choose(it, o.key),
+    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": "h-" + sfx + " t-" + sfx + (o.key === it.pick ? " p-" + sfx : ""), checked: chosen === o.key, onchange: () => choose(it, o.key),
       onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
-    h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab" }, o.label)),
-    h("p", { class: "how" }, o.how),
-    h("div", { class: "tr" }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
-    o.key === it.pick ? h("div", { class: "pick" }, sparkle(), it.why) : h("span", { class: "nopick" }));
+    h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab", id: "l-" + sfx }, o.label)),
+    h("p", { class: "how", id: "h-" + sfx }, o.how),
+    h("div", { class: "tr", id: "t-" + sfx }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
+    o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 function receipt(it) {
@@ -563,7 +568,8 @@ function buildCard(it) {
   const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
   const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   if (it.kind === "decision") {
-    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n });
+    // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
+    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
     card.append(opts, ready,
       h("div", { class: "alts" },
@@ -621,18 +627,38 @@ function signature(it) {
   const d = eff(it) || {};
   return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.noteOpen[it.id], state.more[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
+const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
+// Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
+function graft(old, keeps, nu) {
+  const live = keeps.map((k) => k[0]);
+  [...old.childNodes].forEach((c) => { if (!live.includes(c)) c.remove(); });
+  let ref = old.firstChild;
+  [...nu.childNodes].forEach((c) => {
+    const k = keeps.find((x) => x[1] === c);
+    if (k) { if (k[2]) k[2](k[0], c); ref = k[0].nextSibling; } else old.insertBefore(c, ref);
+  });
+}
+// Same options and designs: keep the live frames and rebuild everything around each one.
+function syncOpts(old, nu) {
+  copyAttrs(old, nu);
+  [...old.children].forEach((ol, i) => {
+    const nl = nu.children[i];
+    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic")]], nl);
+  });
+}
 function patch(old, nu) {
   const active = document.activeElement, focusId = active && old.contains(active) ? active.id : "";
-  const keep = old.querySelector(":scope > .dprev"), slot = nu.querySelector(":scope > .dprev");
+  const keeps = [];
+  for (const [sel, sync, same] of [[":scope > .dprev"], [":scope > .opts[data-d]", syncOpts, (a, b) => a.dataset.d === b.dataset.d]]) {
+    const k = old.querySelector(sel), n = nu.querySelector(sel);
+    if (k && n && (!same || same(k, n))) keeps.push([k, n, sync]);
+  }
   const wasReceipt = !!old.querySelector(":scope > .receipt"), isReceipt = !!nu.querySelector(":scope > .receipt");
   // A card that turns into a receipt keeps its height, so nothing below it moves.
   if (!wasReceipt) heights[old.id] = old.getBoundingClientRect().height;
   const minH = !isReceipt ? "" : wasReceipt ? old.style.minHeight : heights[old.id] ? heights[old.id] + "px" : "";
-  [...old.attributes].forEach((a) => old.removeAttribute(a.name)); [...nu.attributes].forEach((a) => old.setAttribute(a.name, a.value));
-  if (keep && slot) {
-    [...old.childNodes].forEach((c) => { if (c !== keep) c.remove(); });
-    let before = true; [...nu.childNodes].forEach((c) => { if (c === slot) { before = false; return; } before ? old.insertBefore(c, keep) : old.append(c); });
-  } else old.replaceChildren(...nu.childNodes);
+  copyAttrs(old, nu);
+  if (keeps.length) graft(old, keeps, nu); else old.replaceChildren(...nu.childNodes);
   old.style.minHeight = minH;
   if (focusId) { const f = $(focusId); if (f && !f.disabled) f.focus({ preventScroll: true }); }
 }
@@ -888,7 +914,7 @@ $("send").addEventListener("click", sendAll);
 /* ---------- Designs: each mockup is stored whole in this page and shown in a sandboxed frame ---------- */
 let DESIGN_HTML = {};
 try { DESIGN_HTML = JSON.parse($("designData").textContent) || {}; } catch (e) {}
-const allDesigns = () => state.items.filter((it) => it.designs && !isSaved(it)).flatMap((it) => it.designs.map((d) => ({ ...d, it })));
+const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
 // A mockup is drawn 390 wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const FIT_W = 390;
 let FITS = [];
@@ -990,7 +1016,7 @@ function render() {
   renderList(); renderRail(); renderBar(); renderSent();
   FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
   const nd = allDesigns().length;
-  $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => i.designs && i.designs.length);
+  $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => designsOf(i).length);
 }
 
 render();

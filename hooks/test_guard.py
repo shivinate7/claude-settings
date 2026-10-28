@@ -104,7 +104,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on lane-start calls, the reader seam, no child process, no per-call read, no CPU read or wait, the neutral load every other family's lane call meets",
+    "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -15394,7 +15394,8 @@ FAMILY = "load-brake"
 #   full  memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Every lane call is refused,
 #         an Agent or Task call too.
 # The refusal names the reading that tripped it, and never names the CPU. A read that fails, or a reading left
-# unread, counts as normal. Every other tool reads no load. The read starts no child process, writes no file,
+# unread, counts as normal. An agent's own shell or file write reads once and is refused at full only
+# (A RUNNING LANE, below). Every other tool reads no load. The read starts no child process, writes no file,
 # and sleeps for no wait.
 # Not pinned: start_session at busy.
 #
@@ -15640,9 +15641,10 @@ def lb_spawn_input(tool, value):
     return dict(LB_LANE_INPUT[tool], run_in_background=value)
 
 
-def lb_run(tool, spec, tool_input=None, event=None):
+def lb_run(tool, spec, tool_input=None, event=None, agent=None):
     """One guard run in the probe. Returns (decision, reason, side): the decision the run printed,
-    and what the probe saw (reads, children, files, had_reader, reading...)."""
+    and what the probe saw (reads, children, files, had_reader, reading...). `agent` is the payload's
+    agent_id, so the call is an agent's own; None leaves it out (the orchestrator's call)."""
     os.makedirs(LB_DIR, exist_ok=True)
     run = tempfile.mkdtemp(dir=LB_DIR)
     try:
@@ -15660,6 +15662,8 @@ def lb_run(tool, spec, tool_input=None, event=None):
                 for k, v in given.items()}}
         body["cwd"] = dirs["cwd"]
         body["session_id"] = "lb-" + os.path.basename(run)
+        if agent is not None:
+            body["agent_id"], body["agent_type"] = agent, "general-purpose"
         env = dict(os.environ)
         for name in ("TMPDIR", "TEMP", "TMP"):
             env[name] = dirs["tmp"]
@@ -15691,14 +15695,14 @@ def lb_names(word, *numbers, percent=True):
 
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
-                      fake=None):
+                      fake=None, agent=None):
     """A lane-start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
     None to leave it out. `tool_input` replaces the whole input."""
     def check():
         given = lb_lane_input(tool, background) if tool_input is None else tool_input
         spec = {"mode": "judge", "fake": fake} if fake else {"mode": "judge", "reading": reading}
-        got, reason, side = lb_run(tool, spec, given)
+        got, reason, side = lb_run(tool, spec, given, agent=agent)
         if got == "error":
             return False, reason
         called = side.get("reads")
@@ -15722,10 +15726,10 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
     return check
 
 
-def lb_no_read_check(tool, tool_input=None, event=None):
+def lb_no_read_check(tool, tool_input=None, event=None, agent=None):
     """A call that is not a lane start, under the worst reading."""
     def check():
-        got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH}, tool_input, event)
+        got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH}, tool_input, event, agent)
         if got == "error":
             return False, reason
         if got != "allow":
@@ -16109,6 +16113,44 @@ lb_add("a session tool that starts no lane reads no load under the worst reading
        lb_no_read_check("mcp__ccd_session__list_start_targets", {}))
 lb_add("a SubagentStop reads no load under the worst reading",
        lb_no_read_check(None, {}, event="SubagentStop"))
+
+# A RUNNING LANE. An agent's own shell or file write reads the load once, so a lane stops at full even while
+# its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls above read nothing.
+LB_AGENT = "a64a7f84210a8721d"
+LB_STOP_LANE = re.compile(r"Stop this lane now")
+LB_WRITES = (("Bash", {"command": "echo hi"}), ("PowerShell", {"command": "Write-Output hi"}),
+             ("Edit", {"file_path": "{cwd}/notes.txt", "old_string": "a", "new_string": "b"}),
+             ("Write", {"file_path": "{cwd}/notes.txt", "content": "a"}),
+             ("MultiEdit", {"file_path": "{cwd}/notes.txt", "edits": [{"old_string": "a", "new_string": "b"}]}),
+             ("NotebookEdit", {"notebook_path": "{cwd}/n.ipynb", "new_source": "a"}))
+for _tool, _given in LB_WRITES:
+    lb_add("an agent's %s, 3.1 GB free of 926 GB: full, refused, names the reading, tells the lane to stop" % _tool,
+           lb_decision_check(_tool, lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                             (lb_gb(3.1, 926), LB_STOP_LANE), tool_input=_given, agent=LB_AGENT))
+lb_add("an agent's Bash, memory 97.2%: full, refused, names the reading",
+       lb_decision_check("Bash", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_STOP_LANE,),
+                         tool_input={"command": "echo hi"}, agent=LB_AGENT))
+lb_add("an agent's Bash, memory 91.7% and 9.4 GB free of 926 GB: busy, allowed, one read",
+       lb_decision_check("Bash", lb_reading(memory_pct=91.7, disk_free_gb=9.4, disk_total_gb=926.0), "allow",
+                         tool_input={"command": "echo hi"}, agent=LB_AGENT))
+lb_add("an agent's Bash, memory 90% and 8 GB free of 100 GB (8%): busy, not full, allowed, one read",
+       lb_decision_check("Bash", lb_reading(memory_pct=90.0, disk_free_gb=8.0, disk_total_gb=100.0), "allow",
+                         tool_input={"command": "echo hi"}, agent=LB_AGENT))
+lb_add("an agent's Write, memory 95.0% and 5.0 GB free of 100 GB: on the line, not over it, allowed",
+       lb_decision_check("Write", lb_reading(memory_pct=95.0, disk_free_gb=5.0, disk_total_gb=100.0), "allow",
+                         tool_input={"file_path": "{cwd}/notes.txt", "content": "a"}, agent=LB_AGENT))
+lb_add("the orchestrator's own Bash, full machine: never braked, no read",
+       lb_no_read_check("Bash", {"command": "df -h"}))
+lb_add("an agent's Bash, normal reading: allowed, one read, no file",
+       lb_decision_check("Bash", LB_NORMAL, "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT))
+lb_add("an agent's Bash, a read that raises: allowed",
+       lb_decision_check("Bash", "raise", "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT))
+lb_add("an agent's Agent call, memory 97.2%: full, refused, one read, not two",
+       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, agent=LB_AGENT))
+lb_add("an agent's session tool that writes nothing reads no load under the worst reading",
+       lb_no_read_check("mcp__ccd_session__list_start_targets", {}, agent=LB_AGENT))
+lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
+       lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
 for _short, _tool in LB_TOOLS:
     lb_add("%s with the real reader starts no child process" % _short,

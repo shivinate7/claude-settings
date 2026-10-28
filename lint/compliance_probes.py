@@ -6,6 +6,7 @@
     python3 lint/compliance_probes.py lanecap <child root>
     python3 lint/compliance_probes.py playwright <child root>
     python3 lint/compliance_probes.py ios <child root>
+    python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
 then one verdict line. Exit 0: in shape, not rolled out, or n/a. Exit 1: a gap. Exit 2: the probe
@@ -29,6 +30,9 @@ playwright: a Playwright install that also runs apt (`--with-deps`, `install-dep
 ios: drift from the iOS standard of skills/ios-apps, one item per line: the make targets, the ship
   path, the project file, the Kit package, Swift 6, the CI runner, the CI checks, slow tests on each
   pull request, and account IDs in the repo. A repo with no iOS app is n/a. Comments do not count.
+scorecard: not a probe. It reads the group lines from stdin and rewrites docs/health/compliance.md in
+  the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
+  for the STE lint's gap on UI files, a known gap.
 """
 import json
 import os
@@ -435,8 +439,72 @@ def probe_ios(root):
     return finish("ios", lines, worst, 0 if worst == "in shape" else 1)
 
 
+SCORES = "in shape|partial|out|parent-covered|n/a|unknown|not rolled out"
+GRADES = "pass|gap|known gap|" + SCORES  # an item line's grade, as item() in the probes prints it
+# A probe's own group line may end at its score ("design: out"), or go on with no " - ".
+GROUP_LINE = re.compile(r"^([^:\s-][^:]*): (%s)(?:(?: - | )(.*?))?(?: \(([^()]*)\))?$" % SCORES)
+ITEM_LINE = re.compile(r"^\s+(?:- )?([^:]+): (%s) - (.*?)(?: \(([^()]*)\))?$" % GRADES)
+# A finding line with no grade ("  folder src/: neither ..."): the name ends at the first ": ".
+FINDING_LINE = re.compile(r"^\s+(?:- )?(.+?): (.*)$")
+UI_GAP_ROW = ("STE lint on UI files", "partial", "UI text the lint does not read: known gap, no UI linter",
+              "lint/ui_suffixes.py")
+
+
+def scorecard(root):
+    """Rewrite the one scorecard file from the group lines on stdin. A probe prints its item lines
+    before its own group line, named in lower case as in GROUPS; the skill writes them after."""
+    rows, notes, held, group = [], [], [], None
+
+    def item_row(name, line):
+        graded = ITEM_LINE.match(line)
+        if graded:
+            return ("%s: %s" % (name, graded.group(1)),) + graded.groups()[1:]
+        finding = FINDING_LINE.match(line)
+        return ("%s: %s" % (name, finding.group(1)), "finding", finding.group(2), None)
+
+    def flush(name):
+        if name is None:
+            notes.extend(line.strip() for line in held)
+        else:
+            rows.extend(item_row(name, line) for line in held)
+        del held[:]
+
+    for line in sys.stdin.read().splitlines():
+        found = GROUP_LINE.match(line)
+        if found:
+            name = found.group(1)
+            if name in GROUPS and held:
+                rows.append((name, found.group(2), found.group(3) or "", found.group(4)))
+                flush(name)
+            else:
+                flush(group)
+                rows.append((name, found.group(2), found.group(3) or "", found.group(4)))
+            group = name
+        elif ITEM_LINE.match(line) or FINDING_LINE.match(line):
+            held.append(line)
+        elif line.strip():
+            notes.append(line.strip())
+    flush(group)
+    rows.append(UI_GAP_ROW)
+    text = "# Compliance scorecard\n\nRewritten in place on each run by compliance-check.\n\n"
+    text += "| Group | Score | Gold standard | Gap | Source |\n| --- | --- | --- | --- | --- |\n"
+    for name, score, gap, source in rows:
+        cells = [c.replace("|", "\\|") for c in (name, score, "in shape", gap, source or "none cited")]
+        text += "| " + " | ".join(cells) + " |\n"
+    if notes:
+        text += "\n## Notes\n\n" + "".join("- %s\n" % n for n in notes)
+    folder = os.path.join(root, "docs", "health")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "compliance.md"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    except OSError as err:
+        raise CannotRun(str(err))
+    return finish("scorecard", [], "wrote docs/health/compliance.md (%d row(s), %d note(s))" % (len(rows), len(notes)), 0)
+
+
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
-          "ios": probe_ios}
+          "ios": probe_ios, "scorecard": scorecard}
 
 
 def main(argv):

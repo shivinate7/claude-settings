@@ -981,6 +981,90 @@ class NoResendTests(unittest.TestCase):
                 self.assertIsNone(self.verdict(reply, (self.BUILDER,), stop_hook_active=True))
 
 
+class RewriteAfterMissingReportTests(unittest.TestCase):
+    """The rewrite after a missing-report block is checked once for model names and the Unstarted line."""
+
+    BUILDER = {"subagent_type": "builder", "prompt": "build it"}
+    GOOD = "> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.sid = "rw-%d" % id(self)
+
+    def run_hook(self, records, active):
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
+                "session_id": self.sid}
+        run = run_gate(REPORT_GATE, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
+        self.assertEqual(run.returncode, 0)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def stop(self, reply, active):
+        records = [human("do the task"), tool_use_msg("Agent", self.BUILDER), tool_result_msg(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(reply)]
+        return self.run_hook(records, active)
+
+    def missing_report_block(self):
+        out = self.stop("All done.", False)
+        self.assertIn("Send the report now", out["reason"])
+
+    def test_rw_red_rewrite_without_unstarted_blocks(self):
+        self.missing_report_block()
+        out = self.stop("> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** merge", True)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Unstarted gate", out["reason"])
+        self.assertIn("post only the corrected lines", out["reason"].lower())
+
+    def test_rw_red_rewrite_with_wrong_model_blocks(self):
+        for reply in ("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
+                      "> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none"):
+            with self.subTest(reply=reply):
+                self.missing_report_block()
+                out = self.stop(reply, True)
+                self.assertEqual(out["decision"], "block")
+                self.assertIn("Model-name gate", out["reason"])
+
+    def test_rw_second_rewrite_stays_quiet(self):
+        self.missing_report_block()
+        bad = "> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** merge"
+        self.assertEqual(self.stop(bad, True)["decision"], "block")
+        self.assertIsNone(self.stop(bad, True))
+
+    def test_rw_correct_rewrite_passes(self):
+        self.missing_report_block()
+        self.assertIsNone(self.stop(self.GOOD, True))
+        self.assertIsNone(self.stop(self.GOOD, True))
+
+    def test_rw_no_prior_missing_report_block_stays_quiet(self):
+        bad = "> **Done** BUILT the gate, PR #5\n> **Next** merge"
+        self.assertIsNone(self.stop(bad, True))
+
+    def test_rw_correction_block_leaves_no_marker(self):
+        # A correction block (report present) must not arm a check on the next rewrite.
+        bad = "> **Done** BUILT the gate, PR #5\n> **Next** merge"
+        self.assertEqual(self.stop(bad, False)["decision"], "block")
+        self.assertIsNone(self.stop(bad, True))
+
+    def test_rw_stale_marker_is_cleared_by_a_later_turn(self):
+        # The rewrite never ran, so the marker is stale. A new turn's Stop must clear it.
+        self.missing_report_block()
+        self.assertIsNone(self.stop(self.GOOD, False))
+        bad = "> **Done** BUILT the gate, PR #5\n> **Next** merge"
+        self.assertIsNone(self.stop(bad, True))
+
+    def test_rw_feedback_record_counted_as_human_keeps_spawns(self):
+        # Assumed shape of the hook's feedback record: a plain user text record after the block.
+        self.missing_report_block()
+        records = [human("do the task"), tool_use_msg("Agent", self.BUILDER), tool_result_msg(),
+                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text("All done."), human("Stop hook feedback: send the report"),
+                   assistant_text("> **Done** BUILT the gate, PR #5\n> **Next** merge")]
+        out = self.run_hook(records, True)
+        self.assertIn("Unstarted gate", out["reason"])
+
+
 class PickGateTests(unittest.TestCase):
     """decisions-reach-a-clickable-pick: an Input Needed pick needs the question box or a linked waiting-page item."""
 

@@ -23,6 +23,8 @@
 #           1 with one lock line and writes nothing.
 #   log3    install.ps1 and the post-merge hook each log one start line and one end line, naming
 #           the install id and the process id. install.sh does not run on Windows, so it has no leg here.
+#   read1   A run's output file is read while another handle still holds it open for write, as a child
+#           that outlives its run holds it. The read returns the text. A missing file still throws.
 #
 # Every case works under its own folder in a temp root. None touches the real ~/.claude. The
 # sampling loops are bounded by a deadline and read local files only; they measure, they do not wait
@@ -34,6 +36,7 @@ if ($env:OS -ne 'Windows_NT') { Write-Host 'SKIP: install set (Windows only)'; e
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Utf8    = New-Object Text.UTF8Encoding($false)
 . (Join-Path $Here 'testing\TrackedTree.ps1')  # copies what git lists, so no fixture lists files
+. (Join-Path $Here 'testing\SharedRead.ps1')   # Read-Shared: a child's output reads back while a handle holds it
 $PsHost  = (Get-Process -Id $PID).Path
 $Python  = (Get-Command python -ErrorAction Stop).Source
 $GitExe  = (Get-Command git -ErrorAction Stop).Source
@@ -63,14 +66,6 @@ print("\n".join(sorted(ids)))
 '@
 [IO.File]::WriteAllText($ProbePy, ($ProbeText -replace "`r", ''), $Utf8)
 
-# Reads a file with read, write and delete sharing, so an installer rename is never refused by a
-# sampler. A missing or unreadable file throws; the callers catch it.
-function Read-Shared([string]$Path) {
-    $share = [IO.FileShare]([int][IO.FileShare]::ReadWrite -bor [int][IO.FileShare]::Delete)
-    $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
-    try { $sr = New-Object IO.StreamReader($fs, $Utf8); return $sr.ReadToEnd() } finally { $fs.Close() }
-}
-
 # Holds a file open for read with no delete sharing. A rename over the file is refused while it is held.
 function Hold-File([string]$Path) {
     return [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
@@ -90,7 +85,7 @@ function Get-LoadedId([string]$Cfg) {
             -RedirectStandardOutput "$o.out" -RedirectStandardError "$o.err"
     } finally { foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) } }
     if ($p.ExitCode -ne 0 -or -not (Test-Path -LiteralPath "$o.out")) { return '' }
-    $ids = @([IO.File]::ReadAllText("$o.out") -split '\r?\n' | Where-Object { $_ -ne '' } | Select-Object -Unique)
+    $ids = @((Read-Shared "$o.out") -split '\r?\n' | Where-Object { $_ -ne '' } | Select-Object -Unique)
     if ($ids.Count -eq 1 -and $ids[0] -notlike '(*') { return $ids[0] }
     return ''
 }
@@ -192,7 +187,7 @@ function Invoke-Guard([string]$Cfg, [string]$Tag) {
             -ArgumentList @(('"' + (Join-Path $Cfg 'hooks\guard.py') + '"')) `
             -RedirectStandardInput $in -RedirectStandardOutput "$in.out" -RedirectStandardError "$in.err"
     } finally { Restore-Env $saved }
-    $text = if (Test-Path -LiteralPath "$in.out") { [IO.File]::ReadAllText("$in.out").Trim() } else { '' }
+    $text = if (Test-Path -LiteralPath "$in.out") { (Read-Shared "$in.out").Trim() } else { '' }
     return @{ Exit = $p.ExitCode; Text = $text }
 }
 
@@ -244,9 +239,20 @@ function Wait-Bounded($Process, [int]$Seconds) {
 # The text of a run's stdout and stderr files.
 function Get-RunText([string]$Out) {
     $parts = @()
-    foreach ($f in @("$Out.out.txt", "$Out.err.txt")) { if (Test-Path -LiteralPath $f) { $parts += [IO.File]::ReadAllText($f) } }
+    foreach ($f in @("$Out.out.txt", "$Out.err.txt")) { if (Test-Path -LiteralPath $f) { $parts += Read-Shared $f } }
     return ($parts -join "`n")
 }
+
+# ---- read1: a run's output is read while another handle still holds it open for write ------------
+$R1    = Join-Path $Root 'read1'
+New-Item -ItemType Directory -Force -Path $R1 | Out-Null
+$r1Out = Join-Path $R1 'run'
+[IO.File]::WriteAllText("$r1Out.out.txt", "one lock line`n", $Utf8)
+$r1Hold = [IO.File]::Open("$r1Out.out.txt", [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+try { $r1Text = Get-RunText $r1Out; $r1Err = '' } catch { $r1Text = ''; $r1Err = $_.Exception.Message } finally { $r1Hold.Close() }
+Check 'read1: a run output held open for write by another handle reads back whole' ($r1Text.Trim() -eq 'one lock line') "read gave '$($r1Text.Trim())'; error: $r1Err"
+$r1Missing = try { $null = Read-Shared (Join-Path $R1 'absent.txt'); 'no error' } catch { 'threw' }
+Check 'read1: the shared read still throws on a missing file' ($r1Missing -eq 'threw') "a read of a missing file gave: $r1Missing"
 
 # ---- setup: one clean install, so the guard files exist ----------------------------------------
 $C0   = Join-Path $Root 'base'

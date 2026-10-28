@@ -26,6 +26,9 @@
 #   lock1     first local run, skill locked: a .bak or no copy marker after run 1, and no person
 #             file lost after run 2. Needs no symlink rights; copy mode is forced.
 #
+# One more, read1: the text a run printed reads back while another handle still holds the file open
+# for write, and a missing file still throws.
+#
 # One more, hooks-whole, at the end of the file: no live hook file is rewritten in place. A rewrite
 # in place keeps a file's identity, so each changed hook file must get a new one, through install.ps1
 # run 2 and through the post-merge hook it writes. The hook route needs git and a Git Bash sh, and
@@ -45,6 +48,7 @@ $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { Write-Host 'SKIP: install no-gap (Windows only)'; exit 0 }
 
 $Repo   = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $Repo 'testing\SharedRead.ps1')   # Read-Shared: a child's output reads back while a handle holds it
 $Failed = 0
 function Check([string]$name, [bool]$ok) {
     if ($ok) { Write-Host "PASS: $name" } else { Write-Host "FAIL: $name"; $script:Failed++ }
@@ -241,6 +245,11 @@ function Write-FixtureFile([string]$path, [string]$text) {
 # Writes one fixture file under the main clone.
 function Write-Fixture([string]$rel, [string]$text) {
     Write-FixtureFile (Join-Path $Clone $rel) $text
+}
+
+# The text a child run printed to a redirected file. A missing or unreadable file throws.
+function Get-RunText([string]$Path) {
+    return Read-Shared $Path
 }
 
 # Runs install.ps1 from the clone $CloneDir in a child shell. Returns its exit code.
@@ -763,7 +772,7 @@ public static class FileIdentity
         } finally {
             $Held.Dispose()
         }
-        $R1Log = [IO.File]::ReadAllText((Join-Path $Tmp 'replace1-run2.log'))
+        $R1Log = Get-RunText (Join-Path $Tmp 'replace1-run2.log')
         Check "replace1: run 2 exits non-zero when one replace fails for good (exit $rcR2)" ($rcR2 -ne 0)
         Check "replace1: run 2 prints the file it could not replace" ($R1Log -match 'could not (replace|refresh) .*guard_pointer\.py')
         Check "replace1: the file it could not replace is unchanged (still pointer v1)" ([IO.File]::ReadAllText((Join-Path $R1Hooks 'guard_pointer.py')) -eq '# pointer v1')
@@ -884,6 +893,20 @@ public static class FileIdentity
     Check "first1: every mixed-id window clears within 5 s ($($Reader1.Windows) windows, longest $LongestF1 s)" ($Reader1.MaxWindowSeconds -le 5)
     Check "first1: no mixed-id window is still open when the install ends" (-not $Reader1.WindowOpen)
 
+    # ---- read1: a run's printed text is read while another handle still holds the file open for write ---
+    # A child the run left behind can hold its redirected output open for write. The read must still
+    # return the text. A missing file must still throw, so a case never takes absent text for empty text.
+    $R1Dir = Join-Path $Tmp 'read1'
+    New-Item -ItemType Directory -Force -Path $R1Dir | Out-Null
+    $R1File = Join-Path $R1Dir 'run.log'
+    [IO.File]::WriteAllText($R1File, "one printed line`n", $Utf8)
+    $R1Hold = [IO.File]::Open($R1File, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+    try { $R1Text = Get-RunText $R1File; $R1Err = '' } catch { $R1Text = ''; $R1Err = $_.Exception.Message } finally { $R1Hold.Close() }
+    Check "read1: a run's printed text held open for write by another handle reads back whole" ($R1Text.Trim() -eq 'one printed line')
+    if ($R1Err) { Write-Host "  read1 error: $R1Err" }
+    $R1Missing = try { $null = Get-RunText (Join-Path $R1Dir 'absent.log'); 'no error' } catch { 'threw' }
+    Check "read1: a read of a missing file still throws" ($R1Missing -eq 'threw')
+
     # ---- retry1: a file that Resolve-Failures recovers on retry leaves no failure behind -----------
     # A first install: no install marker, and person files already sit at two names. A reader holds
     # guard_pointer.py open with no delete sharing for 5 s. Move-OverFile gives up after about 2.5 s, and
@@ -914,8 +937,8 @@ public static class FileIdentity
         $T1Held.Dispose()
         Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     }
-    $T1Printed = if (Test-Path -LiteralPath $T1Out) { [IO.File]::ReadAllText($T1Out) } else { '' }
-    $T1Text = if (Test-Path -LiteralPath $T1InstallLog) { [IO.File]::ReadAllText($T1InstallLog) } else { '' }
+    $T1Printed = if (Test-Path -LiteralPath $T1Out) { Get-RunText $T1Out } else { '' }
+    $T1Text = if (Test-Path -LiteralPath $T1InstallLog) { Get-RunText $T1InstallLog } else { '' }
     Check "retry1: the first install exits 0 (exit $rcT1)" ($rcT1 -eq 0)
     Check "retry1: the run printed a retry (non-vacuous: the failed replace happened)" ($T1Printed -match 'retrying in')
     Check "retry1: guard_pointer.py holds the new text after the retry" ([IO.File]::ReadAllText((Join-Path $T1Hooks 'guard_pointer.py')) -eq '# pointer v2')
