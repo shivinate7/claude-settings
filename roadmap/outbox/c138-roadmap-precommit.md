@@ -1,0 +1,9 @@
+# c138-roadmap-precommit (cloud lane, Oct 28)
+
+- c138: try 3 built and reviewed; branch `c138-roadmap-precommit` head f514177b (merges clean into roadmap acb813dc). Not on roadmap yet: the orchestrator lands it after telling triage.
+- What it is: `build.py --check-staged` reads step files from the index and refuses a commit that adds or grows an open step's note past 250 words, naming it. Setup, one line in CLAUDE.md: `sh roadmap/hooks/install.sh`. It copies a pre-commit dispatcher into the hooks dir git uses (core.hooksPath if set, else the common .git/hooks), never sets core.hooksPath, leaves main-ref's reference-transaction in place, chains an existing pre-commit (moved to pre-commit.pre-c138), and is a no-op for the cap outside a roadmap checkout.
+- Try 3 answers the orchestrator's blocking finding (clone-wide core.hooksPath switched off main-ref). Red first: main-ref stand-in and an existing pre-commit did not fire under the old setup. Now 40 tests green.
+- Reviews: 2 Opus rounds on the check (done->open, symlinks, odd names, nested files, trims fixed); 1 fresh Opus round on the installer: no blocking or should-fix; nits fixed red-then-green (a sibling worktree's roadmap/hooks as hooksPath refused; a dangling pre-commit kept; messages).
+- For triage once landed: any clone that ran the old `git config core.hooksPath roadmap/hooks` line must unset it, rerun `bash githooks/main-ref/install.sh` on main, then run the new setup. Re-run install.sh after a dispatcher change.
+- Main, not c138 (reviewer, proven): githooks/main-ref/install.sh mis-installs with a relative or `~` core.hooksPath (guard off in other worktrees); usage says `sh` but it needs bash (pipefail). Worth a main step.
+- Known, accepted: clean merge or cherry-pick of a `--no-verify` commit is unchecked (git runs no pre-commit there).
