@@ -1,0 +1,9 @@
+{
+ "title": "the shared link checker skips hosts only home can reach",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3389991,
+ "why": "Orchestrator, Oct 28 14:10 CDT: degen#290 (c127) is blocked on two things, it is a draft and degen's main is red on its link check; the shared link checker fails on links to hosts that only home can reach.",
+ "note": "Slug readme-links-home-hosts (orchestrator, lane PR #785, batch 13). The shared link checker (actions/readme-links: links, alive, main) skips hosts only the home network can reach, so a link to one no longer turns a repo's check red; it names each skipped host in its output, so a skip is never silent. Red first: a fixture README with a home-only link, red on main today and green on the branch, and a dead public link still fails. Unblocks degen#290 (c127). Port: yes, every repo that runs readme-links. Needs no answer. Placed after c185 (triage 12, Oct 28).",
+ "updatedAt": "2026-10-28T19:20:00Z"
+}
