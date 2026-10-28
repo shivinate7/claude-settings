@@ -1207,26 +1207,26 @@ def python_suite_hits(source, rel, paths, read=None, depth=1):
     return False
 
 def lint_steps(root, base_ref, env=None):
-    """-> the names of the `gates` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice."""
-    c, out = sh([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", base_ref], cwd=root, env=env, timeout=120)
+    """-> the names of the `checks` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice."""
+    c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--plan", "--base", base_ref], cwd=root, env=env, timeout=120)
     if c:
         raise Stop(f"the lint steps cannot be listed (exit {c})")
     return {l[len("would run"):].strip() for l in out.splitlines() if l.startswith("would run ")}
 
 def hit_suites(root, paths, skip):
-    """-> [(file, line)]: each suite line of the `gates` job in root's workflow whose source names one of `paths`
+    """-> [(file, line)]: each suite line of the `checks` job in root's workflow whose source names one of `paths`
     (needles), except a mutation script and the steps named in `skip`. The workflow is the one home of which suites
     run, so no list is kept here. A step's `if:` is not read: the batch may have turned it on. Stop when the
     workflow, its job or a suite source cannot be read, or a hit line is not a plain suite line."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     from workflow_steps import job_block, run_body, step_blocks, step_key  # the one home of the step parser
     try:
-        with open(os.path.join(root, ".github", "workflows", "gates.yml"), encoding="utf-8") as f:
-            block = job_block(f.read(), "gates")
+        with open(os.path.join(root, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+            block = job_block(f.read(), "checks")
     except (OSError, UnicodeError) as e:
         raise Stop(f"the workflow cannot be read ({type(e).__name__})")
     if block is None:
-        raise Stop("the workflow has no `gates` job")
+        raise Stop("the workflow has no `checks` job")
     words = _words({n for p in paths for n in needles(p)})
     names = _words({x for p in paths for x in (p, p.split("/")[-1], *(p.rsplit("/", i)[0] for i in range(1, p.count("/") + 1)))})
     def read(path):
@@ -1244,7 +1244,7 @@ def hit_suites(root, paths, skip):
             m = re.match(r"(?:python3|node|bash) +(\S+\.(?:py|mjs|sh))\b", line)
             if not m:  # a line of no suite form is never read, so one that names main's paths or their folders refuses
                 if line and any(w.search(line) for w in names):
-                    raise Stop(f"the gates line `{line}` names main's paths and is no suite this tool can read")
+                    raise Stop(f"the checks line `{line}` names main's paths and is no suite this tool can read")
                 continue
             if "mutate" in m.group(1):
                 continue
@@ -1272,7 +1272,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
     """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T.
     It stands only when main's paths since the merge base M share no path with the batch's (the records page aside: the
     generator proves it on the merge), the merge of sha and T is clean, the repo's ci-scope.sh turns on no job and no suite
-    for main's paths, and on that merge the `gates` lint steps pass and so does each other `gates` suite that names one of
+    for main's paths, and on that merge the `checks` lint steps pass and so does each other `checks` suite that names one of
     main's paths (hit_suites). Anything unread refuses. The worktree goes back to its HEAD.
     Cost per call: about 10 git starts, one ci-scope.sh run, two ci-job runs (a plan, and the lints at two starts per
     step) and one start per hit suite; one temp output file, and one ci-job log, kept only on a failure."""
@@ -1320,7 +1320,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         if before_run:
             before_run(LINT_SECONDS)  # extends the merge lock past the run, or stops with a NetStop
         # --base is the base tip, as a pull request run reads its base: it checks the merge against main as it is now
-        c, out = sh([sys.executable, CI_JOB, "gates", "--lint", "--base", base_ref], cwd=wt, env={**env, "VERDICT_LOG": log}, timeout=LINT_SECONDS)
+        c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", base_ref], cwd=wt, env={**env, "VERDICT_LOG": log}, timeout=LINT_SECONDS)
         if c:
             keep = True
             bad = [l.strip() for l in out.splitlines() if l.startswith(("FAIL", "unknown"))]

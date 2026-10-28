@@ -920,7 +920,7 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
-GATES_YML = ("name: gates\non: pull_request\njobs:\n  gates:\n    runs-on: ubuntu-latest\n    steps:\n"
+CHECKS_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n"
              "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
 SLUG_LINT = '''import collections, os, re, sys
@@ -936,23 +936,23 @@ print(bad or "ok")
 sys.exit(1 if bad else 0)
 '''
 DOC_SUITE = '''import os, sys
-path = os.path.join("docs", "guide.md")  # a gates suite that reads one tracked doc, named in no list
+path = os.path.join("docs", "guide.md")  # a checks suite that reads one tracked doc, named in no list
 sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
 class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
-    The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `gates` job holds one cross-file lint:
-    no two docs share a slug. hooks/test_reads_guide.py is a gates suite outside --lint that reads docs/guide.md."""
+    The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
+    no two docs share a slug. hooks/test_reads_guide.py is a checks suite outside --lint that reads docs/guide.md."""
 
-    def scoped(self, workflow=GATES_YML, scope=True):
+    def scoped(self, workflow=CHECKS_YML, scope=True):
         """Main and feat both gain the CI files; feat then holds main's tip."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
                 put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
-        put(os.path.join(o, ".github/workflows/gates.yml"), workflow)
+        put(os.path.join(o, ".github/workflows/checks.yml"), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
@@ -1028,7 +1028,7 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/other.md": "---\nslug: second\n---\n"})  # feat's record has slug second: each side alone passes
         self.refused()
 
-    def test_a_main_doc_that_breaks_a_gates_suite_reading_docs_is_refused(self):
+    def test_a_main_doc_that_breaks_a_checks_suite_reading_docs_is_refused(self):
         self.scoped()
         self.on("main", {"docs/guide.md": "BROKEN\n"})
         self.refused()
@@ -1041,7 +1041,7 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.assertIn("exit 3", self.refused())
 
-    def test_the_suites_a_doc_hits_come_from_the_gates_job(self):
+    def test_the_suites_a_doc_hits_come_from_the_checks_job(self):
         root = os.path.join(HERE, "..")
         lints = merge.lint_steps(root, "origin/main")
         hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
@@ -1095,14 +1095,14 @@ class SmallBaseMove(Env):
         self.assertTrue(merge.python_suite_hits(files["hooks/test_y.py"], "hooks/test_y.py", ["docs/decisions/z.md"], read))
         self.assertFalse(merge.python_suite_hits("import nowhere\n", "hooks/test_z.py", ["docs/decisions/z.md"], read))
 
-    def test_a_gates_line_of_no_suite_form_that_names_main_s_path_is_refused(self):
-        self.scoped(workflow=GATES_YML + "      - name: Other runner\n        run: sh -c 'grep -q x docs/guide.md || true'\n")
+    def test_a_checks_line_of_no_suite_form_that_names_main_s_path_is_refused(self):
+        self.scoped(workflow=CHECKS_YML + "      - name: Other runner\n        run: sh -c 'grep -q x docs/guide.md || true'\n")
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.assertIn("docs/guide.md", self.refused())
 
     def test_a_records_only_main_move_keeps_the_green_run(self):
-        """A new record and the page rebuilt on main; a gates suite names the record folder only in its temp tree."""
-        self.scoped(workflow=GATES_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
+        """A new record and the page rebuilt on main; a checks suite names the record folder only in its temp tree."""
+        self.scoped(workflow=CHECKS_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
         o = self.other
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         put(os.path.join(o, "hooks/test_temp_tree.py"), 'import os, sys, tempfile\nd = tempfile.mkdtemp()\n'
@@ -1135,12 +1135,12 @@ class SmallBaseMove(Env):
         self.refused()
 
     def test_a_lint_run_that_cannot_find_the_job_is_refused(self):
-        self.scoped(workflow=GATES_YML.replace("  gates:", "  other:"))
+        self.scoped(workflow=CHECKS_YML.replace("  checks:", "  other:"))
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
 
     def test_a_lint_step_ci_job_cannot_read_is_refused(self):
-        self.scoped(workflow=GATES_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
+        self.scoped(workflow=CHECKS_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
 
