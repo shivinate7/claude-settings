@@ -18,7 +18,9 @@ Rulings by shiv, Oct 28 (chat; full text in docs/decisions/session-tiers.md, L0)
 
 15:23 want: rotate standing sessions before they go stale. Triage and the batch runner each report a tally of their own use (turns or context) to the coordinator; near the limit the coordinator has the session write its handoff, archives it and starts a fresh one.
 
-Open: coordinator succession (a new coordinator takes over every child session, each told its id); into session-tiers.md and lane L1 or its own lane. Name: he said "branch manager" for the batch runner; the coordinator is telling him the name in use.
+15:24 ruling: coordinator succession is dropped (it failed in his runs: children refused a new coordinator as "not my parent", or missed a message while busy after the old one archived itself). The coordinator never hands children to a successor; it writes its own handoffs and compacts in place. Rotation of triage and the batch runner stays, and must avoid those two failures: the coordinator itself starts the new session, so it is the child's real parent, and archives the old one only after it has drained its messages.
+
+Name: he said "branch manager" for the batch runner; the coordinator is telling him the name in use.
 
 Lanes L1 (rules, glossary), L2 (skills), L3 (session-start guard) start after batch 13 merges.
 
