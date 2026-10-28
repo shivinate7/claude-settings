@@ -270,6 +270,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
     ];
     const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
+    await noAnchor(page);
     // With option designs, the in-card frames must be the same DOM nodes after each pick, so none reloads.
     let sent = false;
     if (withDesigns) {
@@ -289,10 +290,15 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
     sent = true;
+    // A receipt holds its height only while in view (owner report 1, Oct 28 13:19 CDT, c193), so after Send only what is on screen is compared.
+    const onScreen = () => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.id, c.getBoundingClientRect()]).filter(([, r]) => r.bottom > 0 && r.top < innerHeight).map(([id, r]) => [id, Math.round(r.top), Math.round(r.height)]));
+    const seen = await onScreen();
     await send(page);
     await page.locator("#sent .stamp").waitFor();
     await page.evaluate(() => new Promise((r) => setTimeout(r, 600)));
-    await same("Send");
+    const after = (await onScreen()).slice(0, seen.length); // scroll lands on whole pixels, so a fraction of one is allowed
+    assert.deepEqual(after.map((r) => r[0]), seen.map((r) => r[0]), "the cards on screen changed on Send");
+    seen.forEach((r, i) => { assert.ok(Math.abs(after[i][1] - r[1]) <= 1 && Math.abs(after[i][2] - r[2]) <= 1, "what was on screen moved on Send: " + JSON.stringify([r, after[i]])); });
   });
 }
 
@@ -1827,6 +1833,244 @@ test("a named picture's not-equal sign sits inside its View bar", async (t) => {
   assert.ok(m.n[0] >= m.v[0] - 0.5 && m.n[2] <= m.v[2] + 0.5 && m.n[1] >= m.v[1] - 0.5 && m.n[3] <= m.v[3] + 0.5, "the sign is outside the View bar: " + JSON.stringify(m));
 });
 
+// ---------------------------------------------------------------- sizes: receipt height, rail chips, option pictures (c193)
+const SIZES = [2200, 1280, 390];
+// Chromium's scroll anchoring would hide a missing compensation (Safari has none), so these tests switch it off.
+const noAnchor = (page) => page.addStyleTag({ content: "*, html { overflow-anchor: none !important; }" });
+const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { context: LONG }));
+
+for (const scheme of ["light", "dark"]) {
+  test(`an answered card keeps its height only while in view, then shrinks with nothing on screen moving, ${scheme} scheme`, async (t) => {
+    const target = mk("target", 2, { context: LONG });
+    const items = [mk("above", 1, { context: LONG }), target, ...FILLER];
+    const page = await open(t, { items, scheme, viewport: { width: 1280, height: 700 } }); if (!page) return;
+    await noAnchor(page);
+    const c = card(page, target);
+    const full = (await c.boundingBox()).height;
+    await choose(page, target, "a");
+    await send(page);
+    await c.locator(".receipt").waitFor();
+    assert.ok((await c.boundingBox()).height >= full - 1, "the receipt gave up its height while still in view");
+    // Scroll the receipt out of view above the screen, with a card on screen as the witness.
+    const witness = card(page, FILLER[3]);
+    await witness.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollBy(0, 300));
+    const top = () => witness.evaluate((e) => Math.round(e.getBoundingClientRect().top));
+    const at = await top();
+    await page.waitForFunction(() => document.getElementById("item-target").getBoundingClientRect().bottom < 0);
+    await page.waitForFunction(([id, h]) => document.getElementById(id).getBoundingClientRect().height < h - 100, ["item-target", full]);
+    assert.ok(Math.abs((await top()) - at) <= 1, "what was on screen moved when the receipt shrank");
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of SIZES) {
+  test(`the rail's related-item frames and chips fit the rail at ${width}px wide, ${scheme} scheme`, async (t) => {
+    const long = "A very long title that runs across the whole width of the rail and then some more ";
+    const items = [1, 2, 3].map((n) => mk("pr-" + n, n, { group: "pair", title: long + n })).concat([mk("alone", 4, { title: long + "alone" })]);
+    const page = await open(t, { items, scheme, viewport: { width, height: 900 }, groups: { pair: { title: "Answer these together", why: "Linked." } } }); if (!page) return;
+    const m = await page.evaluate(() => {
+      const r = (e) => { const b = e.getBoundingClientRect(); return { l: b.left, r: b.right }; };
+      const rail = document.querySelector(".rail"), ov = rail.getBoundingClientRect();
+      const frames = [...rail.querySelectorAll(".pairchips")].map(r), chips = [...rail.querySelectorAll(".nchip")].map(r);
+      return { rail: r(rail), railW: ov.width, frames, chips, list: r(document.querySelector(".list")), sw: document.documentElement.scrollWidth, iw: innerWidth, stacked: innerWidth <= 960 };
+    });
+    assert.ok(m.frames.length >= 1, "no related-item frame in the rail");
+    const slack = 1;
+    for (const f of m.frames) assert.ok(f.l >= m.rail.l - slack && f.r <= m.rail.r + slack, `a frame runs past the rail: ${JSON.stringify(f)} in ${JSON.stringify(m.rail)}`);
+    for (const c of m.chips) assert.ok(c.l >= m.rail.l - slack && c.r <= m.rail.r + slack, `a chip runs past the rail: ${JSON.stringify(c)} in ${JSON.stringify(m.rail)}`);
+    if (!m.stacked) { assert.ok(m.railW <= 240 + slack, "the rail grew past 240px: " + m.railW); assert.ok(m.rail.r <= m.list.l + slack, "the rail overlaps the cards"); }
+    assert.ok(m.sw <= m.iw, "the page scrolls sideways");
+  });
+
+  for (const [kind, extra] of [["declared size", { size: { w: 390, h: 844 } }], ["no declared size", {}], ["a focused part", { focus: "#hero", size: { w: 300, h: 200 } }]]) test(`an option's picture (${kind}) sits inside its option card at ${width}px wide, ${scheme} scheme`, async (t) => {
+    const it = mk("fit-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, ...extra })) });
+    const phone = (k) => `<body style="margin:0"><div id="hero" style="width:300px;height:200px;background:#9cf">${k}</div><div style="height:644px;width:390px;background:#eee"></div></body>`;
+    const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, phone(o.design)]));
+    const page = await open(t, { items: [it], designData, scheme, viewport: { width, height: 900 } }); if (!page) return;
+    await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt`)].map((o) => {
+      const b = o.getBoundingClientRect(), pw = o.querySelector(".dfitwrap"), w = pw.getBoundingClientRect();
+      const text = [...o.querySelectorAll(".how, .lab, .tr, .pick, .nopick, .dwarn")].map((x) => x.getBoundingClientRect()).filter((x) => x.height > 0);
+      return { card: [b.left, b.top, b.right, b.bottom], wrap: [w.left, w.top, w.right, w.bottom], text: text.map((x) => [x.top, x.bottom]) };
+    }), it.id);
+    for (const o of m) {
+      assert.ok(o.wrap[0] >= o.card[0] - 1 && o.wrap[2] <= o.card[2] + 1, "the picture runs past the sides of its card: " + JSON.stringify(o));
+      assert.ok(o.wrap[1] >= o.card[1] - 1 && o.wrap[3] <= o.card[3] + 1, "the picture runs past the bottom of its card: " + JSON.stringify(o));
+      for (const [tt, tb] of o.text) assert.ok(tt >= o.wrap[3] - 1 || tb <= o.wrap[1] + 1, "the picture covers text: " + JSON.stringify(o));
+    }
+  });
+}
+
+test("a rail jump after Send still lands on its card when held receipts drop mid-scroll", async (t) => {
+  const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
+  const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
+  await noAnchor(page);
+  await choose(page, items[0], "a"); await choose(page, items[1], "a");
+  await send(page);
+  await page.locator("#item-q0 .receipt").waitFor();
+  await page.click("#c-q9");
+  await page.waitForTimeout(2500);
+  const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
+  assert.ok(top >= 0 && top <= 120, "the jump missed its card; it sits at " + top);
+});
+
+test("a receipt wholly below the screen drops its height without moving the page", async (t) => {
+  const items = Array.from({ length: 40 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
+  const page = await open(t, { items, viewport: { width: 390, height: 360 } }); if (!page) return;
+  await noAnchor(page);
+  await choose(page, items[0], "a");
+  await page.evaluate(() => window.scrollTo(0, 60));
+  const railTop = () => page.evaluate(() => Math.round(document.querySelector(".ov-prog").getBoundingClientRect().top));
+  const at = await railTop();
+  await send(page);
+  await page.locator("#item-q0 .receipt").waitFor();
+  await page.waitForTimeout(600);
+  assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
+});
+
+// A phone mockup shows whole, so the design caps its height at 480px (docs/design/c193-sizes.md item 3); it scales to its card and stays centred.
+for (const width of SIZES) test(`an option's picture is at most 480px high and centred in its card at ${width}px wide`, async (t) => {
+  const it = mk("cap-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
+  const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
+  const page = await open(t, { items: [it], designData, viewport: { width, height: 900 } }); if (!page) return;
+  await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt .opic`)].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.getBoundingClientRect(); return { h: w.height, w: w.width, off: Math.abs((w.left + w.right) / 2 - (b.left + b.right) / 2), room: b.width }; }), it.id);
+  for (const o of m) {
+    assert.ok(o.h <= 481, "the picture is taller than 480px: " + o.h);
+    assert.ok(o.w <= Math.min(390, o.room) + 1, "the picture is wider than its card or the mockup: " + JSON.stringify(o));
+    assert.ok(o.off <= 1, "the picture is not centred: " + JSON.stringify(o));
+  }
+});
+
+// The stamp settles in 200ms with no overshoot, and reduced motion shows it still (docs/design/c193-sizes.md item 4), so the bar is calm and still reads as sent.
+const sentPage = async (t, reduce) => {
+  const page = await open(t); if (!page) return null;
+  if (reduce) await page.emulateMedia({ reducedMotion: "reduce" });
+  await choose(page, DECISION, "a"); await send(page);
+  await page.locator("#sent .stamp").waitFor();
+  return page;
+};
+test("the SENT stamp settles in 200ms with no overshoot", async (t) => {
+  const page = await sentPage(t, false); if (!page) return;
+  const a = await page.locator("#sent .stamp").evaluate((e) => { const s = getComputedStyle(e); return [s.animationName, s.animationDuration, s.animationTimingFunction]; });
+  assert.deepEqual(a, ["stamp-settle", "0.2s", "cubic-bezier(0.2, 0, 0, 1)"]);
+});
+test("reduced motion shows the SENT stamp still", async (t) => {
+  const page = await sentPage(t, true); if (!page) return;
+  assert.equal(await page.locator("#sent .stamp").evaluate((e) => getComputedStyle(e).animationName), "none");
+});
+test("the Sent bar keeps its parts on the page's spacing steps", async (t) => {
+  const page = await sentPage(t, false); if (!page) return;
+  const m = await page.evaluate(() => {
+    const px = (sel, prop) => parseFloat(getComputedStyle(document.querySelector(sel))[prop]);
+    return { pad: px("#sent .in", "paddingTop"), head: px("#sent .sent-head", "columnGap"), what: px("#sent .sent-what", "rowGap"), stamp: Math.round(document.querySelector("#sent .stamp").offsetHeight), inList: !!document.querySelector("#sent .sent-what .sent-list"), li: Math.round(document.querySelector("#sent .sent-list li").getBoundingClientRect().height) };
+  });
+  assert.deepEqual(m, { pad: 16, head: 16, what: 8, stamp: 48, inList: true, li: 28 });
+});
+
+// One containment sweep catches overflow of any kind on every state and width. A new item state is one row in STATES, a new width one entry in SWEEP_WIDTHS.
+const SWEEP_WIDTHS = [320, 390, 768, 1024, 1280, 1600, 2200, 2560];
+const LONGT = "A very long title that runs across the whole width of the rail and then some more ";
+const TALL = '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>';
+const STATES = [
+  ["open", () => ({ items: [DECISION, TASK] })],
+  ["draft ready", () => ({ items: [DECISION, TASK] }), (page) => choose(page, DECISION, "a")],
+  ["answered, filing pending", () => ({ items: [DECISION, TASK], answers: SAVED_A })],
+  ["answered, filed", () => ({ items: [DECISION, TASK], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } })],
+  ["answered, read", () => ({ items: [DECISION, TASK], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } } })],
+  ["bundle", () => ({ items: [1, 2, 3].map((n) => mk("sw-" + n, n, { group: "pair", title: LONGT + n })), groups: { pair: { title: "Answer these together", why: "Linked." } } })],
+  ["pictures", () => ({ items: [mk("sw-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) })], designData: Object.fromEntries(LOOK_OPTS.map((o) => [o.design, TALL])) })],
+  ["task", () => ({ items: [TASK] })],
+  ["stands", () => ({ items: [mk("sw-s1", 7, { stands: true }), mk("sw-s2", 8, { stands: true })] })],
+  ["sent bar", () => ({ items: [DECISION, TASK] }), async (page) => { await choose(page, DECISION, "a"); await send(page); await page.locator("#sent .stamp").waitFor(); }],
+];
+// Runs in the page. Returns what crosses a box, sticks out sideways, or is cut without an ellipsis.
+function sweepPage() {
+  const bad = [], tol = 1.5;
+  const name = (e) => e.tagName.toLowerCase() + (e.id ? "#" + e.id : "") + (e.className && typeof e.className === "string" ? "." + e.className.trim().split(/\s+/).join(".") : "");
+  const boxes = [...document.querySelectorAll("article.card, #rail, #sent .in")].filter((b) => b.getBoundingClientRect().width > 0);
+  for (const box of boxes) {
+    const bb = box.getBoundingClientRect();
+    for (const e of box.querySelectorAll("*")) {
+      const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+      if (!r.width || !r.height || cs.display === "contents" || e.closest(".sr, [hidden]") || cs.position === "fixed" || (e.closest(".dfitwrap") && !e.classList.contains("dfitwrap")) || cs.visibility === "hidden") continue;
+      if (r.left < bb.left - tol || r.right > bb.right + tol || r.top < bb.top - tol || r.bottom > bb.bottom + tol) bad.push("outside " + name(box) + ": " + name(e) + " " + [r.left, r.right, bb.left, bb.right].map(Math.round));
+      if ((cs.overflowX === "hidden" || cs.overflowX === "clip") && e.scrollWidth > e.clientWidth + 1 && cs.textOverflow !== "ellipsis" && !e.classList.contains("dfitwrap") && !e.closest(".dfitwrap") && !cs.webkitLineClamp.match(/^[1-9]/) && !e.classList.contains("opic")) bad.push("clipped: " + name(e));
+    }
+  }
+  if (document.documentElement.scrollWidth > innerWidth) bad.push("page scrolls sideways: " + document.documentElement.scrollWidth + " > " + innerWidth);
+  return bad;
+}
+test("containment sweep: nothing crosses its card, the rail or the Sent bar, nothing is cut without an ellipsis, no sideways scroll", async (t) => {
+  const failures = [];
+  for (const scheme of ["light", "dark"]) for (const width of SWEEP_WIDTHS) for (const [state, make, act] of STATES) {
+    const page = await open(t, { ...make(), scheme, viewport: { width, height: 900 } }); if (!page) return;
+    if (act) await act(page);
+    await page.waitForTimeout(150);
+    for (const b of await page.evaluate(sweepPage)) failures.push(`${state} @${width} ${scheme}: ${b}`);
+    await page.close();
+  }
+  assert.deepEqual(failures, []);
+});
+
+// Edge cases the sweep's fixed fixtures miss: resizing a card, a very tall mockup, the stamp across Undo ticks, a bar that must not jump.
+const growItem = () => mk("grow-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
+const growData = (h) => Object.fromEntries(LOOK_OPTS.map((o) => [o.design, `<body style="margin:0"><div style="width:390px;height:${h}px;background:#eee"></div></body>`]));
+const picBox = (page) => page.evaluate(() => [...document.querySelectorAll("#item-grow-pics label.opt")].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.querySelector(".opic").getBoundingClientRect(); return { w: Math.round(w.width), over: Math.round(Math.max(b.left - w.left, w.right - b.right, 0)) }; }));
+
+test("a capped picture grows back when its card widens and stays inside when it narrows", async (t) => {
+  const page = await open(t, { items: [growItem()], designData: growData(844), viewport: { width: 1070, height: 900 } }); if (!page) return;
+  await page.waitForTimeout(300);
+  const narrow = (await picBox(page))[0].w;
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForTimeout(400);
+  const wide = await picBox(page);
+  assert.ok(wide[0].w > narrow + 10, `the picture did not grow back: ${narrow} then ${wide[0].w}`);
+  await page.setViewportSize({ width: 1066, height: 900 });
+  await page.waitForTimeout(400);
+  for (const b of await picBox(page)) assert.ok(b.over <= 1, "the picture runs past its card after narrowing: " + b.over);
+});
+
+test("a very tall mockup with no focus is never a thin strip", async (t) => {
+  const page = await open(t, { items: [growItem()], designData: growData(3000), viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await page.waitForTimeout(400);
+  for (const b of await picBox(page)) assert.ok(b.w >= 120, "the picture is a strip, " + b.w + "px wide");
+});
+
+test("the SENT stamp is the same element, not rebuilt, as the Undo count ticks", async (t) => {
+  const page = await sentPage(t, false); if (!page) return;
+  await page.evaluate(() => { window.__stamp = document.querySelector("#sent .stamp"); });
+  await page.waitForTimeout(2300);
+  assert.equal(await page.evaluate(() => window.__stamp.isConnected && window.__stamp === document.querySelector("#sent .stamp")), true, "the stamp was rebuilt, so it settles again each second");
+  assert.match(await page.locator("#undoBtn").textContent(), /Undo send \(\d\)/);
+});
+
+for (const width of [390, 500, 600, 1280]) test(`the Sent bar keeps its height when the Undo button goes, at ${width}px wide`, async (t) => {
+  const page = await open(t, { viewport: { width, height: 900 } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").waitFor();
+  const h = () => page.locator("#sent").evaluate((e) => Math.round(e.getBoundingClientRect().height));
+  const before = await h();
+  await page.locator("#undoBtn").waitFor({ state: "detached", timeout: 9500 });
+  assert.ok(Math.abs((await h()) - before) <= 1, `the bar jumped from ${before} to ${await h()}`);
+});
+
+test("a receipt with no Read by centres its label and Change on one line", async (t) => {
+  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  const m = await card(page, DECISION).locator(".receipt .line").evaluate((l) => { const mid = (e) => { const r = e.getBoundingClientRect(); return (r.top + r.bottom) / 2; }; return [mid(l.querySelector("b")), mid(l.querySelector(".changebtn"))]; });
+  assert.ok(Math.abs(m[0] - m[1]) <= 2, "the label and Change are not level: " + m);
+});
+
+test("a related-item frame of seven wraps its chips on a phone and keeps each chip at 48px", async (t) => {
+  const items = Array.from({ length: 7 }, (_, i) => mk("w-" + i, i + 1, { group: "seven", title: "Item " + i }));
+  const page = await open(t, { items, viewport: { width: 390, height: 900 }, groups: { seven: { title: "Seven together", why: "Linked." } } }); if (!page) return;
+  const w = await page.evaluate(() => [...document.querySelectorAll(".rail .pairchips .nchip")].map((c) => Math.round(c.getBoundingClientRect().width)));
+  assert.equal(w.length, 7);
+  assert.ok(w.every((x) => x >= 48), "a chip shrank: " + w);
+});
+
 // ---------------------------------------------------------------- c139: an option that widens a shared tool
 
 test("an option that widens a shared tool says it goes against the uniform ruling; other options do not", async (t) => {
@@ -1839,6 +2083,28 @@ test("an option that widens a shared tool says it goes against the uniform rulin
   assert.equal(await a.locator(".widens").count(), 1, "the widening option carries no label");
   assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your uniform ruling (t18)");
   assert.equal(await b.locator(".widens").count(), 0, "an option that does not widen is labelled");
+});
+
+test("the answered pill keeps a 6px gap between its wrapped rows, as the design draws it", async (t) => {
+  const page = await open(t, { answers: SAVED_A, viewport: { width: 390, height: 900 } }); if (!page) return;
+  assert.equal(await card(page, DECISION).locator(".ans").evaluate((e) => getComputedStyle(e).rowGap), "6px");
+});
+
+test("option pictures of different heights keep the View bars at 44px", async (t) => {
+  const it = growItem();
+  const data = Object.fromEntries(LOOK_OPTS.map((o, i) => [o.design, `<body style="margin:0"><div style="width:390px;height:${[844, 300, 560][i]}px;background:#eee"></div></body>`]));
+  const it2 = { ...it, designs: it.designs.map((d, i) => ({ ...d, size: { w: 390, h: [844, 300, 560][i] } })) };
+  const page = await open(t, { items: [it2], designData: data, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await page.waitForTimeout(400);
+  const hs = await page.evaluate(() => [...document.querySelectorAll("#item-grow-pics .opic .view")].map((v) => Math.round(v.getBoundingClientRect().height)));
+  assert.deepEqual(hs, [44, 44, 44]);
+});
+
+test("a long unbroken receipt label wraps clear of Change at 320px", async (t) => {
+  const it = { ...DECISION, options: [{ key: "a", label: "skills/waiting-page/tests/page.test.mjs-and-more", how: "h", gain: "g", lose: "l" }, DECISION.options[1]] };
+  const page = await open(t, { items: [it], answers: SAVED_A, viewport: { width: 320, height: 900 } }); if (!page) return;
+  const m = await card(page, it).locator(".receipt .line").evaluate((l) => ({ b: l.querySelector("b").getBoundingClientRect().right, c: l.querySelector(".changebtn").getBoundingClientRect().left }));
+  assert.ok(m.b <= m.c + 1, "the label runs under Change: " + JSON.stringify(m));
 });
 
 test("a decision card with no differs mark shows no stray null or undefined text", async (t) => {
