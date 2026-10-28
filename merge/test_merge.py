@@ -4088,6 +4088,24 @@ class GhHalf(Env):
         red, pending, _ = merge.Host.classify({"a": [("pass", "")]}, ["a", "b"], {"b": "x"})
         self.assertEqual(pending, ["b"])
 
+    def test_classify_drops_a_cancelled_duplicate_beside_a_pass_in_either_order(self):
+        names = [f"job{i}" for i in range(13)]
+        got = {k: ([("cancel", "l1"), ("pass", "l2")] if i % 2 else [("pass", "l2"), ("cancel", "l1")]) for i, k in enumerate(names)}
+        red, pending, _ = merge.Host.classify(got, names)
+        self.assertEqual((red, pending), ([], []))
+
+    def test_classify_reads_a_cancel_beside_pending_as_pending_not_red(self):
+        red, pending, _ = merge.Host.classify({"a": [("cancel", ""), ("pending", "")]}, ["a"])
+        self.assertEqual((red, pending), ([], ["a"]))
+
+    def test_classify_keeps_a_cancel_only_name_red(self):
+        red, _, _ = merge.Host.classify({"a": [("cancel", "l")]}, ["a"])
+        self.assertEqual(red, ["a: cancel l"])
+
+    def test_classify_never_drops_a_fail_or_timeout_beside_a_cancel(self):
+        red, _, _ = merge.Host.classify({"a": [("cancel", ""), ("fail", "x")], "b": [("cancel", ""), ("timed out after 6h", "")]}, ["a", "b"])
+        self.assertEqual(red, ["a: fail x", "b: timed out after 6h"])
+
     def test_a_workflow_run_in_progress_holds_the_wait_though_no_job_is_listed(self):
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
         rc, out = self.go()
