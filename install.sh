@@ -624,7 +624,8 @@ TARGET_JSON="$CLAUDE_DIR/settings.json"
 
 if [ "$CLOUD" = 1 ]; then
   # Cloud: generate a real file (not a symlink) and append a SessionStart hook that refreshes
-  # it from GitHub at every session start/resume. The repo's own SessionStart hooks stay first.
+  # it at every session start/resume by re-running install.sh from GitHub. The repo's own
+  # SessionStart hooks come first in the list.
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
   HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"
   if command -v jq >/dev/null 2>&1; then
