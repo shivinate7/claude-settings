@@ -2471,7 +2471,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a port question departs or is not asked
 #
 # docs/decisions/port-keeps-behaviour.md, rule `port-question`, built against a named incident
-# (owner, 2026-10-27 15:32 CDT; landed 2026-10-28): a waiting item about a port or redesign of an
+# (incident in the record): a waiting item about a port or redesign of an
 # existing app carries a "Departs from:" line and never holds work, since the existing app answers
 # the question. The item is read at the ArtifactData call that writes it.
 DATA_TOOL = "ArtifactData"

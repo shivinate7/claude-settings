@@ -11266,7 +11266,7 @@ LOG_CHECKS_EXTRA.append(("temp: the sweep removes an old sibling run folder and 
 # --------------------------------------------------------------------------- a port question departs or is not asked
 FAMILY = "port-question"
 #
-# Owner, 2026-10-27 15:32 CDT, decisions/port-keeps-behaviour.md: a waiting item about a port or
+# Decision port-keeps-behaviour: a waiting item about a port or
 # redesign carries a "Departs from:" line and never holds work. The refusal reads the item the
 # writer sets; the reason names what to add and no forbidden target.
 
