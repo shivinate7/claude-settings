@@ -1,0 +1,5 @@
+# c157-build-idle-clock (lane, step c157 part 2)
+
+- c157 part 2: draft PR #748, head 9a74810a, from main b09aece. Own tree's build folders are kept at its own end; a later agent end deletes build folders only in agent trees idle 30 min or more (git admin clock AND newest uncommitted edit, deletion or untracked file), with #720's process gate read fresh. Red first, then green. Local gates, janitor suites and silent-undo pass; 28 of 28 mutants killed. Reviews: round 1 Opus fix (fixed), round 2 Sonnet merge, round 3 Sonnet pass, net value positive. Ready for the next batch.
+- c157 design pick (lane orchestrator, not shiv): a Claude agent lock does not keep build folders; any other lock does. The harness locks every agent tree with the live host pid all session, so honouring it would keep all build folders until session end (the ENOSPC incident). Revert is one commit (ca841732) if shiv wants a live lock to keep.
+- c157 deviation: the brief named Opus reviewers; rounds 2 and 3 ran Sonnet per CLAUDE.md roles-third-try-steps-up.
