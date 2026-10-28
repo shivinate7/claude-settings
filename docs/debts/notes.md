@@ -413,9 +413,10 @@
 - sendmessage-judge-blind-recvs: The busy-state layer reads an agent id, a uds: address, main and * as unseen and allows. only the wording judge covers them (hooks/sendmessage_state.py, mods/session-board/hooks/lib.mjs). Decision: agent-model-cap
 - stamp-scan-frontmatter-links: The near-miss scan does not skip frontmatter or link targets (actions/stamp/stamp.mjs). Decision: none
 - step-up-prefix-forms: roles-third-try-steps-up counts only a line starting Round N of 3 or Try N of 3. forms like Round 2/3, '- Round 2 of 3', bold and '# ' pass unseen. Decision: agent-model-cap
-- step-up-plugin-types: roles-third-try-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked, and a Workflow agent() call is not checked. Decision: agent-model-cap
+- step-up-plugin-types: roles-third-try-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked. Decision: agent-model-cap
 - step-up-sonnet-substring: the reviewer check is a substring match on sonnet, so a made-up model such as opus-sonnet passes. Decision: agent-model-cap
 - step-up-round1-prose-line: a round 1 reviewer brief with a prose line that starts Round 2 of 3 is refused. the refusal names the fix. Decision: agent-model-cap
+- step-up-workflow-hex-escape: a Workflow prompt that writes a newline as \x0a or \u000a is not decoded, so a Round N of 3 line after it passes unseen. Decision: agent-model-cap
 - floor-workflow-runtime-models: agent-model-floor reads string literals in each agent( call. a model or role built at run time, or a call after a regex literal holding a quote, is unseen. Decision: agent-model-cap
 - floor-builtin-agents: a built-in agent with no file in agents/ picks its own model and never puts it in the tool input. Decision: agent-model-cap
 - explore-audit-judge-misread: the Agent prompt judge is a model and can misread a borderline Explore brief. the caller spot-checks findings before acting on an audit. Decision: agent-model-cap
