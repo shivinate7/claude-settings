@@ -921,7 +921,8 @@ class Guards(Env):
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
 GATES_YML = ("name: gates\non: pull_request\njobs:\n  gates:\n    runs-on: ubuntu-latest\n    steps:\n"
-             "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n")
+             "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n"
+             "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
 SLUG_LINT = '''import collections, os, re, sys
 seen = collections.defaultdict(list)
 for d, _, names in os.walk("docs"):
@@ -935,14 +936,14 @@ print(bad or "ok")
 sys.exit(1 if bad else 0)
 '''
 DOC_SUITE = '''import os, sys
-bad = [n for d, _, ns in os.walk("docs") for n in ns if "BROKEN" in open(os.path.join(d, n), encoding="utf-8").read()]
-sys.exit(1 if bad else 0)
+path = os.path.join("docs", "guide.md")  # a gates suite that reads one tracked doc, named in no list
+sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
 class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
     The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `gates` job holds one cross-file lint:
-    no two docs share a slug. hooks/test_blind_brief.py stands in for a gates suite that reads tracked docs."""
+    no two docs share a slug. hooks/test_reads_guide.py is a gates suite outside --lint that reads docs/guide.md."""
 
     def scoped(self, workflow=GATES_YML, scope=True):
         """Main and feat both gain the CI files; feat then holds main's tip."""
@@ -954,7 +955,7 @@ class SmallBaseMove(Env):
         put(os.path.join(o, ".github/workflows/gates.yml"), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
-        put(os.path.join(o, "hooks/test_blind_brief.py"), DOC_SUITE)
+        put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
         put(os.path.join(o, "hooks/x.py"), "X = 1\n")
         put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
@@ -1031,6 +1032,21 @@ class SmallBaseMove(Env):
         self.scoped()
         self.on("main", {"docs/guide.md": "BROKEN\n"})
         self.refused()
+
+    def test_a_scope_script_that_fails_with_every_flag_off_is_refused_with_its_exit(self):
+        self.scoped()
+        self.on("main", {".github/scripts/ci-scope.sh": 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'})
+        o = self.other  # feat takes main's script, then main moves by a doc only
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "origin/main"); sh(o, "git", "push", "-q", "origin", "feat")
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.assertIn("exit 3", self.refused())
+
+    def test_the_suites_a_doc_hits_come_from_the_gates_job(self):
+        root = os.path.join(HERE, "..")
+        hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], set())]
+        self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
+        self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
+        self.assertNotIn("hooks/test_sendmessage_state.py", hits("docs/guide-c150.md"))
 
     def test_an_unreadable_merge_base_is_refused(self):
         self.scoped()
