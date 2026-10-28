@@ -1,0 +1,9 @@
+{
+ "title": "a note alone sends a task item without marking it done",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3384,
+ "why": "Gripe, Oct 28 (shiv, in triage 11's session): on a task item (no option picker) the page offers only Mark done and a note. Sometimes he does not want to mark it done but has a note or a question; typing a note should count as an answer that sends, without Mark done.",
+ "note": "Checked at main (skills/waiting-page/page.html): a task counts as ready only when done is set (line 479, `if (it.kind === \"task\") return !!d.done;`), so a note alone never sends. Next cloud lane: a task is ready when done is set or the note has text; the send line and receipt say \"note, not done\" for a note-only answer; the owning session routes it as a question or a comment, answers by revising the item, and keeps the item open. SKILL.md's routing step says so too. Red first: a task item with a note and no Mark done cannot be sent today. Needs no answer. Port: yes, the skill installs on every repo's page. Due after: c139 (#775) merges (same skill files; triage's waiting-page order, Oct 28: c139, c186, c135, c136). Placed ahead of c135 (triage 11, Oct 28): a gripe that every task item shows.",
+ "updatedAt": "2026-10-28T17:45:00Z"
+}
