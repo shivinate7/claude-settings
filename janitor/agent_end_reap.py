@@ -21,8 +21,8 @@ Any read that cannot tell means keep. One signal, by pid, through `sweep.send_si
 Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): the ending agent's own tree keeps
 its build folders, since a finished agent is often resumed there. A later agent end reaps them once the
 tree is idle 30 minutes. The worktree stage gives each other `.claude/worktrees/agent-*` tree it keeps a
-build pass when that tree is idle AGENT_END_IDLE_SECONDS or more, holds no live lock, has no live
-session, and no process has a cwd anywhere in it (`build_keep`). A build runs from the worktree root,
+build pass when that tree is idle AGENT_END_IDLE_SECONDS or more, holds no lock other than a Claude
+agent lock, has no live session, and no process has a cwd anywhere in it (`build_keep`). A build runs from the worktree root,
 so a cwd check on the folder alone is not enough. The pass renames each build folder
 (`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to a sibling trash name, then starts a detached child that
 deletes the trash, and leftover trash names go with it. The hook never waits for the child. A folder
@@ -301,8 +301,10 @@ def build_keep(entry: dict, idle, cwds):
         return "unreadable-subject: idle"
     if idle < sweep.AGENT_END_IDLE_SECONDS:
         return "recently-active: git activity %d minutes ago" % (idle // 60)
+    # The live host holds an agent lock on every agent tree all session, so that lock says nothing
+    # about activity. Any other lock (a person's, empty or unknown text) keeps.
     holder = entry.get("locked_reason")
-    if holder is not None and sweep.stale_agent_lock_verdict(holder or "locked") is not True:
+    if holder is not None and not sweep.AGENT_LOCK_RE.match(holder):
         return "locked: %s" % (holder or "locked")
     live = git_reads.worktree_live_session(path)
     if live is None:

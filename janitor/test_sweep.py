@@ -4706,20 +4706,30 @@ class BuildDirReapTests(unittest.TestCase):
             self.assertIn("recently-active",
                           str(self.tree_row(self.last_row(), recent).get("buildDirsKept")))
 
-    def test_a_live_lock_keeps_the_build_folders_of_an_idle_tree(self):
+    def test_a_live_host_agent_lock_does_not_keep_but_a_person_lock_does(self):
+        # The live host holds an agent lock on every agent tree all session, so that lock is no
+        # sign of activity. A person's lock, or any text that is not an agent lock, keeps.
         primary = self.make_primary("locked")
-        locked, free = self.add_agent(primary, "bdrLock"), self.add_agent(primary, "bdrFree")
-        self.fill(locked)
-        self.fill(free)
+        hosted = self.add_agent(primary, "bdrHost")
+        person = self.add_agent(primary, "bdrPerson")
+        empty = self.add_agent(primary, "bdrEmpty")
+        for tree in (hosted, person, empty):
+            self.fill(tree)
         start = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
-        reason = "claude agent agent-bdrLock (pid %d start %s)" % (os.getpid(), start)
-        require(run_vcs(primary, "worktree", "lock", locked, "--reason", reason).returncode == 0,
-                "lock of %s failed" % locked)
-        self.later_end(primary, locked, free)
-        with self.subTest(control="unlocked tree idle 31 min"):
-            self.assert_all_reaped(free)
-        with self.subTest(arm="tree with a live lock, idle 31 min"):
-            self.assert_all_kept(locked, "a live lock did not keep the build folders")
+        reasons = {hosted: "claude agent agent-bdrHost (pid %d start %s)" % (os.getpid(), start),
+                   person: "held by a person for review"}
+        for tree, reason in reasons.items():
+            require(run_vcs(primary, "worktree", "lock", tree, "--reason", reason).returncode == 0,
+                    "lock of %s failed" % tree)
+        require(run_vcs(primary, "worktree", "lock", empty).returncode == 0, "lock of %s failed" % empty)
+        require(sweep.stale_agent_lock_verdict(reasons[hosted]) is False, "the host lock is not live")
+        self.later_end(primary, hosted, person, empty)
+        with self.subTest(arm="agent lock held by a live host, idle 31 min"):
+            self.assert_all_reaped(hosted)
+        with self.subTest(arm="a person's lock, idle 31 min"):
+            self.assert_all_kept(person, "a person's lock did not keep the build folders")
+        with self.subTest(arm="a lock with no reason, idle 31 min"):
+            self.assert_all_kept(empty, "a lock with no reason did not keep the build folders")
 
     def run_in_process(self, ender):
         payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrEnd",

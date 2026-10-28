@@ -8,13 +8,16 @@ Owner, 2026-10-11: the agent-end reap also deletes build folders. The low-disk b
 `janitor/agent_end_reap.py` (SubagentStop) deletes build folders: `native/build`, `.build`, `DerivedData`, and each name in the
 `buildDirs` list of `.claude/janitor.json`. The three defaults always apply. `buildDirs` adds names and cannot remove a default.
 
-Build folders follow the worktree's 30-minute idle clock (roadmap step c157, cleanup never deletes a live agent's build folders). The ending agent's own tree keeps its build folders at
+Build folders follow the worktree's 30-minute idle clock. The ending agent's own tree keeps its build folders at
 its own end, because a finished agent is often resumed there and would rebuild from nothing. A later agent end reaps them. The reap
 deletes a folder only when each gate gives a confirmed yes. Any read that cannot tell means keep.
 
 1. The tree is another `<primary>/.claude/worktrees/agent-*` tree, not the ending agent's own tree and not a primary checkout.
 2. The tree is idle 30 minutes or more (`sweep.worktree_idle_seconds`, read before any `git status`). An unreadable idle keeps.
-3. The tree holds no live lock. Only a lock `sweep.stale_agent_lock_verdict` proves stale lets the reap go on.
+3. The tree holds no lock other than a Claude agent lock (`sweep.AGENT_LOCK_RE`). A person's lock, an empty reason or unknown
+   text keeps. An agent lock does not keep, live or stale: the live host holds one on every agent tree all session, so it says
+   nothing about activity. Keeping on it would keep every build folder until the session ends, the disk-full failure this record
+   exists to prevent.
 4. No live session has a cwd inside the tree (`guard.worktree_live_session`).
 5. No process has a cwd anywhere in the tree. The reap stops no process there. A build runs from the worktree root and writes
    into the folder, so a cwd check on the folder alone deleted live builds (likely risk, 2026-10-27).

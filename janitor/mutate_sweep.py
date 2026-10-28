@@ -832,11 +832,17 @@ MUTATIONS = [
      '        idle = float("inf")',
      'test_an_unreadable_idle_read_keeps_the_build_folders'),
 
-    ('build dirs: a live lock no longer keeps the folders',
+    ('build dirs: a person\'s lock no longer keeps the folders',
      'agent_end_reap',
-     '    if holder is not None and sweep.stale_agent_lock_verdict(holder or "locked") is not True:',
+     '    if holder is not None and not sweep.AGENT_LOCK_RE.match(holder):',
      '    if False:',
-     'test_a_live_lock_keeps_the_build_folders_of_an_idle_tree'),
+     'test_a_live_host_agent_lock_does_not_keep_but_a_person_lock_does'),
+
+    ('build dirs: a live host\'s agent lock keeps the folders',
+     'agent_end_reap',
+     '    if holder is not None and not sweep.AGENT_LOCK_RE.match(holder):',
+     '    if holder is not None and sweep.stale_agent_lock_verdict(holder or "locked") is not True:',
+     'test_a_live_host_agent_lock_does_not_keep_but_a_person_lock_does'),
 
     ('build dirs: a tree past the stage deadline still gets a build pass',
      'agent_end_reap',
