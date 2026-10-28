@@ -805,6 +805,8 @@ const NOT_TOLD = "No session was told; reply in the thread to wake one.";
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
+// "No. 1", "No. 1 and No. 2", "No. 1, No. 2 and No. 3".
+const nList = (ns) => { const a = ns.slice().sort((x, y) => x - y).map((n) => "No. " + n); return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; };
 function noticeText(entries, head, tail) {
   const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
   const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : "")); }).join(", ");
@@ -901,7 +903,7 @@ function renderSent() {
 async function undoSend() {
   const p = state.sentPanel; if (!p || p.busy || undoLeft(p) <= 0) return;
   p.busy = true;
-  const undone = [], late = [];
+  const undone = [], late = [], failed = [];
   // Deletes come first and each one checks the clock, so none runs after the window a session waits out.
   const todo = p.wrote.slice().reverse();
   for (let i = 0; i < todo.length; i++) {
@@ -910,14 +912,14 @@ async function undoSend() {
     try {
       const ref = state.db.collection("answers").doc(w.it.id);
       if (w.prior) await ref.set(w.prior); else await ref.delete();
-    } catch (e) { state.barNote = "Undo failed (" + (e && e.code || "error") + ") at No. " + w.it.n + "."; break; }
+    } catch (e) { todo.slice(i).forEach((x) => failed.push(x.it.n)); state.barNote = "Undo failed (" + (e && e.code || "error") + "). Not undone: " + nList(failed) + "."; break; }
     if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
     if (w.draft) state.draft[w.it.id] = w.draft; if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
-    // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else.
-    if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); delete state.receipts[w.it.id]; } catch (e) {} }
+    // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else, and the old receipt leaves the page state either way.
+    if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); } catch (e) {} delete state.receipts[w.it.id]; }
   }
-  if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + late.map((n) => "No. " + n).join(" and ") + "."; }
+  if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + nList(late) + "."; }
   saveDraft(); closeSent(); render();
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
   if (told.length) {
