@@ -607,23 +607,6 @@ if [ "$CLOUD" != 1 ] && [ -f "$SRC/package-lock.json" ]; then
   fi
 fi
 
-# pipx, cloud only: CI's pinned tools run as `pipx run <tool>==<pin>`, and a cloud container may ship
-# without pipx. Cost: one `pip install --user pipx`, only when pipx is missing; no network work otherwise.
-# A failure is logged and never fails the install. pip puts the binary in ~/.local/bin. That dir is only
-# named in a log line when it is not on PATH: linking into a system dir would write outside ~/.claude.
-if [ "$CLOUD" = 1 ] && ! command -v pipx >/dev/null 2>&1; then
-  if pipx_out=$(python3 -m pip install --user pipx 2>&1); then
-    if command -v pipx >/dev/null 2>&1; then
-      log "installed pipx"
-    else
-      log "installed pipx in $HOME/.local/bin, which is not on PATH; add it to PATH, or run python3 -m pipx"
-    fi
-  else
-    log "WARNING: pip install --user pipx failed; CI's pinned tools (pipx run) cannot run here until it passes. Last lines of its output:"
-    printf '%s\n' "$pipx_out" | tail -n 5 | while IFS= read -r l; do log "  $l"; done
-  fi
-fi
-
 # Stale files from the old Banchi janitor. Nothing runs them, and bin/claude-janitor now runs
 # janitor/sweep.py. Only these exact names are removed, and only when they are not a link into
 # this repo's bin/. Nothing else under bin/ is ever touched.
