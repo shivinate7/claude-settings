@@ -1,11 +1,7 @@
-# Triage (9) state, Oct 28
+# Triage (10) state, Oct 28
 
-- Session: triage 9 (this file is its resume note). Orchestrator: session_013NEJL1XXYYo8v15nsrgKv7.
-- Roadmap page is now https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h (this account). The old page R3iC sits in shiv's other account; CLAUDE.md and roadmap/README.md point at the new one.
-- First job done (heads f79a299b, 10cd3311): c155 closed and freeze lines cleared; c130 done; c127 part 1, c54 pin order, o4 scorecard checked on main e0f9e2d (remaining parts noted); d9 and the d4 hand-off corrected; outbox filed into c95, c142, c150, c126, d9, d4 and new c156 (guard), c157 (#720), c158 (Windows fixture hang); lane status set; o13 lane A due after batch 1.
-- Overlaps to watch: o2 and c143 both edit lint/layout.json; c139, c122, c145, c147 wait on the c126/d9 lane (skills/waiting-page).
-- Waiting page (this account): https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx, made Oct 28 from skills/waiting-page/page.html (main e0f9e2d), db + comments, 12 items, owner "Triage the roadmap (9)". Read `answers` at each wake and route per the skill. Page source is scratch-only: on a republish, read the live page (Artifact read) and keep its designData block, which holds d4's option pictures (items 13-21, from designs/d4-banchi-phone/png, JPEG-shrunk). Answers routed Oct 28: items 4, 5, 8, 11 (closed). c82 waits on the ping verdict lines.
-- Owed: other-repo plan check (S6Eou4...) still unanswered.
-- Tally: 35 messages, 14 placements. Handed off: handoffs/triage-9-2026-10-28.md.
-- Owed: tell the orchestrator when all d4 picks (items 13-16, 18-21) are in; the d4 build waits on them.
-- Ruling, Oct 28 02:44 CDT (shiv, c164): never answer a waiting-page comment in its thread; write the answer into the item's text and republish the page.
+- Session: triage 10. Orchestrator: session_013NEJL1XXYYo8v15nsrgKv7. Started from roadmap b2c2fbc and handoffs/triage-9-2026-10-28.md.
+- Pages watched: waiting page https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx (same artifact as claude.ai/code/artifact/c778ab21-...), roadmap page https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h.
+- Items owned "Triage the roadmap (9)" are triage 10's. Answers 27 b and 20 a (07:46) were already filed by triage 9.
+- Ruling, Oct 28 02:44 CDT (shiv, c164): never answer a waiting-page comment in its thread; write the answer into the item and republish.
+- Owed: tell the orchestrator when d4 items 13-16, 18, 19, 21 are all answered. r1: tell shiv in one line when it opens.
