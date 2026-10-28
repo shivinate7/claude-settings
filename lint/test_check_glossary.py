@@ -13,7 +13,9 @@ from, and the files it checks. The diff cases also make a temp git repo and set
 refs/remotes/origin/main, the base the script diffs against. GLOSSARY_UNDER_TEST overrides the
 module path.
 """
+import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -96,6 +98,13 @@ class GlossaryTests(Fixture):
         code, out = self.run_check("docs/notes.md")
         self.assertEqual(code, 1, out)
         self.assertIn("note", out)
+
+    def test_not_tag_other_than_this_sense_is_reported(self):
+        self.put("GLOSSARY.md", HEAD + ROWS + "| finding | A report. | `rule:one-rule` | `issue (prose)` |\n")
+        code, out = self.run_check("docs/notes.md")
+        self.assertEqual(code, 1, out)
+        self.assertIn("finding", out)
+        self.assertIn("(prose)", out)
 
     def test_missing_glossary_fails(self):
         os.remove(os.path.join(self.tree, "GLOSSARY.md"))
@@ -210,7 +219,7 @@ class GlossaryTests(Fixture):
 
 class CodeNameTests(Fixture):
     """The widened check: identifiers, rule anchors, record slugs and hook messages on added lines."""
-    EXTRA = ("| refuse | What a guard does. | `rule:one-rule` | `deny (prose)`, `block (prose)` |\n"
+    EXTRA = ("| refuse | What a guard does. | `rule:one-rule` | `deny (this sense)`, `block (this sense)` |\n"
              "| agent | Anything the Agent tool starts. | `rule:one-rule` | `subagent` |\n"
              "| safety hole | A guard that lets an act through. | `rule:one-rule` | `hole` |\n")
 
@@ -270,14 +279,35 @@ class CodeNameTests(Fixture):
         self.green("hooks/y.py", 'import os\nos.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "x"\n')
         self.red("hooks/z.py", "subagent_count = 1\n", "hooks/z.py:1")
 
-    def test_prose_tagged_word_is_left_out_of_code_names(self):
+    def test_this_sense_word_is_left_out_of_code_names(self):
         self.green("hooks/x.py", 'deny = 1\nblock_it = 2\nMSG = "The guard will deny it."\n')
         self.green("actions/x.mjs", "const renderBlock = 1;\n")
 
-    def test_prose_tagged_word_is_read_in_a_path_anchor_and_slug(self):
-        self.red("hooks/deny.py", "x = 1\n", "hooks/deny.py")
-        self.red("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:two-deny-rule -->\n", "deny")
-        self.red("docs/notes.md", "See `stop-blocks-live-tasks`.\n", "block")
+    def test_this_sense_word_is_left_out_of_paths_anchors_and_slugs(self):
+        """Owner ruling 2026-10-28 16:15 CDT (waiting-page item 51 a): a "(this sense)" name is never read."""
+        self.green("hooks/deny.py", "x = 1\n")
+        self.green("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:two-deny-rule -->\n")
+        self.green("docs/notes.md", "See `stop-blocks-live-tasks`.\n")
+
+    def test_this_sense_name_passes_in_a_path_an_anchor_and_a_slug(self):
+        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA
+                 + "| finding | A report. | `rule:one-rule` | `issue (this sense)` |\n")
+        self.base_repo()
+        self.put("docs/github-issue-notes.md", "Sync: `github-issue-sync-log` <!-- rule:github-issue-sync -->\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+
+    def test_this_sense_words_are_never_read_as_the_name(self):
+        """The tag's own words, "this sense", are never read: not in a path, anchor, slug, identifier or message."""
+        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA
+                 + "| finding | A report. | `rule:one-rule` | `issue (this sense)` |\n")
+        self.base_repo()
+        self.put("docs/issue-this-sense.md", "Sync: `issue-this-sense-log` <!-- rule:issue-this-sense -->\n")
+        self.put("hooks/x.py", 'issue_this_sense = 1\nMSG = "Refused: an issue this sense."\n')
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
 
     def test_issues_key_passes_in_yaml_only(self):
         self.put("GLOSSARY.md", HEAD + ROWS + "| finding | A report. | `rule:one-rule` | `issue` |\n")
@@ -554,12 +584,48 @@ class CodeNameTests(Fixture):
         self.green("hooks/x.py", 'D = "subagents"\n')
 
 
+def load_check():
+    """The check module, loaded from MODULE, so a case reads the real table through the check's own rows()."""
+    spec = importlib.util.spec_from_file_location("check_glossary_under_test", MODULE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def plural_forms(word):
+    """The word with a plural `s`, `es` or `ies` taken off, so gaps, tries and claims reach gap, try and claim."""
+    out = {word, word[:-1] if word.endswith("s") else word}
+    if word.endswith("es"):
+        out.add(word[:-2])
+    if word.endswith("ies"):
+        out.add(word[:-3] + "y")
+    return out
+
+
 class RepoGlossaryTests(unittest.TestCase):
     def test_repo_glossary_homes_resolve(self):
         """The real GLOSSARY.md: every home resolves. A path list keeps git out of it."""
         r = subprocess.run([sys.executable, MODULE, "README.md"], cwd=os.path.dirname(HERE),
                            capture_output=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_real_not_names_use_this_sense_only_and_keep_gap_try_claim_plain(self):
+        """The real GLOSSARY.md, read through the check's own rows(). Owner ruling 2026-10-28 16:15 CDT
+        (waiting-page item 51 a): the one tag is (this sense), and gap, try and claim are plain words."""
+        check = load_check()
+        with open(os.path.join(os.path.dirname(HERE), "GLOSSARY.md"), encoding="utf-8") as f:
+            table = check.rows(f.read())
+        self.assertTrue(table, "GLOSSARY.md has no rows under ## Terms")
+        problems = []
+        for term, _homes, names in table:
+            for name in names:
+                if "(" in name and not re.fullmatch(r"[^()]+ \(this sense\)", name):
+                    problems.append("row '%s': not name '%s' has a tag other than (this sense)" % (term, name))
+                for word in check.words(name.split(" (")[0]):
+                    if plural_forms(word) & {"gap", "try", "claim"}:
+                        problems.append("row '%s': not name '%s' holds '%s'; gap, try and claim are plain words"
+                                        % (term, name, word))
+        self.assertEqual(problems, [], "\n".join(problems))
 
 
 # o13 lane B retired these names (GLOSSARY.md rows agent, mutation test, red run, command). Claude
