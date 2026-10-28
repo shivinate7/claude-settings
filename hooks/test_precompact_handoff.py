@@ -610,13 +610,13 @@ def case_nudge_reads_messages_not_total():
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(285000)])
         check("messages: total 285,000 (messages 200,000) blocks at 85k overhead",
               is_block(c, p), "out=%r" % p.stdout)
-        # checkpoints(415000) = 200k, 350k, then top 365k messages = total 450k
+        # checkpoints(415000) = 200k, 365k (350k is within 75k of the top, dropped): total 450k
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(449999)])
-        check("messages: total 449,999 stays at bucket 1 (last checkpoint is total 450k)",
-              stored_bucket(c) == 1, "got %r" % stored_bucket(c))
+        check("messages: total 449,999 stays at bucket 0 (last checkpoint is total 450k)",
+              stored_bucket(c) == 0, "got %r" % stored_bucket(c))
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(450000)])
-        check("messages: total 450,000 blocks at the last checkpoint (bucket 2)",
-              is_block(c, p) and stored_bucket(c) == 2,
+        check("messages: total 450,000 blocks at the last checkpoint (bucket 1)",
+              is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         try:
             reason = json.loads(p.stdout).get("reason", "")
@@ -627,6 +627,35 @@ def case_nudge_reads_messages_not_total():
               "reason: %r" % reason)
     finally:
         c.cleanup()
+
+
+def case_nudge_close_checkpoint_dropped_and_bogus_first_entry():
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    # 500k, overhead 90k: room 410k, top 360k. A 350k checkpoint would sit 10k below it.
+    c = Case("nmsg3")
+    try:
+        first = usage_line(90000)
+        blocks = []
+        for total in (290000, 430000, 440000, 450000):
+            p = nudge(c, 0, overhead=None, lines=[first, usage_line(total)])
+            blocks.append((total, is_block(c, p)))
+        check("close checkpoint: one nudge between total 430k and 450k, none at 440k",
+              blocks == [(290000, True), (430000, False), (440000, False), (450000, True)],
+              "got %r" % blocks)
+    finally:
+        c.cleanup()
+    # a bogus first entry is not the overhead
+    for tag, bad in (("sidechain", entry(20000, side=True)),
+                     ("synthetic", entry(20000, model="<synthetic>")),
+                     ("zero usage", entry(0))):
+        c = Case("nmsg4")
+        try:
+            p = nudge(c, 0, overhead=None, lines=[bad, usage_line(1000), usage_line(201000)])
+            check("bogus first entry (%s) is not overhead: messages 200k blocks" % tag,
+                  is_block(c, p), "out=%r" % p.stdout)
+        finally:
+            c.cleanup()
 
 
 def entry(inp, model="claude-sonnet-5-5", side=False):
@@ -1120,6 +1149,7 @@ def main() -> int:
     case_nudge_failures_are_silent()
     case_nudge_limit_checkpoints()
     case_nudge_reads_messages_not_total()
+    case_nudge_close_checkpoint_dropped_and_bogus_first_entry()
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
     case_handoff_path_not_frozen()

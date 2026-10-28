@@ -483,19 +483,23 @@ def _run_reorient(payload):
 
 def checkpoints(limit):
     """Nudge sizes: 200k, then +150k while below limit-50k, then limit-50k itself
-    (500k: 200, 350, 450k). When limit-50k <= 200k, only limit-50k."""
+    (500k: 200, 350, 450k). When limit-50k <= 200k, only limit-50k. A step within
+    NUDGE_STEP // 2 of limit-50k is dropped: two rewrites that close are one too many."""
     top = limit - NUDGE_MARGIN
     if top <= NUDGE_FLOOR:
         return [top]
     cps = [NUDGE_FLOOR]
     while cps[-1] + NUDGE_STEP < top:
         cps.append(cps[-1] + NUDGE_STEP)
+    while len(cps) > 1 and top - cps[-1] < NUDGE_STEP // 2:
+        cps.pop()
     return cps + [top]
 
 
 def window_limit():
     # ponytail: the model's own window can be smaller than autoCompactWindow and this
-    # hook cannot see it; nudges then come late. Upgrade: read the window from the model.
+    # hook cannot see it; nudges then come late. The first one now comes `overhead` tokens
+    # later in total, so a model window smaller than autoCompactWindow can skip it. Upgrade: read the window from the model.
     try:
         with open(os.path.join(config_dir(), "settings.json"), "r", encoding="utf-8") as f:
             v = json.load(f).get("autoCompactWindow")
