@@ -1,9 +1,9 @@
 {
  "title": "Each design option's picture shows that option's own difference",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.338495,
  "why": "Your gripe, Oct 27 15:30 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2JEo4B1iU83SGsnRKwwcxZs, with a screenshot): on the Duo \"Card in Hand\" round 2 question, options A (Claim filed and Lost buttons) and B (the six existing stamps) carried the same generic title-card picture, so neither showed what was being decided.",
- "note": "d9 (in the c126/d9 lane) already requires a picture per option, scaled to the element being decided; it does not stop the same picture on every option. Fix: the waiting-page writer refuses a design item where two options share one image (same bytes or same file) or an image shows no element named in the item's focus; the item's focus names the state to draw (here, the late-package row with its buttons), and the skill tells the designer to draw that state per option. Red first on today's item. Needs no answer. Port: yes, the skill installs everywhere. Due after: c145 merges (same skill files; triage's waiting-page order, Oct 28: c145, c147, c122, c139, c135, c136). Placed ahead of c145 (triage, Oct 27): a gripe, and a picture that shows nothing makes the pick a guess.",
- "updatedAt": "2026-10-28T06:45:00Z"
+ "note": "d9 (in the c126/d9 lane) already requires a picture per option, scaled to the element being decided; it does not stop the same picture on every option. Fix: the waiting-page writer refuses a design item where two options share one image (same bytes or same file) or an image shows no element named in the item's focus; the item's focus names the state to draw (here, the late-package row with its buttons), and the skill tells the designer to draw that state per option. Red first on today's item. Needs no answer. Port: yes, the skill installs everywhere. Due after: c145 merges (same skill files; triage's waiting-page order, Oct 28: c145, c147, c122, c139, c135, c136). Placed ahead of c145 (triage, Oct 27): a gripe, and a picture that shows nothing makes the pick a guess. Doing: lane started Oct 28 03:17 CDT (orchestrator).",
+ "updatedAt": "2026-10-28T09:30:00Z"
 }

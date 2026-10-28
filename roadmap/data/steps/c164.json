@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.338492,
  "why": "Ruling, Oct 28 02:44 CDT (shiv; recorded in decision questions-go-to-owner on branch rulings-oct28, PR #750, 515e916a): never answer a waiting-page comment with a thread reply, since a rebuilt page drops its threads; rewrite the item so its text carries the answer, then republish.",
- "note": "Applied by hand Oct 28 (triage 9): items 6, 7, 31, 32 and 34 now carry their answers in their text. Next cloud lane: skills/waiting-page/SKILL.md \"Read the answers\" and \"Route and close\" drop the thread reply and say to rewrite the item's context with the answer (or new options) and republish; the reply judge flags a thread reply on a waiting page; red first on today's SKILL.md text. Due after: #750 merges (the decision record) and c145 (#744, same skill files). Needs no answer. Port: yes, one skill serves every page. Placed ahead of c147 (triage, Oct 28): it governs every answer on every page.",
- "updatedAt": "2026-10-28T08:50:00Z"
+ "note": "Applied by hand Oct 28 (triage 9): items 6, 7, 31, 32 and 34 now carry their answers in their text. Next cloud lane: skills/waiting-page/SKILL.md \"Read the answers\" and \"Route and close\" drop the thread reply and say to rewrite the item's context with the answer (or new options) and republish; the reply judge flags a thread reply on a waiting page; red first on today's SKILL.md text. Due after: #750 merges (the decision record). Needs no answer. Port: yes, one skill serves every page. Placed ahead of c147 (triage, Oct 28): it governs every answer on every page.",
+ "updatedAt": "2026-10-28T09:30:00Z"
 }

@@ -1,0 +1,9 @@
+{
+ "title": "code-check covers Astro files",
+ "order": 103.3755,
+ "why": "joyous's c127 lane, Oct 28: actions/code-check has no Astro row, so joyous's 27 .astro files go unchecked and its c127 roll-out is deferred.",
+ "note": "Next cloud lane: actions/code-check gains an Astro row (an astro check runner, pinned in standard.json); the shared action still fails on a repo language with no row. Red first on a planted type error in an .astro file. Touches actions/code-check/ only. Needs no answer. Port: yes, joyous first, then any Astro repo. Placed ahead of c78, after c127 (triage, Oct 28): joyous's code-check waits on it.",
+ "phase": "cleanup",
+ "status": "todo",
+ "updatedAt": "2026-10-28T09:30:00Z"
+}
