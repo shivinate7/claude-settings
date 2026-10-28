@@ -597,3 +597,6 @@
 - port-question-cwd-untested: no guard case runs a trailing-slash url, a subfolder cwd or a worktree cwd, though the code handles each (hooks/test_guard.py port-question)
 - port-question-redesign-word: "redesign" in a blocking item that ports nothing is refused until the writer sets `port: false` (hooks/guard.py PORT_WORD; decision port-keeps-behaviour)
 - main-ref-url-forms-untested: no test covers an scp-style or credentialed origin URL in the FETCH_HEAD match; a wrong normalisation refuses, the old behaviour (githooks/main-ref/reference-transaction fetched)
+- other-checkout-git-pointer: the `.git` exemption covers `<owner>/.git` for every checkout, so from the primary a Write to a linked worktree's `.git` pointer file passes; exempting only `git_common_dir` would close it (hooks/guard.py other_checkout_hit)
+- other-checkout-cp-source: `cd <sibling> && cp a.txt /tmp/o` is refused because the shell write reader treats every `cp` argument as a target, so a copy out of another checkout reads as a write into it (hooks/guard_frozen.py _shell_write_hit)
+- other-checkout-mkdir: `mkdir -p` into another checkout passes, because the shell write reader does not read `mkdir` targets (hooks/guard_frozen.py _shell_write_hit)

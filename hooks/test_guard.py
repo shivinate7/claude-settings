@@ -13043,6 +13043,153 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
+def _cross_checkout_fixture(name):
+    """A primary checkout with two nested worktrees, `.claude/worktrees/lane-a` and `lane-b`, the
+    shape the harness makes, and a scratch folder outside the clone. Returns the four paths."""
+    primary = os.path.join(ROOT, name + "_primary")
+    lane_a = os.path.join(primary, ".claude", "worktrees", "lane-a")
+    lane_b = os.path.join(primary, ".claude", "worktrees", "lane-b")
+    scratch = os.path.join(ROOT, name + "_scratch")
+    if not os.path.isdir(lane_b):
+        make_repo(primary, {"src/app.py": "print(1)\n"})
+        run_vcs(primary, "worktree", "add", "-q", lane_a, "-b", name + "-lane-a")
+        run_vcs(primary, "worktree", "add", "-q", lane_b, "-b", name + "-lane-b")
+        os.makedirs(scratch, exist_ok=True)
+    return primary, lane_a, lane_b, scratch
+
+
+def worktree_home_cross_checkout_case():
+    """Rule 0, `other-checkout`, beside `worktree-home`: any session, agent or not, may not write
+    into a checkout of its clone other than the one its cwd stands in. A target in no checkout of
+    the clone is allowed. A nested worktree belongs to itself, not to the primary that holds it.
+    Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md."""
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xco")
+    in_a = os.path.join(lane_a, "src", "app.py")
+    in_b = os.path.join(lane_b, "src", "app.py")
+    in_primary = os.path.join(primary, "src", "app.py")
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # First: a top-level session (no agent_id) in one worktree writes into its sibling.
+    check("top-level Write into a sibling worktree", "deny", "Write", lane_a,
+          file_path=in_b, content="x")
+    check("primary Write into a nested worktree", "deny", "Write", primary,
+          file_path=in_b, content="x")
+    check("worktree Edit into the primary's own files", "deny", "Edit", lane_a,
+          file_path=in_primary, old_string="1", new_string="2")
+    check("worktree MultiEdit into the primary's own files", "deny", "MultiEdit", lane_b,
+          file_path=in_primary, edits=[{"old_string": "1", "new_string": "2"}])
+    check("relative climb out of the worktree into its sibling", "deny", "Write", lane_a,
+          file_path=os.path.join("..", "lane-b", "src", "app.py"), content="x")
+    check("Write to a folder in no checkout", "allow", "Write", lane_a,
+          file_path=os.path.join(scratch, "note.md"), content="x")
+    check("Write within its own worktree", "allow", "Write", lane_a, file_path=in_a, content="x")
+    check("primary Write into its own files", "allow", "Write", primary,
+          file_path=in_primary, content="x")
+    check("primary Write of a new file under .claude", "allow", "Write", primary,
+          file_path=os.path.join(primary, ".claude", "notes.md"), content="x")
+    check("Read of a sibling worktree", "allow", "Read", lane_a, file_path=in_b)
+    check("unreadable git state at the cwd", "allow", "Write", NOGIT, file_path=in_b, content="x")
+    # The shell form: the write targets the guard already extracts for frozen paths.
+    check("shell redirect into a sibling worktree", "deny", "Bash", lane_a,
+          command="echo x > " + slash(in_b))
+    check("shell cp into the primary's files", "deny", "Bash", lane_a,
+          command="cp src/app.py " + slash(in_primary))
+    check("shell read of a sibling worktree", "allow", "Bash", lane_a,
+          command="cat " + slash(in_b))
+    check("shell git read of a sibling worktree", "allow", "Bash", primary,
+          command=VCS + " -C " + slash(lane_b) + " log --oneline -1")
+    check("shell redirect within its own worktree", "allow", "Bash", lane_a,
+          command="echo x > " + slash(os.path.join(lane_a, "src", "new.txt")))
+    check("shell redirect to a folder in no checkout", "allow", "Bash", lane_a,
+          command="echo x > " + slash(os.path.join(scratch, "out.txt")))
+    # A leading cd moves the folder a relative target resolves against.
+    check("shell cd into a sibling, then a relative write", "deny", "Bash", primary,
+          command="cd " + slash(lane_b) + " && echo x > a.txt")
+    check("shell cd out of the clone, then a relative write", "allow", "Bash", lane_a,
+          command="cd " + slash(scratch) + " && echo x > a.txt")
+    # The clone's common git directory belongs to no one checkout.
+    exclude = os.path.join(primary, ".git", "info", "exclude")
+    check("worktree Write into the common git directory", "allow", "Write", lane_a,
+          file_path=exclude, content="x")
+    check("shell append into the common git directory", "allow", "Bash", lane_b,
+          command="echo x >> " + slash(exclude))
+    # A whole worktree removed by hand: refused, and the remedy names the proper tool.
+    got, reason = _decide_full("Bash", primary, command="rm -rf .claude/worktrees/lane-b")
+    if got != "deny" or "other-checkout" not in reason or "git worktree remove" not in reason \
+            or "lane-b" in reason:
+        problems.append("rm -rf of a worktree: want deny naming git worktree remove and no path, "
+                        "got %s (%s)" % (got, reason[:160]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
+
+
+def worktree_home_cross_checkout_cost_case():
+    """other-checkout's stated cost: one `git worktree list` per write call, none for a Read, a
+    Grep, a shell call that writes no file (a `2>&1` or `/dev/null` redirect included), or a write
+    from a cwd with no `.git` at or above it. A stand-in git on PATH logs each spawn."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    real = shutil.which(VCS)
+    if not real:
+        return False, "no git on PATH"
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
+    folder = os.path.join(ROOT, "xcocost_bin")
+    log = os.path.join(ROOT, "xcocost_spawns.log")
+    stand_in = os.path.join(folder, VCS)
+    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
+    os.chmod(stand_in, 0o755)
+    path = folder + os.pathsep + os.environ.get("PATH", "")
+    problems = []
+    for label, tool, cwd, tool_input, want_all, want_list in (
+        ("Read", "Read", lane_a, {"file_path": os.path.join(lane_b, "src", "app.py")}, 0, 0),
+        ("Grep", "Grep", lane_a, {"pattern": "x", "path": lane_b}, 0, 0),
+        ("shell ls", "Bash", lane_a, {"command": "ls " + slash(lane_b)}, None, 0),
+        ("shell quiet redirects", "Bash", lane_a,
+         {"command": "ls " + slash(lane_b) + " 2>&1 >/dev/null"}, None, 0),
+        ("Write into its own checkout", "Write", lane_a,
+         {"file_path": os.path.join(lane_a, "n.txt"), "content": "x"}, None, 1),
+        ("Write from a cwd in no repository", "Write", NOGIT,
+         {"file_path": os.path.join(lane_b, "n.txt"), "content": "x"}, None, 0),
+    ):
+        if os.path.exists(log):
+            os.remove(log)
+        decide({"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": path,
+                "config": None, "agent_id": None, "tool_input": tool_input})
+        spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        listed = sum(1 for line in spawns if "worktree list" in line)
+        if (want_all is not None and len(spawns) != want_all) or listed != want_list:
+            problems.append("%s: %d git spawn(s), %d worktree list, want %s and %d" % (
+                label, len(spawns), listed, "any" if want_all is None else want_all, want_list))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Read, Grep, quiet shell and no-repo writes spawn no worktree list; a write spawns one"
+
+
+def worktree_home_cross_checkout_override_case():
+    """other-checkout is liftable: the owner may mean a write into another checkout. worktree-home,
+    the agent-home part, stays unliftable (ov_drift_acts)."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcoov")
+    config = ov_config("cross-checkout")
+    session = "ov-cross-checkout"
+    call = lambda s: ov_call("Write", {"file_path": os.path.join(lane_b, "src", "app.py"),
+                                       "content": "x"}, lane_a, config, session, s)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
 def worktree_home_later_field_case():
     """Rule 0 judges EVERY path field of a write call, not only the first (PR #306 review gap).
 
@@ -13413,6 +13560,12 @@ LOG_CHECKS = (
      session_is_live_backwards_clock_step_case),
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "
      "unreadable", worktree_home_case),
+    ("worktree-home: any session's write into another checkout of its clone is refused; outside "
+     "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: an owner override lifts the cross-checkout refusal",
+     worktree_home_cross_checkout_override_case),
+    ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
+     worktree_home_cross_checkout_cost_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
@@ -16861,6 +17014,9 @@ LOG_RULE_FAMILY = (
     ("liveness: worktree_live_session answers None when", "branch-worktree"),
     ("liveness: session_is_live reads an implied", "branch-worktree"),
     ("worktree-home: orchestrator", "worktree-home"),
+    ("worktree-home: any session's write into another checkout", "worktree-home"),
+    ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
+    ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
     ("worktree-home: a lone cd or Set-Location", "worktree-home"),
     ("worktree-home: a cd or Set-Location into the home chained", "worktree-home"),

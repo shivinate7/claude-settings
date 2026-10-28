@@ -22,7 +22,7 @@ from git_reads import (  # noqa: F401
     PROCESS_START_UNREADABLE, SESSION_LIVE_TOLERANCE_MS, _common_dir, _git, _inside_work_tree,
     _path_identity, _process_start_ms, _process_start_ms_windows, _under_by_identity,
     branch_cherry_empty, branch_is_ancestor, branch_is_empty, branch_on_remote, branch_proof,
-    git_common_dir, is_worktree, porcelain, primary_checkout, read_default_base,
+    clone_checkouts, git_common_dir, is_worktree, porcelain, primary_checkout, read_default_base,
     resolve_default_base, session_is_live, session_records, stash_stack, worktree_live_session,
     worktree_locked,
 )
