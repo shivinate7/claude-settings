@@ -43,6 +43,25 @@ git switch -q feat
 cd "$tmp/w2" && git switch -q -c main-x && git commit -q --allow-empty -m other && git push -q origin main-x 2>/dev/null
 cd "$tmp/w" || exit 1
 t refused "fetch origin main-x:main"             git fetch -q origin main-x:main
+# another remote's main is not origin's, even one fast-forward of local main
+git switch -q -c o main && git commit -q --allow-empty -m o && git switch -q feat
+git init -q --bare -b main "$tmp/other.git" && git push -q "$tmp/other.git" o:main 2>/dev/null
+git remote add other "$tmp/other.git"
+t refused "fetch other main:main"                git fetch -q other main:main
+# git 2.43 splits `fetch origin main:main` into two transactions, main's first; newer git batches
+# them. Replay the split on any git: FETCH_HEAD written, origin/main stale, then main moves alone.
+cd "$tmp/w2" && git switch -q main && git commit -q --allow-empty -m remote3 && git push -q origin main 2>/dev/null
+cd "$tmp/w" || exit 1
+stale="$(git rev-parse origin/main)"; git fetch -q origin; tip="$(git rev-parse origin/main)"
+git update-ref refs/remotes/origin/main "$stale"
+fh() { printf '%s\t\t%s\n' "$tip" "$1" >"$(git rev-parse --git-path FETCH_HEAD)"; }
+fh "branch 'main-x' of $tmp/origin"
+t refused "split fetch, FETCH_HEAD names main-x" git update-ref refs/heads/main "$tip"
+fh "branch 'main' of $tmp/other"
+t refused "split fetch, FETCH_HEAD names other"  git update-ref refs/heads/main "$tip"
+fh "branch 'main' of $tmp/origin"
+t refused "split fetch, FETCH_HEAD at another commit" git update-ref refs/heads/main feat
+t ok      "split fetch, FETCH_HEAD names origin main" git update-ref refs/heads/main "$tip"
 # install.sh placement: each case a fresh clone with a local commit on feat, then a guarded move
 mk() { # name [hooksPath]: fresh clone at $tmp/name on feat
   cd "$tmp" && git clone -q origin.git "$1" 2>/dev/null && cd "$1" || exit 1
