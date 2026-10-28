@@ -107,6 +107,7 @@ class FakeHost:
         self.body = ""  # the PR body gh reports: a `Drops-lines:` line in it excuses a path at the silent-undo check
         self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
+        self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
 
     def pr(self, n):
         head = merge.origin_head(self.root, self.branch)
@@ -116,6 +117,12 @@ class FakeHost:
 
     def required_names(self):
         return ["checks"]
+
+    def batch_running(self, n, base):  # the other ready pull requests on base with a pending required check; a case sets batch
+        self.batch_calls.append((n, base))
+        if self.batch_error:
+            raise self.batch_error
+        return list(self.batch)
 
     def head_state(self, n):
         return self.state
@@ -2523,6 +2530,7 @@ class BaseAware(Env):
                 h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
                 return info
             def required_names(h): return ["checks"]
+            def batch_running(h, n, base): return []  # no other pull request here: its gh reads are not this case's subject
             def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
             def runs(h, sha): return []
             def base_state(h, base, flows): return "green", ""
@@ -6169,6 +6177,9 @@ class ClockedHost(merge.Host):
         return {"head": self.head_at(self.clock[0]), "branch": "feat", "base": "main", "state": "OPEN",
                 "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": False}
 
+    def batch_running(self, n, base):  # no gh here, and no other pull request in these cases
+        return []
+
     def checks(self, n, *a, **k):
         self.read()
         return self.checks_at(self.clock[0])
@@ -8738,6 +8749,136 @@ class SignalReleasesLock(Env):
     def test_sigint_releases_the_lock(self):  # a control: Python's own KeyboardInterrupt already unwinds the finally; only SIGTERM needs the handler
         self.stop_with(signal.SIGINT)
 
+
+# The batch brake (roadmap step c195): nothing merges to a base while another ready pull request on it has a required check pending.
+BATCH_LINK = "https://github.com/o/r/actions/runs/88"
+BATCH_BLOCKER = "#2 (feat2) required check `checks` is pending: " + BATCH_LINK  # the shape FakeHost.batch reports
+OWN_SHA, OTHER_SHA = "a" * 40, "b" * 40
+
+def batch_pull(number, sha, base="main", draft=False):
+    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads."""
+    return {"number": number, "draft": draft, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
+
+def batch_run(name, status="in_progress", conclusion=None):
+    """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
+    return {"name": name, "status": status, "conclusion": conclusion, "details_url": BATCH_LINK, "started_at": None, "completed_at": None}
+
+class PullsHost(merge.Host):
+    """A real Host whose reads are scripted at `pages`, the one seam: the open pull list, and the check runs and statuses of each head."""
+    def __init__(self, pulls, runs, pulls_error=None, required=("checks",)):
+        super().__init__(list(required), base="main", minute=60, pause=lambda s: None)
+        self.pulls, self.runs, self.pulls_error = pulls, runs, pulls_error
+        self.reads = []
+
+    def pages(self, rel, key=None, fields=None):
+        self.reads.append(rel)
+        if rel == "pulls":
+            if self.pulls_error:
+                raise merge.Stop(self.pulls_error)
+            return self.pulls
+        m = re.fullmatch(r"commits/([^/]+)/check-runs", rel)
+        if m:
+            return self.runs.get(m.group(1), [])
+        if re.fullmatch(r"commits/[^/]+/status", rel):
+            return []
+        raise AssertionError("unexpected read: " + rel)
+
+class BatchRunningReads(unittest.TestCase):
+    """merge.Host.batch_running over scripted reads. Only `pages` is faked: the filters and the check judging are the real code."""
+
+    def test_a_pending_required_check_on_another_ready_pr_blocks(self):
+        host = PullsHost([batch_pull(1, OWN_SHA), batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks")]})
+        blockers = host.batch_running(1, "main")
+        self.assertEqual(len(blockers), 1, blockers)
+        self.assertIn("#2", blockers[0])
+        self.assertIn("checks", blockers[0])
+        self.assertIn(BATCH_LINK, blockers[0])
+        self.assertEqual(host.reads.count("pulls"), 1)  # the open pull list is read once
+
+    def test_a_required_check_that_ran_green_or_red_does_not_block(self):
+        for conclusion in ("success", "failure"):
+            with self.subTest(conclusion=conclusion):
+                host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", conclusion)]})
+                self.assertEqual(host.batch_running(1, "main"), [])
+
+    def test_a_draft_pr_never_blocks(self):
+        host = PullsHost([batch_pull(2, OTHER_SHA, draft=True)], {OTHER_SHA: [batch_run("checks")]})
+        self.assertEqual(host.batch_running(1, "main"), [])
+
+    def test_a_pending_check_that_is_not_required_does_not_block(self):
+        host = PullsHost([batch_pull(2, OTHER_SHA)], {OTHER_SHA: [batch_run("checks", "completed", "success"), batch_run("sync")]})
+        self.assertEqual(host.batch_running(1, "main"), [])
+
+    def test_the_pr_own_pending_run_never_blocks_it(self):
+        host = PullsHost([batch_pull(1, OWN_SHA)], {OWN_SHA: [batch_run("checks")]})
+        self.assertEqual(host.batch_running(1, "main"), [])
+
+    def test_a_pr_on_another_base_never_blocks(self):
+        host = PullsHost([batch_pull(2, OTHER_SHA, base="release")], {OTHER_SHA: [batch_run("checks")]})
+        self.assertEqual(host.batch_running(1, "main"), [])
+
+    def test_a_failed_pulls_read_stops(self):
+        host = PullsHost([], {}, pulls_error="reading pulls from GitHub failed: boom")
+        with self.assertRaises(merge.Stop):
+            host.batch_running(1, "main")
+
+class BatchBrake(Env):
+    """confirm reads the other ready pull requests before anything is pushed, and again before the PUT. preview prints the read."""
+
+    def test_confirm_refuses_while_another_ready_pr_has_a_required_check_pending(self):
+        self.host.batch = [BATCH_BLOCKER]
+        before = self.refs()
+        rc, out = self.run_merge("1", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("#2", out)
+        self.assertIn("CI-done comment", out)
+        self.assertEqual(self.host.batch_calls, [(1, "main")])
+        self.assertEqual(self.refs(), before)  # nothing pushed: no claim, and the lock is released
+        self.assertEqual(self.host.waits, [])
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_confirm_proceeds_when_no_other_pr_blocks(self):
+        rc, out = self.run_merge("1", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn((1, "main"), self.host.batch_calls)  # the brake was read, not assumed clear
+        self.assertTrue(getattr(self.host, "merged", False))
+
+    def test_a_batch_that_goes_ready_during_the_head_wait_refuses_the_put(self):
+        host, wait = self.host, self.host.wait_checks
+        def wait_then_ready(n, sha, d, prior=None):
+            ok = wait(n, sha, d, prior)
+            host.batch = [BATCH_BLOCKER]  # the other pull request goes ready while this head is waited on
+            return ok
+        host.wait_checks = wait_then_ready
+        rc, out = self.run_merge("1", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("#2", out)
+        self.assertIn("CI-done comment", out)
+        self.assertFalse(getattr(host, "merged", False))  # the PUT is never made
+        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))  # the claim is reverted, as for a refused PUT
+        self.assertFalse(self.lock_ref())
+
+    def test_an_unreadable_pulls_list_refuses_confirm(self):
+        self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")
+        before = self.refs()
+        rc, out = self.run_merge("1", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reading pulls", out)
+        self.assertEqual(self.refs(), before)
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_preview_prints_a_batch_line_that_is_clear(self):
+        rc, out = self.run_merge("1")
+        lines = [l for l in out.splitlines() if l.startswith("  batch:")]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("clear", lines[0])
+
+    def test_preview_prints_the_blocker_on_its_batch_line(self):
+        self.host.batch = [BATCH_BLOCKER]
+        rc, out = self.run_merge("1")
+        lines = [l for l in out.splitlines() if l.startswith("  batch:")]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("#2", lines[0])
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":

@@ -403,6 +403,15 @@ GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
 GHSTATPEND = os.path.join(ROOT, "ghstatpend")  # a green check run, and one commit status still pending
 GHSTATRED = os.path.join(ROOT, "ghstatred")    # a green check run, and one commit status failed
+GHBATCH = os.path.join(ROOT, "ghbatch")        # merging pull request 1 while pull request 2, also ready on main, has its required check pending
+GHBATCHDONE = os.path.join(ROOT, "ghbatchdone")  # the same, with pull request 2's required check passed
+GHBATCHRED = os.path.join(ROOT, "ghbatchred")    # the same, with pull request 2's required check failed
+
+
+def batch_other(bucket):
+    """Pull request 2 on main, ready, whose one required check (`checks`) is in `bucket`: the other half of the batch brake."""
+    return [{"number": 2, "head": "def5678", "draft": False,
+             "checks": [{"name": "checks", "bucket": bucket, "link": "https://github.com/y/x/actions/runs/88"}]}]
 GHPAGE2 = os.path.join(ROOT, "ghpage2")        # the failed check run is on the second page of the check runs
 CURREPO = os.path.join(ROOT, "currepo")        # a checkout on the branch `feat`, the head of the one pull request the fake gh lists
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
@@ -842,29 +851,36 @@ else:
     m = re.match(r"^repos/(?:\{owner\}/\{repo\}|[^/{}]+/[^/{}]+)/(.*)$", path)
     rel = m.group(1) if m else ""
     head = state["pr"]["head"]["sha"]
+    rows_of = {head: (state["checks"], state["statuses"])}  # the head's own rows; each other open pull request's head has its own
+    rows_of.update({o["head"]: (o.get("checks", []), o.get("statuses", [])) for o in state["others"]})
     if re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
-        print(listing([dict(state["pr"], number=state["number"])], None, fields, flags))
-    elif rel in ("commits/%s/check-runs" % head, "commits/%s/status" % head):
+        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": "feat%d" % o["number"], "sha": o["head"]},
+                       base={"ref": o.get("base", "main")}) for o in state["others"]]
+        print(listing([dict(state["pr"], number=state["number"])] + others, None, fields, flags))
+    elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
+        checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
             runs = [{"id": i, "name": c["name"], "status": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[0],
                      "conclusion": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[1], "details_url": c["link"] or None,
-                     "started_at": None, "completed_at": None} for i, c in enumerate(state["checks"])]
+                     "started_at": None, "completed_at": None} for i, c in enumerate(checks)]
             print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}))
         else:
             sts = [{"id": 50 + i, "context": c["name"], "state": STATUS_OF.get(c["bucket"], c["bucket"]), "target_url": c["link"] or None}
-                   for i, c in enumerate(state["statuses"])]
+                   for i, c in enumerate(statuses)]
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
-            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": head, "total_count": len(sts)}))
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
+    elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
+        print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
     else:
         api_error(404, "Not Found")
 '''
 
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
-                 cwd_name="", statuses=None, page_cap=100):
+                 cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",)):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
@@ -917,6 +933,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
         "page_cap": page_cap,
+        "others": [dict(o) for o in others],  # more open pull requests on the base, each {number, head, draft, checks}: the batch brake reads them
+        "required": list(required),  # the names the base's protection requires
         "runs": runs if runs is not None else [
             {"status": "completed", "conclusion": "success", "name": "checks"}],
         "broken": broken,
@@ -1073,6 +1091,9 @@ def build_fixtures():
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
+    make_fake_gh(GHBATCH, "main", others=batch_other("pending"))
+    make_fake_gh(GHBATCHDONE, "main", others=batch_other("pass"))
+    make_fake_gh(GHBATCHRED, "main", others=batch_other("fail"))
     # merge.py's shared_deadline splits one budget across the read's calls (c53: four on REST: the pull request, the check
     # runs, the commit statuses, the workflow runs), so a delay only a little past the per-call figure that used to be the
     # cutoff no longer exhausts it. 20s per call outruns the whole shared budget on its own, whichever call absorbs the
@@ -7623,6 +7644,21 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+# The batch brake (roadmap step c195): a merge is refused while another ready pull request on the base has a required check
+# pending, by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is def5678).
+BATCH_ON = GHBATCH + os.pathsep + PY_PATH
+sh("merge-batch: gh pr merge is refused while another ready pr has a required check pending",
+   "gh pr merge 1 --squash", "deny", "merge-checks", carries="#2", cwd=NOGIT, env_path=BATCH_ON, config=MERGECFG)
+add("merge-batch: the merge tool of the host is refused while another ready pr has a required check pending", "deny", "merge-checks",
+    carries="#2", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+    env_path=BATCH_ON, config=MERGECFG)
+sh("merge-batch: gh pr merge is allowed when the other ready pr's required check has passed",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHDONE + os.pathsep + PY_PATH)
+sh("merge-batch: gh pr merge is allowed when the other ready pr's required check has failed",
+   "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHBATCHRED + os.pathsep + PY_PATH)
+add("merge-batch: the merge tool of the host is allowed when the other ready pr's required check has passed", "allow",
+    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+    env_path=GHBATCHDONE + os.pathsep + PY_PATH)
 NEED_ON = GHNEED + os.pathsep + PY_PATH
 sh("merge-checks: the pull request and repo of the call are the ones read",
    "gh pr merge 12 --squash -R y/x", "allow", silent=True, cwd=NOGIT, env_path=NEED_ON,
