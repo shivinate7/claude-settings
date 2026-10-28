@@ -273,9 +273,11 @@ This tier runs per repository, so `sweep: false` opts it out.
 
 ## Build folders
 
-At agent end, the SubagentStop reap renames each build folder in the agent's
-worktree to a sibling trash name (`<name>.reap-trash-<id>`). A
-detached child then deletes the trash. The folders are `native/build`,
+At each agent end, the SubagentStop reap renames each build folder in other
+agent worktrees idle 30 minutes or more to a sibling trash name
+(`<name>.reap-trash-<id>`). The ending agent's own worktree keeps its build
+folders, since the agent may be resumed there. A detached child then deletes
+the trash. The folders are `native/build`,
 `.build` and `DerivedData`, plus each name in `buildDirs` in
 `.claude/janitor.json`, for example `["Pods/Build"]`. A name with `/` matches
 one path under the worktree root. A bare name matches at any depth. `buildDirs`

@@ -41,6 +41,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
     ranked items, oldest first. A group sits together at its best member's `rank`.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
+  - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
+    whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
+    "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
+    (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
@@ -108,7 +112,10 @@ into `meta/page`.
    unique key, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
-   - Fill `holds` whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
+   - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
+     and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
+     Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
+   - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
