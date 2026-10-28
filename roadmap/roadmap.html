@@ -80,8 +80,8 @@ a{color:var(--accent-ink)}
 .brand b{font-family:var(--font-num);font-weight:600;font-size:15px}
 .brand b::before{content:var(--repo-name)}
 .brand span{color:var(--muted);font-size:12px}
-.tabs{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-m);padding:2px}
-.tabs button{padding:4px 10px;border-radius:calc(var(--radius-m) - 2px);font-size:13px;color:var(--ink-2)}
+.tabs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:2px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-m);padding:2px}
+.tabs button{text-align:center;padding:4px 10px;border-radius:calc(var(--radius-m) - 2px);font-size:13px;color:var(--ink-2)}
 .tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line-2)}
 .tabs .ct{font-family:var(--font-num);font-size:11px;color:var(--accent-ink);margin-left:4px}
 .tools{margin-left:auto;display:flex;gap:6px;align-items:center}
