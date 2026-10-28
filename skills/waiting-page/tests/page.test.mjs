@@ -1211,6 +1211,16 @@ test("SKILL.md names the page's one writer and the rank field", async () => {
   assert.match(rule, /`rank`/);
 });
 
+// Decision questions-go-to-owner, "Answer on the page, not in a comment thread":
+// a rebuilt page drops its threads, so a session rewrites the item instead.
+test("SKILL.md answers a comment by rewriting the item, never in a comment thread", async () => {
+  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+  assert.doesNotMatch(skill, /action `reply`/);
+  assert.doesNotMatch(skill, /reply in the comment thread/i);
+  assert.match(skill, /never reply in a comment thread/i);
+  assert.match(skill, /rewrite that item/i);
+});
+
 // ---------------------------------------------------------------- round 2 looks
 
 const PANEL = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:45px;background:#a62"></div><div style="height:500px"></div></body>';
@@ -1345,6 +1355,46 @@ test("two designs of one slug with different focus keep their own size, and the 
   assert.ok(hs[0] > hs[1] * 1.6, "the second picture took the first one's size: " + hs);
   await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
   assert.match(await page.locator("#dTitle").textContent(), /^Layout B/);
+});
+
+// ---------------------------------------------------------------- each option's picture shows its own difference
+const ALERT = (page, it) => card(page, it).locator("p.broken[role=alert]");
+const lateRow = (state) => `<body style="margin:0"><div id="late-row">${state}</div><div id="other">x</div></body>`;
+const looks = (id, n, designs, over = {}) => mk(id, n, { look: true, pick: "a", options: WIDE.map(([k, l]) => ({ key: k, label: l, how: "h", gain: "g", lose: "l", design: "o-" + k })), designs, ...over });
+
+test("a look question whose options A and B name one design shows an alert and Send is refused", async (t) => {
+  const it = mk("same-pic", 60, { look: true, pick: "a",
+    options: [{ key: "a", label: "Claim filed and Lost", how: "h", gain: "g", lose: "l", design: "late" }, { key: "b", label: "Six stamps", how: "h", gain: "g", lose: "l", design: "late" }],
+    designs: [{ slug: "late", label: "Late" }] });
+  const page = await open(t, { items: [it], designData: { late: lateRow("alert") } }); if (!page) return;
+  assert.equal(await ALERT(page, it).count(), 1, "no alert on two options with one picture");
+  assert.match(await ALERT(page, it).textContent(), /A and B.*share one picture.*neither shows its own difference.*fix item 60/s);
+  await page.evaluate(() => { setDraft(byId("same-pic"), { choice: "a", auto: true }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on an item whose options share a picture");
+});
+
+test("two options whose designs have different slugs but the same bytes are refused too", async (t) => {
+  const it = looks("same-bytes", 61, [{ slug: "o-a", label: "A" }, { slug: "o-b", label: "B" }]);
+  const page = await open(t, { items: [it], designData: { "o-a": lateRow("same"), "o-b": lateRow("same") } }); if (!page) return;
+  assert.match(await ALERT(page, it).textContent(), /A and B.*share one picture/s);
+});
+
+test("a focus that matches nothing in its mockup, or is no selector, is refused and names the option", async (t) => {
+  for (const [id, n, focus] of [["focus-miss", 62, "#no-such"], ["focus-bad", 63, "##("]]) {
+    const it = looks(id, n, [{ slug: "o-a", label: "A" }, { slug: "o-b", label: "B", focus }]);
+    const page = await open(t, { items: [it], designData: { "o-a": lateRow("one"), "o-b": lateRow("two") } }); if (!page) return;
+    assert.equal(await ALERT(page, it).count(), 1, id + " shows no alert");
+    assert.match(await ALERT(page, it).textContent(), /option B.*shows nothing the focus names.*fix item/s);
+    assert.doesNotMatch(await ALERT(page, it).textContent(), /option A/);
+  }
+});
+
+test("distinct pictures with a focus that matches show no alert; extra widths and one slug with two focuses stay free", async (t) => {
+  const it = looks("own-pics", 64, [{ slug: "o-a", label: "A", focus: "#late-row" }, { slug: "o-b", label: "B", focus: "#late-row" }, { slug: "o-a", option: "a", label: "A wide", width: "Wide" }]);
+  const page = await open(t, { items: [it], designData: { "o-a": lateRow("one"), "o-b": lateRow("two") } }); if (!page) return;
+  assert.equal(await ALERT(page, it).count(), 0, "an alert on distinct pictures");
+  await page.evaluate(() => { setDraft(byId("own-pics"), { choice: "a", auto: true }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), false);
 });
 
 // ---------------------------------------------------------------- the database key is the item's key

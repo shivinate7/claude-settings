@@ -1,0 +1,9 @@
+{
+  "name": "code-check-tools",
+  "private": true,
+  "description": "Test-only install of the npm tools code-check pins in ../standard.json; test_action.py checks the versions match.",
+  "dependencies": {
+    "@astrojs/check": "0.9.12",
+    "typescript": "5.9.3"
+  }
+}

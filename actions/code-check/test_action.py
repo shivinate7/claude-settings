@@ -1,15 +1,24 @@
 """Tests the code-check runner on throwaway repos. `python3 actions/code-check/test_action.py`.
 Asserts: a tracked language with no row is red (by extension and by shebang), a planted mypy error in
 a listed module is red, a shrunk mypy list is red against the base ref, a missing listed module is red,
-an excluded folder is not scanned, and the standard's table is whole (every layer runs or has a one-line reason).
-The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy and shellcheck must be installed."""
-import json, os, subprocess, sys, tempfile, unittest
+an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
+standard's table is whole (every layer runs or has a one-line reason).
+The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
+astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
+skip and say so, except under CI, where they fail."""
+import json, os, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNNER = os.path.join(HERE, "code_check.py")
 STANDARD = os.path.join(HERE, "standard.json")
 GOOD_PY = "def add(a: int, b: int) -> int:\n    return a + b\n"
 BAD_PY = "def add(a: int, b: int) -> int:\n    return str(a)\n"
+GOOD_ASTRO = "---\ninterface Props { title: string }\nconst { title } = Astro.props;\nconst n: number = 2;\n---\n<h2>{title} {n}</h2>\n"
+BAD_ASTRO = "---\nconst n: number = \"x\";\n---\n<p>{n}</p>\n"
+ASTRO_CONFIG = "export default {};\n"
+# CI must not go green by skipping: there a missing astro-check fails the test instead.
+NEEDS_ASTRO = unittest.skipUnless(shutil.which("astro-check") or os.environ.get("CI"),
+                                  "astro-check not on PATH; npm ci in actions/code-check/tools (CI does)")
 
 
 def git(cwd, *a):
@@ -161,8 +170,45 @@ class CodeCheck(unittest.TestCase):
                 self.assertEqual(len(cell), 1, name)
                 if "skip" in cell:
                     self.assertTrue(cell["skip"].strip() and "\n" not in cell["skip"], name)
-        for tool in ("ruff", "mypy", "shellcheck-py", "typescript"):
+        self.assertEqual(std["languages"]["astro"]["typecheck"], {"run": "astro-check"})
+        for tool in ("ruff", "mypy", "shellcheck-py", "typescript", "@astrojs/check"):
             self.assertRegex(std["tools"][tool], r"^\d+\.\d+\.\d+(\.\d+)?$")
+
+    def test_astro_file_has_a_row(self):
+        rc, out = check({".code-check.json": config([]), "astro.config.mjs": ASTRO_CONFIG, "src/pages/index.astro": GOOD_ASTRO})
+        self.assertNotIn("no row", out)
+        self.assertIn("astro typecheck", out)
+
+    @NEEDS_ASTRO
+    def test_astro_type_error_is_red(self):
+        rc, out = check({".code-check.json": config([]), "site/astro.config.mjs": ASTRO_CONFIG,
+                         "site/src/pages/index.astro": BAD_ASTRO})
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("astro-check found problems", out)
+        self.assertIn("index.astro", out)
+
+    @NEEDS_ASTRO
+    def test_astro_file_under_no_config_is_checked(self):
+        rc, out = check({".code-check.json": config([]), "pages/a.astro": BAD_ASTRO})
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("astro-check found problems", out)
+
+    @NEEDS_ASTRO
+    def test_clean_astro_project_is_green(self):
+        rc, out = check({".code-check.json": config([]), "astro.config.mjs": ASTRO_CONFIG,
+                         "src/components/Card.astro": GOOD_ASTRO})
+        self.assertEqual(rc, 0, out)
+        self.assertIn("astro typecheck: astro-check pass", out)
+
+    def test_npm_lockfile_matches_the_standard(self):
+        std = json.load(open(STANDARD, encoding="utf-8"))
+        tools = os.path.join(HERE, "tools")
+        want = {k: std["tools"][k] for k in ("@astrojs/check", "typescript")}
+        self.assertEqual(json.load(open(os.path.join(tools, "package.json"), encoding="utf-8"))["dependencies"], want)
+        lock = json.load(open(os.path.join(tools, "package-lock.json"), encoding="utf-8"))["packages"]
+        self.assertEqual(lock[""]["dependencies"], want)
+        for name, version in want.items():
+            self.assertEqual(lock["node_modules/" + name]["version"], version, name)
 
     def test_format_layer_waits_for_o2(self):
         std = json.load(open(STANDARD, encoding="utf-8"))

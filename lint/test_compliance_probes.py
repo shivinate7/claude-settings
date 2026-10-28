@@ -63,7 +63,7 @@ class Layout(unittest.TestCase):
         self.assertIn("preview folder src/", out)
 
     def test_stray_folder_and_missing_core_kind_are_red(self):
-        repo = Repo(self).write(EXTRAS, '{"kinds": {}}').write("src/a.py").write("CLAUDE.md")
+        repo = Repo(self).write(EXTRAS, '{"kinds": {}, "rolled-out": true}').write("src/a.py").write("CLAUDE.md")
         code, out = repo.run("layout")
         self.assertEqual(code, 1, out)
         self.assertIn("folder src/: neither", out)
@@ -72,20 +72,20 @@ class Layout(unittest.TestCase):
 
     def test_stray_folder_inside_a_kind_parent_is_red(self):
         parent = kind_path("decisions").rsplit("/", 1)[0]
-        repo = Repo(self).core().write(EXTRAS, '{"kinds": {}}').write(parent + "/odd/a.md")
+        repo = Repo(self).core().write(EXTRAS, '{"kinds": {}, "rolled-out": true}').write(parent + "/odd/a.md")
         code, out = repo.run("layout")
         self.assertEqual(code, 1, out)
         self.assertIn("folder %s/odd/" % parent, out)
 
     def test_extras_tool_folders_and_kind_subfolders_pass(self):
-        repo = Repo(self).core().write(EXTRAS, '{"kinds": {"src": {"path": "src"}}}')
+        repo = Repo(self).core().write(EXTRAS, '{"kinds": {"src": {"path": "src"}}, "rolled-out": true}')
         repo.write("src/deep/a.py").write(".github/workflows/a.yml").write(".claude/skills/s/SKILL.md")
         repo.write(kind_path("decisions") + "/sub/a.md")
         code, out = repo.run("layout")
         self.assertEqual((code, out.strip()), (0, "layout: in shape"))
 
     def test_scorecard_file_is_a_layout_kind(self):
-        repo = Repo(self).core().write(EXTRAS, '{"kinds": {}}').write("docs/health/compliance.md")
+        repo = Repo(self).core().write(EXTRAS, '{"kinds": {}, "rolled-out": true}').write("docs/health/compliance.md")
         code, out = repo.run("layout")
         self.assertEqual((code, out.strip()), (0, "layout: in shape"))
 
@@ -97,14 +97,14 @@ class Layout(unittest.TestCase):
         self.assertIn("legacy home of decisions, moves to " + kind_path("decisions"), out)
 
     def test_a_todo_kept_by_legacy_repos_is_not_missing(self):
-        repo = Repo(self).core().write(EXTRAS, '{"kinds": {"todo": {"path": "records"}}}').write("records/backlog.md")
+        repo = Repo(self).core().write(EXTRAS, '{"kinds": {"todo": {"path": "records"}}, "rolled-out": true}').write("records/backlog.md")
         subprocess.run(["git", "-C", repo.root, "rm", "-q", "--cached", kind_path("todo")], check=True)
         code, out = repo.run("layout")
         self.assertEqual((code, out.strip()), (0, "layout: in shape"))
 
     def test_untracked_core_kind_is_missing(self):
         rules = kind_path("rules")
-        repo = Repo(self).write(EXTRAS, '{"kinds": {}}')
+        repo = Repo(self).write(EXTRAS, '{"kinds": {}, "rolled-out": true}')
         os.makedirs(os.path.join(repo.root, *rules.split("/")))
         code, out = repo.run("layout")
         self.assertIn("missing core kind rules: " + rules, out)
