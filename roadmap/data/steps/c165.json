@@ -1,0 +1,9 @@
+{
+ "title": "The guard's simulator cap sees boots inside bin/sim-test",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.92001,
+ "why": "mailaudit's c89 lane, Oct 28 (via the orchestrator): hooks/guard.py _sim_boot_names keys on the command word, so it never sees the simulator boot that bin/sim-test runs; sim-test's comment \"the guard caps booted simulators\" is false for that path.",
+ "note": "Debt (a gap and a false comment; the guard lives in claude-settings, so it is a step here, not a note in a child repo). Next cloud lane: either the guard reads a bin/sim-test call as a simulator boot (it reuses a booted iPhone, else boots one), or sim-test enforces the cap itself before it boots; then the comment says which. Red first on a bin/sim-test call that boots past the cap. Touches hooks/guard.py, hooks/test_guard.py and bin/sim-test. Needs no answer. Port: no; installs from claude-settings. Placed ahead of c91, after c89 (triage, Oct 28): same simulator tool, found in c89's lane.",
+ "updatedAt": "2026-10-28T09:00:00Z"
+}
