@@ -1,6 +1,6 @@
 # o8 option (c), lane o8-session-lines: outbox
 
-State: plan sent to the orchestrator, Oct 28. No builder started. Branch o8-session-lines not created.
+State: paused, Oct 28. The orchestrator declined the reading in plan point 1. Triage puts it on the waiting page for shiv, recommending: drop (c), keep (a). Build nothing until the orchestrator messages the answer.
 Why paused: the plan changes who writes the page's database (brief: plan first).
 
 ## Plan (sent)
@@ -18,4 +18,4 @@ Why paused: the plan changes who writes the page's database (brief: plan first).
 5. Build if approved: skills/roadmap SKILL.md paragraph + viewer merge of `live` with --live by title
    (newer wins, >6h quiet, malformed skipped); waiting-page protocol line; fixture test red first.
 
-Deferred: the c136 reading (1) and the Windows measure (3), to the orchestrator.
+Deferred: why: c136 (Oct 27, after the Oct 26 (c) ruling) says sessions never write the page; shiv decides whether (c) survives. Windows measure (point 3) stays open if (c) survives.
