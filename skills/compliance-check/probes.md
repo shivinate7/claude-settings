@@ -104,6 +104,38 @@ Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
 
 The lowest iOS, the tokens and the test style are read by hand in a repo visit.
 
+## Words
+
+`$PY $P/lint/compliance_probes.py words .` lists each retired word in the child. A retired word is a
+"Not" name in a row of `GLOSSARY.md`. The probe reads the child's tracked files only, and never edits
+or pushes to the child.
+
+The probe holds no word list. On each run it reads `GLOSSARY.md` and `lint/check_glossary.py` from the
+parent clone. It calls the check's own readers: the path read, and the read of identifiers, rule
+anchors, record slugs and hook messages. A word the glossary brings back is gone from the next run. A
+`word (prose)` name is read in paths, anchors and slugs only, never in a code name. Prose is not read.
+
+The probe reads every tracked file, so it can take a minute on a large repo. The check reads hook
+messages in `hooks/` only. That fits the layout of claude-settings, and a child with another layout has
+no message read.
+
+Each hit is one item line, `  <word>: <file>:<line> <detail>`, on one line even when a message holds a
+newline. A path hit has `-` for the line. One more line, `glossary read at <sha> of claude-settings`,
+names the parent commit whose glossary the run read. It adds `(uncommitted)` when `GLOSSARY.md` differs
+from that commit. Name the commit in the report, so a later run on a moved list is read against it.
+
+A tracked file that does not decode as text, such as a binary, is still read by its path. One note line,
+`unread: <N> files, <the first three>`, names those files. They do not make the group `unknown`.
+
+| Exit | Group line |
+| --- | --- |
+| 0 | `words: in shape` |
+| 1 | `words: out`, one item line per hit |
+| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, a Python file does not parse, or no tracked file could be read |
+
+A copy of the probe with no `GLOSSARY.md` beside it, such as an installed copy under `~/.claude/lint`,
+is `unknown`, never `in shape`.
+
 ## Copies
 
 The copy probe and its verdicts are in `copies.md`, beside this file.
