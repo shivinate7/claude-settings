@@ -28,10 +28,13 @@ the desktop app has none.
   digest, the compaction summary and the prior handoff alone).
 
   Stop --nudge (stdin: session_id, transcript_path, stop_hook_active) -- reads the last
-  main-chain, non-synthetic assistant entry's usage, if above 0 (input + cache_creation + cache_read tokens) as the context
-  size. Bucket = index of the highest checkpoint reached, -1 below the first (checkpoints():
-  200k, +150k while below limit-50k, then limit-50k; limit = autoCompactWindow in
-  <config dir>/settings.json, default 500,000). The bucket lives in
+  main-chain, non-synthetic assistant entry's usage, if above 0 (input + cache_creation +
+  cache_read tokens) as the context size. Overhead = the first such entry's size. Messages
+  = size - overhead, at least 0 (a proxy: record hook-inputs-carry-token-counts). Bucket =
+  index of the highest checkpoint that messages reached, -1 below the first, and -1 when
+  messages is 0 (checkpoints(limit - overhead): 200k, +150k while below the top, then the
+  top = room - 50k; limit = autoCompactWindow in <config dir>/settings.json, default
+  500,000). The last checkpoint is at size = limit - 50k. The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
   than stored prints {"decision": "block", "reason": ...}: rewrite the handoff per the
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
@@ -480,19 +483,23 @@ def _run_reorient(payload):
 
 def checkpoints(limit):
     """Nudge sizes: 200k, then +150k while below limit-50k, then limit-50k itself
-    (500k: 200, 350, 450k). When limit-50k <= 200k, only limit-50k."""
+    (500k: 200, 350, 450k). When limit-50k <= 200k, only limit-50k. A step within
+    NUDGE_STEP // 2 of limit-50k is dropped: two rewrites that close are one too many."""
     top = limit - NUDGE_MARGIN
     if top <= NUDGE_FLOOR:
         return [top]
     cps = [NUDGE_FLOOR]
     while cps[-1] + NUDGE_STEP < top:
         cps.append(cps[-1] + NUDGE_STEP)
+    while len(cps) > 1 and top - cps[-1] < NUDGE_STEP // 2:
+        cps.pop()
     return cps + [top]
 
 
 def window_limit():
     # ponytail: the model's own window can be smaller than autoCompactWindow and this
-    # hook cannot see it; nudges then come late. Upgrade: read the window from the model.
+    # hook cannot see it; nudges then come late. The first one now comes `overhead` tokens
+    # later in total, so a model window smaller than autoCompactWindow can skip it. Upgrade: read the window from the model.
     try:
         with open(os.path.join(config_dir(), "settings.json"), "r", encoding="utf-8") as f:
             v = json.load(f).get("autoCompactWindow")
@@ -510,7 +517,7 @@ def run_nudge(payload):
         return 0
     try:
         session_id = payload.get("session_id", "")
-        size = None
+        size = overhead = None
         with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
             for line in f:
                 try:
@@ -526,10 +533,18 @@ def run_nudge(payload):
                 n = sum(u.get(k) or 0 for k in (
                     "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
                 if n > 0:
+                    if overhead is None:
+                        overhead = n
                     size = n
         if size is None:
             return 0
-        bucket = sum(1 for c in checkpoints(window_limit()) if size >= c) - 1
+        # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
+        messages = max(size - overhead, 0)
+        if messages == 0:
+            bucket = -1  # nothing to hand off, even when the room left is zero or negative
+        else:
+            bucket = sum(1 for c in checkpoints(window_limit() - overhead)
+                         if messages >= c) - 1
         path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -542,10 +557,10 @@ def run_nudge(payload):
         if bucket > stored:
             ensure_handoff_dir(session_id)
             print(json.dumps({"decision": "block", "reason": (
-                "Context is about %dk tokens. Rewrite your handoff at %s now, the whole "
+                "Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the whole "
                 "file; never append. Follow step 4 of %s for its sections and their order. "
                 "Then continue."
-                % (size // 1000, handoff_path(session_id), prompt_path()))}))
+                % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
     return 0

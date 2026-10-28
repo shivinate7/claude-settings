@@ -1146,6 +1146,66 @@ def case_undoable_pick_finding_logs_its_rule():
           (run.code, run.out))
 
 
+# --------------------------------------------------------------------------- c148
+# A port or redesign keeps the existing app's behaviour. A reply that marks work "blocked on", or an
+# Input Needed item as blocking, a question about such a port is flagged, since the existing app
+# answers it. A question that says how the work departs, with a "Departs from:" line, and is not
+# marked blocking, is never flagged. Code sends every "blocked on" Stop to the model, off-sample.
+
+PORT_BLOCKED = ("Plan: blocked on what happens to Suspense cards when Card in Hand closes "
+                "(Duo port of the web app).")
+PORT_FINDING = {"ok": False, "reason": ASK_RULE + ": the web app answers it; read it and cite file and symbol."}
+
+
+def case_blocked_on_reply_is_judged_off_sample():
+    run, _ = second_stop(PORT_BLOCKED, label="c148-judged", session="c148-judged")
+    check("blocked on: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+    run, _ = second_stop("Plan: BLOCKED ON the answer.", label="c148-case", session="c148-case")
+    check("blocked on: the words are read in any case", len(run.calls) == 1, run.calls)
+    run, _ = second_stop("Plan: the work is blocking nothing; unblocked and moving.", label="c148-none",
+                         session="c148-none")
+    check("blocked on: a reply without the words is not judged off-sample", len(run.calls) == 0, run.calls)
+    run, _ = second_stop("Plan: the test went green, unblocked on retry.", label="c148-unblocked",
+                         session="c148-unblocked")
+    check("blocked on: unblocked on retry is not judged off-sample", len(run.calls) == 0, run.calls)
+
+
+def case_prompt_flags_a_port_question_marked_blocking():
+    run = run_hook(PORT_BLOCKED, answer=OK_ANSWER)
+    sentences = rule_sentences(run, PORT_BLOCKED)
+    check("prompt: a sentence flags work blocked on a question about a port or redesign of an existing app",
+          has_pin(sentences, ("flag",), ("blocked on",), ("port",), ("redesign",), ("existing app",)),
+          sentences)
+    check("prompt: a sentence flags an Input Needed item marked blocking on such a question",
+          has_pin(sentences, ("flag",), ("input needed",), ("blocking",), ("port",)), sentences)
+    check("prompt: a sentence says the existing app's behaviour answers it",
+          has_pin(sentences, ("existing app",), ("behaviour",), ("answer",)), sentences)
+    check("prompt: a sentence flags a port question with no Departs from line",
+          has_pin(sentences, ("flag",), ("port",), ("departs from:",)), sentences)
+
+
+def case_prompt_spares_a_departure_not_marked_blocking():
+    run = run_hook(PORT_BLOCKED, answer=OK_ANSWER)
+    sentences = rule_sentences(run, PORT_BLOCKED)
+    check("prompt: never flag a question that says how the work departs and is not marked blocking",
+          has_pin(sentences, ("never flag",), ("departs",), ("not marked blocking", "not blocking")),
+          sentences)
+    check("prompt: the never-flag-a-merge exemption stays",
+          has_pin(sentences, ("never flag",), ("merge",)), sentences)
+
+
+def case_port_finding_is_a_note_with_its_rule():
+    run, config = second_stop(PORT_BLOCKED, answer=json.dumps(PORT_FINDING), label="c148-log",
+                              session="c148-log")
+    parts = (guard_lines(config) or [""])[0].split("\t")
+    out = parse_stdout(run)
+    check("port finding: guard.log rule is %s" % ASK_RULE, len(parts) == 6 and parts[3] == ASK_RULE, parts)
+    check("port finding: a note, never a block, exit 0",
+          run.code == 0 and isinstance(out, dict) and "decision" not in out
+          and out.get("hookSpecificOutput", {}).get("additionalContext") == PORT_FINDING["reason"],
+          (run.code, run.out))
+
+
 # --------------------------------------------------------------------------- d9
 # A pick between visual options needs a picture of each option in the reply. A reply that asks the
 # owner to pick and only links to the mockups (a folder, a repo or a file) is flagged.
@@ -1214,6 +1274,10 @@ CASES = (
     case_prompt_spares_irreversible_and_goal_picks,
     case_undoable_pick_finding_logs_its_rule,
     case_prompt_flags_a_visual_pick_that_only_links,
+    case_blocked_on_reply_is_judged_off_sample,
+    case_prompt_flags_a_port_question_marked_blocking,
+    case_prompt_spares_a_departure_not_marked_blocking,
+    case_port_finding_is_a_note_with_its_rule,
 )
 
 

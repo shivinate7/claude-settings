@@ -856,8 +856,9 @@ AGENT_END_IDLE_SECONDS = 30 * 60
 
 def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     """The keep-or-reap decision for one `.claude/worktrees/agent-*` tree at agent end. MIN_IDLE is
-    the seconds of git quiet the tree needs (None: none). Idle is read first: `git status` can
-    rewrite the index and make every tree look active. The rest is
+    the seconds of git quiet the tree needs (None: none). Idle is read first, or taken from
+    ENTRY["idle"] when the caller read it: `git status` can rewrite the index and make every tree
+    look active. The rest is
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
@@ -865,7 +866,7 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     process holds it, so it can be decided again."""
     path = entry["path"]
     if min_idle is not None:
-        idle = worktree_idle_seconds(path)
+        idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(path)
         if idle is None:
             return {"path": path, "action": "keep", "reason": "unreadable-subject"}
         if idle < min_idle:

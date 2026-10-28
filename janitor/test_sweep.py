@@ -4377,10 +4377,12 @@ JANITOR = os.path.join(HERE, "sweep.py")
 
 
 class BuildDirReapTests(unittest.TestCase):
-    """Decision build-dirs-reaped-at-agent-end, Part 1. The SubagentStop reap deletes build folders
-    in the finished agent's worktree: `native/build`, a bare `.build` at any depth, `DerivedData`,
-    and each `buildDirs` name from `.claude/janitor.json`. Each delete is a rename to a trash name,
-    then a detached child deletes the trash.
+    """Decision build-dirs-reaped-at-agent-end. A SubagentStop reap deletes build folders in
+    OTHER finished agents' worktrees idle 30 minutes or more: `native/build`, a bare `.build` at
+    any depth, `DerivedData`, and each `buildDirs` name from `.claude/janitor.json`. The ending
+    agent's own tree keeps its build folders at its own end, since it is often resumed. Each
+    delete is a rename to a trash name, then a detached child deletes the trash. Most cases age
+    the subject tree 31 minutes and fire the hook for a separate ending agent (`later_end`).
 
     Real git repos, real hook processes (`agent_end_reap.py` run as the harness runs it). Every
     fixture is a few small files. Each keep arm sits beside a control arm that must delete, so a
@@ -4431,6 +4433,27 @@ class BuildDirReapTests(unittest.TestCase):
                                                                        result.stderr[-300:]))
         return elapsed
 
+    def later_end(self, primary, *trees, minutes=31):
+        """Age each of TREES MINUTES idle, then run the hook for a separate ending agent in PRIMARY.
+        The aging runs last, right before the hook, so no git call resets it."""
+        ender = os.path.join(primary, ".claude", "worktrees", "agent-bdrEnd")
+        if not os.path.isdir(ender):
+            self.add_agent(primary, "bdrEnd")
+        for tree in trees:
+            _age_admin_files(tree, minutes * 60)
+        return self.run_hook("bdrEnd", ender)
+
+    def last_row(self):
+        with open(os.path.join(self.cfg, "state", "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
+            return json.loads(handle.readlines()[-1])
+
+    @staticmethod
+    def tree_row(record, path):
+        for row in record.get("worktrees") or []:
+            if _norm_path(str(row.get("path", ""))) == _norm_path(path):
+                return row
+        return None
+
     def hold_cwd(self, folder):
         """A live process whose cwd is FOLDER. The test started it, so the test stops it."""
         proc = subprocess.Popen(["sleep", "120"], cwd=folder, stdin=subprocess.DEVNULL,
@@ -4454,7 +4477,7 @@ class BuildDirReapTests(unittest.TestCase):
         primary = self.make_primary("reap")
         wt = self.add_agent(primary, "bdrA")
         self.fill(wt)
-        self.run_hook("bdrA", wt)
+        self.later_end(primary, wt)
         for rel in BUILD_DIRS:
             with self.subTest(folder=rel):
                 self.assertFalse(os.path.exists(os.path.join(wt, rel)),
@@ -4465,7 +4488,7 @@ class BuildDirReapTests(unittest.TestCase):
         wt = self.add_agent(primary, "bdrA")
         self.fill(wt)
         self.fill(primary)
-        self.run_hook("bdrA", wt)
+        self.later_end(primary, wt)
         with self.subTest(control="agent worktree"):
             for rel in BUILD_DIRS:
                 self.assertFalse(os.path.exists(os.path.join(wt, rel)), "%s not reaped" % rel)
@@ -4481,7 +4504,7 @@ class BuildDirReapTests(unittest.TestCase):
         outside = os.path.join(self.root, "outside")
         write(os.path.join(outside, "keep.txt"), "not ours\n")
         os.symlink(outside, os.path.join(wt, ".build"))
-        self.run_hook("bdrA", wt)
+        self.later_end(primary, wt)
         with self.subTest(control="native/build"):
             self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
         with self.subTest(arm="link .build"):
@@ -4494,7 +4517,7 @@ class BuildDirReapTests(unittest.TestCase):
         wt = self.add_agent(primary, "bdrA")
         self.fill(wt)
         self.hold_cwd(os.path.join(wt, "DerivedData"))
-        self.run_hook("bdrA", wt)
+        self.later_end(primary, wt)
         with self.subTest(sibling="native/build and DegenKit/.build: a kept process keeps the worktree's builds"):
             self.assertTrue(os.path.isdir(os.path.join(wt, "native", "build")))
             self.assertTrue(os.path.isdir(os.path.join(wt, "DegenKit", ".build")))
@@ -4511,8 +4534,7 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(busy)
         self.fill(idle)
         self.hold_cwd(busy)
-        self.run_hook("bdrBusy", busy)
-        self.run_hook("bdrIdle", idle)
+        self.later_end(primary, busy, idle)
         with self.subTest(control="agent-bdrIdle with no process inside"):
             for rel in BUILD_DIRS:
                 self.assertFalse(os.path.exists(os.path.join(idle, rel)), "%s not reaped" % rel)
@@ -4529,8 +4551,7 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(other)
         write(os.path.join(self.cfg, "sessions", "bdr-live.json"),
               json.dumps({"pid": os.getpid(), "startedAt": this_process_start_ms(), "cwd": live}))
-        self.run_hook("bdrLive", live)
-        self.run_hook("bdrB", other)
+        self.later_end(primary, live, other)
         with self.subTest(control="agent-bdrB with no session"):
             for rel in BUILD_DIRS:
                 self.assertFalse(os.path.exists(os.path.join(other, rel)), "%s not reaped" % rel)
@@ -4543,7 +4564,7 @@ class BuildDirReapTests(unittest.TestCase):
         clean = self.make_primary("clean")
         clean_wt = self.add_agent(clean, "bdrOk")
         self.fill(clean_wt)
-        self.run_hook("bdrOk", clean_wt)
+        self.later_end(clean, clean_wt)
         with self.subTest(control="checkout with no janitor.json reaps the defaults"):
             for rel in BUILD_DIRS:
                 self.assertFalse(os.path.exists(os.path.join(clean_wt, rel)), "%s not reaped" % rel)
@@ -4553,7 +4574,7 @@ class BuildDirReapTests(unittest.TestCase):
                                             janitor=json.dumps({"buildDirs": bad}))
                 wt = self.add_agent(primary, "bdrBad")
                 self.fill(wt)
-                self.run_hook("bdrBad", wt)
+                self.later_end(primary, wt)
                 for rel in BUILD_DIRS:
                     self.assertTrue(os.path.isdir(os.path.join(wt, rel)),
                                     "%s deleted under a bad buildDirs value" % rel)
@@ -4564,7 +4585,7 @@ class BuildDirReapTests(unittest.TestCase):
         wt = self.add_agent(primary, "bdrA")
         self.fill(wt)
         self.fill(wt, ("Pods/Build", "Sub/scratch-out"))
-        self.run_hook("bdrA", wt)
+        self.later_end(primary, wt)
         with self.subTest(control="a default folder"):
             self.assertFalse(os.path.exists(os.path.join(wt, "native", "build")))
         with self.subTest(name="Pods/Build"):
@@ -4590,8 +4611,10 @@ class BuildDirReapTests(unittest.TestCase):
         def held_delete(*args, **kwargs):
             latch.wait(30)  # a delete made in the hook's own process waits here, so the hook hangs
 
-        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrR",
-                              "cwd": wt, "session_id": "bdr-cases"})
+        ender = self.add_agent(primary, "bdrEnd")
+        _age_admin_files(wt, 31 * 60)
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrEnd",
+                              "cwd": ender, "session_id": "bdr-cases"})
         worker = threading.Thread(target=self.reap.handle, args=(payload,), daemon=True)
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}), \
                 mock.patch.object(os, "rename", recorded(real_rename)), \
@@ -4620,7 +4643,9 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(os.path.dirname(trash), (os.path.basename(trash),))
         notes = os.path.join(wt, "notes-not-trash")
         write(os.path.join(notes, "keep.txt"), "not trash\n")
-        self.run_hook("bdrT", wt)
+        then = time.time() - 31 * 60  # an untracked file edited now would keep the whole tree
+        os.utime(os.path.join(notes, "keep.txt"), (then, then))
+        self.later_end(primary, wt)
         with self.subTest(arm="notes-not-trash"):
             self.assertTrue(os.path.isfile(os.path.join(notes, "keep.txt")),
                             "a name outside the trash pattern was deleted")
@@ -4635,11 +4660,236 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(os.path.dirname(free), (os.path.basename(free),))
         self.fill(os.path.dirname(live), (os.path.basename(live),))
         self.hold_cwd(live)
-        self.run_hook("bdrT", wt)
+        self.later_end(primary, wt)
         with self.subTest(sibling="leftover trash: a kept process keeps the worktree's trash"):
             self.assertTrue(os.path.isdir(free), "trash was deleted while a process ran in the worktree")
         with self.subTest(arm="leftover trash with a live cwd"):
             self.assertTrue(os.path.isdir(live), "a trash name with a live process inside was deleted")
+
+    def assert_all_kept(self, tree, why):
+        for rel in BUILD_DIRS:
+            self.assertTrue(os.path.isdir(os.path.join(tree, rel)), "%s removed: %s" % (rel, why))
+
+    def assert_all_reaped(self, tree):
+        for rel in BUILD_DIRS:
+            self.assertFalse(os.path.exists(os.path.join(tree, rel)), "%s not reaped" % rel)
+
+    def test_the_ending_agents_own_build_folders_are_kept_at_its_own_end(self):
+        # A finished agent is often resumed into its own tree, so its build folders wait for the
+        # tree's idle clock and a later agent end. The own tree is aged too, so only the own-tree
+        # rule can keep it.
+        primary = self.make_primary("own")
+        own, other = self.add_agent(primary, "bdrOwn"), self.add_agent(primary, "bdrOther")
+        self.fill(own)
+        self.fill(other)
+        _age_admin_files(own, 31 * 60)
+        _age_admin_files(other, 31 * 60)
+        self.run_hook("bdrOwn", own)
+        with self.subTest(control="another agent's tree idle 31 min is reaped"):
+            self.assert_all_reaped(other)
+        with self.subTest(arm="the ending agent's own tree"):
+            self.assert_all_kept(own, "the own tree's build folders were reaped at its own end")
+            row = self.tree_row(self.last_row(), own) or {}
+            self.assertNotIn("buildDirs", row, "the own row records a build reap")
+
+    def test_a_build_folder_in_a_tree_idle_under_30_minutes_is_kept(self):
+        primary = self.make_primary("recent")
+        recent, old = self.add_agent(primary, "bdrRecent"), self.add_agent(primary, "bdrOld")
+        self.fill(recent)
+        self.fill(old)
+        _age_admin_files(recent, 29 * 60)
+        self.later_end(primary, old)
+        with self.subTest(control="tree idle 31 min"):
+            self.assert_all_reaped(old)
+            self.assertTrue(self.tree_row(self.last_row(), old).get("buildDirs"),
+                            "the row for the reaped tree names no build folder")
+        with self.subTest(arm="tree idle 29 min"):
+            self.assert_all_kept(recent, "a tree idle 29 min lost its build folders")
+            self.assertIn("recently-active",
+                          str(self.tree_row(self.last_row(), recent).get("buildDirsKept")))
+
+    def test_a_live_host_agent_lock_does_not_keep_but_a_person_lock_does(self):
+        # The live host holds an agent lock on every agent tree all session, so that lock is no
+        # sign of activity. A person's lock, or any text that is not an agent lock, keeps.
+        primary = self.make_primary("locked")
+        hosted = self.add_agent(primary, "bdrHost")
+        person = self.add_agent(primary, "bdrPerson")
+        empty = self.add_agent(primary, "bdrEmpty")
+        for tree in (hosted, person, empty):
+            self.fill(tree)
+        start = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
+        reasons = {hosted: "claude agent agent-bdrHost (pid %d start %s)" % (os.getpid(), start),
+                   person: "held by a person for review"}
+        for tree, reason in reasons.items():
+            require(run_vcs(primary, "worktree", "lock", tree, "--reason", reason).returncode == 0,
+                    "lock of %s failed" % tree)
+        require(run_vcs(primary, "worktree", "lock", empty).returncode == 0, "lock of %s failed" % empty)
+        require(sweep.stale_agent_lock_verdict(reasons[hosted]) is False, "the host lock is not live")
+        self.later_end(primary, hosted, person, empty)
+        with self.subTest(arm="agent lock held by a live host, idle 31 min"):
+            self.assert_all_reaped(hosted)
+        with self.subTest(arm="a person's lock, idle 31 min"):
+            self.assert_all_kept(person, "a person's lock did not keep the build folders")
+        with self.subTest(arm="a lock with no reason, idle 31 min"):
+            self.assert_all_kept(empty, "a lock with no reason did not keep the build folders")
+
+    def test_an_uncommitted_edit_newer_than_30_minutes_keeps_the_build_folders(self):
+        # The admin-file idle clock misses edits that are not committed or staged. A builder that
+        # built, then edits sources for 35 minutes, must keep its build output.
+        primary = self.make_primary("edits")
+        edited, untracked, old = (self.add_agent(primary, n) for n in ("bdrEdit", "bdrNew", "bdrOldEdit"))
+        for tree in (edited, untracked, old):
+            self.fill(tree)
+        write(os.path.join(edited, "f.txt"), "edited 5 min ago\n")
+        then = time.time() - 5 * 60
+        os.utime(os.path.join(edited, "f.txt"), (then, then))
+        write(os.path.join(untracked, "Sources", "new", "x.swift"), "let x = 1\n")
+        write(os.path.join(old, "f.txt"), "edited 31 min ago\n")
+        then = time.time() - 31 * 60
+        os.utime(os.path.join(old, "f.txt"), (then, then))
+        self.later_end(primary, edited, untracked, old)
+        with self.subTest(control="tree whose last edit is 31 min old"):
+            self.assert_all_reaped(old)
+        with self.subTest(arm="tracked file edited 5 min ago, admin idle 31 min"):
+            self.assert_all_kept(edited, "a fresh uncommitted edit did not keep the build folders")
+            self.assertIn("recently-edited",
+                          str(self.tree_row(self.last_row(), edited).get("buildDirsKept")))
+        with self.subTest(arm="new untracked folder written now, admin idle 31 min"):
+            self.assert_all_kept(untracked, "a fresh untracked file did not keep the build folders")
+
+    def test_a_tracked_file_deleted_5_minutes_ago_keeps_the_build_folders(self):
+        # A deletion leaves no file to stat; it moves its parent folder's own mtime.
+        primary = self.make_primary("deleted")
+        gone, quiet = self.add_agent(primary, "bdrGone"), self.add_agent(primary, "bdrQuietDel")
+        self.fill(gone)
+        self.fill(quiet)
+        old = time.time() - 40 * 60  # every file left in the tree is old: only the deletion is fresh
+        for dirpath, _dirs, files in os.walk(gone):
+            for name in files:
+                os.utime(os.path.join(dirpath, name), (old, old))
+        os.remove(os.path.join(gone, "f.txt"))
+        then = time.time() - 5 * 60
+        os.utime(gone, (then, then))
+        self.later_end(primary, gone, quiet)
+        with self.subTest(control="tree with no edit"):
+            self.assert_all_reaped(quiet)
+        with self.subTest(arm="tracked file deleted 5 min ago, admin idle 31 min"):
+            self.assert_all_kept(gone, "a fresh deletion did not keep the build folders")
+
+    def test_show_untracked_files_no_cannot_hide_a_fresh_file(self):
+        # A repository setting must not hide new files from the edit clock.
+        primary = self.make_primary("hidden")
+        run_vcs(primary, "config", "status.showUntrackedFiles", "no")
+        hidden, quiet = self.add_agent(primary, "bdrHidden"), self.add_agent(primary, "bdrQuietHid")
+        self.fill(hidden)
+        self.fill(quiet)
+        write(os.path.join(hidden, "Sources", "new file \u00e9.swift"), "let x = 1\n")
+        self.later_end(primary, hidden, quiet)
+        with self.subTest(control="tree with no edit"):
+            self.assert_all_reaped(quiet)
+        with self.subTest(arm="fresh untracked file under showUntrackedFiles=no"):
+            self.assert_all_kept(hidden, "a hidden untracked file did not keep the build folders")
+
+    def test_edit_idle_keeps_on_an_unreadable_stat_or_a_spent_deadline(self):
+        primary = self.make_primary("failsafe")
+        tree = self.add_agent(primary, "bdrSafe")
+        write(os.path.join(tree, "f.txt"), "edited\n")
+        write(os.path.join(tree, "Sources", "x.swift"), "let x = 1\n")
+        later = time.monotonic() + 60
+        self.assertIsNotNone(self.reap.edit_idle(tree, later), "control: a readable tree reads")
+        real = os.lstat
+
+        def refused(target, *args, **kwargs):
+            if os.path.basename(str(target)) == "f.txt":
+                raise PermissionError(13, "refused", target)
+            return real(target, *args, **kwargs)
+
+        with self.subTest(arm="an unreadable stat"), mock.patch.object(os, "lstat", new=refused):
+            self.assertIsNone(self.reap.edit_idle(tree, later))
+        with self.subTest(arm="a walk past the deadline"):
+            self.assertIsNone(self.reap.edit_idle(tree, time.monotonic() - 1))
+
+    def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
+        # A build that starts after the hook's first process read must still keep its folders.
+        primary = self.make_primary("late-build")
+        late, quiet = self.add_agent(primary, "bdrLateBuild"), self.add_agent(primary, "bdrQuiet")
+        ender = self.add_agent(primary, "bdrEnd")
+        self.fill(late)
+        self.fill(quiet)
+        _age_admin_files(late, 31 * 60)
+        _age_admin_files(quiet, 31 * 60)
+        real = self.reap._decide
+
+        def then_start_build(target):
+            answer = real(target)
+            self.hold_cwd(late)  # the build's cwd is the worktree root
+            return answer
+
+        with mock.patch.object(self.reap, "_decide", new=then_start_build):
+            record = self.run_in_process(ender)
+        with self.subTest(control="tree with no process"):
+            self.assert_all_reaped(quiet)
+        with self.subTest(arm="build started after the first process read"):
+            self.assert_all_kept(late, "a build started during the hook lost its folders")
+            self.assertEqual(self.tree_row(record, late).get("buildDirsKept"), "process-in-worktree")
+
+    def test_the_idle_read_comes_before_git_status_rewrites_the_index(self):
+        # A tracked file with a changed mtime but the same content makes `git status` refresh and
+        # rewrite the index, so an idle read after the decision would see the tree as active.
+        primary = self.make_primary("order")
+        tree = self.add_agent(primary, "bdrOrder")
+        self.fill(tree)
+        then = time.time() - 40 * 60
+        os.utime(os.path.join(tree, "f.txt"), (then, then))
+        self.later_end(primary, tree)
+        self.assert_all_reaped(tree)
+
+    def run_in_process(self, ender):
+        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrEnd",
+                              "cwd": ender, "session_id": "bdr-cases"})
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}):
+            return self.reap.handle(payload)
+
+    def test_an_unreadable_idle_read_keeps_the_build_folders(self):
+        primary = self.make_primary("unread")
+        blind, seen = self.add_agent(primary, "bdrBlind"), self.add_agent(primary, "bdrSeen")
+        ender = self.add_agent(primary, "bdrEnd")
+        self.fill(blind)
+        self.fill(seen)
+        _age_admin_files(blind, 31 * 60)
+        _age_admin_files(seen, 31 * 60)
+        real = sweep.worktree_idle_seconds
+
+        def blind_idle(path, now=None):
+            return None if _norm_path(path) == _norm_path(blind) else real(path, now)
+
+        with mock.patch.object(sweep, "worktree_idle_seconds", new=blind_idle):
+            record = self.run_in_process(ender)
+        with self.subTest(control="readable tree idle 31 min"):
+            self.assert_all_reaped(seen)
+        with self.subTest(arm="tree whose idle read fails"):
+            self.assert_all_kept(blind, "an unreadable idle read did not keep the build folders")
+            self.assertIn("unreadable", str(self.tree_row(record, blind).get("buildDirsKept")))
+
+    def test_a_tree_the_hook_budget_does_not_reach_keeps_its_build_folders(self):
+        primary = self.make_primary("budget")
+        tree = self.add_agent(primary, "bdrLate")
+        ender = self.add_agent(primary, "bdrEnd")
+        self.fill(tree)
+        _age_admin_files(tree, 31 * 60)
+        real = sweep.decide_agent_end_worktree
+
+        def slow(*args, **kwargs):
+            # The tree's decision ends past the stage deadline, so its build pass is not reached.
+            decision = real(*args, **kwargs)
+            time.sleep(1.2)
+            return decision
+
+        with mock.patch.object(self.reap, "WORKTREE_SECONDS", 1), \
+                mock.patch.object(sweep, "decide_agent_end_worktree", new=slow):
+            record = self.run_in_process(ender)
+        self.assert_all_kept(tree, "a tree past the stage deadline lost its build folders")
+        self.assertEqual(self.tree_row(record, tree).get("buildDirsKept"), "budget")
 
     # The hook keeps every build folder when any process sits in the worktree, so the per-folder
     # cwd check in reap_build_dirs is only reachable by calling it with the cwds list directly.

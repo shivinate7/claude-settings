@@ -18,12 +18,16 @@ A process is stopped only when all of these answer a confirmed yes:
 
 Any read that cannot tell means keep. One signal, by pid, through `sweep.send_signal`.
 
-Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): when the checks above hold for the whole
-worktree, the reap also renames each build folder (`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to
-a sibling trash name, then starts a detached child that deletes the trash. The hook never waits for
-the child. Every build folder stays while the reap keeps any process in the worktree. A folder with
-a process cwd inside, a link, or any unreadable read stays. A later reap
-deletes trash names a child left.
+Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): the ending agent's own tree keeps
+its build folders, since a finished agent is often resumed there. A later agent end reaps them once the
+tree is idle 30 minutes. The worktree stage gives each other `.claude/worktrees/agent-*` tree it keeps a
+build pass when that tree and its newest uncommitted change are idle AGENT_END_IDLE_SECONDS or more,
+it holds no lock other than a Claude agent lock, has no live session, and no process has a cwd anywhere in it (`build_keep`). A build runs from the worktree root,
+so a cwd check on the folder alone is not enough. The pass renames each build folder
+(`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to a sibling trash name, then starts a detached child that
+deletes the trash, and leftover trash names go with it. The hook never waits for the child. A folder
+with a process cwd inside, a link, or any unreadable read stays. A tree the stage deadline does not
+reach keeps its folders. A tree the stage removes whole needs no pass.
 
 Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the checks above hold for the whole worktree,
 the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
@@ -171,40 +175,53 @@ def tree_root_orphaned(pid: int, target: str, cwd_of=None):
 
 def decide(target: str):
     """Return (reason, decisions). REASON is set when nothing in TARGET may be touched."""
-    reason, decisions, _ = _decide(target)
-    return reason, decisions
+    return _decide(target)
 
 
-def _decide(target: str):
-    """`decide` plus the cwd of every process read, for the build-folder check."""
-    primary = sweep._is_primary_checkout(target)
-    if primary is None:
-        return "unreadable-subject", [], []
-    if primary:
-        return "primary-checkout", [], []
-    live = git_reads.worktree_live_session(target)
-    if live is None:
-        return "unreadable-subject", [], []
-    if live:
-        return "live-session", [], []
+def cwd_reader(timeout=BATCH_TIMEOUT):
+    """`(pids, cwd_of)` for every process but this one, or None when the enumeration failed.
+    CWD_OF(pid) is that pid's cwd, or None when its own read failed."""
     pids = sweep.list_all_pids()
     if pids is None:
-        return "unreadable-subject", [], []
+        return None
     cwd_of = sweep.process_cwd
     if sys.platform == "darwin":
         # One `lsof` for every pid: 1,300 per-pid reads at 27 ms overran the 60 s hook limit.
         # A failed batch keeps everything; it never falls back to per-pid reads.
-        table = sweep._read_all_cwds_macos(BATCH_TIMEOUT)
+        table = sweep._read_all_cwds_macos(timeout)
         if table is None:
-            return "unreadable-subject", [], []
+            return None
         cwd_of = sweep._first_cwd_by_pid(table).get
-    decisions, cwds = [], []
+    return [pid for pid in pids if pid != os.getpid()], cwd_of
+
+
+def all_cwds(timeout=BATCH_TIMEOUT):
+    """Every readable process cwd, or None when the enumeration failed."""
+    read = cwd_reader(timeout)
+    if read is None:
+        return None
+    pids, cwd_of = read
+    return [cwd for cwd in map(cwd_of, pids) if cwd is not None]
+
+
+def _decide(target: str):
+    primary = sweep._is_primary_checkout(target)
+    if primary is None:
+        return "unreadable-subject", []
+    if primary:
+        return "primary-checkout", []
+    live = git_reads.worktree_live_session(target)
+    if live is None:
+        return "unreadable-subject", []
+    if live:
+        return "live-session", []
+    read = cwd_reader()
+    if read is None:
+        return "unreadable-subject", []
+    pids, cwd_of = read
+    decisions = []
     for pid in pids:
-        if pid == os.getpid():
-            continue
         cwd = cwd_of(pid)
-        if cwd is not None:
-            cwds.append(cwd)
         if cwd is None or not sweep._cwd_under_checkout(cwd, target):
             continue
         base = {"pid": pid, "cwd": cwd, "command": sweep.process_command(pid)}
@@ -223,7 +240,7 @@ def _decide(target: str):
             decisions.append(dict(base, action="keep", reason="not-current-user"))
             continue
         decisions.append(dict(base, action="reap", reason="agent-ended"))
-    return None, decisions, cwds
+    return None, decisions
 
 
 BUILD_SCAN_SECONDS = 20  # the scan stops here and keeps the rest; the hook's own limit is 60
@@ -241,17 +258,19 @@ DELETE_CHILD = ("import os, shutil, stat, sys\n"
 trash_name, is_trash_name = sweep.trash_name, sweep.is_trash_name  # one home: sweep.py
 
 
-def reap_build_dirs(target: str, cwds):
+def reap_build_dirs(target: str, cwds, stop_at=None):
     """Rename each proven build folder in TARGET to a trash name, then start one detached child
     that deletes those and every leftover trash name. Returns the folders renamed. The caller has
-    proven the worktree checks; this proves the folder checks: no link, no process cwd inside."""
+    proven the worktree checks; this proves the folder checks: no link, no process cwd inside. The
+    scan stops at BUILD_SCAN_SECONDS or at STOP_AT (a `time.monotonic` time), whichever is first."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     names = sweep.build_dir_names(sweep.read_optout(root))
     if names is None:  # bad file: nothing, defaults included
         return []
     if sweep.is_link(target):  # a link as the worktree would send the rename and delete elsewhere
         return []
-    builds, trash = sweep.scan_worktree(target, names, time.monotonic() + BUILD_SCAN_SECONDS)
+    stop = time.monotonic() + BUILD_SCAN_SECONDS
+    builds, trash = sweep.scan_worktree(target, names, stop if stop_at is None else min(stop, stop_at))
 
     def busy(folder):
         return any(sweep._cwd_under_checkout(c, folder) for c in cwds)
@@ -285,12 +304,141 @@ HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook s
 OWN_TREE_REASON = "own tree: kept for 30 idle min"  # decision when-a-worktree-may-be-removed (own tree waits 30 idle min); a later agent end removes it
 
 
+def _skipped(rel: str, names) -> bool:
+    """True when REL (a path under the tree, `/`-separated) is inside a build folder or trash name."""
+    parts = rel.strip("/").split("/")
+    return any(p in names or sweep.is_trash_name(p) for p in parts) or any(
+        rel.strip("/") == n or rel.startswith(n + "/") for n in names if "/" in n)
+
+
+def _newest_under(folder: str, path: str, names, deadline: float):
+    """Newest mtime of the files under FOLDER (None when it holds none), links not followed, build
+    folders and trash names skipped. Folder mtimes do not count: creating a build folder moves its
+    parent's. Raises OSError when a read failed or DEADLINE (a `time.monotonic` time) cut the walk."""
+    failed, newest = [], None
+    for dirpath, dirnames, filenames in os.walk(folder, onerror=failed.append):
+        if time.monotonic() > deadline:
+            raise OSError("walk cut short by the deadline")
+        rel = os.path.relpath(dirpath, path).replace(os.sep, "/")
+        dirnames[:] = [d for d in dirnames if d != ".git" and not _skipped(rel + "/" + d, names)]
+        for name in filenames:
+            found = os.lstat(os.path.join(dirpath, name)).st_mtime
+            newest = found if newest is None else max(newest, found)
+    if failed:
+        raise failed[0]
+    return newest
+
+
+def changed_paths(path: str):
+    """The paths `git status` lists as changed or untracked in PATH, relative and `/`-separated, or
+    None when it cannot be read. `-z` gives each path exactly, with no quoting. `--untracked-files=normal`
+    overrides the repository's `status.showUntrackedFiles`, so untracked files always show; a
+    folder of only untracked files shows as the folder."""
+    answer = git_reads._git(path, "status", "--porcelain", "-z", "--untracked-files=normal")
+    if answer is None or answer.returncode != 0:
+        return None
+    fields, paths = answer.stdout.split("\0"), []
+    rename_source = False
+    for field in fields:
+        if rename_source:  # `-z` puts a rename's source path in the next field
+            rename_source = False
+            continue
+        if len(field) < 4:
+            continue
+        paths.append(field[3:])
+        rename_source = field[0] in "RC"
+    return paths
+
+
+def _lstat_or_missing(full: str):
+    """`os.lstat(FULL)`, or None when FULL does not exist. Any other failure raises: an unreadable
+    path is never read as deleted."""
+    try:
+        return os.lstat(full)
+    except FileNotFoundError:
+        return None
+
+
+def edit_idle(path: str, deadline: float):
+    """Seconds since the newest change among the changed and untracked paths of PATH, or None when
+    a read failed or DEADLINE (a `time.monotonic` time) cut a walk short. The admin-file idle clock
+    misses edits that are not committed or staged. A file counts by its own mtime, an untracked
+    folder by the newest file under it. A deleted path counts by the own mtime of its nearest
+    existing parent folder, since the delete moved it. Build folders and trash names are skipped.
+    `git status` touches no working-tree mtime, so this read may follow it. No such path: infinity."""
+    rels = changed_paths(path)
+    if rels is None:
+        return None
+    names = sweep.build_dir_names(sweep.read_optout(
+        os.path.dirname(os.path.dirname(os.path.dirname(path))))) or set(sweep.DEFAULT_BUILD_DIRS)
+    newest = None
+    try:
+        for rel in rels:
+            if _skipped(rel, names):
+                continue
+            full = os.path.join(path, rel.rstrip("/"))
+            info = _lstat_or_missing(full)
+            if info is None:  # a deleted path: the own mtime of its nearest existing parent
+                while info is None and os.path.dirname(full) != full:
+                    full = os.path.dirname(full)
+                    info = _lstat_or_missing(full)
+                if info is None:
+                    return None
+                found = info.st_mtime
+            elif os.path.isdir(full) and not sweep.is_link(full):
+                found = _newest_under(full, path, names, deadline)
+            else:
+                found = info.st_mtime
+            if found is not None:
+                newest = found if newest is None else max(newest, found)
+    except OSError:
+        return None
+    return float("inf") if newest is None else time.time() - newest
+
+
+def build_keep(entry: dict, idle, deadline: float):
+    """`(reason, cwds)`: why the other agent tree ENTRY keeps its build folders (None when every
+    check gives a confirmed yes), and every process cwd read for the pass. IDLE is the tree's
+    admin-file idle read, taken before any `git status`. The cwds are read last, after the edit
+    walk, so a build started during the hook keeps. The reap stops no process in this tree, so any
+    process with a cwd anywhere in it keeps every folder: a build runs from the worktree root."""
+    path = entry["path"]
+    if idle is None:
+        return "unreadable-subject: idle", None
+    if idle < sweep.AGENT_END_IDLE_SECONDS:
+        return "recently-active: git activity %d minutes ago" % (idle // 60), None
+    # The live host holds an agent lock on every agent tree all session, so that lock says nothing
+    # about activity. Any other lock (a person's, empty or unknown text) keeps.
+    holder = entry.get("locked_reason")
+    if holder is not None and not sweep.AGENT_LOCK_RE.match(holder):
+        return "locked: %s" % (holder or "locked"), None
+    live = git_reads.worktree_live_session(path)
+    if live is None:
+        return "unreadable-subject: session", None
+    if live:
+        return "live-session", None
+    edited = edit_idle(path, deadline)
+    if edited is None:
+        return "unreadable-subject: edits", None
+    if edited < sweep.AGENT_END_IDLE_SECONDS:
+        return "recently-edited: newest uncommitted change %d minutes ago" % (edited // 60), None
+    cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))
+    if cwds is None:
+        return "unreadable-subject: processes", None
+    if any(sweep._cwd_under_checkout(c, path) for c in cwds):
+        return "process-in-worktree", cwds
+    return None, cwds
+
+
 def reap_worktrees(target: str, deadline: float):
-    """Keep TARGET (the ending agent's own worktree; a later agent end removes it once idle) and remove
-    every other finished `.claude/worktrees/agent-*` worktree of its repository, idle 30 minutes or
-    more, that `sweep.decide_agent_end_worktree` clears. Returns one row for TARGET, one per other
-    tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""
-    rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON}]
+    """Keep TARGET (the ending agent's own worktree and its build folders; a later agent end removes
+    them once idle) and remove every other finished `.claude/worktrees/agent-*` worktree of its
+    repository, idle 30 minutes or more, that `sweep.decide_agent_end_worktree` clears. Each other
+    tree it keeps gets a build pass when `build_keep` clears it. Returns one row for TARGET, one per
+    other tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short. A tree's row carries `buildDirs` (folders renamed)
+    or `buildDirsKept` (why not)."""
+    rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON,
+             "buildDirsKept": OWN_TREE_REASON}]
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     entries = sweep.parse_worktree_list(root)
     if entries is None:
@@ -304,9 +452,19 @@ def reap_worktrees(target: str, deadline: float):
             if time.monotonic() > deadline:
                 rows.append({"action": "keep", "reason": "budget: %d trees not reached" % (len(queue) - done)})
                 break
+            # Idle is read once, before `git status` in the decision can rewrite the index.
+            entry = dict(entry, idle=sweep.worktree_idle_seconds(entry["path"]))
             decision = sweep.decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)
             if decision["action"] == "reap":
                 sweep.remove_worktree(root, entry["path"], decision)
+            elif time.monotonic() > deadline:
+                decision["buildDirsKept"] = "budget"
+            else:
+                kept, cwds = build_keep(entry, entry["idle"], deadline)
+                if kept:
+                    decision["buildDirsKept"] = kept
+                else:
+                    decision["buildDirs"] = reap_build_dirs(entry["path"], cwds, deadline)
             rows.append(decision)
     finally:
         sweep._LIVE_HEADS = None
@@ -324,19 +482,13 @@ def handle(raw: str, started=None):
     record = {"raw": raw, "target": target}
     if not target:
         return record
-    reason, decisions, cwds = _decide(target)
+    reason, decisions = _decide(target)
     for decision in decisions:
         if decision["action"] == "reap":
             decision["signalled"] = sweep.send_signal(decision["pid"])
     # claudePid: whether the harness sets CLAUDE_PID in a SubagentStop hook's env is not measured.
     record.update(reason=reason, decisions=decisions, claudePid=os.environ.get("CLAUDE_PID"))
     if reason is None:
-        # A build runs from the worktree root (xcodebuild, swift build), not from inside the folder
-        # it writes. Any process the reap keeps in the worktree means a build may be writing.
-        if any(d["action"] != "reap" for d in decisions):
-            record["buildDirs"], record["buildDirsKept"] = [], "process-in-worktree"
-        else:
-            record["buildDirs"] = reap_build_dirs(target, cwds)
         now = time.monotonic()
         deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
         record["worktrees"] = reap_worktrees(target, deadline)

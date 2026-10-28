@@ -17,6 +17,8 @@ GitHub's branch protection setting is the owner's to change. It may still hold t
   `ssemwal-cdc` has push, not admin.
 - Before every merge, read the checks yourself and refuse on red. The `merge` tool reads its checks
   from `stamp.json`.
+- Owner ruling, 2026-10-28 (waiting-page item 33 a): a rename of required checks switches branch
+  protection in the merge act. The owner switches it, then the batch merges at once.
 
 Reason: agent rules alone did not stop red merges.
 

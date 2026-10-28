@@ -805,12 +805,15 @@ class Host:
     def classify(got, names, ignore=None, branch="<branch>"):
         """-> (red, pending, ignored). Every check on the head counts, required or not. Red: any bucket
         that is not pass, skipping or pending (fail, cancel, and any bucket gh adds later: closed).
+        A cancel entry is dropped when another entry of that name is pass or pending (another run ran; concurrency cancels one of two
+        same-head runs; a cancel beside only a skip or alone stays red; a fail or timeout is never dropped).
         Also red: a head with entries where none is pass or pending (all skipping): no check ran on it,
         unless something is pending. `branch` fills the remedy's `--ref`.
         Pending: a pending entry, or a required name with no entry. `ignore` maps a name to its reason:
         those checks are left out of red and pending, and named in `ignored`."""
         ignore = ignore or {}
         live = {k: rows for k, rows in got.items() if k not in ignore or k in names}
+        live = {k: ([r for r in rows if r[0] != "cancel"] if any(r[0] in ("pass", "pending") for r in rows) else rows) for k, rows in live.items()}
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
