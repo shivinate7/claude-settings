@@ -10,7 +10,7 @@ value. Ruling: record ux-house-rules (house UX rules). Owner ruling, 2026-10-11.
 - Space tokens are `--space-N`, where step N is N x 4 px. `--space-2` is 8 px.
 - Corner radius is 8 px.
 
-Seen in: banchi, q_max, degen spec, sillage, feed-build, home-app.
+Seen in: banchi, q_max, degen spec, sillage, feed-build, home.
 
 ## Fluid tokens
 
@@ -36,15 +36,15 @@ A size that grows with its box is a clamp() token. Rules: `layout.md` ux-fluid-t
 - Each color has a role name, such as surface, text or accent. Never name a color by its hue.
 - Colors come in a light set and a dark set.
 
-Seen in: banchi, feed-build, home-app, tcg-dealer, sillage.
+Seen in: banchi, feed-build, home, tcg-dealer, sillage.
 
 ## Font and navigation
 
 - App chrome uses the system font. Brand fonts appear only in content.
 - On a phone, navigation uses a bottom tab bar.
 
-Seen in, system font: feed-build, degen, tcg-dealer, home-app, joyous.
-Seen in, bottom tab bar: sillage, degen spec, feed-build, home-app iOS.
+Seen in, system font: feed-build, degen, tcg-dealer, home, joyous.
+Seen in, bottom tab bar: sillage, degen spec, feed-build, home iOS.
 
 ## Not a default
 

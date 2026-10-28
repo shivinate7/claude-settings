@@ -7,7 +7,7 @@ agents, and both run Opus.
 
 - The designer (`agents/designer.md`) runs before the builder. It draws one HTML mockup per changed
   screen, with a notes file, in the repo's design folder (the `design` kind in `lint/layout.json`).
-  home-app's `docs/design/` is the working pattern.
+  home's `docs/design/` is the working pattern.
 - The builder builds to the step's mockup when one exists (`agents/builder.md`).
 - The design reviewer (`agents/design-reviewer.md`) runs after the build. It judges each built screen
   against the mockup and the repo's design rules, at every size and theme, with a verdict per screen.

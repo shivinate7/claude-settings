@@ -14,8 +14,7 @@
     "min_saturation": 0.2,
     "drawn": [
       "ios-adblock",
-      "adblock-lists",
-      "home"
+      "adblock-lists"
     ]
   },
   "retired": {
@@ -23,7 +22,6 @@
   },
   "sources": {
     "claude-settings": "skills/waiting-page/page.html, the template's amber",
-    "home-app": "web/style.css, --accent",
     "banchi": "app/src/tokens.css, --bn-accent",
     "q_max": "src/index.css, --color-aq-accent (Compass Orange)",
     "degen": "app icon hair crimson, owner pick 2026-10-27",
@@ -31,11 +29,10 @@
     "joyous": "src/layouts/Base.astro, --green",
     "ios-adblock": "drawn from the name; no colour of its own found",
     "adblock-lists": "drawn from the name; no colour of its own found",
-    "home": "drawn from the name; no colour of its own found"
+    "home": "web/style.css, --accent"
   },
   "repos": {
     "claude-settings": "#b45f06",
-    "home-app": "#0a84ff",
     "banchi": "#3d5af1",
     "q_max": "#f47820",
     "degen": "#a82830",
@@ -43,6 +40,6 @@
     "joyous": "#27553f",
     "ios-adblock": "#9e2e75",
     "adblock-lists": "#519e2e",
-    "home": "#8f9e2e"
+    "home": "#0a84ff"
   }
 }
