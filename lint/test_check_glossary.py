@@ -391,7 +391,7 @@ class CodeNameTests(Fixture):
         self.red("bin/x.sh", "echo don't\nbundle=1\n", "bin/x.sh:2")
 
 
-    # Reviewer round 1: false alarms and misses of the first scanner
+    # False alarms and misses that a scanner built from one regex per language would have
 
     def test_a_term_that_holds_a_not_word_passes(self):
         self.green("hooks/x.py", "safety_hole = 1\nclass SafetyHole:\n    pass\nM = 'This is a safety hole.'\n")
