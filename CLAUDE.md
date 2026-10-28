@@ -10,7 +10,7 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
 - To file: `git fetch origin roadmap`, work on a checkout of `roadmap` (a worktree is fine), edit,
   run `python roadmap/build.py`, commit the JSON and roadmap/roadmap.html, `git push origin roadmap`.
   Then republish roadmap/roadmap.html to the roadmap page,
-  https://claude.ai/artifact/R3iCpK91QRjC5he8bwfY7m (Artifact tool, same URL).
+  https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h (Artifact tool, same URL).
 - Other threads file here too. Pull right before each write. If roadmap.html conflicts on a pull,
   run build.py again rather than merging it by hand.
 - Briefs go in briefs/, plans in plans/, hand-off notes in handoffs/. A brief's full text also
