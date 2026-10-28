@@ -331,9 +331,9 @@ def _newest_under(folder: str, path: str, names, deadline: float):
 
 def changed_paths(path: str):
     """The paths `git status` lists as changed or untracked in PATH, relative and `/`-separated, or
-    None when it cannot be read. `-z` gives each path exactly, with no quoting. Untracked files show
-    whatever the repository's `status.showUntrackedFiles` says; a folder of only untracked files
-    shows as the folder."""
+    None when it cannot be read. `-z` gives each path exactly, with no quoting. `--untracked-files=normal`
+    overrides the repository's `status.showUntrackedFiles`, so untracked files always show; a
+    folder of only untracked files shows as the folder."""
     answer = git_reads._git(path, "status", "--porcelain", "-z", "--untracked-files=normal")
     if answer is None or answer.returncode != 0:
         return None
