@@ -1,3 +1,5 @@
 # Triage (11) state, Oct 28
 
 - Note to land in docs/debts/notes.md on main (orchestrator, Oct 28 07:49 CDT; a note, not a debt, unless it repeats): the lint gate (`ci-job gates --lint --base origin/main`) passed on c122's head 1ea8c877 but failed STE001 at docs/debts/notes.md:606 on the batch 9 tree (main 26a539ff plus lanes). Cause unmeasured; one guess is a stale origin/main in the lane, so the changed-line set differed. Fixed in the lane at 5e302879.
+- Incident against rule shared-trees-one-checkout-per-agent (one checkout per concurrent agent), not a new rule (orchestrator, Oct 28 07:58 CDT): in c179's lane two builders shared one branch, and a stale index dropped install.sh's hunk inside d99be389; 23b4ff58 restored it byte-for-byte. Land it where that rule's incidents are logged on main.
+- Note for docs/debts/notes.md, c179 (orchestrator, Oct 28 07:58 CDT), slug cloud-pipx-pep668: a PEP 668 python3 image would refuse c179's `pip install pipx` in install.sh --cloud. Today's cloud image does not. A debt only if the image changes.
