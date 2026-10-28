@@ -552,6 +552,12 @@ class LintTools(Job):
                                                          step("pinned", "pipx run zizmor==1.0 .")))
         self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines], ["pinned"], out)
 
+    def test_a_session_github_token_does_not_reach_a_step(self):
+        rc, lines, out = self.run_job(step("offline", 'test -z "$GH_TOKEN$GITHUB_TOKEN"'),
+                                      step("mapped", 'test "$GH_TOKEN" = set', env={"GH_TOKEN": "set"}),
+                                      env={"GH_TOKEN": "session", "GITHUB_TOKEN": "session"})
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+
     def test_an_unknown_local_action_under_lint_is_one_unknown_line(self):
         rc, lines, out = self.run_job(step("New check", uses="$/actions/new-check"),
                                       args=("--lint", "--base", "origin/main"))

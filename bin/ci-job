@@ -18,7 +18,8 @@
 # Workflow: .github/workflows/gates.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
-# Multi-line `run: |` steps run whole. Verdicts: PASS, FAIL, unknown (tool missing, or an expression it
+# GH_TOKEN and GITHUB_TOKEN are unset unless the step's env: sets them, as on the runner (a session token would
+# turn zizmor's offline audits online). Multi-line `run: |` steps run whole. Verdicts: PASS, FAIL, unknown (tool missing, or an expression it
 # cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no base).
 # A step's `if:` reads every needs.scope.outputs flag as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
@@ -138,6 +139,7 @@ def missing_in_log(log, start, script):
 
 LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed|pipx run [\w.-]+==[\w.]+)"
                       r"(?: [^|&;`<>]*)?")
+RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN"}  # absent from a runner step's env unless its env: maps them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check)(?:@\S*)?")
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
 CODE_CHECK = os.path.join(os.path.dirname(BIN), "actions", "code-check", "code_check.py")
@@ -295,7 +297,8 @@ def main(argv):
             start = os.path.getsize(log) if os.path.exists(log) else 0
             done = _nowindow.run([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                                  cwd=os.path.join(top, cwd) if cwd else top, capture_output=True, text=True,
-                                 env={**os.environ, **env, "VERDICT_LOG": log})
+                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET},
+                                      **env, "VERDICT_LOG": log})
             gone = missing_in_log(log, start, script)
             unstarted = could_not_start(log, start) if known_action(step) == "code-check" else []
         finally:
