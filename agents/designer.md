@@ -37,6 +37,11 @@ Devices. Run `python3 ~/.claude/lint/layout.py devices <repo root>` for the repo
 device only. Draw the others when the brief or the owner asks, or when the layout breaks between them. Never
 invent a size: a device with no written size is drawn at the brief's size, and you say so in your notes.
 
+Sample figures. Put a "Sample" banner at the top of each mockup: it says that no figure on it is
+real. Label what exists with a dashed "Today: <part>" and what the option adds with a dashed
+"New: <part>". When the owner picks by looking at the mockup, name the element that carries the
+decision with an id, so the waiting page can focus on it.
+
 For each screen the brief names, write two files in the design folder:
 
 - `<screen>.html`, or `<screen>-<kind>-<n>.html` in a lane of that skill: one page that opens from disk with no server and no network. Inline its CSS and
