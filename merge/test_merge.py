@@ -919,6 +919,145 @@ class Guards(Env):
             os.environ.update(keep)
             merge.drop_worktree(self.co, tmp, wt)
 
+SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
+GATES_YML = ("name: gates\non: pull_request\njobs:\n  gates:\n    runs-on: ubuntu-latest\n    steps:\n"
+             "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n")
+SLUG_LINT = '''import collections, os, re, sys
+seen = collections.defaultdict(list)
+for d, _, names in os.walk("docs"):
+    for n in names:
+        if n.endswith(".md"):
+            m = re.search(r"^slug: (.+)$", open(os.path.join(d, n), encoding="utf-8").read(), re.M)
+            if m:
+                seen[m.group(1)].append(n)
+bad = {k: v for k, v in seen.items() if len(v) > 1}
+print(bad or "ok")
+sys.exit(1 if bad else 0)
+'''
+DOC_SUITE = '''import os, sys
+bad = [n for d, _, ns in os.walk("docs") for n in ns if "BROKEN" in open(os.path.join(d, n), encoding="utf-8").read()]
+sys.exit(1 if bad else 0)
+'''
+
+class SmallBaseMove(Env):
+    """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
+    The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `gates` job holds one cross-file lint:
+    no two docs share a slug. hooks/test_blind_brief.py stands in for a gates suite that reads tracked docs."""
+
+    def scoped(self, workflow=GATES_YML, scope=True):
+        """Main and feat both gain the CI files; feat then holds main's tip."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if scope:
+            with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+                put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+        put(os.path.join(o, ".github/workflows/gates.yml"), workflow)
+        put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
+        put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
+        put(os.path.join(o, "hooks/test_blind_brief.py"), DOC_SUITE)
+        put(os.path.join(o, "hooks/x.py"), "X = 1\n")
+        put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def on(self, branch, files):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
+
+    def refused(self):
+        self.host.merged = False
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not hold origin/main", out)
+        self.assertIn("Merge main into the branch", out)
+        self.assertFalse(self.host.merged, out)
+        return out
+
+    def test_a_docs_only_main_move_keeps_the_green_run(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertNotIn("does not hold", out)
+        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
+        self.assertIn("# Guide", self.show("main", "docs/guide.md"))
+
+    def test_a_docs_only_move_during_the_wait_keeps_the_green_run(self):
+        self.scoped()
+        self.host.on_wait = lambda: self.on("main", {"docs/late.md": "# Late\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+
+    def test_the_preview_says_a_docs_only_move_keeps_the_green_run(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        rc, out = self.run_merge("7")
+        self.assertIn("base:   main moved by 1 commit touching only paths no job of this batch reads", out)
+        self.assertNotIn("BEHIND", out)
+
+    def test_main_touching_a_file_of_the_batch_is_refused(self):
+        self.scoped()
+        self.on("feat", {"docs/shared.md": "one changed\ntwo\nthree\nfour\nfive\n"})
+        self.on("main", {"docs/shared.md": "one\ntwo\nthree\nfour\nfive changed\n"})  # merges clean, but one path
+        self.assertIn("docs/shared.md", self.refused())
+
+    def test_a_conflicting_main_move_is_refused(self):
+        self.scoped()
+        self.on("feat", {"docs/shared.md": "one\nfeat\n"})
+        self.on("main", {"docs/shared.md": "one\nmain\n"})
+        self.refused()
+
+    def test_main_touching_a_code_path_is_refused(self):
+        self.scoped()
+        self.on("main", {"hooks/x.py": "X = 2\n"})
+        self.refused()
+
+    def test_main_touching_an_unmapped_path_is_refused(self):
+        self.scoped()
+        self.on("main", {"notes.txt": "a note\n"})
+        self.refused()
+
+    def test_a_main_doc_that_breaks_a_cross_file_lint_on_the_merge_is_refused(self):
+        self.scoped()
+        self.on("main", {"docs/other.md": "---\nslug: second\n---\n"})  # feat's record has slug second: each side alone passes
+        self.refused()
+
+    def test_a_main_doc_that_breaks_a_gates_suite_reading_docs_is_refused(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "BROKEN\n"})
+        self.refused()
+
+    def test_an_unreadable_merge_base_is_refused(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        real = merge.git
+        def git(cwd, *a, **k):
+            if a and a[0] == "merge-base" and "--is-ancestor" not in a:
+                return 128, "fatal: no merge base"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            self.refused()
+
+    def test_a_repo_without_the_scope_script_is_refused(self):
+        self.scoped(scope=False)
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.refused()
+
+    def test_a_lint_run_that_cannot_find_the_job_is_refused(self):
+        self.scoped(workflow=GATES_YML.replace("  gates:", "  other:"))
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.refused()
+
+    def test_a_lint_step_with_a_missing_tool_is_refused(self):
+        self.scoped(workflow=GATES_YML + "      - name: Missing\n        run: no-such-tool-c150 --check\n")
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.refused()
+
 class CutBranch(Env):
     def local_branch(self, extra):
         sh(self.co, "git", "fetch", "-q", "origin")
