@@ -3,17 +3,37 @@
 
     scripts/readme_links.py [FILE]    exit 1, listing each dead link
 """
+import ipaddress
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # Inline links, autolinks and bare URLs. Trailing punctuation is not part of a URL.
 URL = re.compile(r"https?://[^\s)>\]\"'`]+")
 
 
+# Hosts CI cannot reach by design. Matched on the whole host or its trailing labels, never a substring.
+LOCAL_SUFFIXES = (".localhost", ".local", ".home.arpa", ".internal")
+
+
 def links(text):
-    return sorted({u.rstrip(".,;:*_") for u in URL.findall(text)})
+    # A comma-joined list (`https://a,https://b`) is one regex match: split it into its URLs.
+    found = (u for m in URL.findall(text) for u in re.split(r",(?=https?://)", m))
+    return sorted({u.rstrip(".,;:*_") for u in found})
+
+
+def skip_reason(url):
+    """Why CI cannot check this link by design, or None for a host it should reach."""
+    host = (urllib.parse.urlsplit(url).hostname or "").rstrip(".").lower()
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        if host == "localhost" or host.endswith(LOCAL_SUFFIXES):
+            return "local-only host"
+        return None
+    return "private address" if ip.is_private or ip.is_loopback or ip.is_link_local else None
 
 
 def alive(url, tries=2):
@@ -32,9 +52,16 @@ def alive(url, tries=2):
     return err
 
 
-def main(path="README.md"):
+def main(path="README.md", skip=skip_reason):
     with open(path, encoding="utf-8") as f:
-        dead = [(u, e) for u in links(f.read()) if (e := alive(u))]
+        urls = links(f.read())
+    checked = []
+    for u in urls:
+        if why := skip(u):
+            print(f"SKIP {u} ({why})")
+        else:
+            checked.append(u)
+    dead = [(u, e) for u in checked if (e := alive(u))]
     for u, e in dead:
         print(f"DEAD {u} ({e})")
     return 1 if dead else 0

@@ -2,7 +2,8 @@ name: README link check
 description: >
   Checks the external https links in a markdown file (stdlib python3, no install). Run it from
   a weekly `schedule` workflow, never per pull request: a flaky site must not turn a PR red.
-  With `open-issue: true` a dead link opens or updates one issue (needs `issues: write`). The
+  Links CI cannot reach by design (localhost, private IPs, *.local, *.home.arpa, *.internal) are
+  skipped and printed as `SKIP`. With `open-issue: true` a dead link opens or updates one issue (needs `issues: write`). The
   caller needs actions/checkout.
 inputs:
   file:
