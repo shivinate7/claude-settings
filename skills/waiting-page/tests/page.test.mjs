@@ -1709,3 +1709,14 @@ test("an Undo where one delete works and a later one fails names only the items 
   assert.match(text, /Not undone: No\. 1 and No\. 2\./, text);
   assert.doesNotMatch(text, /No\. 3/, "No. 3 was undone and must not be named: " + text);
 });
+
+test("a named picture's not-equal sign sits inside its View bar", async (t) => {
+  const it = looks("diff-ne", 78, [{ slug: "o-a", label: "A" }, { slug: "o-b", label: "B" }]);
+  it.options[0].differs = ["picture"];
+  const page = await open(t, { items: [it], designData: { "o-a": lateRow("one"), "o-b": lateRow("two") } }); if (!page) return;
+  const m = await page.evaluate((id) => {
+    const o = document.querySelector(`#item-${id} label.opt .opic.dif`), v = o.querySelector(".view").getBoundingClientRect(), n = o.querySelector(".ne").getBoundingClientRect();
+    return { v: [v.left, v.top, v.right, v.bottom], n: [n.left, n.top, n.right, n.bottom] };
+  }, it.id);
+  assert.ok(m.n[0] >= m.v[0] - 0.5 && m.n[2] <= m.v[2] + 0.5 && m.n[1] >= m.v[1] - 0.5 && m.n[3] <= m.v[3] + 0.5, "the sign is outside the View bar: " + JSON.stringify(m));
+});
