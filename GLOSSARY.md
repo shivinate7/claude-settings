@@ -7,10 +7,10 @@ this file defines.
 Each row has the term, its meaning, its home and the names to avoid. The home is the rule or
 record that defines the term. When a meaning changes, change the home first, then this row. Use
 the term, never a name from its "Not" cell. `lint/check_glossary.py` fails a row whose home does not
-exist. It also fails a new file path, and a line that a change adds, that uses a "Not" name in an
-identifier, a rule anchor, a record slug or a hook message. It never reads prose. A "Not" name
-written `word (prose)` is an everyday word, such as `block` or `entry`: the check reads it in
-paths, anchors and slugs only, and a reviewer reads it everywhere else.
+exist. It also fails a new file path that uses a "Not" name. It fails a line that a change adds,
+too, when an identifier, a rule anchor, a record slug or a hook message uses one. It never reads
+prose. A "Not" name written `word (prose)` is an everyday word, such as `block` or `entry`. The
+check reads it in paths, anchors and slugs only. A reviewer reads it everywhere else.
 
 The form comes from the `domain-modeling` skill in
 [mattpocock/skills](https://github.com/mattpocock/skills/tree/main/skills/engineering/domain-modeling):
