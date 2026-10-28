@@ -74,13 +74,17 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   also says "Read by <owner>" and the time.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
-  `{ref, note}`) and `identity` (`{name, mark, brand, face}`).
+  `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
   - `brand` is one hex colour, such as `#f47820`. The page derives every colour from it and
     checks each text colour for 4.5:1 contrast. With no valid `brand`, the page keeps its neutral
     colours.
   - `face` is `sans` (the default), `serif`, `display` or `classic`. It sets the face of the name.
+  - `icon` is the repo's own icon as an inline `data:image/svg+xml` or `data:image/png;base64` URI,
+    at most 16384 characters (the page's `ICON_MAX`). It replaces the letter on a white or dark tile,
+    whichever more of its pixels stand out on. A square icon reads best: a wide one shrinks to fit
+    the 22px slot. The page never fetches a URL; any other value keeps the letter.
 
 The page hides an item with status `closed`. It shows an item as answered, in place, when
 `answers/<id>` exists: a green edge and the badge "Answered, filing pending" or "Answered, filed
@@ -201,9 +205,11 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
    `db` and `comments` (the full form, `{comments: {}}`). Change nothing in the page. A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
-3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` from
-   `colour_for(repo)` in `docs/design/repo-colours.json` when that file exists. Leave `brand` out
-   when the repo has no colour. Never invent a colour.
+3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
+   `python3 ~/.claude/lint/repo_colour.py identity <repo root>`. It reads the repo's own extras keys
+   `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
+   then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
+   invent a colour. The page still checks each text colour for 4.5:1 contrast.
 4. Put the URL in the repo's extras file: `"waiting-page": "<url>"`. The file alone does not mark the
    repo as rolled out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
 5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.

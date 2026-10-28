@@ -133,8 +133,8 @@ class LayoutFile(Tree):
         self.assertEqual(self.layout.path(self.tree, "todo"), "specs/todo.md")
 
     def test_a_repo_entry_holds_after_roll_out_and_its_extras_may_repeat_it(self):
-        self.origin("https://github.com/shivinate7/home-app")
-        self.roll_out({"todo": {"path": "records"}})  # home-app's extras file names its task home
+        self.origin("https://github.com/shivinate7/home")
+        self.roll_out({"todo": {"path": "records"}})  # the extras file of home repeats its task home
         self.assertEqual(self.layout.path(self.tree, "todo"), "records")
         self.assertEqual(self.layout.path(self.tree, "decisions"), "docs/decisions")
 
@@ -165,7 +165,7 @@ class LayoutFile(Tree):
         self.assertEqual(self.layout.path(self.tree, "todo"), "docs/todo.md")
 
     def test_an_extras_todo_that_differs_from_the_repo_entry_is_an_error(self):
-        for url in ("https://github.com/shivinate7/home-app", "https://github.com/shivinate7/degen"):
+        for url in ("https://github.com/shivinate7/home", "https://github.com/shivinate7/degen"):
             with self.subTest(url=url):
                 self.origin(url)
                 self.roll_out({"todo": {"path": "elsewhere"}})
@@ -220,6 +220,46 @@ class WaitingPage(Tree):
     def test_the_real_repo_prints_its_current_page(self):
         code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", REPO], REPO)
         self.assertEqual((code, out.strip()), (0, "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"))
+
+
+class WaitingPageBranding(Tree):
+    """A repo states its waiting page's colour and icon in its own extras file (roadmap step c132)."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def keys(self, **keys):
+        self.put(EXTRAS, json.dumps(dict({"kinds": {}}, **keys)))
+
+    def test_no_extras_file_or_no_key_is_none(self):
+        self.assertIsNone(self.layout.waiting_page_colour(self.tree))
+        self.assertIsNone(self.layout.waiting_page_icon(self.tree))
+        self.keys()
+        self.assertIsNone(self.layout.waiting_page_colour(self.tree))
+        self.assertIsNone(self.layout.waiting_page_icon(self.tree))
+
+    def test_colour_reads_lowercased(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, self.layout.WAITING_PAGE_COLOUR: "#A82830"}))
+        self.assertEqual(self.layout.waiting_page_colour(self.tree), "#a82830")
+
+    def test_a_colour_that_is_not_rrggbb_is_an_error(self):
+        for bad in ("red", "#abc", "#12345g", "a82830", 5, ["#a82830"], "#a82830 "):
+            with self.subTest(bad=bad):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-colour": bad}))
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.waiting_page_colour(self.tree)
+
+    def test_icon_reads_its_path(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, self.layout.WAITING_PAGE_ICON: "assets/icon.svg"}))
+        self.assertEqual(self.layout.waiting_page_icon(self.tree), "assets/icon.svg")
+
+    def test_an_icon_outside_the_repo_or_not_a_path_is_an_error(self):
+        for bad in ("../icon.svg", "/etc/icon.svg", "a/../../icon.png", "C:/icon.png", "", 3, " icon.svg"):
+            with self.subTest(bad=bad):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-icon": bad}))
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.waiting_page_icon(self.tree)
 
 
 class RolledOutMark(Tree):

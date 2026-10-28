@@ -434,6 +434,93 @@ test("a page with no brand uses neutral defaults and draws no colour of its own"
   assert.equal(await page2.evaluate(() => document.documentElement.style.getPropertyValue("--r-hdr-l")), "", "a brand that is no hex was used");
 });
 
+// ---------------------------------------------------------------- the repo's icon (roadmap step c132)
+
+const svgIcon = (fill, extra = "") => "data:image/svg+xml;base64," + Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" fill="${fill}"/>${extra}</svg>`).toString("base64");
+const markState = (page) => page.evaluate(() => {
+  const m = document.getElementById("mark"), img = m.querySelector("img");
+  return { icon: m.classList.contains("icon"), img: img ? img.getAttribute("src") : null, alt: img ? img.getAttribute("alt") : null, text: m.textContent, hidden: m.hidden, tile: m.style.getPropertyValue("--tile"), aria: m.getAttribute("aria-hidden") };
+});
+const named = (page, name) => page.waitForFunction((n) => document.getElementById("repoName").textContent === n, name);
+
+test("a dark icon shows on a white tile in place of the letter, alt empty and aria-hidden kept", async (t) => {
+  const icon = svgIcon("#11151b");
+  const page = await open(t, { meta: { identity: { name: "Compass", brand: "#f47820", icon } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  const m = await markState(page);
+  assert.deepEqual(m, { icon: true, img: icon, alt: "", text: "", hidden: false, tile: "#ffffff", aria: "true" });
+  const box = await page.evaluate(() => { const r = document.querySelector("#mark img").getBoundingClientRect(), b = document.getElementById("mark").getBoundingClientRect(); return [r.width, r.height, b.width, b.height]; });
+  assert.deepEqual(box, [22, 22, 28, 28]);
+});
+
+test("a white icon gets the dark tile", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass", brand: "#f47820", icon: svgIcon("#ffffff") } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  assert.equal((await markState(page)).tile, "#11151b");
+});
+
+test("an icon that is not an inline svg or png data URI, or is too long, leaves the letter", async (t) => {
+  const long = "data:image/svg+xml;base64," + "A".repeat(16385 - 26);
+  assert.equal(long.length, 16385);
+  for (const icon of ["data:image/png;base64,AAAA", "https://example.com/icon.svg", long, "data:image/jpeg;base64,/9j/4AAQ", 42]) {
+    const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
+    await named(page, "Compass");
+    await page.waitForTimeout(150);
+    const m = await markState(page);
+    assert.deepEqual([m.icon, m.img, m.text, m.hidden], [false, null, "C", false], String(icon).slice(0, 40));
+    await page.close();
+  }
+});
+
+test("an icon leaves the header height as it was", async (t) => {
+  const height = async (identity) => {
+    const page = await open(t, { meta: { identity } }); if (!page) return null;
+    await named(page, "Compass");
+    if (identity.icon) await page.waitForSelector("#mark.icon img");
+    const h = await page.evaluate(() => document.querySelector("header.hdr").getBoundingClientRect().height);
+    await page.close();
+    return h;
+  };
+  const plain = await height({ name: "Compass" }); if (plain === null) return;
+  assert.equal(await height({ name: "Compass", icon: svgIcon("#11151b") }), plain);
+});
+
+test("an icon with no name or mark still shows", async (t) => {
+  const page = await open(t, { meta: { identity: { icon: svgIcon("#11151b") } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  assert.equal((await markState(page)).hidden, false);
+});
+
+test("a meta write with the same icon keeps it shown, with no flash of the letter", async (t) => {
+  const icon = svgIcon("#11151b");
+  const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  const flashed = await page.evaluate(async (icon) => {
+    const m = document.getElementById("mark"); let lost = false;
+    new MutationObserver(() => { if (!m.classList.contains("icon") || !m.querySelector("img")) lost = true; }).observe(m, { attributes: true, childList: true });
+    state.meta = { identity: { name: "Compass", brand: "#f47820", icon } }; applyIdentity();
+    await new Promise((r) => setTimeout(r, 200));
+    return lost;
+  }, icon);
+  assert.equal(flashed, false);
+  assert.equal((await markState(page)).img, icon);
+});
+
+test("a decode that finishes after a newer identity is ignored", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
+  await named(page, "Compass");
+  const slow = svgIcon("#11151b", "<!--slow-->");
+  await page.evaluate((slow) => {
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && new Promise((r) => setTimeout(r, 400))); };
+    state.meta = { identity: { name: "Compass", icon: slow } }; applyIdentity();
+    state.meta = { identity: { name: "Compass" } }; applyIdentity();
+  }, slow);
+  await page.waitForTimeout(700);
+  const m = await markState(page);
+  assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""]);
+});
+
 // ---------------------------------------------------------------- designs
 
 test("a design shows in a sandboxed frame on its card, and the Designs tab pages through a sheet", async (t) => {
