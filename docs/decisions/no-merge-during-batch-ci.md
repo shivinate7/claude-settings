@@ -7,6 +7,7 @@ The owner ruled on Oct 28 at 13:36 CDT: no one merges to main while a batch's CI
 - Mechanism: the merge tool (`merge <pr> --confirm`) and the merge guard refuse to merge a PR while another open, non-draft PR on the same base has a required check pending on its head.
 - The tool checks under the lock before any push. It checks again right before the merge call. So a batch that goes ready during the wait for the head's checks is refused.
 - The preview prints a `batch:` line.
+- Required names: the repo's pinned `merge.requiredChecks` list, else the branch protection. The guard's ruling (owner, Oct 28): with no branch protection (HTTP 404), every reported pending check on the other ready PR counts. The tool refuses a base with no protection and no pinned list.
 - A failed read refuses. Unknown is red, as in decision ci-unknown-is-red (an unknown read in CI is red).
 - The refusal names the other PR, the check and the check's link. It says to wait. The session that watches the other PR wakes when its run ends. A red run also posts the CI-done comment (rule git-ci-done-comment-wakes).
 - No reason flag lifts this refusal in the tool.

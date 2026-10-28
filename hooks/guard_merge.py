@@ -168,7 +168,7 @@ def merge_check(selector, repo: str, where: str):
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
-    host = module.Host(repo=repo or None, cwd=where or None)
+    host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
     return host.head_read(selector, nothing_is_green=not has_workflows(where))
 
 
@@ -194,28 +194,44 @@ def merge_check_reason(verdict: str, detail: str) -> str:
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
-def _merge_config_at(root: str) -> bool:
-    """True when the nearest folder at or above `root` that holds `.git` has a `.github/stamp.json`
-    JSON object with a `merge` key. Any other outcome is False."""
+def _merge_config_at(root: str):
+    """The `.github/stamp.json` object in the nearest folder at or above `root` that holds `.git`,
+    when it is a JSON object with a `merge` key. Any other outcome is None."""
     while not os.path.exists(os.path.join(root, ".git")):
         if os.path.dirname(root) == root:
-            return False
+            return None
         root = os.path.dirname(root)
     try:
         with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as handle:
             config = json.load(handle)
     except (OSError, ValueError):
-        return False
-    return isinstance(config, dict) and "merge" in config
+        return None
+    return config if isinstance(config, dict) and "merge" in config else None
+
+
+def _merge_configs(where: str):
+    """The merge configs of the repo the cwd sits in. The path is walked as written AND with symlinks
+    resolved: a cwd that is a symlink into a repo finds its `.git` only on the real path, and a
+    symlink out of one only on the written path."""
+    configs = (_merge_config_at(root) for root in dict.fromkeys((os.path.abspath(where), os.path.realpath(where))))
+    return [c for c in configs if c is not None]
 
 
 def uses_merge_tool(where: str) -> bool:
-    """True when the repo the cwd sits in uses the merge tool (see `_merge_config_at`). The path is
-    walked as written AND with symlinks resolved: a cwd that is a symlink into a repo finds its
-    `.git` only on the real path, and a symlink out of one only on the written path. No root, or a
+    """True when the repo the cwd sits in uses the merge tool (see `_merge_configs`). No root, or a
     missing, unreadable, invalid or non-object file, is False: nothing to ask."""
-    return any(_merge_config_at(root) for root in dict.fromkeys(
-        (os.path.abspath(where), os.path.realpath(where))))
+    return bool(_merge_configs(where))
+
+
+def pinned_required(where: str):
+    """The repo's pinned `merge.requiredChecks` list, when it is a non-empty list of names; else None,
+    and the batch read takes the names from the branch protection."""
+    for config in _merge_configs(where) if where else ():
+        merge = config["merge"]
+        names = merge.get("requiredChecks") if isinstance(merge, dict) else None
+        if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
+            return names
+    return None
 
 
 BARE_MERGE_REASON = (

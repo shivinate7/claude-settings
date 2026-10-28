@@ -720,36 +720,53 @@ class Host:
             heads[name] = row
         return heads
 
-    def batch_running(self, n, base):
+    def batch_running(self, n, base, unprotected_counts_all=False):
         """-> one line per other open, ready pull request on `base` whose head has a required check reported and not completed (rule
         git-no-merge-during-batch-ci). A required name with no entry on that head does not count: a ready PR whose CI never reports
-        would block every merge. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red."""
+        would block every merge. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red.
+        The required names are a pinned list, else the branch protection. `unprotected_counts_all` (the guard's mode): a base with no
+        branch protection counts every reported pending check, and an empty protection list counts none. Without it, required_names rules."""
         others = [d for d in self.pages("pulls", fields={"state": "open"})
                   if d["base"]["ref"] == base and not d.get("draft") and d["number"] != n]
         if not others:
             return []  # no protection read when no other pull request could block
-        names = self.required_names()
+        if unprotected_counts_all and not isinstance(self.required, list):
+            names = self.protection_names()  # None: no branch protection
+        else:
+            names = self.required_names()
         blockers = []
         for d in others:
             got = self.checks(d["number"], warn=False, sha=d["head"]["sha"])
-            _, pending, _ = self.classify(got, names, self.ignore)
+            _, pending, _ = self.classify(got, names or [], self.ignore)
             hits = [f"`{k}` is pending: " + next((l for b, l in got[k] if b == "pending"), "")
-                    for k in pending if k in names and got.get(k)]
+                    for k in pending if (names is None or k in names) and got.get(k)]
             if hits:
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) required check " + "; ".join(hits))
         return blockers
+
+    def protection_names(self):
+        """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
+        network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read raises Stop."""
+        c, out = self.api(f"branches/{self.base}/protection/required_status_checks", "--jq", ".contexts")
+        if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
+            return None
+        try:
+            names = json.loads(out) if not c else None
+            if not isinstance(names, list):
+                raise ValueError
+        except ValueError:
+            raise Stop(f"cannot read the required checks of {self.base}. Set merge.requiredChecks to a list of check names.\n{out}")
+        return names
 
     def required_names(self):
         """The required check names. Never empty: an empty list would pass the wait without a read."""
         if isinstance(self.required, list):
             names = self.required
         else:
-            # Through api, so the guard's -R repo and its cwd name the repo whose protection is read.
-            c, out = self.api(f"branches/{self.base}/protection/required_status_checks", "--jq", ".contexts")
-            if c:
-                raise Stop(f"cannot read the required checks of {self.base} (no branch protection?). "
-                           f"Set merge.requiredChecks to a list of check names.\n{out}")
-            names = json.loads(out)
+            names = self.protection_names()
+            if names is None:
+                raise Stop(f"{self.base} has no branch protection, so it names no required checks. "
+                           "Set merge.requiredChecks to a list of check names.")
         clash = [k for k in names if k in self.ignore]
         if clash:
             raise Stop("merge.ignoreChecks names a required check: " + ", ".join(clash) + ". A required check is never ignored.")
@@ -763,10 +780,11 @@ class Host:
         An empty or unreadable protection leaves the pinned list in force; an unreadable one says so."""
         if not isinstance(self.required, list):
             return
-        c, out = self.gh(["api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
         try:
-            held = json.loads(out) if not c else None
-        except ValueError:
+            held = self.protection_names()
+        except NetStop:
+            raise
+        except Stop:
             held = None
         if held is None:
             say(f"merge: cannot read the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
@@ -1009,7 +1027,7 @@ class Host:
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
                 unseen = not got and not runs and not nothing_is_green
-                blockers = [] if red or pending or unseen else self.batch_running(num, info["base"])
+                blockers = [] if red or pending or unseen else self.batch_running(num, info["base"], unprotected_counts_all=True)
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
