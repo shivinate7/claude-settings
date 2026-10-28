@@ -580,7 +580,7 @@
     "questions-go-to-owner": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether a question names what the session does meanwhile, whether the session kept working on what does not depend on the answer, and whether it also reached the waiting page, is a content judgment. The session-board mod refuses a question box while this session's agents or background commands run (record session-board-mod-limits). The Stop reply judge (hooks/reply_judge.py, a model, never blocks) notes an Input Needed item whose pick rule parallelism-keep-going lets the session take with no question."
+        "reason": "Whether a question names what the session does meanwhile, whether the session kept working on what does not depend on the answer, and whether it also reached the waiting page, is a content judgment. The session-board mod refuses a question box while this session's agents or background commands run, and once it has started another session (record session-board-mod-limits). The Stop reply judge (hooks/reply_judge.py, a model, never blocks) notes an Input Needed item whose pick rule parallelism-keep-going lets the session take with no question."
       }
     },
     "style-cut-narration": {
