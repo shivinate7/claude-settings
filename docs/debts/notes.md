@@ -586,3 +586,6 @@
 - waiting-cap-left-wide: at 1440 the viewer caption sits left at x=20 while the mockup is centred (skills/waiting-page/page.html .dcap)
 - waiting-dpos-stale-form: after a resize, `#dPos` keeps its old form ("1/3" or "1 of 3") until the next page turn (skills/waiting-page/page.html showDesign)
 - waiting-head-midwidth-untested: no test runs the viewer head at 521-900 px with a wide font, where the buttons keep their long labels (skills/waiting-page/tests/page.test.mjs)
+- port-question-url-forms: the guard matches the waiting-page url as an exact string, so a query string, a fragment or the claude.ai/code/artifact form is not judged (hooks/guard.py port-question; decision port-keeps-behaviour)
+- port-question-cwd-untested: no guard case runs a trailing-slash url, a subfolder cwd or a worktree cwd, though the code handles each (hooks/test_guard.py port-question)
+- port-question-redesign-word: "redesign" in a blocking item that ports nothing is refused until the writer sets `port: false` (hooks/guard.py PORT_WORD; decision port-keeps-behaviour)
