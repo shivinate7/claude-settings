@@ -21,7 +21,7 @@ Not counted:
 
 Limits:
 
-- A click on GitHub's own Merge button is not refused by a hook.
+- Pressing GitHub's own Merge button is not refused by a hook.
 - A raw `gh api -X PUT .../pulls/<n>/merge` is not refused by a hook.
 - The guard stops `gh pr merge` and the MCP merge tool. For the rest, the rule binds the owner by the owner's own word.
 
