@@ -1,0 +1,9 @@
+{
+ "title": "merge.py reads a cancelled duplicate run as red",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.30315,
+ "why": "Orchestrator, Oct 28 02:36 CDT: batch PR #745 was opened as a draft and marked ready in the same second, which started two gates runs on one head; concurrency cancelled one, and merge.py read the cancelled run's jobs as red and refused, though run 40648096904 had all 13 required checks green. Cost: one full re-run (40648096446).",
+ "note": "Debt, hit today. Next cloud lane: merge.py takes, for each required check, the newest completed run on the head that was not cancelled, and ignores a cancelled duplicate; red first on today's case (a cancelled duplicate beside a green run). The other fix, opening batch PRs non-draft, is a flow change that a later draft-and-ready would undo, so it is the fallback. Touches merge/merge.py and merge/test_merge.py; it overlaps no open lane. Needs no answer. Port: no; merge.py lives in claude-settings. Placed ahead of c154, after c150 (triage, Oct 28): every batch can hit it, and each hit costs a 50 to 60 min re-run.",
+ "updatedAt": "2026-10-28T08:15:00Z"
+}
