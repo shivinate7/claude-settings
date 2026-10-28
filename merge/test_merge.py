@@ -919,6 +919,231 @@ class Guards(Env):
             os.environ.update(keep)
             merge.drop_worktree(self.co, tmp, wt)
 
+SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
+GATES_YML = ("name: gates\non: pull_request\njobs:\n  gates:\n    runs-on: ubuntu-latest\n    steps:\n"
+             "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n"
+             "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
+SLUG_LINT = '''import collections, os, re, sys
+seen = collections.defaultdict(list)
+for d, _, names in os.walk("docs"):
+    for n in names:
+        if n.endswith(".md"):
+            m = re.search(r"^slug: (.+)$", open(os.path.join(d, n), encoding="utf-8").read(), re.M)
+            if m:
+                seen[m.group(1)].append(n)
+bad = {k: v for k, v in seen.items() if len(v) > 1}
+print(bad or "ok")
+sys.exit(1 if bad else 0)
+'''
+DOC_SUITE = '''import os, sys
+path = os.path.join("docs", "guide.md")  # a gates suite that reads one tracked doc, named in no list
+sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
+'''
+
+class SmallBaseMove(Env):
+    """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
+    The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `gates` job holds one cross-file lint:
+    no two docs share a slug. hooks/test_reads_guide.py is a gates suite outside --lint that reads docs/guide.md."""
+
+    def scoped(self, workflow=GATES_YML, scope=True):
+        """Main and feat both gain the CI files; feat then holds main's tip."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if scope:
+            with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+                put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+        put(os.path.join(o, ".github/workflows/gates.yml"), workflow)
+        put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
+        put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
+        put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
+        put(os.path.join(o, "hooks/x.py"), "X = 1\n")
+        put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def on(self, branch, files):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        for path, text in files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
+
+    def refused(self):
+        self.host.merged = False
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not hold origin/main", out)
+        self.assertIn("Merge main into the branch", out)
+        self.assertFalse(self.host.merged, out)
+        return out
+
+    def test_a_docs_only_main_move_keeps_the_green_run(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertNotIn("does not hold", out)
+        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
+        self.assertIn("# Guide", self.show("main", "docs/guide.md"))
+
+    def test_a_docs_only_move_during_the_wait_keeps_the_green_run(self):
+        self.scoped()
+        self.host.on_wait = lambda: self.on("main", {"docs/late.md": "# Late\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+
+    def test_the_preview_says_a_docs_only_move_keeps_the_green_run(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        rc, out = self.run_merge("7")
+        self.assertIn("base:   main moved by 1 commit touching only paths no job of this batch reads", out)
+        self.assertNotIn("BEHIND", out)
+
+    def test_main_touching_a_file_of_the_batch_is_refused(self):
+        self.scoped()
+        self.on("feat", {"docs/shared.md": "one changed\ntwo\nthree\nfour\nfive\n"})
+        self.on("main", {"docs/shared.md": "one\ntwo\nthree\nfour\nfive changed\n"})  # merges clean, but one path
+        self.assertIn("docs/shared.md", self.refused())
+
+    def test_a_conflicting_main_move_is_refused(self):
+        self.scoped()
+        self.on("feat", {"docs/shared.md": "one\nfeat\n"})
+        self.on("main", {"docs/shared.md": "one\nmain\n"})
+        self.refused()
+
+    def test_main_touching_a_code_path_is_refused(self):
+        self.scoped()
+        self.on("main", {"hooks/x.py": "X = 2\n"})
+        self.refused()
+
+    def test_main_touching_an_unmapped_path_is_refused(self):
+        self.scoped()
+        self.on("main", {"notes.txt": "a note\n"})
+        self.refused()
+
+    def test_a_main_doc_that_breaks_a_cross_file_lint_on_the_merge_is_refused(self):
+        self.scoped()
+        self.on("main", {"docs/other.md": "---\nslug: second\n---\n"})  # feat's record has slug second: each side alone passes
+        self.refused()
+
+    def test_a_main_doc_that_breaks_a_gates_suite_reading_docs_is_refused(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "BROKEN\n"})
+        self.refused()
+
+    def test_a_scope_script_that_fails_with_every_flag_off_is_refused_with_its_exit(self):
+        self.scoped()
+        self.on("main", {".github/scripts/ci-scope.sh": 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'})
+        o = self.other  # feat takes main's script, then main moves by a doc only
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "origin/main"); sh(o, "git", "push", "-q", "origin", "feat")
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.assertIn("exit 3", self.refused())
+
+    def test_the_suites_a_doc_hits_come_from_the_gates_job(self):
+        root = os.path.join(HERE, "..")
+        lints = merge.lint_steps(root, "origin/main")
+        hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
+        self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
+        self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
+        self.assertNotIn("hooks/test_sendmessage_state.py", hits("docs/guide-c150.md"))
+        new = hits("docs/decisions/" + "new-" + "rec.md")  # a new record, split so this file names no such path: the suite that lists the folder runs, fixture-only suites do not
+        self.assertIn("hooks/test_precompact_handoff.py", new)
+        self.assertNotIn("hooks/test_guard.py", new)
+        self.assertIn("merge/test_merge.py", new)  # this suite reads the real tree whole, just above, so every path hits it
+        self.assertIn("skills/ios-apps/tests/test_new_app.py", hits("skills/ios-apps/templates/" + "new.md"))  # through new_app.py
+
+    def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
+        hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])
+        self.assertFalse(hit('import os, tempfile\nd = tempfile.mkdtemp()\nos.makedirs(os.path.join(d, "docs", "decisions"))\n'))
+        self.assertFalse(hit('TEXT = "see decisions/other.md"  # a cite in text\n'))
+        self.assertTrue(hit('import os\nROOT = os.path.dirname(os.path.dirname(__file__))\nD = os.path.join(ROOT, "docs", "decisions")\n'))
+        self.assertTrue(hit('import pathlib\nROOT = pathlib.Path(__file__).parent.parent\nD = ROOT / "docs" / "decisions"\n'))
+        self.assertTrue(hit('open("docs/decisions/y.md").read()\n'))
+        self.assertTrue(hit('import os\nos.listdir(os.path.join("docs", "decisions"))\n'))
+        self.assertTrue(hit('X = "docs/decisions/x.md"\n'))  # the exact path, anywhere
+        # a root anchored on __file__ and walked whole: a path under it is read
+        self.assertTrue(merge.python_suite_hits('import os\nHERE = os.path.dirname(__file__)\nSKILL = os.path.dirname(HERE)\nwalk(SKILL)\n',
+                                                "skills/s/tests/test_s.py", ["skills/s/templates/new.md"]))
+        with self.assertRaises(SyntaxError):
+            hit("def (:\n")
+
+    def test_a_root_read_in_any_form_is_a_hit(self):
+        hit = lambda src, path="docs/decisions/x.md": merge.python_suite_hits(src, "hooks/test_x.py", [path])
+        here = "import os, pathlib\nHERE = os.path.dirname(os.path.abspath(__file__))\nROOT = os.path.dirname(HERE)\n"
+        for form in ('open(f"{ROOT}/docs/decisions/a.md")', 'open(ROOT + "/docs/decisions/a.md")',
+                     'open("{}/docs/decisions/a.md".format(ROOT))', 'open("%s/docs/decisions/a.md" % ROOT)',
+                     'D = pathlib.Path(__file__).resolve().parents[1] / "docs" / "decisions"'):
+            with self.subTest(form=form):
+                self.assertTrue(hit(here + form + "\n"))
+
+    def test_a_root_at_the_repo_top_is_a_hit(self):
+        hit = lambda src, path="docs/decisions/x.md": merge.python_suite_hits(src, "hooks/test_x.py", [path])
+        here = "import os, pathlib\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+        self.assertTrue(hit(here + 'DOCS = os.path.join(os.path.dirname(HERE), "docs")\nos.listdir(DOCS)\n'))
+        self.assertTrue(hit(here + 'DOCS = os.path.join(os.path.dirname(HERE), "docs")\nfor x in os.walk(DOCS): pass\n'))
+        self.assertTrue(hit('import pathlib\nD = pathlib.Path(__file__).resolve().parent.parent / "docs"\nlist(D.rglob("*.md"))\n'))
+        self.assertTrue(hit(here + 'for x in os.walk(os.path.dirname(HERE)): pass\n', "notes/any.md"))  # the whole repo: every path
+
+    def test_a_read_through_a_local_module_is_a_hit(self):
+        files = {"skills/s/tests/test_s.py": "import os, sys\nsys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scripts'))\nimport helper\n",
+                 "skills/s/scripts/helper.py": "import os\nT = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')\nos.listdir(T)\n",
+                 "hooks/test_y.py": "import sibling\n", "hooks/sibling.py": "open('docs/decisions/y.md')\n"}
+        read = files.get
+        self.assertTrue(merge.python_suite_hits(files["skills/s/tests/test_s.py"], "skills/s/tests/test_s.py", ["skills/s/templates/new.md"], read))
+        self.assertTrue(merge.python_suite_hits(files["hooks/test_y.py"], "hooks/test_y.py", ["docs/decisions/z.md"], read))
+        self.assertFalse(merge.python_suite_hits("import nowhere\n", "hooks/test_z.py", ["docs/decisions/z.md"], read))
+
+    def test_a_gates_line_of_no_suite_form_that_names_main_s_path_is_refused(self):
+        self.scoped(workflow=GATES_YML + "      - name: Other runner\n        run: sh -c 'grep -q x docs/guide.md || true'\n")
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.assertIn("docs/guide.md", self.refused())
+
+    def test_a_records_only_main_move_keeps_the_green_run(self):
+        """A new record and the page rebuilt on main; a gates suite names the record folder only in its temp tree."""
+        self.scoped(workflow=GATES_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "hooks/test_temp_tree.py"), 'import os, sys, tempfile\nd = tempfile.mkdtemp()\n'
+            'os.makedirs(os.path.join(d, "docs", "decisions"))\nsys.exit(1)  # fails if it is ever run on the merge\n')
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "temp suite"); sh(o, "git", "push", "-q", "origin", "feat")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main"); sh(o, "git", "merge", "-q", "--no-edit", "origin/feat")
+        sh(o, "git", "push", "-q", "origin", "main")
+        put(os.path.join(o, "docs/decisions/third.md"), record("D-009", "third"))
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a record"); sh(o, "git", "push", "-q", "origin", "main")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertIn("touching only paths no job of this batch reads", out)
+
+    def test_an_unreadable_merge_base_is_refused(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        real = merge.git
+        def git(cwd, *a, **k):
+            if a and a[0] == "merge-base" and "--is-ancestor" not in a:
+                return 128, "fatal: no merge base"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git):
+            self.refused()
+
+    def test_a_repo_without_the_scope_script_is_refused(self):
+        self.scoped(scope=False)
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.refused()
+
+    def test_a_lint_run_that_cannot_find_the_job_is_refused(self):
+        self.scoped(workflow=GATES_YML.replace("  gates:", "  other:"))
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.refused()
+
+    def test_a_lint_step_ci_job_cannot_read_is_refused(self):
+        self.scoped(workflow=GATES_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.refused()
+
 class CutBranch(Env):
     def local_branch(self, extra):
         sh(self.co, "git", "fetch", "-q", "origin")

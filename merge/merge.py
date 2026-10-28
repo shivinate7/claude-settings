@@ -14,7 +14,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, contextlib, datetime, json, math, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -94,9 +94,10 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None):
+def sh(args, cwd=None, input=None, env=None, timeout=None):
     args = [resolve_program(args[0], env), *args[1:]]
-    timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else SH_TIMEOUT
+    limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
+    timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -1023,18 +1024,349 @@ def records_proof(wt, base_ref):
             git(wt, "reset", "--hard", "-q", "HEAD")  # also ends a merge in progress
             git(wt, "clean", "-fdq")
 
-def holds_base(wt, base_ref, sha):
-    """-> None when sha holds the tip of base_ref, else why not. The checks ran on sha, so a sha without that tip was
-    never tested against the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
+CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
+CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
+LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
+SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
+
+def needles(path):
+    """The names a suite that reads `path` would hold: the path, its file name, its stem (4 or more characters), and each
+    parent folder below the top, as a path and as its own name. A top folder alone (`docs`) names too much to tell."""
+    parts = path.split("/")
+    out = {path, parts[-1]}
+    stem = parts[-1].rsplit(".", 1)[0]
+    if len(stem) >= 4:
+        out.add(stem)
+    for i in range(2, len(parts)):
+        out.update(("/".join(parts[:i]), parts[i - 1]))
+    return out
+
+READERS = {"open", "listdir", "scandir", "glob", "iglob", "rglob", "iterdir", "Path", "PurePath", "walk", "exists", "isfile", "isdir"}
+SAME_DIR = {"abspath", "realpath", "normpath", "resolve", "Path", "PurePath", "absolute", "str", "fspath", "expanduser"}  # a call that names the folder it is given
+# a call that builds a path or a string and reads nothing
+BUILDERS = SAME_DIR | {"dirname", "join", "joinpath", "normcase", "relpath", "basename", "splitext", "as_posix", "commonpath",
+                       "replace", "lower", "strip", "rstrip", "lstrip", "encode", "decode", "split", "rsplit", "startswith", "endswith", "format"}
+
+def _words(needle_set):
+    return [re.compile(r"(?<![\w.-])" + re.escape(n) + r"(?![\w-])") for n in needle_set]
+
+def _func_name(call):
+    f = call.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+
+def _constant_path(e):
+    """True when e is a string, or a call (such as os.path.join) on strings only: a path fixed in the source."""
+    if isinstance(e, ast.Constant):
+        return isinstance(e.value, str)
+    return isinstance(e, ast.Call) and bool(e.args) and all(_constant_path(a) for a in e.args)
+
+def _own_nodes(scope):
+    """The nodes of one scope: the module or one function, without the functions nested in it."""
+    todo, out = list(ast.iter_child_nodes(scope)), []
+    while todo:
+        n = todo.pop()
+        out.append(n)
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            todo.extend(ast.iter_child_nodes(n))
+    return out
+
+def _top_exprs(stmt):
+    """The largest expressions of one statement: an expression held by a `with` item or an argument list counts too."""
+    for child in ast.iter_child_nodes(stmt):
+        if isinstance(child, ast.expr):
+            yield child
+        elif not isinstance(child, ast.stmt):
+            yield from _top_exprs(child)
+
+def _up(d, n=1):
+    """The folder n levels above repo folder d ("." is the top), or None above the top."""
+    for _ in range(n):
+        if d is None or d == ".":
+            return None
+        d = posixpath.dirname(d) or "."
+    return d
+
+def _under(d, *parts):
+    d = posixpath.normpath(posixpath.join(d, *(x.strip("/") for x in parts)))
+    return None if d == ".." or d.startswith("../") else d
+
+def python_suite_hits(source, rel, paths, read=None, depth=1):
+    """True when a Python suite at repo path `rel` may read one of `paths` from the checkout. Read with `ast`, so a
+    name inside a string or comment is told from code. A root is a name bound, in its own scope or the module's, from
+    an expression that holds `__file__` or a root. A hit is:
+    - the exact path or file name anywhere in the source;
+    - a folder below the top or a stem (needles) in any string of an expression that holds a root, in any form
+      (join, `/`, `+`, f-string, format, `%`), or given bare to a file reader (CI runs at the repo top);
+    - a path under the folder a root names, when a call that builds no path takes that root whole (a walk). A root at
+      the top takes every path.
+    `read(path)` -> the text of a repo file or None: each local module the suite imports, from its own folder or a
+    folder it puts on sys.path, is read the same way, `depth` levels deep. A module that resolves to no file is no hit.
+    A folder named only under a temp dir is no hit. SyntaxError when the source does not parse."""
+    tree = ast.parse(source)
+    for p in paths:
+        if any(w.search(source) for w in _words({p, p.split("/")[-1]})):
+            return True
+    words = _words({w for p in paths for w in needles(p)})
+    path_dirs = set()
+    # a function of this file that calls only builders builds a path too, such as a helper that turns `\\` into `/`
+    builders = BUILDERS | {f.name for f in tree.body if isinstance(f, ast.FunctionDef)
+                           and all(_func_name(c) in BUILDERS for c in ast.walk(f) if isinstance(c, ast.Call))}
+
+    def analyze(scope, outer):
+        """-> (roots of this scope: name -> folder or None, hit). `outer` is the module's roots, for names not bound here."""
+        nodes = _own_nodes(scope)
+        bound = {n.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            bound |= {a.arg for a in ast.walk(scope.args) if isinstance(a, ast.arg)}
+        roots = {}
+        def is_root(name):
+            return name == "__file__" or (name in roots if name in bound else name in outer)
+        def has_root(e):
+            return any(isinstance(n, ast.Name) and is_root(n.id) for n in ast.walk(e))
+        def folder(e):  # the repo folder a root expression names, or None when it cannot be told
+            if isinstance(e, ast.Name):
+                return rel if e.id == "__file__" else roots.get(e.id) if e.id in bound else outer.get(e.id)
+            if isinstance(e, ast.Attribute) and e.attr == "parent":
+                return _up(folder(e.value))
+            if isinstance(e, ast.Subscript) and isinstance(e.value, ast.Attribute) and e.value.attr == "parents":
+                k = e.slice
+                return _up(folder(e.value.value), k.value + 1) if isinstance(k, ast.Constant) and isinstance(k.value, int) else None
+            if isinstance(e, ast.BinOp) and isinstance(e.right, ast.Constant) and isinstance(e.right.value, str):
+                d = folder(e.left)
+                if d is not None and (isinstance(e.op, ast.Div) or isinstance(e.op, ast.Add) and e.right.value.startswith("/")):
+                    return _under(d, e.right.value)
+                return None
+            if isinstance(e, ast.JoinedStr) and e.values and isinstance(e.values[0], ast.FormattedValue):
+                d = folder(e.values[0].value)
+                rest = e.values[1:]
+                if d is not None and all(isinstance(x, ast.Constant) for x in rest):
+                    return _under(d, "".join(x.value for x in rest))
+                return None
+            if isinstance(e, ast.Call):
+                name = _func_name(e)
+                head = e.args[0] if e.args else e.func.value if isinstance(e.func, ast.Attribute) else None
+                if head is None or name not in BUILDERS:
+                    return None
+                rest = e.args[1:] if e.args and head is e.args[0] else e.args
+                d = folder(head)
+                if name in SAME_DIR:
+                    return d
+                if name == "dirname":
+                    return _up(d)
+                if d is not None and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in rest):
+                    return _under(d, *(x.value for x in rest))
+            return None
+        binds = sorted((n for n in nodes if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None), key=lambda n: (n.lineno, n.col_offset))
+        for _ in range(3):  # a root bound from a root bound from __file__: a few passes reach the fixpoint
+            for n in binds:
+                if has_root(n.value):
+                    for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                        if isinstance(t, ast.Name):
+                            roots[t.id] = folder(n.value)
+        consts = []
+        for n in nodes:
+            if isinstance(n, ast.stmt):
+                for e in _top_exprs(n):  # any expression that holds a root: each string in it may be a path part
+                    if has_root(e):
+                        consts += [y.value for y in ast.walk(e) if isinstance(y, ast.Constant) and isinstance(y.value, str)]
+            if isinstance(n, ast.Call):
+                name = _func_name(n)
+                if name in READERS:  # a bare relative path: CI runs at the repo top
+                    for x in n.args:
+                        if _constant_path(x):
+                            consts += [y.value for y in ast.walk(x) if isinstance(y, ast.Constant) and isinstance(y.value, str) and not y.value.startswith("/")]
+                heads = list(n.args) + ([n.func.value] if isinstance(n.func, ast.Attribute) else [])
+                for x in heads:
+                    d = folder(x) if has_root(x) else None
+                    if d is None:
+                        continue
+                    if name in ("insert", "append") and isinstance(n.func, ast.Attribute):
+                        path_dirs.add(d)  # sys.path.insert(0, <root>): a folder its imports come from
+                    if name not in builders and (d == "." or any(p.startswith(d + "/") for p in paths)):
+                        return roots, True  # a root taken whole, as by a walk: every path under it
+        return roots, any(w.search(c) for c in consts for w in words)
+
+    module, hit = analyze(tree, {})
+    if hit or any(analyze(f, module)[1] for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))):
+        return True
+    if read is None or depth < 1:
+        return False
+    mods = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    mods |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module and not n.level}
+    for mod in sorted(mods):
+        for d in [posixpath.dirname(rel) or ".", *sorted(path_dirs)]:
+            for cand in (_under(d, mod.replace(".", "/") + ".py"), _under(d, mod.replace(".", "/"), "__init__.py")):
+                text = cand and read(cand)
+                if text is not None and text is not False and cand != rel:
+                    try:
+                        if python_suite_hits(text, cand, paths, read, depth - 1):
+                            return True
+                    except SyntaxError:
+                        return True  # a module it cannot read is read as a hit
+                    break
+    return False
+
+def lint_steps(root, base_ref, env=None):
+    """-> the names of the `gates` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice."""
+    c, out = sh([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", base_ref], cwd=root, env=env, timeout=120)
+    if c:
+        raise Stop(f"the lint steps cannot be listed (exit {c})")
+    return {l[len("would run"):].strip() for l in out.splitlines() if l.startswith("would run ")}
+
+def hit_suites(root, paths, skip):
+    """-> [(file, line)]: each suite line of the `gates` job in root's workflow whose source names one of `paths`
+    (needles), except a mutation script and the steps named in `skip`. The workflow is the one home of which suites
+    run, so no list is kept here. A step's `if:` is not read: the batch may have turned it on. Stop when the
+    workflow, its job or a suite source cannot be read, or a hit line is not a plain suite line."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    from workflow_steps import job_block, run_body, step_blocks, step_key  # the one home of the step parser
+    try:
+        with open(os.path.join(root, ".github", "workflows", "gates.yml"), encoding="utf-8") as f:
+            block = job_block(f.read(), "gates")
+    except (OSError, UnicodeError) as e:
+        raise Stop(f"the workflow cannot be read ({type(e).__name__})")
+    if block is None:
+        raise Stop("the workflow has no `gates` job")
+    words = _words({n for p in paths for n in needles(p)})
+    names = _words({x for p in paths for x in (p, p.split("/")[-1], *(p.rsplit("/", i)[0] for i in range(1, p.count("/") + 1)))})
+    def read(path):
+        try:
+            with open(os.path.join(root, *path.split("/")), encoding="utf-8") as f:
+                return f.read()
+        except (OSError, UnicodeError):
+            return None
+    hits = []
+    for step in step_blocks(block):
+        if step_key(step, "name") in skip:
+            continue
+        for line in (run_body(step) or "").splitlines():
+            line = line.strip()
+            m = re.match(r"(?:python3|node|bash) +(\S+\.(?:py|mjs|sh))\b", line)
+            if not m:  # a line of no suite form is never read, so one that names main's paths or their folders refuses
+                if line and any(w.search(line) for w in names):
+                    raise Stop(f"the gates line `{line}` names main's paths and is no suite this tool can read")
+                continue
+            if "mutate" in m.group(1):
+                continue
+            try:
+                with open(os.path.join(root, *m.group(1).split("/")), encoding="utf-8") as f:
+                    text = f.read()
+            except (OSError, UnicodeError) as e:
+                raise Stop(f"the suite {m.group(1)} cannot be read ({type(e).__name__})")
+            if m.group(1).endswith(".py"):
+                try:
+                    hit = python_suite_hits(text, m.group(1), paths, read)
+                except (SyntaxError, ValueError, RecursionError) as e:
+                    raise Stop(f"the suite {m.group(1)} cannot be parsed ({type(e).__name__})")
+            else:  # node and bash suites: any needle in the source is a hit, which fails safe
+                hit = any(w.search(text) for w in words)
+            if hit:
+                if not SUITE_LINE.fullmatch(line):
+                    raise Stop(f"the suite line `{line}` reads main's paths and cannot be run as written")
+                hits.append((m.group(1), line))
+    return hits
+
+_SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read after the wait does not repeat a proof it already holds
+
+def small_base_move(wt, base_ref, sha, before_run=None):
+    """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T.
+    It stands only when main's paths since the merge base M share no path with the batch's (the records page aside: the
+    generator proves it on the merge), the merge of sha and T is clean, the repo's ci-scope.sh turns on no job and no suite
+    for main's paths, and on that merge the `gates` lint steps pass and so does each other `gates` suite that names one of
+    main's paths (hit_suites). Anything unread refuses. The worktree goes back to its HEAD.
+    Cost per call: about 10 git starts, one ci-scope.sh run, two ci-job runs (a plan, and the lints at two starts per
+    step) and one start per hit suite; one temp output file, and one ci-job log, kept only on a failure."""
+    c, tip = git(wt, "rev-parse", base_ref)
+    if c:
+        return False, f"cannot read {base_ref}"
+    key = (wt, sha, tip)
+    if key in _SMALL_MOVES:
+        return _SMALL_MOVES[key]
+    c, m = git(wt, "merge-base", sha, tip)
+    if c or not m:
+        return False, "the merge base cannot be read"
+    reads = [git(wt, "diff", "--name-only", "--no-renames", "-z", m, x) for x in (tip, sha)]  # --no-renames: a moved file names both paths
+    count = git(wt, "rev-list", "--count", f"{sha}..{tip}")
+    if any(c for c, _ in reads) or count[0]:
+        return False, "the paths of main or of the batch cannot be read"
+    theirs, ours = ({p for p in out.split("\0") if p} for _, out in reads)
+    shared = sorted((theirs & ours) - {RECORDS_PAGE})
+    if not theirs or shared:
+        return False, "main and the batch both change " + ", ".join(shared) if shared else "main's commits change no path"
+    c, head = git(wt, "rev-parse", "HEAD")
+    if c:
+        return False, "the worktree's HEAD cannot be read"
+    fd, out_file = tempfile.mkstemp(prefix="merge-scope-")
+    os.close(fd)
+    fd, log = tempfile.mkstemp(prefix="merge-lint-", suffix=".log")
+    os.close(fd)
+    keep = False
+    try:
+        c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", "-m", f"Merge {base_ref} to read the lints", tip)
+        if c:
+            return False, f"the head does not merge cleanly with {base_ref}"
+        if not os.path.isfile(os.path.join(wt, *CI_SCOPE.split("/"))):
+            return False, f"the repo has no {CI_SCOPE} to say which jobs read main's paths"
+        # On the merge, sha...HEAD is main's paths: the same set as M..T, because the two sides share none
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
+        c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
+        with open(out_file, encoding="utf-8") as f:
+            flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        on = sorted(k for k, v in flags.items() if v != "false")
+        if on or not flags:
+            return False, f"{CI_SCOPE} turns on " + (", ".join(on) if flags else "every job (it gave no answer)") + " for main's paths"
+        if c:
+            return False, f"{CI_SCOPE} failed (exit {c}) on main's paths"
+        if before_run:
+            before_run(LINT_SECONDS)  # extends the merge lock past the run, or stops with a NetStop
+        # --base is the base tip, as a pull request run reads its base: it checks the merge against main as it is now
+        c, out = sh([sys.executable, CI_JOB, "gates", "--lint", "--base", base_ref], cwd=wt, env={**env, "VERDICT_LOG": log}, timeout=LINT_SECONDS)
+        if c:
+            keep = True
+            bad = [l.strip() for l in out.splitlines() if l.startswith(("FAIL", "unknown"))]
+            return False, f"the lints of the merge are not all PASS ({'; '.join(bad[:3]) or 'exit ' + str(c)}; full output: {log})"
+        try:
+            # the records page is left out: it is derived from the records, which are matched, and the generator proves it on the merge
+            suites = hit_suites(wt, sorted(theirs - {RECORDS_PAGE}), lint_steps(wt, base_ref, env))
+        except Stop as e:
+            return False, str(e)
+        if suites and before_run:
+            before_run(LINT_SECONDS)
+        end = time.monotonic() + LINT_SECONDS
+        for suite, line in suites:  # each suite that reads one of main's paths, run on the merge as the workflow writes it
+            c, out = sh(["bash", "-c", line], cwd=wt, env=env, timeout=max(1, end - time.monotonic()))
+            if c:
+                return False, f"{suite} fails on the merge (exit {c})"
+        n = int(count[1])
+        verdict = True, f"{base_ref.split('/', 1)[-1]} moved by {n} commit{'s' * (n != 1)} touching only paths no job of this batch reads; the lints pass on the merge"
+        _SMALL_MOVES[key] = verdict
+        return verdict
+    except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+        return False, f"the proof could not run ({type(e).__name__})"
+    finally:
+        git(wt, "merge", "--abort")
+        git(wt, "reset", "--hard", "-q", head)
+        git(wt, "clean", "-fdq")
+        for f in (out_file, *(() if keep else (log,))):
+            with contextlib.suppress(OSError):
+                os.remove(f)
+
+def holds_base(wt, base_ref, sha, before_run=None):
+    """-> (None, None) when sha holds the tip of base_ref; (None, why) when it does not but its green run still stands
+    (small_base_move); else (why not, None). The checks ran on sha, so a sha without that tip was never tested against
+    the base as it is now. Branch protection has strict false, so GitHub does not refuse it (merge-needs-current-base)."""
     c, out = git(wt, "merge-base", "--is-ancestor", base_ref, sha)
     if c == 0:
-        return None
+        return None, None
     if c == 1:
+        ok, why = small_base_move(wt, base_ref, sha, before_run)
+        if ok:
+            return None, why
         tip = git(wt, "rev-parse", "--short=9", base_ref)[1]
         base = base_ref.split("/", 1)[-1]
         return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
-                f"Merge {base} into the branch, push, and run again.")
-    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}"
+                f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}."), None
+    return f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: {out}", None
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -1552,8 +1884,9 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
-            current = holds_base(wt, f"origin/{base}", info["head"])
+            current, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = current and ("BEHIND: " if "does not hold" in current else "UNKNOWN: ") + current + " --confirm refuses it."
+            current = current or stands and stands + ". The green run stands."
         except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
             say("BLOCKED: " + " ".join(str(e).splitlines()[:-1]).replace("  ", " ").strip())
             raise
@@ -1598,9 +1931,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
         refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok)
-        stale = holds_base(wt, base_ref, info["head"])
+        stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
+        if stands:
+            say(f"merge: {stands}. The green run stands.")
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
         resumed = own_claim(wt, stamp_cfg, base_ref) if base == cfg["defaultBranch"] else None
         claimed, trailer = bool(resumed), None  # claimed: the pushed commit holds a Record-claim
@@ -1689,9 +2024,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     return proof
                 if proof == "stale":
                     stop(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again.")
-                stale = holds_base(wt, base_ref, sha)  # the base moved during the wait: the green run did not test it
+                stale, stands = holds_base(wt, base_ref, sha, host.before_wait)  # the base moved during the wait: the green run did not test it
                 if stale:
                     stop(stale)
+                if stands:
+                    say(f"merge: {stands}. The green run stands.")
                 return proof
 
             if prove(fail) == "healed":  # the page conflicted with the base: the merge commit carries a rebuilt page, so it is pushed and its checks wait

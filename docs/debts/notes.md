@@ -589,3 +589,4 @@
 - waiting-cap-left-wide: at 1440 the viewer caption sits left at x=20 while the mockup is centred (skills/waiting-page/page.html .dcap)
 - waiting-dpos-stale-form: after a resize, `#dPos` keeps its old form ("1/3" or "1 of 3") until the next page turn (skills/waiting-page/page.html showDesign)
 - waiting-head-midwidth-untested: no test runs the viewer head at 521-900 px with a wide font, where the buttons keep their long labels (skills/waiting-page/tests/page.test.mjs)
+- main-ref-url-forms-untested: no test covers an scp-style or credentialed origin URL in the FETCH_HEAD match; a wrong normalisation refuses, the old behaviour (githooks/main-ref/reference-transaction fetched)
