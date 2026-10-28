@@ -906,12 +906,21 @@ def run_unreadable(c, launcher, module, flag):
 
 def lock_against_delete(c, sid):
     """Make the pointer of `sid` impossible to delete in this run -> an undo function, and
-    whether the lock holds. Windows: the file is read-only. POSIX: its folder is read-only. A
-    root run cannot be locked, so the lock check fails the case rather than passing it."""
+    whether the lock holds. Windows: the file is read-only. POSIX: its folder is read-only. Root
+    ignores mode bits, so a root run marks the file immutable (chattr +i); where that fails, the
+    lock check fails the case rather than passing it."""
     ptr, pdir = c.pointer(sid), os.path.dirname(c.pointer(sid))
     if os.name == "nt":
         os.chmod(ptr, stat.S_IREAD)
         target, undo = ptr, (lambda: os.chmod(ptr, stat.S_IREAD | stat.S_IWRITE))
+    elif os.geteuid() == 0:
+        def chattr(flag):
+            try:
+                subprocess.run(["chattr", flag, ptr], capture_output=True)
+            except OSError:
+                pass   # no chattr: the lock check below fails the case
+        chattr("+i")
+        target, undo = ptr, (lambda: chattr("-i"))
     else:
         os.chmod(pdir, 0o555)
         target, undo = pdir, (lambda: os.chmod(pdir, 0o755))

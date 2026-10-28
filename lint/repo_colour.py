@@ -29,6 +29,11 @@ def load(registry=REGISTRY):
         return json.load(f)
 
 
+def retired(registry=REGISTRY):
+    """Old repo name -> the repo that took it."""
+    return load(registry).get("retired", {})
+
+
 def hue_gap(a, b):
     d = abs(a - b) % 360
     return min(d, 360 - d)
