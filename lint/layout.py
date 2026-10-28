@@ -5,9 +5,11 @@ lint/layout.json holds the kinds. A repo adds its own kinds in its extras file (
 extra kind may not replace a layout kind. The mark that the repo has rolled out to the layout is
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
-("waiting-page", "kind", "caution", "visibility", "devices", "roadmap") read whenever the file
-exists (`has_extras()`). The "waiting-page" key holds the URL of the repo's waiting page
-(`waiting_page()`, skill waiting-page).
+("waiting-page", "waiting-page-colour", "waiting-page-icon", "kind", "caution", "visibility",
+"devices", "shared-resources", "roadmap") read whenever the file exists (`has_extras()`). The
+"waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page);
+"waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
+branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py).
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
 layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. A kind
@@ -204,6 +206,33 @@ def waiting_page(root):
     if not isinstance(found, str) or not found.startswith(ARTIFACT_LINK):
         raise LayoutError("%s: %s is not a claude.ai artifact link" % (_extras(root), WAITING_PAGE))
     return found
+
+
+WAITING_PAGE_COLOUR = "waiting-page-colour"  # the extras key: the page's colour, #rrggbb
+WAITING_PAGE_ICON = "waiting-page-icon"  # the extras key: the page's icon file, a path inside the repo
+
+
+def waiting_page_colour(root):
+    """The waiting page colour of `root` from its extras file, lowercased; None when unset. LayoutError
+    when it is not #rrggbb, so a caller never guesses one."""
+    found = _repo_keys(root).get(WAITING_PAGE_COLOUR)
+    if found is None:
+        return None
+    if not isinstance(found, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", found):
+        raise LayoutError("%s: %s %r is not #rrggbb" % (_extras(root), WAITING_PAGE_COLOUR, found))
+    return found.lower()
+
+
+def waiting_page_icon(root):
+    """The path, relative to `root`, of its waiting page icon from its extras file; None when unset.
+    LayoutError when it is not a path inside the repo. The file itself is the caller's to read."""
+    found = _repo_keys(root).get(WAITING_PAGE_ICON)
+    if found is None:
+        return None
+    where = "%s: %s" % (_extras(root), WAITING_PAGE_ICON)
+    if not isinstance(found, str) or not found.strip("/ ") or found != found.strip():
+        raise LayoutError("%s %r is not a path" % (where, found))
+    return _safe(found, where)
 
 
 def live_pages(roots):
