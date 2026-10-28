@@ -1,9 +1,9 @@
 {
  "title": "A waiting-page answer always saves to its item, even when the item has no id field",
  "phase": "cleanup",
- "status": "doing",
+ "status": "done",
  "order": 103.33825,
  "why": "Your gripe, Oct 27 11:26 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2KjDb58BKeFGkYX5Wiy92vx): banchi's items 29 to 32 had no id field, so each Save wrote answers/<undefined> and you could not save a pick.",
- "note": "Checked on main 2ca89254: skills/waiting-page/page.html drops the database key when it loads items, and nothing refuses an item with no id. Fix, built in the thread \"Stop waiting-page answers saving to nowhere\" on branch waiting-page-item-ids: the page keys each item by its database key, refuses Send on an item with broken fields and says why on its card, and SKILL.md \"Add an item\" reads the item back. Red first on main. After merge, c130 republishes every live page. Needs no answer. Port: yes; one template serves every page. Green in c126's lane: draft PR #732 (6c4dfc04), batch 2. Placed ahead of c130 (triage, Oct 27): a save that goes nowhere loses your answer.",
- "updatedAt": "2026-10-28T05:45:00Z"
+ "note": "Checked on main 2ca89254: skills/waiting-page/page.html drops the database key when it loads items, and nothing refuses an item with no id. Fix, built in the thread \"Stop waiting-page answers saving to nowhere\" on branch waiting-page-item-ids: the page keys each item by its database key, refuses Send on an item with broken fields and says why on its card, and SKILL.md \"Add an item\" reads the item back. Red first on main. After merge, c130 republishes every live page. Needs no answer. Port: yes; one template serves every page. Green in c126's lane: draft PR #732 (6c4dfc04), batch 2. Placed ahead of c130 (triage, Oct 27): a save that goes nowhere loses your answer. Merged in batch #737 (main b09aece, Oct 28 01:19 CDT), PR #732.",
+ "updatedAt": "2026-10-28T06:45:00Z"
 }

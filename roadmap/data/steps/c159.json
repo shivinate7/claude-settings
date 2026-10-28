@@ -1,9 +1,9 @@
 {
  "title": "main-ref's hook installer works with any core.hooksPath and says it needs bash",
  "phase": "cleanup",
- "status": "doing",
+ "status": "done",
  "order": 103.3389998,
  "why": "c138's installer reviewer (Oct 28) proved two faults in githooks/main-ref/install.sh on main: with a relative or ~ core.hooksPath it installs where git does not look, so the main-ref guard is off in other worktrees; and its usage says sh, but it uses pipefail, so it needs bash.",
- "note": "Debt. Green and reviewed Oct 28: draft PR #733 (833a594), batch 2; 6 new cases red then green; Opus round 1 found a silent success outside a repo (fixed), Sonnet round 2 clear. Was: githooks/main-ref/install.sh resolves core.hooksPath as git does (relative to the worktree root, ~ expanded) and its usage line says bash (or it drops pipefail); red first on a clone with a relative hooksPath whose sibling worktree runs no guard. Touches only githooks/main-ref/ and its test. Needs no answer. Port: no; the guard installs from claude-settings. Placed ahead of c107 (triage, Oct 28): a guard that is silently off in other worktrees.",
- "updatedAt": "2026-10-28T05:45:00Z"
+ "note": "Debt. Green and reviewed Oct 28: draft PR #733 (833a594), batch 2; 6 new cases red then green; Opus round 1 found a silent success outside a repo (fixed), Sonnet round 2 clear. Was: githooks/main-ref/install.sh resolves core.hooksPath as git does (relative to the worktree root, ~ expanded) and its usage line says bash (or it drops pipefail); red first on a clone with a relative hooksPath whose sibling worktree runs no guard. Touches only githooks/main-ref/ and its test. Needs no answer. Port: no; the guard installs from claude-settings. Placed ahead of c107 (triage, Oct 28): a guard that is silently off in other worktrees. Merged in batch #737 (main b09aece, Oct 28 01:19 CDT), PR #733.",
+ "updatedAt": "2026-10-28T06:45:00Z"
 }

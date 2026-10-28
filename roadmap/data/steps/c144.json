@@ -1,9 +1,9 @@
 {
  "title": "A standing-role hand-off moves the page watches to the successor",
  "phase": "cleanup",
- "status": "doing",
+ "status": "done",
  "order": 103.338999,
  "why": "Incident, Oct 27 12:07 CDT: your waiting-page answers (items 35 and 31) still went to the old triage thread after Triage (8) took over, because the page's comment watch stayed with Triage (7); both threads then acted on the same comment.",
- "note": "Green and reviewed: draft PR #727 (head 3047cc7, 3 review rounds), waits for the next batch; role-handoff.md gains a Pages section, and the successor reads comments since the old thread's stop time. Two notes for docs/debts/notes.md: a comment arriving mid-handover can be answered twice; the successor's read shows the old thread's replies. Was: skill project-ops' hand-off steps gain two lines, the successor watches each page its role owns (the roadmap page, this project's waiting page) and the old thread stops watching them, and the hand-off file lists those page URLs; red first on a hand-off file that names no page. Needs no answer. Port: yes, with project-ops. Placed ahead of c107 (triage, Oct 27): it recurs at every hand-off.",
- "updatedAt": "2026-10-28T04:55:00Z"
+ "note": "Green and reviewed: draft PR #727 (head 3047cc7, 3 review rounds), waits for the next batch; role-handoff.md gains a Pages section, and the successor reads comments since the old thread's stop time. Two notes for docs/debts/notes.md: a comment arriving mid-handover can be answered twice; the successor's read shows the old thread's replies. Was: skill project-ops' hand-off steps gain two lines, the successor watches each page its role owns (the roadmap page, this project's waiting page) and the old thread stops watching them, and the hand-off file lists those page URLs; red first on a hand-off file that names no page. Needs no answer. Port: yes, with project-ops. Placed ahead of c107 (triage, Oct 27): it recurs at every hand-off. Merged in batch #737 (main b09aece, Oct 28 01:19 CDT), PR #727.",
+ "updatedAt": "2026-10-28T06:45:00Z"
 }
