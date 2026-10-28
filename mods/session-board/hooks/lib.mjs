@@ -375,11 +375,26 @@ export function trackedTaskIds(tasks) {
 
 const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
 
-// The refusal text, or null when nothing runs.
-export function questionRefusal(agents, tasks) {
-  if (!agents && !tasks) return null
-  const running = [agents ? plural(agents, 'agent') : '', tasks ? plural(tasks, 'background task') : ''].filter(Boolean).join(' and ')
-  return `Question box refused: ${running} of this session still run, and a box stops the session until the owner answers. Ask in your reply and on the waiting page instead, then keep working on what does not depend on the answer (rule questions-go-to-owner).`
+// A tool call that starts another session: the desktop start (hooks/guard.py SESSION_TOOL) or the
+// cloud start. The guard is Python, so its name is copied here. Exact MCP names only: a lookalike
+// such as create_session_tags or another server's start_session is not a start.
+export const SESSION_START_TOOLS = ['mcp__ccd_session__start_session', 'mcp__claude-code-remote__create_session']
+export const startsSession = tool => SESSION_START_TOOLS.includes(tool)
+
+// A tool.call result that answered without error: a deny or an error result is no start.
+export const answered = r => !!r && typeof r === 'object' && 'result' in r && !r.deny && r.isError !== true
+
+// The count a start record (store key started:<id>, { n, at }) holds, 0 when it holds none.
+export const startedCount = raw => (raw && typeof raw === 'object' ? num(raw.n, 0, 999) ?? 0 : 0)
+
+// The refusal text, or null when nothing runs and no session was started. A started session may
+// wait on this one for as long as this one lives.
+export function questionRefusal(agents, tasks, started = 0) {
+  if (!agents && !tasks && !started) return null
+  const why = []
+  if (agents || tasks) why.push([agents ? plural(agents, 'agent') : '', tasks ? plural(tasks, 'background task') : ''].filter(Boolean).join(' and ') + ' of this session still run')
+  if (started) why.push(`this session started ${plural(started, 'session')}, which may wait on it`)
+  return `Question box refused: ${why.join(', and ')}. A box stops the session until the owner answers. Ask in your reply and on the waiting page instead, then keep working on what does not depend on the answer (rule questions-go-to-owner).`
 }
 
 // /safe-stop. The text goes to the session as a prompt. The handoff hook's own prompt file holds

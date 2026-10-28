@@ -39,7 +39,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    tool warns when a job passes 70% of its cap. A timeout stays red, labelled "re-cap or split".
    Give a network step, such as a browser install, its own short cap.
    When a job nears its cap, split the slowest suite's subject by family into its own job. Give
-   the measured CI time before and after.
+   the measured CI time before and after. The target is a slowest of 30 runs under 80% of the cap.
+   Decision `ci-job-caps` holds the per-job table and how to measure again.
 6. **After a merge, read every run the push starts.** A deploy or nightly workflow is not a
    required check, so its failure shows on no PR.
 7. **Pin and audit actions.** Pin each third-party action by full commit SHA, with the version as

@@ -623,13 +623,14 @@ done
 TARGET_JSON="$CLAUDE_DIR/settings.json"
 
 if [ "$CLOUD" = 1 ]; then
-  # Cloud: generate a real file (not a symlink) and add a SessionStart hook that refreshes
-  # both files from GitHub at every session start/resume. Only in cloud, so the shared
-  # settings.json stays hook-free for Windows/macOS/Linux locals.
+  # Cloud: generate a real file (not a symlink) and append a SessionStart hook that refreshes
+  # it at every session start/resume by re-running install.sh from GitHub. The repo's own
+  # SessionStart hooks come first in the list.
+  # Locals get no refresh hook: their settings.json is a symlink into the clone.
   HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"
   if command -v jq >/dev/null 2>&1; then
     jq --arg cmd "$HOOK_CMD" \
-      '.hooks.SessionStart = [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}]' \
+      '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])' \
       "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"
     log "wrote $TARGET_JSON (repo settings + cloud refresh hook)"
   else

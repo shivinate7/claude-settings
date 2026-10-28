@@ -1,5 +1,6 @@
 # Notes: findings too unlikely to hit to be debts
 - AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
+- guard-suite-red-on-unparsed: hooks/test_guard.py is not green when hooks/guard_wsl.py is parsed and unparsed, so the report has no same-engine gold row for the guard. Cause unmeasured: find which case reads the source text. Decision: mutation-report-scores-suites.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a refusal case. Decision: wsl-allow-list (WSL allow list).
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
 - agent-brief-no-matcher: SubagentStart agent-brief hook has no matcher, so every agent type gets the standing rules (settings.json)
@@ -261,6 +262,14 @@
 - shell-write-miss-pipe-heredoc: cat <<EOF | sh writing a frozen path is not seen; the heredoc body is stripped first (hooks/guard_core.py)
 - shell-write-miss-sort-output: sort -o P writes P, but sort is not a mutating command and -o is not a redirect (hooks/guard_frozen.py)
 - shell-write-miss-subshell: a write inside ( ... > P) is not seen; the closing parenthesis stays glued to the path (hooks/guard_frozen.py)
+- silent-suite-platform-exit: lint/test_hook_platform_exit.py kills none of 10 mutants of hooks/stall_watch.py; it pins the platform exit only. Decision: mutation-report-scores-suites.
+- silent-suite-reply-judge: hooks/test_reply_judge.py kills none of 10 sampled mutants of lint/report_gate.py, but it goes red when the file is wholly broken, so it does load the file. Cause unmeasured. Decision: mutation-report-scores-suites (the mutation report scores suites).
+- mutant-load-unproven: the report never proves a silent suite loaded the mutant. A suite that skips or reads an installed copy reads silent. Fix: a whole-file break control per file. Decision: mutation-report-scores-suites.
+- mutant-subprocess-throw-kill: a mutant that throws in a child process the suite reports as a FAIL line counts as killed, so the rates are an upper bound. Decision: mutation-report-scores-suites.
+- silent-suite-rule-audit: lint/test_rule_audit.py kills none of 10 mutants of lint/report_gate.py; it names the file as a rule reference only. Decision: mutation-report-scores-suites.
+- silent-suite-session-end-sweep: janitor/test_session_end_sweep.py kills none of 10 mutants of hooks/stall_watch.py; it only names the hook in a list. Decision: mutation-report-scores-suites.
+- silent-suite-settings-matcher: lint/test_settings_matcher.py kills none of 10 mutants of lint/report_gate.py, hooks/feedback_gate.py or hooks/stall_watch.py; it pins hook registration only. Decision: mutation-report-scores-suites.
+- silent-suite-wrappers: hooks/test_wrappers.py kills none of 10 mutants of lint/report_gate.py or hooks/stall_watch.py; it pins the wrapper shape only. Decision: mutation-report-scores-suites.
 - sim-boot-check-xcodebuild: the boot check skips xcodebuild -destination, simctl bootstatus -b and simctl boot with a leading flag (hooks/sim_boot_record.py)
 - skill-rows-fence-indent: a 4-space-indented fence mark inside a fence closes it, so a row inside counts: false green (lint/check_skill_model_rows.py)
 - skill-rows-posix-only-test: the unreadable-folder exit 2 test and symlink case run only on POSIX (lint/check_skill_model_rows.py fixtures)
@@ -404,9 +413,10 @@
 - sendmessage-judge-blind-recvs: The busy-state layer reads an agent id, a uds: address, main and * as unseen and allows. only the wording judge covers them (hooks/sendmessage_state.py, mods/session-board/hooks/lib.mjs). Decision: agent-model-cap
 - stamp-scan-frontmatter-links: The near-miss scan does not skip frontmatter or link targets (actions/stamp/stamp.mjs). Decision: none
 - step-up-prefix-forms: roles-third-try-steps-up counts only a line starting Round N of 3 or Try N of 3. forms like Round 2/3, '- Round 2 of 3', bold and '# ' pass unseen. Decision: agent-model-cap
-- step-up-plugin-types: roles-third-try-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked, and a Workflow agent() call is not checked. Decision: agent-model-cap
+- step-up-plugin-types: roles-third-try-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked. Decision: agent-model-cap
 - step-up-sonnet-substring: the reviewer check is a substring match on sonnet, so a made-up model such as opus-sonnet passes. Decision: agent-model-cap
 - step-up-round1-prose-line: a round 1 reviewer brief with a prose line that starts Round 2 of 3 is refused. the refusal names the fix. Decision: agent-model-cap
+- step-up-workflow-hex-escape: a Workflow prompt that writes a newline as \x0a or \u000a is not decoded, so a Round N of 3 line after it passes unseen. Decision: agent-model-cap
 - floor-workflow-runtime-models: agent-model-floor reads string literals in each agent( call. a model or role built at run time, or a call after a regex literal holding a quote, is unseen. Decision: agent-model-cap
 - floor-builtin-agents: a built-in agent with no file in agents/ picks its own model and never puts it in the tool input. Decision: agent-model-cap
 - explore-audit-judge-misread: the Agent prompt judge is a model and can misread a borderline Explore brief. the caller spot-checks findings before acting on an audit. Decision: agent-model-cap
@@ -565,7 +575,14 @@
 - ci-job-ste-ignores-inputs: ci-job runs the gates STE step as `bin/ste-changed <base>` and reads neither its `if:` nor its `with:`, so a `full_ste_audit` dispatch (scope all, fail false) is not mirrored locally. The local run is stricter, never looser (bin/ci-job is_ste_action)
 - waiting-opt-shared-slug: two options that share one mockup slug open the first one's sheet and label on "Open full size", as `openDesign` takes the first match (skills/waiting-page/page.html openDesign)
 - waiting-opt-sel-untested: no test asserts the `.sel` class after a pick that keeps the option frames, so a stale highlight from a dropped attribute copy would pass (skills/waiting-page/tests/page.test.mjs)
-- waiting-opt-lone-empty-slot: above 710 px a fourth option alone in a second row still shows an empty mockup slot, as CSS cannot see a card's row (skills/waiting-page/page.html)
 - waiting-opt-id-namespace: the trade-off id `t-<item>-<key>` shares a namespace with the title id `t-<item>`, so items `foo` and `foo-a` would both own `t-foo-a` (skills/waiting-page/page.html optCard)
 - waiting-sheet-brand-border: with a brand colour the Designs sheet's 50% `--on-hdr` button border can fall under 3:1 (about 18% of 648 sampled brands); the ring stays 4.5:1 or better (skills/waiting-page/page.html .dsh-head .btn)
 - scorecard-indented-caution-row: an indented `x: y` line, such as an indented Caution line, becomes a `finding` row on the group before it, not a Notes line. Nothing is dropped (lint/compliance_probes.py FINDING_LINE)
+- waiting-designs-mixed-shape: an item that lists `designs` has its options' `design` slugs ignored, so an option whose slug is not in the list warns "No picture" even when its HTML exists (skills/waiting-page/page.html designsOf)
+- waiting-viewer-option-letter: an option design from an item with no `designs` list is labelled by `o.label` alone, so the viewer head does not name the option letter (skills/waiting-page/page.html allDesigns)
+- waiting-drawn-infinity: `drawn: Infinity` passes the `> 0` check and gives a blank frame; 0, negative, NaN and missing fall back to 390 (skills/waiting-page/page.html fitFrame)
+- waiting-fit-cache-drawn: the `FIT` cache key is `slug|focus` and leaves out `drawn`, so two entries for one slug at two widths share one cached box (skills/waiting-page/page.html FIT)
+- waiting-cap-font-swap: a web font that swaps in after the viewer opens without changing the title's box leaves the caption state stale until the next fit (skills/waiting-page/page.html capFit)
+- waiting-cap-left-wide: at 1440 the viewer caption sits left at x=20 while the mockup is centred (skills/waiting-page/page.html .dcap)
+- waiting-dpos-stale-form: after a resize, `#dPos` keeps its old form ("1/3" or "1 of 3") until the next page turn (skills/waiting-page/page.html showDesign)
+- waiting-head-midwidth-untested: no test runs the viewer head at 521-900 px with a wide font, where the buttons keep their long labels (skills/waiting-page/tests/page.test.mjs)

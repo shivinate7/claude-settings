@@ -1,12 +1,9 @@
 # The gates job runs near its cap
 
-**What.** The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. Two runs were
-cancelled at 18m10s by the old 18 min cap, with every CI step green. The cap is now 36 min, 2x
-the slowest green run. Suite growth is the cause, and the cap only hides it.
+**What.** The gates job took 30.4 min slowest over 30 runs (median 22.1), 84% of its 36 min cap, on 2026-10-27. The guard fixture suite alone took 10.6 min slowest, so it moved to the `gates-guard` job. The gates job is projected at 19.8 min slowest, 55% of its cap. Suite growth is the cause, and the cap only hides it. Figures: decision `ci-job-caps`.
 
 **Where.** `.github/workflows/gates.yml`, the `gates` job, `timeout-minutes`.
 
-**Decision.** none.
+**Decision.** `ci-job-caps`.
 
-**Retire.** Split the slowest suite into its own job, so the gates job's slowest green run
-is under half the cap. A gates run shows it.
+**Retire.** The gates job's slowest green run is under half the cap (18 min). A gates run after the split shows it. Then delete this debt.

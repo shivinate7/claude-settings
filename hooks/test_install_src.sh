@@ -1114,6 +1114,41 @@ skills_case2() {
   rm -rf "$h"
 }
 
+# ---- cloud settings: the refresh hook is added after the repo's own SessionStart hooks ------
+# The expected list is read from the repo's settings.json, so a new SessionStart hook needs no edit here.
+cloud_settings1() {
+  name="cloud_settings1: cloud settings.json keeps every repo SessionStart hook, then adds the refresh hook"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/cloud_settings1-checkout"
+  make_checkout "$co" "# cloud_settings1 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  cp "$REPO_ROOT/settings.json" "$co/settings.json"
+  ( cd "$co" && git add -A && git commit -q -m settings )
+
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        bash ./install.sh --cloud 2>&1); rc=$?
+  want=$(jq -c '.hooks.SessionStart' "$REPO_ROOT/settings.json")
+  n=$(jq '.hooks.SessionStart | length' "$REPO_ROOT/settings.json")
+  got=$(jq -c --argjson n "$n" '.hooks.SessionStart[:$n]' "$cfg/settings.json" 2>/dev/null)
+  tail_cmd=$(jq -r --argjson n "$n" '.hooks.SessionStart[$n:] | map(.hooks[].command) | join("\n")' \
+        "$cfg/settings.json" 2>/dev/null)
+  extra=$(jq --argjson n "$n" '.hooks.SessionStart | length - $n' "$cfg/settings.json" 2>/dev/null)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$got" != "$want" ]; then
+    bad "$name" "the first $n SessionStart entries differ from the repo settings.json; the cloud install dropped or changed a repo hook"
+  elif [ "$extra" != 1 ]; then
+    bad "$name" "expected one entry after the repo hooks, found ${extra:-none}"
+  else
+    case "$tail_cmd" in
+      "curl -fsSL "*"/install.sh | bash -s -- --cloud") ok "$name" ;;
+      *) bad "$name" "the last SessionStart entry is not the refresh hook: $tail_cmd" ;;
+    esac
+  fi
+  rm -rf "$h"
+}
+
 # ---- skills backups, cloud mode: a repeat run replaces its own copy, and a needed backup lands outside skills/ ----
 # Each cloud run installs again, so a backup inside skills/ piled up and loaded as one more skill each.
 skills_bak_setup() {
@@ -2735,6 +2770,7 @@ run prune_case5
 run prune_case6
 run skills_case1
 run skills_case2
+run cloud_settings1
 run skills_bak1
 run skills_bak2
 run skills_bak3

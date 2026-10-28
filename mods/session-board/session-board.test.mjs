@@ -1331,6 +1331,138 @@ await test('question box: an earlier deny stands and costs no read', async () =>
   same(reads, 0, 'no agent read')
 })
 
+// One tool call through the tool.call hook; `answer` is what the rest of the chain returns, or throws.
+async function callTool(h, tool, answer) {
+  const hook = h.hooks.find(x => x.event === 'tool.call')
+  try { await hook.fn(h.$, { tool, input: {}, tool_use_id: 'u-' + tool }, async () => { if (answer instanceof Error) throw answer; return answer }) } catch { /* the call failed */ }
+}
+const STARTED = { result: { content: [{ type: 'text', text: 'session_x started' }] } }
+
+for (const tool of ['mcp__ccd_session__start_session', 'mcp__claude-code-remote__create_session']) {
+  await test(`question box: a session that started a session is refused, with nothing running (${tool})`, async () => {
+    const h = await start({ liveAgents: [], python: PYOK, env: { HOME: '/home/u' } })
+    await fire(h, 'session.start', {})
+    await callTool(h, tool, STARTED)
+    const r = await askBox(h)
+    same(r && r.decision, 'deny', 'verdict')
+    assert.match(r.reason, /started 1 session\b/, 'the reason counts the started sessions')
+    assert.match(r.reason, /waiting page/i, 'the reason names the waiting page')
+    assert.match(r.reason, /keep working/i, 'the reason says to keep working')
+    await callTool(h, tool, STARTED)
+    assert.match((await askBox(h)).reason, /started 2 sessions/, 'a second start counts')
+    await settle()
+    assert.ok(guardLines(h).length >= 1 && guardLines(h)[0].some(x => /started=1/.test(String(x))), 'the guard.log line counts the starts')
+  })
+}
+
+await test("question box: the desktop start tool is the guard's own SESSION_TOOL", async () => {
+  const { readFileSync } = await import('node:fs')
+  const guard = readFileSync(fileURLToPath(new URL('../../hooks/guard.py', import.meta.url)), 'utf8')
+  const m = /^SESSION_TOOL = "([^"]+)"$/m.exec(guard)
+  assert.ok(m && lib.startsSession(m[1]), `guard.py SESSION_TOOL ${m && m[1]} is not a start`)
+})
+
+await test('question box: a failed or refused session start leaves it open', async () => {
+  const h = await start({ liveAgents: [] })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', { result: 'no such repo', isError: true, text: 'no such repo' })
+  await callTool(h, 'mcp__claude-code-remote__create_session', { deny: 'refused' })
+  await callTool(h, 'mcp__claude-code-remote__create_session', new Error('host failed'))
+  same((await askBox(h)).decision, 'allow', 'verdict')
+})
+
+await test('question box: a tool that only looks like a session start leaves it open', async () => {
+  const h = await start({ liveAgents: [] })
+  await fire(h, 'session.start', {})
+  for (const tool of ['mcp__claude-code-remote__create_session_tags', 'mcp__claude-code-remote__send_message', 'mcp__claude-code-remote__set_session_tags', 'mcp__other__start_session', 'mcp__other__create_session', 'mcp__ccd_session__start_sessions', 'Agent', 'start_session']) {
+    await callTool(h, tool, STARTED)
+  }
+  same((await askBox(h)).decision, 'allow', 'verdict')
+})
+
+await test('question box: the start count survives a mod reload and an app restart under the same id', async () => {
+  for (const reason of [null, 'prompt_input_exit', 'other']) {
+    const h = await start({ liveAgents: [] })
+    await fire(h, 'session.start', {})
+    await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+    await settle()
+    if (reason) await fire(h, 'session.end', { sessionId: ID, reason })
+    same(h.store.get('started:' + ID) && h.store.get('started:' + ID).n, 1, `the start record after ${reason || 'a reload'}`)
+    const h2 = await start({ liveAgents: [], seed: [...h.store] }) // fresh module, same store, same id
+    await fire(h2, 'session.start', {})
+    await settle()
+    same((await askBox(h2)).decision, 'deny', `verdict after ${reason || 'a reload'}`)
+  }
+})
+
+await test('question box: the sweep clears a dead session\'s start record and keeps a live or own one', async () => {
+  const old = { n: 2, at: NOW - 86_400_001 }
+  const h = await start({
+    agents: [{ sessionId: sid(4), status: 'idle', cwd: '/r' }],
+    seed: [['started:' + OTHER, old], ['started:' + sid(3), { n: 1, at: NOW - 86_000_000 }], ['started:' + sid(4), old], ['started:' + ID, old]],
+  })
+  await fire(h, 'session.start', {})
+  await settle()
+  same(['started:' + OTHER, 'started:' + sid(3), 'started:' + sid(4), 'started:' + ID].map(k => h.store.has(k)), [false, true, true, true], 'dead old gone; young, live and own kept')
+})
+
+await test('question box: a session start under a new id drops the count; under the same id it keeps it', async () => {
+  const h = await start({ liveAgents: [] })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  await settle()
+  await fire(h, 'session.start', {}) // the same module, the same id
+  await settle()
+  same((await askBox(h)).decision, 'deny', 'same id keeps the count')
+  await fire(h, 'session.end', { sessionId: ID, reason: 'other' })
+  h.sid = NEW_ID
+  await fire(h, 'session.start', {}) // the same module serves another session
+  await settle()
+  same((await askBox(h)).decision, 'allow', 'a new id starts at its own count')
+  await tickBeat(h)
+  same(h.store.has('started:' + NEW_ID), false, "no count written under the new id")
+})
+
+await test('question box: a day-old start record beside a fresh board entry keeps all three records', async () => {
+  const h = await start({
+    agents: [],
+    seed: [['sess:' + OTHER, raw()], ['detail:' + OTHER, { v: 1, at: NOW }], ['started:' + OTHER, { n: 1, at: NOW - 86_400_001 }]],
+  })
+  await fire(h, 'session.start', {})
+  await settle()
+  same(['sess:', 'detail:', 'started:'].map(k => h.store.has(k + OTHER)), [true, true, true], 'records kept')
+})
+
+await test("question box: an in-process resume drops the old count and loads the resumed session's own", async () => {
+  const h = await start({ liveAgents: [], seed: [['started:' + NEW_ID, { n: 3, at: NOW }]] })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  await fire(h, 'session.end', { sessionId: ID, reason: 'resume' })
+  h.sid = NEW_ID
+  const r = await askBox(h)
+  same(r.decision, 'deny', "the resumed session's own count")
+  assert.match(r.reason, /started 3 sessions/, 'its count, not the old one added')
+  const h2 = await start({ liveAgents: [] })
+  await fire(h2, 'session.start', {})
+  await callTool(h2, 'mcp__ccd_session__start_session', STARTED)
+  await fire(h2, 'session.end', { sessionId: ID, reason: 'resume' })
+  h2.sid = NEW_ID
+  same((await askBox(h2)).decision, 'allow', 'a resumed session that started none')
+  await tickBeat(h2)
+  same(h2.store.has('started:' + NEW_ID), false, 'no count written under the resumed id')
+})
+
+await test('question box: a /clear keeps the count, and writes it under the new id', async () => {
+  const h = await start({ liveAgents: [] })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  await fire(h, 'session.end', { sessionId: ID, reason: 'clear' })
+  h.sid = NEW_ID
+  same((await askBox(h)).decision, 'deny', 'verdict after /clear')
+  await tickBeat(h)
+  same(h.store.get('started:' + NEW_ID) && h.store.get('started:' + NEW_ID).n, 1, 'the count under the new id')
+})
+
 await test("question box: GUARD_PY writes one guard.log line through the real guard_core writer", async () => {
   const { spawnSync } = await import('node:child_process')
   const { mkdtempSync, readFileSync, rmSync } = await import('node:fs')
