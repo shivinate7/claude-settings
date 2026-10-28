@@ -127,8 +127,32 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 
 /* Options side by side; each card's rows line up so lose sits beside lose. */
 .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
-.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
-@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+/* .optw wraps one option, so the open button sits beside the label, never inside it. */
+.optw { display: grid; gap: 8px; grid-template-rows: auto auto 1fr auto; min-width: 0; }
+.opts.withd .optw { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) {
+  .opts { grid-auto-rows: auto; }
+  .optw { grid-row: span 4; grid-template-rows: subgrid; }
+  .opts.withd .optw { grid-row: span 5; grid-template-rows: subgrid; }
+}
+.opt { grid-area: 1 / 1 / -1 / -1; position: relative; display: grid; grid-template-rows: inherit; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; min-width: 0; }
+@supports (grid-template-rows: subgrid) { .opt { grid-template-rows: subgrid; } }
+/* An option's mockup: a 4:3 slot, so it has its size before the frame loads. The frame ignores the pointer, so a tap on it picks the option. */
+.oshot { display: block; aspect-ratio: 4 / 3; min-width: 0; }
+.oframe { display: block; width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; pointer-events: none; }
+.opt.sel .oframe { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.oshot.none .slot { display: block; height: 100%; border: 1.5px dashed var(--line); border-radius: 8px; }
+.opts.withd { container-type: inline-size; }
+/* 710px is three 230px columns and two 10px gaps. Below it a lone no-design option can sit in its own row, and the shared rows still line up without the slot, so it folds away. */
+@container (width < 710px) { .opts.withd .oshot.none { aspect-ratio: auto; height: 0; } .oshot.none .slot { display: none; } }
+.ofull { grid-area: 2 / 1; align-self: start; justify-self: end; margin-right: 16px; position: relative; z-index: 1; width: 44px; height: 44px; padding: 0; border: 0; background: none; cursor: zoom-in; display: grid; place-items: center; }
+.ofull .ic { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); color: var(--ink); border: 1px solid var(--faint); box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
+.ofull:hover .ic { border-color: var(--acc); }
+.ofull:focus-visible { outline: none; }
+/* The halo keeps the ring readable on the mockup's white. */
+.ofull:focus-visible .ic { outline: 2px solid var(--acc); outline-offset: 2px; box-shadow: 0 0 0 6px var(--surface); }
+/* Without subgrid, row 2 of .optw is not the picture row, so the button would cover the label. The Designs tab still opens each option's mockup. */
+@supports not (grid-template-rows: subgrid) { .ofull { display: none; } }
 .opt:hover { border-color: var(--faint); }
 .opt input { position: absolute; opacity: 0; pointer-events: none; }
 .opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
@@ -216,8 +240,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
 .dsh-head .in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-block: 8px; }
 .dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 220px; }
-.dsh-head .btn { min-height: 40px; }
-.dsh-head .btn.quiet { color: var(--on-hdr); border-color: color-mix(in srgb, var(--on-hdr) 40%, transparent); }
+.dsh-head .btn { min-height: 40px; border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
 .dsh-body { position: relative; min-height: 0; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
 .dsh-body .dframe { position: absolute; inset: 0; width: 100%; height: 100%; }
 .dsh-body .dframe.off { visibility: hidden; }
@@ -417,14 +442,23 @@ function readyText(it) {
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   return "Ready to send: " + d.choice.toUpperCase() + (d.auto ? ", my pick." : ", your choice.");
 }
-function optCard(it, o, chosen) {
-  const id = "o-" + it.id + "-" + o.key;
-  return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
-    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, checked: chosen === o.key, onchange: () => choose(it, o.key) }),
-    h("span", { class: "head" }, h("span", { class: "key" }, o.key.toUpperCase()), h("span", { class: "lab" }, o.label)),
-    h("p", { class: "how" }, o.how),
-    h("div", { class: "tr" }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
-    o.key === it.pick ? h("div", { class: "pick" }, h("b", { "aria-label": "My pick", title: "My pick" }, "★"), it.why) : h("span", { class: "nopick" }));
+const ICON_FULL = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/></svg>';
+// withd: some option of this item has a mockup, so every option keeps a picture row (an empty slot when it has none).
+function optCard(it, o, chosen, withd) {
+  const id = "o-" + it.id + "-" + o.key, lid = "l-" + it.id + "-" + o.key, K = o.key.toUpperCase();
+  const shot = !withd ? null : o.design
+    ? h("span", { class: "oshot" }, frame(o.design, "Mockup for option " + K, { class: "oframe", tabindex: "-1" }))
+    : h("span", { class: "oshot none", "aria-hidden": "true" }, h("span", { class: "slot" }));
+  const label = h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
+    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": lid, "aria-describedby": "h-" + it.id + "-" + o.key + " t-" + it.id + "-" + o.key + (o.key === it.pick ? " p-" + it.id + "-" + o.key : ""), checked: chosen === o.key, onchange: () => choose(it, o.key) }),
+    h("span", { class: "head" }, h("span", { class: "key" }, K), h("span", { class: "lab", id: lid }, o.label)),
+    shot,
+    h("p", { class: "how", id: "h-" + it.id + "-" + o.key }, o.how),
+    h("div", { class: "tr", id: "t-" + it.id + "-" + o.key }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
+    o.key === it.pick ? h("div", { class: "pick", id: "p-" + it.id + "-" + o.key }, h("b", { "aria-label": "My pick", title: "My pick" }, "★"), it.why) : h("span", { class: "nopick" }));
+  const full = !o.design ? null : h("button", { class: "ofull", type: "button", "aria-label": "Open full size: option " + K, onclick: (e) => { e.preventDefault(); e.stopPropagation(); openDesign(o.design); } });
+  if (full) full.innerHTML = '<span class="ic">' + ICON_FULL + "</span>";
+  return h("div", { class: "optw" }, label, full);
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 function receipt(it) {
@@ -480,8 +514,9 @@ function buildCard(it) {
   const clear = h("button", { class: "btn quiet clearbtn" + (clearable ? "" : " gone"), type: "button", id: "b-clear-" + it.id, onclick: () => clearItem(it) }, "Clear");
   const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   if (it.kind === "decision") {
-    const opts = h("div", { class: "opts", role: "radiogroup", "aria-label": "Options for No. " + it.n });
-    (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
+    const withd = (it.options || []).some((o) => o.design);
+    const opts = h("div", { class: "opts" + (withd ? " withd" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": withd ? it.options.map((o) => o.key + ":" + (o.design || "")).join() : null });
+    (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice, withd)));
     card.append(opts, ready,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
@@ -533,18 +568,38 @@ function signature(it) {
   const d = eff(it) || {};
   return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.noteOpen[it.id], state.more[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
+const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
+// Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
+function graft(old, keeps, nu) {
+  const live = keeps.map((k) => k[0]);
+  [...old.childNodes].forEach((c) => { if (!live.includes(c)) c.remove(); });
+  let ref = old.firstChild;
+  [...nu.childNodes].forEach((c) => {
+    const k = keeps.find((x) => x[1] === c);
+    if (k) { if (k[2]) k[2](k[0], c); ref = k[0].nextSibling; } else old.insertBefore(c, ref);
+  });
+}
+// Same options and designs: keep the live frames and rebuild everything around each one.
+function syncOpts(old, nu) {
+  copyAttrs(old, nu);
+  [...old.children].forEach((w, i) => {
+    const ol = w.querySelector(":scope > label"), nl = nu.children[i].querySelector(":scope > label");
+    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .oshot"), nl.querySelector(":scope > .oshot")]], nl);
+  });
+}
 function patch(old, nu) {
   const active = document.activeElement, focusId = active && old.contains(active) ? active.id : "";
-  const keep = old.querySelector(":scope > .dprev"), slot = nu.querySelector(":scope > .dprev");
+  const keeps = [];
+  for (const [sel, sync, same] of [[":scope > .dprev"], [":scope > .opts[data-d]", syncOpts, (a, b) => a.dataset.d === b.dataset.d]]) {
+    const k = old.querySelector(sel), n = nu.querySelector(sel);
+    if (k && n && (!same || same(k, n))) keeps.push([k, n, sync]);
+  }
   const wasReceipt = !!old.querySelector(":scope > .receipt"), isReceipt = !!nu.querySelector(":scope > .receipt");
   // A card that turns into a receipt keeps its height, so nothing below it moves.
   if (!wasReceipt) heights[old.id] = old.getBoundingClientRect().height;
   const minH = !isReceipt ? "" : wasReceipt ? old.style.minHeight : heights[old.id] ? heights[old.id] + "px" : "";
-  [...old.attributes].forEach((a) => old.removeAttribute(a.name)); [...nu.attributes].forEach((a) => old.setAttribute(a.name, a.value));
-  if (keep && slot) {
-    [...old.childNodes].forEach((c) => { if (c !== keep) c.remove(); });
-    let before = true; [...nu.childNodes].forEach((c) => { if (c === slot) { before = false; return; } before ? old.insertBefore(c, keep) : old.append(c); });
-  } else old.replaceChildren(...nu.childNodes);
+  copyAttrs(old, nu);
+  if (keeps.length) graft(old, keeps, nu); else old.replaceChildren(...nu.childNodes);
   old.style.minHeight = minH;
   if (focusId) { const f = $(focusId); if (f && !f.disabled) f.focus({ preventScroll: true }); }
 }
@@ -793,9 +848,11 @@ $("send").addEventListener("click", sendAll);
 /* ---------- Designs: each mockup is stored whole in this page and shown in a sandboxed frame ---------- */
 let DESIGN_HTML = {};
 try { DESIGN_HTML = JSON.parse($("designData").textContent) || {}; } catch (e) {}
-const allDesigns = () => state.items.filter((it) => it.designs && !isSaved(it)).flatMap((it) => it.designs.map((d) => ({ ...d, it })));
-function frame(slug, title) {
-  const f = h("iframe", { class: "dframe", title, sandbox: "allow-scripts", loading: "lazy" });
+// An item's designs, then one per option that carries a design (the sheet labels it "A: Red").
+const designsOf = (it) => [...(it.designs || []), ...(it.options || []).filter((o) => o.design).map((o) => ({ slug: o.design, label: o.key.toUpperCase() + ": " + o.label }))];
+const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
+function frame(slug, title, attrs) {
+  const f = h("iframe", { class: "dframe", title, sandbox: "allow-scripts", loading: "lazy", ...attrs });
   f.srcdoc = DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>";
   return f;
 }
@@ -844,7 +901,7 @@ document.addEventListener("keydown", (e) => {
 function render() {
   renderList(); renderRail(); renderBar(); renderSent();
   const nd = allDesigns().length;
-  $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => i.designs && i.designs.length);
+  $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => designsOf(i).length);
 }
 
 render();

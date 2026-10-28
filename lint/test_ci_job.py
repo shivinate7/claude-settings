@@ -284,7 +284,7 @@ class RealGates(unittest.TestCase):
             want = len(step_blocks(job_block(f.read(), "gates")))
         done = subprocess.run([sys.executable, CI_JOB, "gates", "--plan", "--base", "origin/main"],
                               cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
-        lines = done.stdout.splitlines()
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("would fetch")]  # a shallow clone adds one
         self.assertEqual(len(lines), want, done.stdout + done.stderr)
         self.assertGreater(want, 50)
         self.assertTrue(any(ln.startswith("would run") and "STE lint" in ln for ln in lines), done.stdout)
@@ -329,7 +329,7 @@ class LintMode(unittest.TestCase):
         self.assertGreater(len(want), 20)
         done = subprocess.run([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", "origin/main"],
                               cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
-        lines = done.stdout.splitlines()
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("would fetch")]  # a shallow clone adds one
         self.assertEqual(len(lines), len(want), done.stdout + done.stderr)
         for expected in want:
             self.assertTrue(any(ln.split("  ", 1)[-1].startswith(expected) or ("  " + expected) in ln for ln in lines),
@@ -360,6 +360,57 @@ class LintMode(unittest.TestCase):
             step("kept", "python3 lint/check_a.py")))
         self.assertEqual(code, 0, out)
         self.assertEqual([ln.replace("would run", "", 1).strip() for ln in lines], ["kept"], out)
+
+
+class Shallow(Job):
+    """A shallow clone must get the full history CI's checkout (fetch-depth: 0) gives it."""
+
+    def clone(self):
+        origin = os.path.join(self.root, "origin")
+        subprocess.run(["git", "init", "-q", "-b", "main", origin], check=True, env=ENV)
+        for n in (1, 2):
+            subprocess.run(["git", "-C", origin, "commit", "-q", "--allow-empty", "-m", "c%d" % n], check=True, env=ENV)
+        self.work = os.path.join(self.root, "work")
+        subprocess.run(["git", "clone", "-q", "--depth", "1", "file://" + origin, self.work], check=True, env=ENV)
+        self.root = self.work
+        return origin
+
+    def shallow(self):
+        return subprocess.run(["git", "-C", self.work, "rev-parse", "--is-shallow-repository"], capture_output=True,
+                              text=True, env=ENV).stdout.strip()
+
+    STEPS = (step("checkout", uses="actions/checkout@abc", **{"with": {"fetch-depth": "0"}}),
+             step("needs history", 'test "$(git rev-parse --is-shallow-repository)" = false'))
+
+    def test_a_shallow_clone_is_unshallowed_before_the_steps(self):
+        self.clone()
+        self.assertEqual(self.shallow(), "true")
+        rc, lines, out = self.run_job(*self.STEPS)
+        self.assertEqual(self.verdicts(lines), ["fetched", "not run locally", "PASS"], out)
+        self.assertEqual((rc, self.shallow()), (0, "false"), out)
+
+    def test_plan_only_says_it_would_fetch(self):
+        self.clone()
+        rc, lines, out = self.run_job(*self.STEPS, args=("--plan",))
+        self.assertEqual(lines[0].split()[:2], ["would", "fetch"], out)
+        self.assertEqual((rc, self.shallow()), (0, "true"), out)
+
+    def test_a_failed_fetch_is_unknown_and_the_steps_still_run(self):
+        shutil.rmtree(self.clone())
+        rc, lines, out = self.run_job(*self.STEPS)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(lines[0].startswith("unknown") and "shallow" in lines[0], out)
+        self.assertEqual(self.verdicts(lines)[1:], ["not run locally", "FAIL"], out)
+
+    def test_a_failed_fetch_with_passing_steps_exits_two(self):
+        shutil.rmtree(self.clone())
+        rc, lines, out = self.run_job(self.STEPS[0], step("ok", "true"))
+        self.assertEqual((rc, self.verdicts(lines)[0]), (2, "unknown"), out)
+
+    def test_no_full_history_checkout_means_no_fetch(self):
+        self.clone()
+        rc, lines, out = self.run_job(step("ok", "true"))
+        self.assertEqual((rc, self.verdicts(lines), self.shallow()), (0, ["PASS"], "true"), out)
 
 
 if __name__ == "__main__":

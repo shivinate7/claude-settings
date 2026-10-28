@@ -260,6 +260,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `gates-job-near-timeout` | The gates job took 13.7-17.8 min over 12 green runs on 2026-10-17. | [`docs/debts/gates-job-near-timeout.md`](../docs/debts/gates-job-near-timeout.md) |
 | `gitignore-skips-map-tests` | `ci-scope.sh` turns on only `code` for a `.gitignore` change. | [`docs/debts/gitignore-skips-map-tests.md`](../docs/debts/gitignore-skips-map-tests.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
+| `health-folder-not-in-layout` | `scorecard` writes `docs/health/compliance.md`, but `lint/layout.json` has no kind for `docs/health`. | [`docs/debts/health-folder-not-in-layout.md`](../docs/debts/health-folder-not-in-layout.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
 | `install-checkout-flake` | On Windows CI two session-start freshness cases failed, then passed on rerun, twice on 2026-10-20: caseF1 in the morning (#527), and caseG1 at 23:00 (#533, run 39528566602; "expected ... | [`docs/debts/install-checkout-flake.md`](../docs/debts/install-checkout-flake.md) |
@@ -287,6 +288,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refresh-lock-untested` | The SessionStart refresh holds a lock directory in the config dir. | [`docs/debts/refresh-lock-untested.md`](../docs/debts/refresh-lock-untested.md) |
 | `refusal-route-around-guard` | A hook refuses an Edit of a path, then the same agent writes the file with Bash and Python. | [`docs/debts/refusal-route-around-guard.md`](../docs/debts/refusal-route-around-guard.md) |
 | `ruling-kind-vacuous-local-pass` | `lint/check_ruling_kind.py` checks only the committed diff against `origin/main`, so a run before the commit checks zero files and prints PASS. | [`docs/debts/ruling-kind-vacuous-local-pass.md`](../docs/debts/ruling-kind-vacuous-local-pass.md) |
+| `scorecard-item-wrong-group` | The probes print item lines before their group line, and the skill writes them after it. | [`docs/debts/scorecard-item-wrong-group.md`](../docs/debts/scorecard-item-wrong-group.md) |
 | `settled-question-unchecked` | A question that a decision or a debt already settles can reach the owner. | [`docs/debts/settled-question-unchecked.md`](../docs/debts/settled-question-unchecked.md) |
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`docs/debts/sharables-adopts-the-stamp.md`](../docs/debts/sharables-adopts-the-stamp.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`docs/debts/skill-copy-no-typescript.md`](../docs/debts/skill-copy-no-typescript.md) |

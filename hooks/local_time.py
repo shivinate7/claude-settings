@@ -83,11 +83,22 @@ def override_line(result):
 def inbox_paths(session_id):
     """(inbox, turn state) for a session, or None when the id cannot be a file name. The one home
     of these paths: feedback_gate.py calls it. precompact_handoff owns the handoffs folder."""
+    base = _session_base(session_id)
+    return None if base is None else (base + ".inbox.md", base + ".inbox.turns")
+
+
+def _session_base(session_id):
     if not re.fullmatch(r"[\w.-]+", session_id or "") or session_id.startswith("."):
         return None
     import precompact_handoff
-    base = os.path.join(os.path.dirname(precompact_handoff.handoff_path(session_id)), session_id)
-    return base + ".inbox.md", base + ".inbox.turns"
+    return os.path.join(os.path.dirname(precompact_handoff.handoff_path(session_id)), session_id)
+
+
+def report_marker_path(session_id):
+    """The file report_gate.py writes when it blocks for a missing report, or None. Same folder
+    as the inbox files."""
+    base = _session_base(session_id)
+    return None if base is None else base + ".report-block"
 
 
 def capture(raw, stamp):
