@@ -143,12 +143,13 @@ class Scaffold(unittest.TestCase):
         self.assertIn("starts triage and the batch runner together, as a trio, before any lane session", flat)
         self.assertIn("checks whether that repo has an active coordinator", flat)
         self.assertIn("It does not wait for a reply.", flat)
-        self.assertIn("tags itself and each session it starts `cs-repo:<owner>/<repo>`", flat)
-        self.assertIn("`list_sessions` for a session tagged `cs-repo:<owner>/<repo>`", flat)
+        self.assertIn("tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`", flat)
+        self.assertIn("a live session tagged both `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`", flat)
+        self.assertIn("filters the tags itself", flat)
 
     def test_brief_carries_repo_tag(self):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
-        self.assertIn("tag `cs-repo:<owner>/<repo>`", flat)
+        self.assertIn("tags `cs-repo:<owner>/<name>` and `cs-build:lane`", flat)
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
