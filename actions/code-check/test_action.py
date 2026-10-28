@@ -1,6 +1,7 @@
 """Tests the code-check runner on throwaway repos. `python3 actions/code-check/test_action.py`.
 Asserts: a tracked language with no row is red (by extension and by shebang), a planted mypy error in
 a listed module is red, a shrunk mypy list is red against the base ref, a missing listed module is red,
+a listed module renamed off the list is red, a shrink against --main (current main) is red,
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason).
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
@@ -41,18 +42,28 @@ def config(modules, exclude=()):
     return json.dumps({"exclude": list(exclude), "mypy_modules": list(modules)})
 
 
-def check(files, base_files=None, base=None, **env):
+def head(d):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
+
+
+def check(files, base_files=None, base=None, main_files=None, main=None, **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
-    `base` names a ref outright. Returns (exit, output)."""
+    main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
+    the PR's files then go on the base. `base` and `main` name a ref outright. Returns (exit, output)."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
             put(d, base_files)
             git(d, "add", "-A"); git(d, "commit", "-qm", "base")
-            base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
+            base = head(d)
+        if main_files is not None:
+            put(d, main_files)
+            git(d, "add", "-A"); git(d, "commit", "-qm", "main moved on")
+            main = head(d)
+            git(d, "checkout", "-q", base)
         put(d, files)
         git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
-        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base else [])
+        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base else []) + (["--main", main] if main else [])
         p = subprocess.run(args, capture_output=True, text=True, env=dict(os.environ, CODE_CHECK_TOOLS="path", **env))
         return p.returncode, p.stdout + p.stderr
 
@@ -150,6 +161,37 @@ class CodeCheck(unittest.TestCase):
         base = {".code-check.json": config(["a.py", "b.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
         rc, out = check({".code-check.json": config(["a.py"]), "b.py": None}, base_files=base)
         self.assertEqual(rc, 0, out)
+
+    def test_renamed_module_dropped_from_list_is_red(self):
+        base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
+        rc, out = check({".code-check.json": config([]), "a.py": None, "b.py": GOOD_PY}, base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("mypy list lost a.py, renamed to b.py; list b.py in .code-check.json", out)
+
+    def test_renamed_module_listed_at_new_path_is_green(self):
+        base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
+        rc, out = check({".code-check.json": config(["b.py"]), "a.py": None, "b.py": GOOD_PY}, base_files=base)
+        self.assertEqual(rc, 0, out)
+
+    def test_shrink_against_main_is_red(self):
+        # Fine against the PR base, but main has since listed b.py, so merging drops it.
+        base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
+        rc, out = check({"c.py": GOOD_PY}, base_files=base, main_files={".code-check.json": config(["a.py", "b.py"])})
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("shrank: b.py", out)
+        self.assertEqual(len([l for l in out.splitlines() if "shrank" in l and not l.startswith("::")]), 1, out)
+
+    def test_same_failure_from_base_and_main_prints_once(self):
+        base = {".code-check.json": config(["a.py", "b.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
+        rc, out = check({".code-check.json": config(["a.py"])}, base_files=base, main_files={"c.py": GOOD_PY})
+        self.assertNotEqual(rc, 0, out)
+        self.assertEqual(len([l for l in out.splitlines() if "shrank" in l and not l.startswith("::")]), 1, out)
+
+    def test_main_not_in_clone_is_unknown_not_red(self):
+        base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
+        rc, out = check({"c.py": GOOD_PY}, base_files=base, main="1" * 40)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("unknown: main", out)
 
     def test_gone_module_still_listed_gets_one_message(self):
         rc, out = check({".code-check.json": config(["a.py", "gone.py"]), "a.py": GOOD_PY})
