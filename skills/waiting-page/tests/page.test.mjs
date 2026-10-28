@@ -1251,6 +1251,49 @@ test("a viewer at 520 wide or less names the design in a one-line caption above 
   assert.equal(await cap.isVisible(), false, "the caption shows on a wide screen");
 });
 
+// The caption names the design whenever the head cuts the title, and only then (design review round 2).
+const TALL_DESIGN = `<body style="margin:0">${Array.from({ length: 25 }, (_, i) => `<div style="height:80px;background:hsl(${i * 14},60%,55%)">${i + 1}</div>`).join("")}</body>`;
+const capItem = (labels) => mk("cap-q", 56, { pick: "a", options: labels.map((l, i) => ({ key: "abc"[i], label: l, how: "h", gain: "g", lose: "l", design: "c-" + "abc"[i] })),
+  designs: labels.map((l, i) => ({ slug: "c-" + "abc"[i], label: l, width: "Phone" })) });
+const capState = (page) => page.evaluate(() => { const c = document.querySelector("#dCap"), t = document.querySelector("#dTitle"), r = c.getBoundingClientRect();
+  return { shown: getComputedStyle(c).display !== "none" && r.height > 0, h: r.height, text: c.textContent, cut: c.scrollWidth > c.clientWidth, label: dList[dAt].label, titleCut: t.scrollWidth > t.clientWidth }; });
+async function openCap(t, labels, width, design) {
+  const it = capItem(labels);
+  const page = await open(t, { items: [it], designData: { "c-a": design, "c-b": "<p>b</p>" }, viewport: { width, height: 900 } }); if (!page) return null;
+  // Stand-in for CI's wider fallback font.
+  await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  await page.waitForFunction(() => FIT["c-a|"] && document.querySelector("#dStage .dfitwrap:not(.off)").getBoundingClientRect().height > 60);
+  return page;
+}
+
+test("a tall design with a long label is named in a caption with height, at 390 wide", async (t) => {
+  const page = await openCap(t, ["Tall A layout with bands", "B"], 390, TALL_DESIGN); if (!page) return;
+  const c = await capState(page);
+  assert.ok(c.titleCut, "the stand-in label fits the head; the test needs a longer one");
+  assert.ok(c.shown && c.h >= 14, "the caption is " + c.h + "px high, so nothing names the design");
+  assert.equal(c.text, c.label); assert.ok(!c.cut, "the caption cuts the label");
+});
+
+test("at 768 wide a title the head cuts shows in the caption, and Prev to a short title hides it", async (t) => {
+  const page = await openCap(t, ["Layout A in a sheet under the feed card", "B"], 768, "<p>a</p>"); if (!page) return;
+  let c = await capState(page);
+  assert.ok(c.titleCut, "the stand-in label fits the head; the test needs a longer one");
+  assert.ok(c.shown, "the head cuts the title and no caption names the design");
+  assert.equal(c.text, c.label); assert.ok(!c.cut, "the caption cuts the label");
+  await page.click("#dPrev");
+  c = await capState(page);
+  assert.ok(!c.titleCut, "the short title is cut");
+  assert.ok(!c.shown, "the caption repeats a title that fits");
+});
+
+test("a title that fits the head gets no caption, at 390 wide", async (t) => {
+  const page = await openCap(t, ["A", "B"], 390, "<p>a</p>"); if (!page) return;
+  const c = await capState(page);
+  assert.ok(!c.titleCut, "the short title is cut");
+  assert.ok(!c.shown, "the caption repeats a title that fits");
+});
+
 test("a picture's height is reserved from its declared size before it loads", async (t) => {
   const it = mk("reserve-q", 53, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "r-a" }], designs: [{ slug: "r-a", label: "A", focus: "#panel", size: { w: 600, h: 400 } }] });
   const mockup = '<body style="margin:0;width:700px"><div style="height:700px"></div><div id="panel" style="width:600px;height:400px;background:#a62"></div></body>';
