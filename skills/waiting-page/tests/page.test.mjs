@@ -1928,3 +1928,88 @@ test("a receipt wholly below the screen drops its height without moving the page
   await page.waitForTimeout(600);
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
+
+// Part 3, set by the designer (docs/design/c193-sizes.md item 3): a picture is at most 480px high, scaled to its card, and centred.
+for (const width of SIZES) test(`an option's picture is at most 480px high and centred in its card at ${width}px wide`, async (t) => {
+  const it = mk("cap-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
+  const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
+  const page = await open(t, { items: [it], designData, viewport: { width, height: 900 } }); if (!page) return;
+  await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt .opic`)].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.getBoundingClientRect(); return { h: w.height, w: w.width, off: Math.abs((w.left + w.right) / 2 - (b.left + b.right) / 2), room: b.width }; }), it.id);
+  for (const o of m) {
+    assert.ok(o.h <= 481, "the picture is taller than 480px: " + o.h);
+    assert.ok(o.w <= Math.min(390, o.room) + 1, "the picture is wider than its card or the mockup: " + JSON.stringify(o));
+    assert.ok(o.off <= 1, "the picture is not centred: " + JSON.stringify(o));
+  }
+});
+
+// Part 5, set by the designer (item 4): the SENT stamp settles in 200ms with no overshoot, and reduced motion shows it still.
+const sentPage = async (t, reduce) => {
+  const page = await open(t); if (!page) return null;
+  if (reduce) await page.emulateMedia({ reducedMotion: "reduce" });
+  await choose(page, DECISION, "a"); await send(page);
+  await page.locator("#sent .stamp").waitFor();
+  return page;
+};
+test("the SENT stamp settles in 200ms with no overshoot", async (t) => {
+  const page = await sentPage(t, false); if (!page) return;
+  const a = await page.locator("#sent .stamp").evaluate((e) => { const s = getComputedStyle(e); return [s.animationName, s.animationDuration, s.animationTimingFunction]; });
+  assert.deepEqual(a, ["stamp-settle", "0.2s", "cubic-bezier(0.2, 0, 0, 1)"]);
+});
+test("reduced motion shows the SENT stamp still", async (t) => {
+  const page = await sentPage(t, true); if (!page) return;
+  assert.equal(await page.locator("#sent .stamp").evaluate((e) => getComputedStyle(e).animationName), "none");
+});
+test("the Sent bar keeps its parts on the page's spacing steps", async (t) => {
+  const page = await sentPage(t, false); if (!page) return;
+  const m = await page.evaluate(() => {
+    const px = (sel, prop) => parseFloat(getComputedStyle(document.querySelector(sel))[prop]);
+    return { pad: px("#sent .in", "paddingTop"), head: px("#sent .sent-head", "columnGap"), what: px("#sent .sent-what", "rowGap"), stamp: Math.round(document.querySelector("#sent .stamp").offsetHeight), inList: !!document.querySelector("#sent .sent-what .sent-list"), li: Math.round(document.querySelector("#sent .sent-list li").getBoundingClientRect().height) };
+  });
+  assert.deepEqual(m, { pad: 16, head: 16, what: 8, stamp: 48, inList: true, li: 28 });
+});
+
+// Part 4 (orchestrator, Oct 28): one containment sweep. A new item state is one row in STATES, a new width one entry in SWEEP_WIDTHS.
+const SWEEP_WIDTHS = [320, 390, 768, 1024, 1280, 1600, 2200, 2560];
+const LONGT = "A very long title that runs across the whole width of the rail and then some more ";
+const TALL = '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>';
+const STATES = [
+  ["open", () => ({ items: [DECISION, TASK] })],
+  ["draft ready", () => ({ items: [DECISION, TASK] }), (page) => choose(page, DECISION, "a")],
+  ["answered, filing pending", () => ({ items: [DECISION, TASK], answers: SAVED_A })],
+  ["answered, filed", () => ({ items: [DECISION, TASK], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } })],
+  ["bundle", () => ({ items: [1, 2, 3].map((n) => mk("sw-" + n, n, { group: "pair", title: LONGT + n })), groups: { pair: { title: "Answer these together", why: "Linked." } } })],
+  ["pictures", () => ({ items: [mk("sw-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) })], designData: Object.fromEntries(LOOK_OPTS.map((o) => [o.design, TALL])) })],
+  ["task", () => ({ items: [TASK] })],
+  ["stands", () => ({ items: [mk("sw-s1", 7, { stands: true }), mk("sw-s2", 8, { stands: true })] })],
+  ["sent bar", () => ({ items: [DECISION, TASK] }), async (page) => { await choose(page, DECISION, "a"); await send(page); await page.locator("#sent .stamp").waitFor(); }],
+];
+// Runs in the page. Returns what crosses a box, sticks out sideways, or is cut without an ellipsis.
+function sweepPage() {
+  const bad = [], tol = 1.5;
+  const name = (e) => e.tagName.toLowerCase() + (e.id ? "#" + e.id : "") + (e.className && typeof e.className === "string" ? "." + e.className.trim().split(/\s+/).join(".") : "");
+  const boxes = [...document.querySelectorAll("article.card, #rail, #sent .in")].filter((b) => b.getBoundingClientRect().width > 0);
+  for (const box of boxes) {
+    const bb = box.getBoundingClientRect();
+    for (const e of box.querySelectorAll("*")) {
+      const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+      if (!r.width || !r.height || cs.display === "contents" || e.closest(".sr, [hidden]") || cs.position === "fixed" || (e.closest(".dfitwrap") && !e.classList.contains("dfitwrap")) || cs.visibility === "hidden") continue;
+      if (r.left < bb.left - tol || r.right > bb.right + tol || r.top < bb.top - tol || r.bottom > bb.bottom + tol) bad.push("outside " + name(box) + ": " + name(e) + " " + [r.left, r.right, bb.left, bb.right].map(Math.round));
+      if ((cs.overflowX === "hidden" || cs.overflowX === "clip") && e.scrollWidth > e.clientWidth + 1 && cs.textOverflow !== "ellipsis" && !e.classList.contains("dfitwrap") && !e.closest(".dfitwrap") && !cs.webkitLineClamp.match(/^[1-9]/) && !e.classList.contains("opic")) bad.push("clipped: " + name(e));
+    }
+  }
+  if (document.documentElement.scrollWidth > innerWidth) bad.push("page scrolls sideways: " + document.documentElement.scrollWidth + " > " + innerWidth);
+  return bad;
+}
+test("containment sweep: nothing crosses its card, the rail or the Sent bar, nothing is cut without an ellipsis, no sideways scroll", async (t) => {
+  const failures = [];
+  for (const scheme of ["light", "dark"]) for (const width of SWEEP_WIDTHS) for (const [state, make, act] of STATES) {
+    const page = await open(t, { ...make(), scheme, viewport: { width, height: 900 } }); if (!page) return;
+    if (act) await act(page);
+    await page.waitForTimeout(150);
+    for (const b of await page.evaluate(sweepPage)) failures.push(`${state} @${width} ${scheme}: ${b}`);
+    await page.close();
+  }
+  assert.deepEqual(failures, []);
+});

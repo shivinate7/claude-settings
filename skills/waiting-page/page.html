@@ -84,22 +84,23 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
 .ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
 .ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
-.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips-n { display: flex; flex-wrap: wrap; gap: 4px; }
 .nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .nchip:hover { border-color: var(--acc); }
 .nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
 .nchip.sent::before { content: "\2713"; margin-right: 3px; }
 .nchip.sent:not(.filed)::before { content: "\25CB"; }
-.pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
-.pairchips .nchip { height: 28px; width: 44px; }
+.pairchips { display: inline-flex; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.pairchips .nchip { height: 32px; width: 48px; }
 .nchip .nt { display: none; }
 .ov-tier, .chips-n, .pairchips { min-width: 0; }
 .nchip { min-width: 0; overflow: hidden; }
 @media (min-width: 961px) {
   .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
   .pairchips { display: flex; max-width: 100%; }
-  .nchip, .pairchips .nchip { width: 100%; height: 30px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip, .pairchips .nchip { width: 100%; height: 32px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .no { min-width: 2ch; font-variant-numeric: tabular-nums; }
   .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
 }
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
@@ -149,8 +150,9 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
 .key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
 .opt .lab { min-width: 0; overflow-wrap: anywhere; }
-.opt .opic { display: block; position: relative; cursor: zoom-in; min-height: 40px; }
-.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 40px; margin-top: 6px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic .dfitwrap { justify-self: center; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
 .opts.pics { grid-auto-rows: auto; }
 .opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
 @supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
@@ -204,8 +206,12 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
 
 /* Receipt: the card stays where it was and shows what happened to the answer. */
-.receipt { display: grid; gap: 10px; }
-.receipt .line { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 15.5px; }
+.receipt { display: grid; gap: 8px; }
+.receipt .line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-height: 44px; font-size: 15.5px; }
+.receipt .line > svg { grid-column: 1; grid-row: 1; }
+.receipt .line b { grid-column: 2; grid-row: 1; }
+.receipt .line .read { grid-column: 2; grid-row: 2; }
+.receipt .line .changebtn { grid-column: 3; grid-row: 1 / span 2; }
 .receipt .line b { color: var(--good); }
 .receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
 .card.answered { border-left: 6px solid var(--good); }
@@ -223,24 +229,26 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 
 /* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
 .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
-.bar .in { padding-block: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
 .bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 .btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
 .sent { background: var(--surface); border-bottom: 1px solid var(--line); }
-.sent .in { padding-block: 14px; display: grid; gap: 10px; font-size: 15px; }
-.sent-head { display: flex; gap: 14px; align-items: center; }
-.stamp { flex: none; transform: rotate(-6deg); border: 3px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 9px 3px; font: 700 18px/1 var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
-.stamp small { display: block; font: 500 11px/1.3 var(--mono); letter-spacing: 0; text-transform: none; }
-@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp .42s cubic-bezier(.3,1.6,.5,1) both; } }
-@keyframes stamp { from { transform: rotate(-6deg) scale(2); opacity: 0; } to { transform: rotate(-6deg) scale(1); opacity: 1; } }
-.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 22vh; overflow: auto; }
-.sent-list li { display: inline-flex; gap: 8px; align-items: center; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
+.sent-head { display: flex; gap: 16px; align-items: center; }
+.sent-what { display: grid; gap: 8px; flex: 1 1 220px; min-width: 0; }
+.stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
+@keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
+.sent-list li { display: inline-flex; gap: 8px; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
 .sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
 .dstate { padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
 .dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
-.sent .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.sent .row { display: flex; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
+#undoBtn { font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
 
 /* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
@@ -589,7 +597,7 @@ function optPic(it, o, dif) {
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
   return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
-    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0])), h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
+    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480), h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
 }
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
@@ -979,7 +987,7 @@ function renderSent() {
     h("div", { class: "sent-head" }, h("span", { class: "stamp" }, n ? "Sent" : "Withdrawn", h("small", {}, fmt(p.at, false))),
       h("div", {}, h("b", {}, said), h("span", { id: "sentStatus" }, p.status),
         blk ? h("span", {}, " " + blk + " blocking " + (blk === 1 ? "item" : "items") + " can move again once read.") : null)),
-    h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = rcOf(w.it); return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); })),
+    h("div", { class: "sent-what" }, h("ul", { class: "sent-list" }, p.wrote.map((w) => { const rc = rcOf(w.it); return h("li", { title: "Goes to " + w.it.owner }, h("span", { class: "no" }, "No. " + w.it.n), rc.read || rc.filed ? h("span", { class: "dstate on" }, rc.filed ? "Filed" : "Read") : null); }))),
     h("div", { class: "row" }, undoLeft(p) > 0 ? h("button", { class: "btn alt", type: "button", id: "undoBtn", onclick: undoSend }, (n ? "Undo send (" : "Undo withdraw (") + undoLeft(p) + ")") : null, h("button", { class: "btn quiet", type: "button", id: "sentClose", onclick: closeSent }, "Close")));
 }
 // Undo puts back what each write replaced: the earlier answer, or nothing. The owner's picks come back as drafts.
@@ -1058,7 +1066,7 @@ const fitScript = (focus) => '<script>(function(){var F=' + JSON.stringify(focus
 // `size` ({w, h}) is the declared size of what the card shows: the focused element, else the whole mockup. It holds the height until the mockup reports its own.
 // `drawn` is the width in mockup pixels the design is laid out at (default FIT_W). The frame has that width, and the scale is the width it has divided by it.
 // `head` (the viewer's) runs before each fit, and the same observer watches the viewer title, so a caption shown or hidden is fitted around.
-function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state) {
+function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state, maxH) {
   const DW = drawn > 0 ? drawn : FIT_W, key = slug + "|" + (focus || "") + (state ? "|" + state : "");
   const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
   f.srcdoc = withState(DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>", state) + fitScript(focus);
@@ -1066,10 +1074,11 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state)
   const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
   const fit = () => {
     if (head) head();
-    const c = FIT[key], ww = wrap.clientWidth || DW;
+    const c = FIT[key], ww = maxH ? (wrap.parentElement ? Math.max(wrap.parentElement.clientWidth - 2, 1) : Infinity) : wrap.clientWidth || DW; // a capped picture sizes to its card; before it is placed, to its own cap
     const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
     const ht = c ? c.h : (!focus && size ? size.h : 200);
-    const sc = Math.min(maxScale || 1, ww / (box ? Math.max(box.w, 1) : DW));
+    const bw = box ? Math.max(box.w, 1) : DW, sc = Math.min(maxScale || 1, ww / bw, maxH ? maxH / Math.max(box ? box.h : ht, 1) : Infinity);
+    if (maxH) wrap.style.width = Math.ceil(bw * sc) + 2 + "px";
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
     if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px"; }
