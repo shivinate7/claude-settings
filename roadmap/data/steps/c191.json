@@ -1,9 +1,9 @@
 {
  "title": "a blind designer gets no repo colours, fonts or spacing",
  "phase": "cleanup",
- "status": "todo",
+ "status": "done",
  "order": 103.33837,
  "why": "Gripe, Oct 28 13:12 CDT (shiv, waiting page items 12 and 13): the d4 Banchi phone mockups were called blind, yet they used Banchi's colours, fonts and spacing: \"very evident someone leaked banchis colors, fonts, spacing to it\".",
- "note": "Leak path, read Oct 28 (triage 12): the blind brief template (c109) has a free Palette section that holds the repo's brand palette, and the d4 designer's notes say \"Banchi blue #3d5af1\", the same hex as docs/design/repo-colours.json for banchi. Not yet read: what the orchestrator wrote in that section, and what else the designer opened (docs/design is in its checkout). Next cloud lane, claude-settings only: (1) design-explore and blind_brief.py drop the Palette section from a blind brief and refuse any brand colour, font or spacing value in one; (2) designer.md: a blind lane never reads repo-colours.json or repo tokens, and draws from neutral house tokens; (3) find every other path (house tokens.md names banchi as a source of the 4 px step and 8 px radius; say whether that counts). Red first on the d4 brief. Port: yes, skills and agents install everywhere. Needs no answer. Touches c109's template: shiv's Oct 26 ruling stands, a blind lane never sees today's screen.",
- "updatedAt": "2026-10-28T18:20:00Z"
+ "note": "Leak path, read Oct 28 (triage 12): the blind brief template (c109) has a free Palette section that holds the repo's brand palette, and the d4 designer's notes say \"Banchi blue #3d5af1\", the same hex as docs/design/repo-colours.json for banchi. Not yet read: what the orchestrator wrote in that section, and what else the designer opened (docs/design is in its checkout). Next cloud lane, claude-settings only: (1) design-explore and blind_brief.py drop the Palette section from a blind brief and refuse any brand colour, font or spacing value in one; (2) designer.md: a blind lane never reads repo-colours.json or repo tokens, and draws from neutral house tokens; (3) find every other path (house tokens.md names banchi as a source of the 4 px step and 8 px radius; say whether that counts). Red first on the d4 brief. Port: yes, skills and agents install everywhere. Needs no answer. Touches c109's template: shiv's Oct 26 ruling stands, a blind lane never sees today's screen. Merged in batch 13, PR #787 (main 60216ac9), Oct 28 16:22 CDT (lane PR #782). Done.",
+ "updatedAt": "2026-10-28T21:40:00Z"
 }
