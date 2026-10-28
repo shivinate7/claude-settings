@@ -56,7 +56,7 @@ designer.
 4. **Spawn all lanes together.** The lanes share no input, so they run in parallel. Lanes never talk
    to each other (`parallelism-no-mid-task-talk`).
 5. **Collect.** Read each report, never a transcript. Grep each blind mockup for a hex that is in
-   `docs/design/repo-colours.json` or the repo's tokens; one hit means the lane leaked, so redo it. Then run the structure check of skill
+   `docs/design/repo-colours.json` or the repo's tokens; one hit means that the lane leaked, so redo it. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
 6. **Gather.** Each lane pushes its own branch. The orchestrator copies every lane's pair onto the

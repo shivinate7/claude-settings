@@ -39,8 +39,8 @@ section held a repo's brand hex): the token rules landed in roadmap step c191.
 Limits: the designer's reads are barred by its own instruction, not by a hook: the guard `designer-scope`
 limits writes only, and no hook knows the lane kind of a read. A designer that opens a barred file is
 caught only by the orchestrator's hex check of the finished mockup. The value patterns catch hex, rgb and
-hsl colours, named fonts and font-family words, and px or rem steps near a spacing word, not every
-paraphrase such as "Banchi blue" with no hex. The word lists catch the common forms of a keep rule and of a current-view name, not every
+hsl colours, named fonts and font-family words. They also catch px or rem steps near a spacing word. They
+miss a paraphrase such as "Banchi blue" with no hex. The word lists catch the common forms of a keep rule and of a current-view name, not every
 paraphrase. The check refuses a view name only when the orchestrator passes it with `--current`.
 The spawn hook does not know view names. The `Blind lanes:` line is the orchestrator's own
 count, not a count of spawned lanes.
