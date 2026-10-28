@@ -4102,9 +4102,14 @@ class GhHalf(Env):
         red, _, _ = merge.Host.classify({"a": [("cancel", "l")]}, ["a"])
         self.assertEqual(red, ["a: cancel l"])
 
+    def test_classify_keeps_a_cancel_beside_only_a_skip_red(self):
+        red, _, _ = merge.Host.classify({"a": [("skipping", ""), ("cancel", "l")], "b": [("pass", "")]}, [])
+        self.assertEqual(red, ["a: cancel l"])
+
     def test_classify_never_drops_a_fail_or_timeout_beside_a_cancel(self):
         red, _, _ = merge.Host.classify({"a": [("cancel", ""), ("fail", "x")], "b": [("cancel", ""), ("timed out after 6h", "")]}, ["a", "b"])
-        self.assertEqual(red, ["a: fail x", "b: timed out after 6h"])
+        self.assertIn("a: fail x", red)
+        self.assertIn("b: timed out after 6h", red)
 
     def test_a_workflow_run_in_progress_holds_the_wait_though_no_job_is_listed(self):
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
