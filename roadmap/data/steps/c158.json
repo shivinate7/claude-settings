@@ -1,9 +1,9 @@
 {
  "title": "The Windows stamp fixture suite never hangs past its cap",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.3034,
  "why": "c95 step 1a's lane (Oct 27): on run 40542065223 (push to main), the Windows \"Record stamp engine fixture suite\" hung 23 min; its normal maximum is 1.5 min (n=28).",
- "note": "Debt; cause unknown. #715 gives the step a 5 min cap, so the next hang reads red at its own step. Next cloud lane: after #715 lands, read the next capped hang's log, find the hang, fix it; red first on the hang if it reproduces. Needs no answer. Port: no. Due after: batch 1 (#715 + #721) merges. Placed ahead of c82 (triage, Oct 28): it ate a full run's Windows time.",
- "updatedAt": "2026-10-28T05:10:00Z"
+ "note": "Debt; cause unknown. #715 gives the step a 5 min cap, so the next hang reads red at its own step. Doing: lane started Oct 28 CDT, branch c158-stamp-hang from batch-oct28a 0ae758e, Opus builder and reviewer. Found: the log is gone; the step stayed in progress until the server ended the job at its 28 min cap, so neither cap ended it on the runner. Working cause (unmeasured): a hung grandchild (git, or node to git) holds the step's output pipe, and an in-process timer cannot fire while spawnSync blocks. Plan: an out-of-process watchdog (4 min cap, tree kill, names the hung test), a timeout on each spawn, and a test that a hung fixture exits red in time. Needs no answer. Port: no. Placed ahead of c82 (triage, Oct 28): it ate a full run's Windows time.",
+ "updatedAt": "2026-10-28T05:45:00Z"
 }
