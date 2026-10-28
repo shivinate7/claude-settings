@@ -1,0 +1,9 @@
+{
+ "title": "home drops its uncalled copy of degen's LAN check",
+ "phase": "rollout",
+ "status": "doing",
+ "order": 304.6,
+ "why": "From c177's lane, Oct 28: home's tools/lan_check_resolve.py has no caller since degen ships its own ops/ copy.",
+ "note": "Next cloud lane, small, in shivinate7/home (grant: waiting page item 2, a; read home's open branches and PRs first): delete tools/lan_check_resolve.py and the tools/lan_check*.py pattern in .github/scope.sh. Red first: a grep for a caller of lan_check_resolve in home finds none while the file stays. Needs no answer. Port: home's part of c141. Placed ahead of r5, after c177 (triage 10, Oct 28): a dead copy drifts from degen's live one. Doing: home#372 merged; the same home lane (session_013NEJL2ujKFqWohUqDUjVmW) works from home main 9c330df3.",
+ "updatedAt": "2026-10-28T11:14:46Z"
+}

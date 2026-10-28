@@ -1,9 +1,9 @@
 {
  "title": "claude-settings names home, not the retired home-app repo",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.26,
  "why": "Found Oct 28 in c141's home lane: shivinate7/home-app merged into shivinate7/home on Oct 26 (home's CLAUDE.md line 3), yet 13 files on claude-settings main still name the repo home-app, and c140's lane wrote it into the HA Green's owner.",
- "note": "Debt. Measured by triage 10 on main 599dd58b: `git grep home-app` hits 13 files, among them decision shared-resource-owner, docs/design/repo-colours.json, lint/layout.json, lint/test_layout.py, lint/test_repo_colour.py, skills/ios-apps/SKILL.md and docs/records.md. Next cloud lane: rename each hit that means the repo to home; keep any hit that means the Home app inside home (home's records/home-app.md is that app's record, not a repo). Where home-app and home are both listed (repo colours, layout), merge the two rows into home's, and say which value wins. Red first: a test that the repo list names no retired repo. Needs no answer. Port: no; claude-settings only. Placed ahead of c95, after c175 (triage 10, Oct 28): a stale repo name sends a lane to a repo that does not exist, as nearly happened in c141.",
- "updatedAt": "2026-10-28T10:56:53Z"
+ "note": "Debt. Measured by triage 10 on main 599dd58b: `git grep home-app` hits 13 files, among them decision shared-resource-owner, docs/design/repo-colours.json, lint/layout.json, lint/test_layout.py, lint/test_repo_colour.py, skills/ios-apps/SKILL.md and docs/records.md. Next cloud lane: rename each hit that means the repo to home; keep any hit that means the Home app inside home (home's records/home-app.md is that app's record, not a repo). Where home-app and home are both listed (repo colours, layout), merge the two rows into home's, and say which value wins. Red first: a test that the repo list names no retired repo. Needs no answer. Port: no; claude-settings only. Placed ahead of c95, after c175 (triage 10, Oct 28): a stale repo name sends a lane to a repo that does not exist, as nearly happened in c141. Doing: lane started Oct 28 (session_013NEJKzn87kCJw6MZa5VTXA).",
+ "updatedAt": "2026-10-28T11:08:49Z"
 }
