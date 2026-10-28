@@ -186,7 +186,7 @@ class BriefFaults(unittest.TestCase):
         self.assertIn("token-section", codes(self.m.brief_faults(brief(palette="None."))))
 
     def test_colour_values_are_refused_in_a_free_section(self):
-        for line in ("The accent is #3d5af1.", "Ink is #14161F80.", "Use #fa0 for alerts.",
+        for line in ("The accent is #3d5af1.", "Ink is #14161F80.", "The alert colour is #fa0.",
                      "Surface rgb(246, 247, 251).", "Text hsl(220 20% 10%).", "Accent oklch(0.6 0.2 260)."):
             for where in ("job", "device"):
                 with self.subTest(line=line, where=where):
@@ -217,6 +217,51 @@ class BriefFaults(unittest.TestCase):
                      "The font on the envelope is hard to read.", "Inter-city mail takes 3 days."):
             with self.subTest(line=line):
                 self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
+    def test_more_font_spacing_and_colour_leaks_are_refused(self):
+        for key, line in (("token-font", "Headings in Satoshi, body in Lora."),
+                          ("token-font", "The font is set in Fraunces."),
+                          ("token-font", "Use Inter."), ("token-spacing", "Body text is 16px."),
+                          ("token-spacing", "8px rounded corners."), ("token-spacing", "Leave 1.5rem between cards."),
+                          ("token-spacing", "Padding of 12 pt."), ("token-colour", "Accent rgb (61,90,241)."),
+                          ("token-colour", "Text colour #333."), ("token-colour", "Ink #333333."),
+                          ("token-colour", "Surface hsl 220 90 60.")):
+            with self.subTest(line=line):
+                self.assertIn(key, codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_ids_names_and_plain_scales_in_a_job_pass(self):
+        for line in ("Order #123456 arrived.", "Order #A123 is late.", "Lot #B12 is lost.", "Bin #C1D2 is full.",
+                     "Invoice #12345678 is paid.", "He grades cards on a 10-point scale.",
+                     "Inter Miami cards are rare.", "Gotham City cards sell fast.", "Menlo Park sellers ship late.",
+                     "Rubik cards are rare.", "A serif logo is on the seal.", "The typeface on the card is old.",
+                     "Profit margin is 5 percent.", "A step in the process takes 5 minutes."):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
+    def test_device_gap_inset_and_scale_sizes_pass(self):
+        for line in ("8 px gap at the hinge.", "Hinge gap: 8 pt.", "Safe area: 47 pt top inset.",
+                     "1114 x 705 pt, a grid of two screens.", "240 pt, one step down.",
+                     "1114 x 705 pt in 2x scale."):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\n" + line)), [])
+
+    def test_device_still_refuses_colour_and_font(self):
+        for key, line in (("token-colour", "The shell is #3d5af1."), ("token-font", "Labels in Roboto.")):
+            with self.subTest(line=line):
+                self.assertIn(key, codes(self.m.brief_faults(brief(device=DEVICE + "\n" + line))))
+
+    def test_text_on_the_kind_line_or_a_second_kind_line_is_refused(self):
+        for header in ("Lane kind: blind, accent #3d5af1\nLane: packages-blind-1",
+                       "Lane kind: blind\nLane kind: blind #3d5af1\nLane: packages-blind-1",
+                       "Lane kind: blind\nLane kind: blind\nLane: packages-blind-1"):
+            with self.subTest(header=header):
+                self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
+
+    def test_long_digit_run_is_fast(self):
+        import time
+        start = time.time()
+        self.m.brief_faults(brief(job=JOB + "\n" + "1" * 20000))
+        self.assertLess(time.time() - start, 2)
 
     def test_device_written_sizes_pass(self):
         line = "iPhone Duo, 1114 x 705 pt open, 540 x 720 px per screen."

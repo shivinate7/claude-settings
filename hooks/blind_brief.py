@@ -41,6 +41,7 @@ FREE = ("Job", "Device")
 FIXED = ("House rules", "Deliver")
 
 KIND_LINE = re.compile(r"^lane kind:\s*(blind|informed|directed)\b", re.I)
+BLIND_KIND_ONLY = re.compile(r"^lane kind:\s*blind\s*$", re.I)
 LANE_LINE = re.compile(r"^Lane:\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
 BLIND_LANES = re.compile(r"^blind lanes:\s*(.*?)\s*$", re.I | re.M)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
@@ -87,32 +88,40 @@ PATTERNS = {
     ],
 }
 # A repo's design values: colour, font and spacing. A brief that states one leaks the repo's look
-# (roadmap step c191), because the repo's own tokens hold the same value.
-_SPACE_WORD = r"(?:spacing|space|gaps?|padding|margins?|gutters?|radius|radii|rhythm|steps?|scale|grid|insets?)"
-_UNIT = r"\d+(?:\.\d+)?\s?(?:px|pt|rem|em|dp)\b"
+# (roadmap step c191), because the repo's own tokens hold the same value. A Device section is exempt from
+# token-spacing: it copies written device sizes, and a hinge gap or a safe-area inset is a device fact.
+_SPACE_WORD = r"(?:spacing|gaps?|padding|margins?|gutters?|radius|radii|insets?)"
+_COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|palette|tint|shade|text|paper)"
+_ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
+            "number", "ref")
+SPACING_EXEMPT = ("Device",)
 PATTERNS.update({
     "token-colour": [
-        r"#(?:[0-9a-f]{6}|[0-9a-f]{8})\b", r"#(?=[0-9a-f]{3,4}\b)[0-9a-f]*[a-f][0-9a-f]*\b",
-        r"\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(",
+        r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
+        "".join("(?<!%s )" % w for w in _ID_WORD) + r"#(?:\d{6}|\d{8})\b",
+        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#[0-9a-f]{3,4}\b",
+        r"\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
     ],
     "token-font": [
-        r"\bfont-family\b", r"\bfont\s+(?:stack|family)\b", r"\btypefaces?\b", r"\b(?:sans-)?serif\b",
+        r"\bfont-family\b", r"\bfont\s+(?:stack|family)\b", r"\b(?:sans-)?serif\s+(?:font|typeface)\b",
         r"\bmonospace\b", r"\bsystem-ui\b", r"-apple-system",
     ],
     "token-spacing": [
-        r"--space-\d", r"\b" + _SPACE_WORD + r"\b\W+(?:\w+\W+){0,3}" + _UNIT,
-        _UNIT + r"\W+(?:\w+\W+){0,2}" + _SPACE_WORD + r"\b",
-        r"\b\d+[- ]?(?:point|pt|px)\s+(?:grid|scale|step|baseline)\b", r"\bspacing\s+scale\b",
+        r"--space-\d", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:px|rem|dp)\b",
+        r"\b" + _SPACE_WORD + r"\b\W+(?:\w+\W+){0,3}(?<![\w.])\d+(?:\.\d+)?\s?(?:pt|em)\b",
+        r"\b\d+[- ]?(?:point|pt)\s+(?:grid|baseline)\b", r"\bspacing\s+scale\b",
     ],
 })
 COMPILED = {kind: [re.compile(p, re.I) for p in pats] for kind, pats in PATTERNS.items()}
-# Font names are capitalised words, so they match with case: "Inter 600" is a font, "inter-city" is not.
+# Font names are capitalised words, so they match with case: "Inter 600" is a font, "Inter Miami" is not.
 COMPILED["token-font"] += [re.compile(p) for p in (
-    r"\bInter\b(?![-\w])",
-    r"\b(?:Roboto|Helvetica|Arial|SF Pro|SF Mono|San Francisco|Avenir|Futura|Gotham|Montserrat|Open Sans"
-    r"|Poppins|Nunito|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather"
-    r"|Garamond|Verdana|Tahoma|Segoe UI|Menlo|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans"
-    r"|Rubik|Figtree|Fraunces)\b")]
+    r"\b(?i:in|use|using|with|font|typeface)\s+Inter\b(?![-\w]|\s+[A-Z])", r"\bInter\s+\d{3}\b",
+    r"\b(?:Roboto|Helvetica|Arial|SF Pro|SF Mono|San Francisco|Avenir|Montserrat|Open Sans|Poppins|Nunito"
+    r"|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather|Garamond|Verdana"
+    r"|Tahoma|Segoe UI|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans|Figtree|Fraunces|Satoshi"
+    r"|General Sans)\b",
+    r"\b(?:[Ff]onts?|[Tt]ypefaces?|[Hh]eadings?|[Bb]ody(?: text)?|[Tt]itles?)\s+(?:is |are )?(?:set )?in\s+"
+    r"[A-Z][A-Za-z]+\b(?!-)")]
 TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
 
 
@@ -202,8 +211,12 @@ def brief_faults(text, current=(), template=None, devices=None):
         faults.append(("kind", "first line", lines[0] if lines else ""))
     if not any(LANE_LINE.match(line) for line in lines):
         faults.append(("lane", "header", "no Lane line"))
-    for line in lines:
-        if not KIND_LINE.match(line) and not LANE_LINE.match(line):
+    for index, line in enumerate(lines):
+        if KIND_LINE.match(line):
+            # The kind line holds the kind and nothing else, and only once: text after it hides a value.
+            if index > 0 or not BLIND_KIND_ONLY.match(line):
+                faults.append(("outside", "header", line))
+        elif not LANE_LINE.match(line):
             faults.append(("outside", "header", line))
     for code, name in extra:
         faults.append((code, "body", name))
@@ -232,6 +245,8 @@ def brief_faults(text, current=(), template=None, devices=None):
         if hit:
             faults.append(("placeholder", name, hit.group(0)))
         for kind, pats in COMPILED.items():
+            if kind == "token-spacing" and name in SPACING_EXEMPT:
+                continue
             for pat in pats:
                 hit = pat.search(body)
                 if hit:

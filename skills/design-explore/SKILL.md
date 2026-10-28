@@ -55,8 +55,9 @@ designer.
    prints its lane kind on the page. A directed mockup also prints its direction.
 4. **Spawn all lanes together.** The lanes share no input, so they run in parallel. Lanes never talk
    to each other (`parallelism-no-mid-task-talk`).
-5. **Collect.** Read each report, never a transcript. Grep each blind mockup for a hex that is in
-   `docs/design/repo-colours.json` or the repo's tokens; one hit means that the lane leaked, so redo it. Then run the structure check of skill
+5. **Collect.** Read each report, never a transcript. Grep each blind mockup for the repo's own colour
+   (`python3 ~/.claude/lint/repo_colour.py <repo root>`) and for each colour in the repo's token files, as hex, rgb()
+   and hsl(); one hit means that the lane leaked, so redo it. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
 6. **Gather.** Each lane pushes its own branch. The orchestrator copies every lane's pair onto the

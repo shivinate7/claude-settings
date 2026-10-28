@@ -33,8 +33,9 @@ designer kept today's views, so every mockup copied the current app. The prose r
 `design-agents` could not stop it, because nothing read the brief.
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-26 22:58 CDT, the mailaudit Duo
-mockups. Landed 2026-10-27. Second incident, the d4 Banchi phone mockups, 2026-10-28 (the Palette
-section held a repo's brand hex): the token rules landed in roadmap step c191.
+mockups. Landed 2026-10-27. Second incident, the d4 Banchi phone mockups (the Palette section held a
+repo's brand hex), owner gripe 2026-10-28 13:12 CDT: the no-Palette and no-value rules landed in roadmap
+step c191. A Device section may name written sizes, so it is exempt from the spacing check.
 
 Limits: the designer's reads are barred by its own instruction, not by a hook: the guard `designer-scope`
 limits writes only, and no hook knows the lane kind of a read. A designer that opens a barred file is
