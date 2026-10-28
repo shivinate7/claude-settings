@@ -1,5 +1,5 @@
 {
-  "about": "One colour per repo. Read it through lint/repo_colour.py (colour_for), never from a copy. A repo that has its own brand colour keeps it, read from that repo; each source names where. A repo with none gets a hue drawn from its name by the rule below, and the draw is stored here so a later repo never moves it. When a drawn repo gets its own colour, replace its entry and drop it from rule.drawn. Ruling: owner, 2026-10-26 20:37 CDT, roadmap step c105 (one colour wheel for every repo).",
+  "about": "One colour per repo. Read it through lint/repo_colour.py (colour_for), never from a copy. A repo that has its own brand colour keeps it, read from that repo; each source names where. A repo with none gets a hue drawn from its name by the rule below, and the draw is stored here so a later repo never moves it. When a drawn repo gets its own colour, replace its entry and drop it from rule.drawn. The retired list maps a retired repo name to the repo that took it; no file may name the old one. Ruling: owner, 2026-10-26 20:37 CDT, roadmap step c105 (one colour wheel for every repo).",
   "rule": {
     "state_hues": [
       5,
@@ -17,6 +17,9 @@
       "adblock-lists",
       "home"
     ]
+  },
+  "retired": {
+    "home-app": "home"
   },
   "sources": {
     "claude-settings": "skills/waiting-page/page.html, the template's amber",
