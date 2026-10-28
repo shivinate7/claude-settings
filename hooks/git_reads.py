@@ -111,6 +111,42 @@ def git_common_dir(where: str):
     return _common_dir(where)
 
 
+def _has_git_above(where: str) -> bool:
+    """True when `where` or a folder above it holds a `.git` entry. A stat walk, no git spawn, so a
+    call outside every repository spends no git read. `GIT_DIR` set in the environment counts."""
+    if os.environ.get("GIT_DIR"):
+        return True
+    folder = os.path.realpath(where)
+    while True:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return True
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return False
+        folder = parent
+
+
+def clone_checkouts(where: str):
+    """Return the root of every checkout of the clone that `where` sits in, the primary and each
+    linked worktree, realpath'd. None when git gives no answer (no git, no tree, a git too old for
+    `-z`). One `git worktree list` call, and none when no `.git` sits at or above `where`. A bare entry has no tree and is left out."""
+    if not where or not os.path.isdir(where) or not _has_git_above(where):
+        return None
+    answer = _git(where, "worktree", "list", "--porcelain", "-z")
+    if answer is None or answer.returncode != 0:
+        return None
+    roots = []
+    for field in answer.stdout.split("\0"):
+        if field.startswith("worktree "):
+            roots.append(field[len("worktree "):])
+        elif field == "bare" and roots:
+            roots.pop()
+    try:
+        return [os.path.realpath(root) for root in roots if root] or None
+    except Exception:
+        return None
+
+
 def _inside_work_tree(where: str):
     """True inside a git working tree, False when git says this is no git tree, None when git
     gives no answer at all (git missing, a timeout, a crash).

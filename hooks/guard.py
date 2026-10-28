@@ -93,6 +93,12 @@ Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
+                       No override lifts it. (an-agent-outside-its-home-tree-must-stop)
+  other-checkout       deny. Any session's write whose target sits in a checkout of this clone
+                       other than the one holding its cwd. A nested worktree owns its own files.
+                       A target in no checkout, or in the clone's `.git`, passes; unreadable git
+                       passes. The shell form reads the targets frozen-path reads, after a
+                       leading `cd`. An override lifts it.
                        (an-agent-outside-its-home-tree-must-stop)
   agent-model-floor, roles-third-try-steps-up
                        deny. A spawn below the model floor, or a round or try on the wrong model.
@@ -210,7 +216,7 @@ while True:
             AUTHOR_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            clone_checkouts, command_root, git_calls, git_common_dir, inline_script, is_move_into, is_powershell, is_worktree, log_path_and_text,
             nested_script, norm,
             path_is_inside, primary_checkout, record, refuse, resolve_command, resolve_default_base,
             segment_tokens, split_segments, strip_heredoc_bodies,
@@ -245,7 +251,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
+            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, is_frozen, is_project_config,
             project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -820,6 +826,14 @@ WORKTREE_HOME_REASON = (
     "Rule (worktree home): this agent's own working tree is gone, or this call reaches outside "
     "it. "
     "Remedy: make no further change. Stop, and report this to your orchestrator."
+)
+
+OTHER_CHECKOUT_REASON = (
+    "Rule (other checkout): this write lands in another checkout of this clone, not the one this "
+    "session stands in. "
+    "Remedy: write only inside your own checkout, or report the change to the session that owns "
+    "the other one. To remove a whole worktree, use `git worktree remove`, or leave it to the "
+    "janitor sweep."
 )
 
 
@@ -2758,6 +2772,61 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
+# A shell command with none of these can write no named file, so it spends no git read here. A
+# redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
+SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
+SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
+
+
+def _owning_checkout(path: str, roots) -> str:
+    """The deepest checkout root that holds `path`, else ''. A nested worktree under the
+    primary's `.claude/worktrees/` is deeper than the primary, so it owns its own files."""
+    owners = [root for root in roots if path_is_inside(path, root) is True]
+    return max(owners, key=len) if owners else ""
+
+
+def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule 0, other-checkout, for every session: the log detail when a write lands in a checkout
+    of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. An
+    unreadable git state, or a cwd in no checkout, is unknown and passes. One git read per call
+    that can write. Liftable by an owner override, unlike `worktree_home_hit`
+    (docs/decisions/an-agent-outside-its-home-tree-must-stop.md)."""
+    if tool in WRITE_TOOLS:
+        targets = write_targets(tool_input)
+    elif tool in SHELL_TOOLS:
+        targets = None
+        command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
+        if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)):
+            return ""
+    else:
+        return ""
+    if targets == []:
+        return ""
+    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    roots = clone_checkouts(where) if where else None
+    own = _owning_checkout(where, roots) if roots else ""
+    if not own:
+        return ""
+
+    def elsewhere(target, at):
+        try:
+            resolved = _resolved(target, at)
+            owner = _owning_checkout(resolved, roots)
+        except Exception:
+            return False
+        # The primary's `.git` is the clone's common directory, shared by every checkout.
+        return (bool(owner) and owner != own
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+
+    if targets is None:
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)
+        return "shell write into another checkout: " + hit if hit else ""
+    for target in targets:
+        if elsewhere(target, where):
+            return "write target in another checkout: " + target
+    return ""
+
+
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
@@ -2801,6 +2870,11 @@ def judge(payload) -> None:
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
         refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
+    # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
+    # a rule id of its own, because the owner ruled that no override lifts worktree-home.
+    other_hit = other_checkout_hit(tool, tool_input, cwd)
+    if other_hit:
+        refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
