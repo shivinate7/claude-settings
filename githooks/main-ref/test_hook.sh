@@ -8,7 +8,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_CO
 git init -q --bare -b main origin.git
 git clone -q origin.git w 2>/dev/null; cd w || exit 1
 git commit -q --allow-empty -m one && git push -q origin main 2>/dev/null
-bash "$here/install.sh" >/dev/null
+bash "$here/install.sh"
 bad=0
 t() { # want label cmd...
   want="$1"; label="$2"; shift 2
@@ -43,4 +43,27 @@ git switch -q feat
 cd "$tmp/w2" && git switch -q -c main-x && git commit -q --allow-empty -m other && git push -q origin main-x 2>/dev/null
 cd "$tmp/w" || exit 1
 t refused "fetch origin main-x:main"             git fetch -q origin main-x:main
+# install.sh placement: each case a fresh clone with a local commit on feat, then a guarded move
+mk() { # name [hooksPath]: fresh clone at $tmp/name on feat
+  cd "$tmp" && git clone -q origin.git "$1" 2>/dev/null && cd "$1" || exit 1
+  [ -z "${2:-}" ] || git config core.hooksPath "$2"
+  git switch -q -c feat && git commit -q --allow-empty -m local
+}
+mk rel .hooks; mkdir -p sub/deep
+(cd sub/deep && bash "$here/install.sh")
+t refused "relative hooksPath, installed from a subdir"  git branch -f main feat
+mk relwt .hooks; git worktree add -q -b wtb "$tmp/relwt-2" 2>/dev/null
+bash "$here/install.sh"
+cd "$tmp/relwt-2" && git commit -q --allow-empty -m wt
+t refused "relative hooksPath, move from a second worktree" git branch -f main wtb
+mkdir -p "$tmp/home"; mk tilde '~/hk'
+HOME="$tmp/home" bash "$here/install.sh"
+t refused "~ hooksPath expands to HOME"          env HOME="$tmp/home" git branch -f main feat
+mk dash
+sh "$here/install.sh"
+t refused "installer run under sh"               git branch -f main feat
+# outside any repo: the installer fails and writes nothing (it once wrote /hooks)
+mkdir "$tmp/norepo"; snap() { cksum /hooks/reference-transaction 2>/dev/null; }; before="$(snap)"
+t refused "installer outside a repo"             env GIT_CEILING_DIRECTORIES="$tmp" sh -c 'cd "$1" && sh "$2"' _ "$tmp/norepo" "$here/install.sh"
+t ok      "outside a repo writes nothing"        sh -c '[ -z "$(ls -A "$1")" ] && [ "$(cksum /hooks/reference-transaction 2>/dev/null)" = "$2" ]' _ "$tmp/norepo" "$before"
 rm -rf "$tmp"; exit $bad
