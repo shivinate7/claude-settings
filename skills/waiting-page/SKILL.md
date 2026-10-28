@@ -208,8 +208,8 @@ picks the option. A "View" control, 40px or more high, sits in a row under the p
 of the item, before the options. An option that names a design (`design`) which the item does not
 carry shows a warning line in its card in place of the picture.
 
-Each option gets its own mockup, drawn in that option's state. Two options never share one picture.
-The page refuses an item where two options share a picture, or where a `focus` finds nothing.
+Each option gets its own mockup, drawn in that option's state. Two options never show the same picture with the same `focus`.
+The page refuses an item where they do, or where a `focus` finds nothing.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
    phone width for a web app. Draw it 390 wide. The page scales it to the card and shows all of it,
