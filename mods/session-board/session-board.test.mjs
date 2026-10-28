@@ -1380,17 +1380,60 @@ await test('question box: a tool that only looks like a session start leaves it 
   same((await askBox(h)).decision, 'allow', 'verdict')
 })
 
-await test('question box: the start count lives in the board record and survives a mod reload', async () => {
+await test('question box: the start count survives a mod reload and an app restart under the same id', async () => {
+  for (const reason of [null, 'prompt_input_exit', 'other']) {
+    const h = await start({ liveAgents: [] })
+    await fire(h, 'session.start', {})
+    await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+    await settle()
+    if (reason) await fire(h, 'session.end', { sessionId: ID, reason })
+    same(h.store.get('started:' + ID) && h.store.get('started:' + ID).n, 1, `the start record after ${reason || 'a reload'}`)
+    const h2 = await start({ liveAgents: [], seed: [...h.store] }) // fresh module, same store, same id
+    await fire(h2, 'session.start', {})
+    await settle()
+    same((await askBox(h2)).decision, 'deny', `verdict after ${reason || 'a reload'}`)
+  }
+})
+
+await test('question box: the sweep clears a dead session\'s start record and keeps a live or own one', async () => {
+  const old = { n: 2, at: NOW - 86_400_001 }
+  const h = await start({
+    agents: [{ sessionId: sid(4), status: 'idle', cwd: '/r' }],
+    seed: [['started:' + OTHER, old], ['started:' + sid(3), { n: 1, at: NOW - 86_000_000 }], ['started:' + sid(4), old], ['started:' + ID, old]],
+  })
+  await fire(h, 'session.start', {})
+  await settle()
+  same(['started:' + OTHER, 'started:' + sid(3), 'started:' + sid(4), 'started:' + ID].map(k => h.store.has(k)), [false, true, true, true], 'dead old gone; young, live and own kept')
+})
+
+await test("question box: an in-process resume drops the old count and loads the resumed session's own", async () => {
+  const h = await start({ liveAgents: [], seed: [['started:' + NEW_ID, { n: 3, at: NOW }]] })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  await fire(h, 'session.end', { sessionId: ID, reason: 'resume' })
+  h.sid = NEW_ID
+  const r = await askBox(h)
+  same(r.decision, 'deny', "the resumed session's own count")
+  assert.match(r.reason, /started 3 sessions/, 'its count, not the old one added')
+  const h2 = await start({ liveAgents: [] })
+  await fire(h2, 'session.start', {})
+  await callTool(h2, 'mcp__ccd_session__start_session', STARTED)
+  await fire(h2, 'session.end', { sessionId: ID, reason: 'resume' })
+  h2.sid = NEW_ID
+  same((await askBox(h2)).decision, 'allow', 'a resumed session that started none')
+  await tickBeat(h2)
+  same(h2.store.has('started:' + NEW_ID), false, 'no count written under the resumed id')
+})
+
+await test('question box: a /clear keeps the count, and writes it under the new id', async () => {
   const h = await start({ liveAgents: [] })
   await fire(h, 'session.start', {})
   await callTool(h, 'mcp__ccd_session__start_session', STARTED)
-  await settle()
-  same(h.store.get('sess:' + ID).started, 1, 'the board record holds the count')
-  const h2 = await start({ liveAgents: [], seed: [...h.store] }) // a reload: fresh module, same store
-  await fire(h2, 'session.start', {})
-  await settle()
-  same((await askBox(h2)).decision, 'deny', 'verdict after the reload')
-  same(h2.store.get('sess:' + ID).started, 1, 'the next write keeps the count')
+  await fire(h, 'session.end', { sessionId: ID, reason: 'clear' })
+  h.sid = NEW_ID
+  same((await askBox(h)).decision, 'deny', 'verdict after /clear')
+  await tickBeat(h)
+  same(h.store.get('started:' + NEW_ID) && h.store.get('started:' + NEW_ID).n, 1, 'the count under the new id')
 })
 
 await test("question box: GUARD_PY writes one guard.log line through the real guard_core writer", async () => {

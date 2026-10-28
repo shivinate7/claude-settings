@@ -25,7 +25,9 @@ let lastDetail = '' // the detail record as last written, without its stamp
 let board = null // { rows, band, note, now, hidden }
 let view = { id: null, detail: null } // id null: all-sessions view
 const bgTasks = new Set() // background command and workflow task ids seen to start and not yet seen to end
-let started = 0 // sessions this one started; never falls, and rides in the board record across a reload
+let started = 0 // sessions this one started; kept in its start record (started:<id>) across a reload or restart
+let startedFor = '' // the id whose start record holds the count now; '' makes the next write store it
+let startedLoad = true // the bound id's start record is not read yet: true at load and after a resume
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -47,6 +49,10 @@ export function register(on) {
         // answers the old one: write nothing for it.
         staleId = e.sessionId
         if (isSessionId(e.sessionId)) retired.add(e.sessionId)
+        // A resume puts another conversation in this process: its own count, read once its id binds.
+        // A /clear goes on with the same work: the count carries to the new id.
+        if (e.reason === 'resume') { started = 0; startedLoad = true }
+        startedFor = ''
         lastDetail = ''
         tracker.reset()
         await setRepo($)
@@ -106,7 +112,8 @@ export function register(on) {
       if (typeof task === 'string') bgTasks.add(task)
       if (startsSession(e.tool) && answered(result)) {
         started++
-        await soon($, flush($, false)) // the count reaches the board record now, not at the next beat
+        startedFor = ''
+        await soon($, flush($, false)) // the count reaches the start record now, not at the next beat
       }
       return result
     } finally {
@@ -121,6 +128,7 @@ export function register(on) {
   on('tool.check', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const result = await next(e)
     if (result && result.decision === 'deny') return result
+    await soon($, bindStarted($))
     if (started) {
       await soon($, guardLog($, 'deny', `started=${started} tasks=${bgTasks.size}`))
       return { decision: 'deny', reason: questionRefusal(0, bgTasks.size, started) }
@@ -207,16 +215,22 @@ async function startUp($) {
   await setRepo($)
   if (beat) beat.cancel()
   beat = $.clock.every(HEARTBEAT_MS, () => { void tick($) })
-  // The start count comes back from the board record first, so the first write keeps it. Then the
-  // first reading and the sweep of killed sessions' entries; all share one wait of GRACE_MS.
-  await soon($, (async () => { await loadStarted($); await Promise.all([refreshAll($, true), sweepAll($)]) })())
+  // The first reading reads the start record back first. It and the sweep of killed sessions'
+  // entries share one wait of GRACE_MS.
+  await soon($, Promise.all([refreshAll($, true), sweepAll($)]))
 }
 
-// After a mod reload: this session's start count, from its own board record. Never lowers it.
-async function loadStarted($) {
+// Once per load and per resume, when the id is bound: the count from this id's start record.
+// session.end leaves the record, so a restart under the same id reads it back. Never lowers it.
+async function bindStarted($, bound) {
+  if (!startedLoad) return
   try {
-    const id = await ident($)
-    if (isSessionId(id)) started = Math.max(started, startedCount(await bounded($, $.store.get('sess:' + id))))
+    const id = bound ?? await ident($)
+    if (!isSessionId(id) || id === staleId) return
+    const n = startedCount(await bounded($, $.store.get('started:' + id)))
+    if (!startedLoad) return // another read landed first
+    startedLoad = false
+    if (n > started) { started = n; startedFor = id }
   } catch (err) { note($, 'start count read failed: ' + (err && err.message)) }
 }
 
@@ -291,11 +305,11 @@ async function flush($, withDetail) {
     if (id === staleId) return // /clear ran and the new id is not bound yet
     staleId = ''
     retired.delete(id) // the host answers this id as current
+    await bindStarted($, id)
     const now = await $.clock.now()
     if (ended) return
-    const entry = tracker.entry(now)
-    if (started) entry.started = started
-    await $.store.set('sess:' + id, entry)
+    await $.store.set('sess:' + id, tracker.entry(now))
+    if (started && startedFor !== id) { await $.store.set('started:' + id, { n: started, at: now }); startedFor = id }
     if (withDetail && !gone(id)) {
       const detail = tracker.detail(now)
       const key = id + JSON.stringify({ ...detail, at: 0 })
@@ -351,7 +365,8 @@ async function readEntries($) {
   const entries = new Map()
   const old = []
   const now = await $.clock.now()
-  const keys = (await $.store.keys()).filter(k => typeof k === 'string' && k.startsWith('sess:'))
+  const all = await $.store.keys()
+  const keys = all.filter(k => typeof k === 'string' && k.startsWith('sess:'))
   const newest = keys.slice().reverse().slice(0, MAX_KEYS)
   await Promise.all(newest.map(async k => {
     try {
@@ -360,6 +375,16 @@ async function readEntries($) {
       if (now - e.at > GC_MS) old.push(k.slice(5))
       else entries.set(k.slice(5), e)
     } catch { /* one bad key hides one row */ }
+  }))
+  // A start record outlives its session's end, so a restart reads it back. One a day past its
+  // last write goes to the sweep too; the sweep keeps it for a live session.
+  const starts = all.filter(k => typeof k === 'string' && k.startsWith('started:')).slice(-MAX_KEYS)
+  await Promise.all(starts.map(async k => {
+    try {
+      const r = await $.store.get(k)
+      const at = r && typeof r === 'object' ? num(r.at, 0, 8.64e15) : null
+      if (at === null || now - at > GC_MS) old.push(k.slice(8))
+    } catch { /* one bad key waits for the next sweep */ }
   }))
   return { entries, old, total: keys.length, read: newest.length }
 }
@@ -375,12 +400,14 @@ async function sweep($, old, live) {
       await $.store.delete('sess:' + id)
       await $.store.delete('detail:' + id)
       if (id === sid) lastDetail = ''
+      else if (sid) await $.store.delete('started:' + id) // this session's own count stays while it lives; an unknown own id deletes none
     } catch { /* the next sweep tries again */ }
   }
 }
 
 async function sweepAll($) {
-  const [agents, store] = await Promise.all([readAgents($), readEntries($)])
+  // The own id first: the sweep keeps this session's start record and must know which one it is.
+  const [agents, store] = await Promise.all([readAgents($), readEntries($), ident($)])
   await sweep($, store.old, agents.ok ? new Set(agents.rows.map(r => r.id)) : null)
 }
 

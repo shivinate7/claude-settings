@@ -384,8 +384,8 @@ export const startsSession = tool => SESSION_START_TOOLS.includes(tool)
 // A tool.call result that answered without error: a deny or an error result is no start.
 export const answered = r => !!r && typeof r === 'object' && 'result' in r && !r.deny && r.isError !== true
 
-// The start count a board record holds, 0 when it holds none.
-export const startedCount = raw => (raw && typeof raw === 'object' ? num(raw.started, 0, 999) ?? 0 : 0)
+// The count a start record (store key started:<id>, { n, at }) holds, 0 when it holds none.
+export const startedCount = raw => (raw && typeof raw === 'object' ? num(raw.n, 0, 999) ?? 0 : 0)
 
 // The refusal text, or null when nothing runs and no session was started. A started session may
 // wait on this one for as long as this one lives.
