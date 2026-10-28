@@ -1,6 +1,6 @@
 ---
 name: project-ops
-description: Use when the owner asks to give a repo standing roles, counted hand-offs, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and hand-off templates. Not for ordinary code edits.
+description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation by usage tally, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and hand-off templates. Not for ordinary code edits.
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
@@ -22,7 +22,7 @@ Without a project, each tier is one Claude Code session, and the owner acts as t
   The model adds only the "frozen at <sha>" line on each merge go.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
   briefs and role hand-off notes. It is never merged into main.
-- **The outbox.** `roadmap/outbox/`, one file per thread, for non-urgent notes to triage. Its
+- **The outbox.** `roadmap/outbox/`, one file per session, for non-urgent notes to triage. Its
   README gives the format. `templates/operating-model.md` says when to message instead.
 - **Briefs and role hand-offs.** `templates/brief.md` and `templates/role-handoff.md`.
 

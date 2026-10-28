@@ -9,7 +9,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  starts each lane session in roadmap order, and talks with the owner. The load brake, not a
+  writes each lane brief, starts each lane session in roadmap order, and talks with the owner. The load brake, not a
   number, decides how many lanes run at once. It does not rotate (see below).
 - **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
@@ -17,8 +17,9 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   publish (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
-  tool runs and archiving finished lanes. Each merge go names `frozen at <sha>`. It prints the
-  merge output on the terminal, never to a log only. It dispatches no deferred step.
+  tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
+  Each merge it runs names `frozen at <sha>`. It prints the merge output on the terminal, never
+  to a log only. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
@@ -28,7 +29,7 @@ says so in one line: its own tier, the right tier, and why. It then handles the 
 
 A coordinator may work in another repo, by hand-off or by its own lane PR there. Before it acts,
 it checks whether that repo has an active coordinator. If one is active, it coordinates with it.
-If none is active, it proceeds.
+If none is active, it proceeds. It does not wait for a reply.
 
 ## Rotation of standing sessions
 
@@ -38,21 +39,24 @@ The coordinator does not rotate. It writes its own handoffs and compacts in plac
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
-- At each wake, the coordinator reads each standing session's tally from `get_session`:
-  `context_usage` (`used_tokens` of `max_tokens`). The limit is `<limit>`.
+- At each wake, the coordinator reads triage's and the batch runner's tally from `get_session`:
+  `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
+  is no reading: the coordinator asks that session for its tally instead. Without a project, each
+  standing session ends every reply with its tally, and the owner reads it.
+- The limits are `<triage limit>` and `<batch runner limit>`.
 - Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
   re-asked question, a reply that contradicts the roadmap, or a missed ruling.
 - On a rotation, in this order:
-  1. The old thread stops watching each page its role owns (the roadmap page, the project's
+  1. The old session stops watching each page its role owns (the roadmap page, the project's
      waiting page). It notes the time, then answers each comment still open at that time on
      those pages.
-  2. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
-     `role-handoff.md`, with that time. It drains its work in flight: it starts nothing new and
-     ends or hands over each wait it holds.
-  3. The coordinator archives the old session, then the coordinator starts the successor from
-     the hand-off file and updates the roster. The coordinator sends no broadcast. Threads read
+  2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
+  3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
+     `role-handoff.md`, with that time. The file names each wait it handed over.
+  4. The coordinator archives the old session, then the coordinator starts the successor from
+     the hand-off file and updates the roster. The coordinator sends no broadcast. Sessions read
      the roster.
-  4. The successor watches each page at once. It reads each page's comments since the time in
+  5. The successor watches each page at once. It reads each page's comments since the time in
      the hand-off file.
 - The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 
@@ -73,24 +77,24 @@ parent, or miss a message while busy.
 
 - A message can hold a ruling, a finding, a new step, a debt or a note. File it in the same turn,
   and tell the owner in one line where it went.
-- Only triage writes new steps, merges, order and closes. Another thread sends the item to triage,
+- Only triage writes new steps, merges, order and closes. Another session sends the item to triage,
   with the owner's message attached.
-- A thread rewrites the note, status and brief of a step it works on.
+- A session rewrites the note, status and brief of a step it works on.
 - The roadmap is a current record, not a log. Rewrite a note to what is true now. Keep each ruling
   as one dated line.
 - A new or moved step near the top gets the line `Placed ahead of <step> (triage, <date>): <why>`.
 - Pull right before each write.
 
-## Messages between threads
+## Messages between sessions
 
 - Send a message at once in two cases: work is blocked (a PR held, a lane stopped), or the owner
   asked for something to be passed on.
-- Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<thread-slug>.md`
-  on the record branch. Each thread keeps one file and rewrites it to hold only what is unfiled.
+- Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<session-slug>.md`
+  on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled.
 - Triage reads the outbox at each wake, files each item, and removes what it filed.
 - The session that owns a waiting item reads its answer. Nobody relays it. Skill `waiting-page`
   holds the protocol.
-- A thread re-reads the roster right before it sends to a standing thread.
+- A session re-reads the roster right before it sends to a standing session.
 
 ## Briefs
 
