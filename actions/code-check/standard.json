@@ -27,7 +27,7 @@
       "shebangs": ["zsh"],
       "gold": {"typecheck": "none exists", "lint": "none exists; zsh -n checks syntax only", "format": "none exists"},
       "typecheck": {"skip": "zsh has no type system"},
-      "lint": {"skip": "ShellCheck does not parse zsh; zsh is not on the ubuntu runner"},
+      "lint": {"skip": "ShellCheck does not parse zsh; zsh -n not adopted"},
       "format": {"skip": "no zsh formatter exists"}
     },
     "typescript": {
