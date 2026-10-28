@@ -26,6 +26,8 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - Triage may run agents (owner, about 14:55).
   - Triage is the only writer of the roadmap and the waiting page (owner, 2026-10-28, time not given).
 - **Lane session.** A lane session runs its own lane as an orchestrator. It spawns its own builder and reviewer agents under `agent-model-cap` (the model per role). It reports up to the coordinator. Owner, about 14:52, in short: sessions that spawn under a coordinator are their own orchestrators, reporting up to it.
+- **Lane session model** (owner, 16:15, waiting item 50, pick b). A lane session runs Opus. It keeps itself light, but it needs top reasoning on what it is asked.
+  - The helpers it starts, such as a builder or a designer, may run Sonnet at low effort. The owner has not decided that yet (waiting item 59).
 - **Overlapping files.** No coded guard and no file-ownership record covers lanes that touch the same file. A good brief is enough. Orchestrators resolve overlapping edits. The owner wants better file splitting (owner, 15:01). A false "done" is already covered. The shared merge tool, `merge/merge.py`, reads the head and CI from GitHub.
 - **Batch runner.** A third standing role (owner, 15:11): "B for sure actually". The batch runner owns:
   - the integration batch,
@@ -49,7 +51,7 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
 
 ## Open
 
-Open: lane sessions on Sonnet or Opus (waiting item 50). Per-tier context limits (waiting item 53). What the tally measures, and its limit.
+Open: per-tier context limits (waiting item 53). What the tally measures, and its limit. Helper model and effort under an Opus lane session (waiting item 59).
 
 Kind: process
 Home: docs/decisions/session-tiers.md
