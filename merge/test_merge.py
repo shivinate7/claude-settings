@@ -120,7 +120,7 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
-    def base_state(self, base):  # main's latest run is green unless a case says so (RedMainBrake)
+    def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
         return "green", ""
 
     def wait_checks(self, n, sha, d, prior=None):
@@ -2531,7 +2531,7 @@ class BaseAware(Env):
             def required_names(h): return ["gates"]
             def checks(h, n, *a, **k): return {"gates": [("pass", "")]}
             def runs(h, sha): return []
-            def base_state(h, base): return "green", ""
+            def base_state(h, base, flows): return "green", ""
             def head_state(h, n, *a, **k): return "green"
             def wait_checks(h, *a, **k):
                 h.in_wait = True
@@ -2835,7 +2835,7 @@ try:
     m_pr, m_put = re.fullmatch(r"pulls/(\d+)", rel), re.fullmatch(r"pulls/(\d+)/merge", rel)
     m_run, m_sta = re.fullmatch(r"commits/([^/]+)/check-runs", rel), re.fullmatch(r"commits/([^/]+)/status", rel)
     m_req = re.fullmatch(r"branches/(.+)/protection/required_status_checks", rel)
-    m_jobs = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)  # main's runs (the red-main brake): none unless a case sets base_runs / base_jobs
+    m_jobs = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)  # main's runs (the red-main check): none unless a case sets base_runs / base_jobs
     after = bool(S.get("put_done")) and bool(m_pr) and method == "GET"
     note("calls.log", line + (" after-merge" if after else ""))
     note("repos.log", repo)
@@ -3133,13 +3133,14 @@ class GhHalf(Env):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
 
     def test_a_red_main_run_read_through_gh_refuses_the_merge(self):
-        # the red-main brake's REST reads through the real gh call: one page of main's push runs, then the red run's jobs
+        # the red-main check's REST reads through the real gh call: one page of main's runs, then the red run's jobs
+        push_base(self, {".github/workflows/gates.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
         self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("gates", "failure", 20)]})
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("run 901", out)
         self.assertIn("gates: fail", out)
-        self.assertIn("GET actions/runs branch=main event=push per_page=30", self.calls())
+        self.assertIn("GET actions/runs branch=main per_page=50", self.calls())
         self.assertNotIn("PUT pulls/7/merge", self.calls())
 
     def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
@@ -8388,9 +8389,9 @@ MAIN_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="gates"):
-    """One push run on main, as `GET actions/runs` lists it."""
-    return {"id": id_, "name": name, "event": "push", "status": status, "conclusion": conclusion if status == "completed" else None,
+def main_run(id_, conclusion, status="completed", name="gates", event="push", path=".github/workflows/gates.yml"):
+    """One run on main, as `GET actions/runs` lists it."""
+    return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
             "head_sha": f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
 
 
@@ -8412,10 +8413,11 @@ class MainRunsHost(FakeHost, merge.Host):
 
     def api(self, rel, *extra, method="GET", fields=None):
         self.reads.append(rel)
-        assert (rel, method, fields.get("branch"), fields.get("event")) == ("actions/runs", "GET", "main", "push"), (rel, fields)
+        assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
-        return 0, json.dumps({"total_count": len(self.main_runs), "workflow_runs": self.main_runs})
+        runs = [r for r in self.main_runs if fields.get("event") in (None, r["event"])]  # GitHub's event filter, when one is sent
+        return 0, json.dumps({"total_count": len(runs), "workflow_runs": runs})
 
     def pages(self, rel, key=None, fields=None):
         self.reads.append(rel)
@@ -8427,7 +8429,7 @@ class MainRunsHost(FakeHost, merge.Host):
 
 
 class RedMainBrake(Env):
-    """c166: no batch merge onto a red main. The brake judges main's latest completed push run, job by job (decision no-merge-onto-red-main)."""
+    """c166: no batch merge onto a red main. The red-main check judges main's latest completed run, job by job (decision no-merge-onto-red-main)."""
     def setUp(self):
         super().setUp()
         push_base(self, {".github/workflows/gates.yml": MAIN_WORKFLOW})  # the caps the timeout verdict reads
@@ -8465,10 +8467,57 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(902, "failure")], jobs)
         self.merged(rc, out)
 
-    def test_a_main_run_red_only_by_a_cancelled_twin_does_not_refuse(self):
-        # a job cancelled beside its passing twin, and a newer run cancelled beside an older run that ran (c162's twin rule)
-        jobs = {903: [main_job("scope", "success"), main_job("gates", "cancelled", 2), main_job("gates", "success", 20)]}
+    def test_a_main_run_red_only_by_a_cancelled_twin_job_does_not_refuse(self):
+        # the timeout explains the failure; the cancelled twin beside its passing job is no red job
+        jobs = {903: [main_job("gates-macos", "cancelled", 30), main_job("gates", "cancelled", 2), main_job("gates", "success", 20)]}
+        rc, out, _ = self.go([main_run(903, "failure")], jobs)
+        self.merged(rc, out)
+
+    def test_a_newest_run_cancelled_with_no_red_job_is_unknown_not_an_older_run(self):
+        # on main the twin rule would reach across commits: the cancelled run is judged itself, never swapped for an older green one
+        jobs = {904: [main_job("scope", "success"), main_job("gates", "cancelled", 2)]}
+        rc, out, before = self.go([main_run(904, "cancelled"), main_run(903, "success")], jobs)
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("run 904", out)
+
+    def test_a_newest_run_cancelled_by_a_timeout_is_not_red(self):
+        jobs = {904: [main_job("scope", "success"), main_job("gates-macos", "cancelled", 30)]}
         rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
+        self.merged(rc, out)
+
+    def test_a_failed_run_with_no_judged_job_is_red(self):
+        # a broken workflow file: startup_failure and no job; or failure with every job passing
+        for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("gates", "success", 20)])):
+            with self.subTest(conclusion=conclusion, jobs=len(jobs)):
+                rc, out, before = self.go([main_run(913, conclusion)], {913: jobs})
+                self.refused(rc, out, before)
+                self.assertIn(f"run 913", out)
+                self.assertIn(conclusion, out)
+
+    def test_a_run_of_a_workflow_file_gone_from_main_is_not_judged(self):
+        # a renamed or deleted workflow: its last red run stays in the page, but no new run will ever replace it
+        rc, out, _ = self.go([main_run(910, "success", name="checks"), main_run(909, "failure", path=".github/workflows/old-gates.yml")],
+                             {909: [main_job("gates", "failure", 20)]})
+        self.merged(rc, out)
+
+    def test_runs_are_judged_per_workflow_file_not_per_name(self):
+        # the workflow's name changed in the same file: the newer run is the verdict
+        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure")], {911: [main_job("gates", "failure", 20)]})
+        self.merged(rc, out)
+
+    def green_run_of(self, event):
+        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")], {914: [main_job("gates", "failure", 20)]})
+        self.merged(rc, out)
+
+    def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
+        self.green_run_of("workflow_dispatch")  # `gh workflow run gates.yml --ref main`, the remedy classify prints
+
+    def test_a_green_schedule_run_clears_an_older_red_push_run(self):
+        self.green_run_of("schedule")
+
+    def test_a_pull_request_run_is_not_judged(self):
+        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("gates", "failure", 20)]})
         self.merged(rc, out)
 
     def test_a_newer_run_in_progress_is_skipped_for_the_latest_completed_one(self):
@@ -8485,11 +8534,12 @@ class RedMainBrake(Env):
         self.assertEqual(self.host.reads.count("actions/runs"), 1)
         self.assertFalse([r for r in self.host.reads if r.endswith("/jobs")], "a green run needs no jobs read")
 
-    def test_the_owner_flag_lifts_the_brake_and_logs_its_reason(self):
+    def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
         rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", "this batch carries the gates fix")
         self.merged(rc, out)
         self.assertIn("run 901", out)
-        self.assertIn("Owner override, reason: this batch carries the gates fix", out)
+        self.assertIn("--base-red-ok, reason: this batch carries the gates fix", out)
+        self.assertNotIn("Owner override", out, "a reason flag Claude can type is not the owner's override")
 
     def test_the_flag_with_no_reason_does_not_lift(self):
         rc, out, before = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", " ")
@@ -8507,11 +8557,11 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("UNKNOWN", out)
 
-    def test_the_owner_flag_lifts_unknown_and_logs_it(self):
+    def test_the_reason_flag_lifts_unknown_and_logs_it(self):
         rc, out, _ = self.go([], {}, "--base-red-ok", "GitHub is down, owner read main", runs_fail="gh: HTTP 500")
         self.merged(rc, out)
         self.assertIn("UNKNOWN", out)
-        self.assertIn("Owner override, reason: GitHub is down, owner read main", out)
+        self.assertIn("--base-red-ok, reason: GitHub is down, owner read main", out)
 
     def test_the_preview_reports_a_red_main_and_presses_nothing(self):
         rc, out, before = self.go([main_run(901, "failure")], self.OCT14, confirm=False)

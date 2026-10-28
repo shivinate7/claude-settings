@@ -792,43 +792,51 @@ class Host:
         every run is completed/skipped and none is pending, no job ran on this head: red (GitHub counts a
         skipped job as passing, so required checks miss it)."""
         pending = [f"workflow {r['name']}" for r in runs if r["status"] != "completed"]
-        runs = Host.newest_runs(runs)
+        ran = {r["name"] for r in runs if r["conclusion"] != "skipped"}
+        runs = [r for r in runs if not (r["conclusion"] == "skipped" and r["name"] in ran)]
+        live = {r["name"] for r in runs if r["conclusion"] not in ("skipped", "cancelled")}
+        runs = [r for r in runs if not (r["conclusion"] == "cancelled" and r["name"] in live)]
+        runs = list({r["name"]: r for r in reversed(runs)}.values())[::-1]
         red = [f"workflow {r['name']}: {r['conclusion']}" for r in runs if r["status"] == "completed" and r["conclusion"] not in ("success", "skipped", "neutral")]
         if runs and not pending and all(r["conclusion"] == "skipped" for r in runs):
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
 
-    @staticmethod
-    def newest_runs(runs):
-        """The newest run per workflow name, newest first, after the twin rule of judge_runs drops a skipped or cancelled run beside one that ran."""
-        ran = {r["name"] for r in runs if r["conclusion"] != "skipped"}
-        runs = [r for r in runs if not (r["conclusion"] == "skipped" and r["name"] in ran)]
-        live = {r["name"] for r in runs if r["conclusion"] not in ("skipped", "cancelled")}
-        runs = [r for r in runs if not (r["conclusion"] == "cancelled" and r["name"] in live)]
-        return list({r["name"]: r for r in reversed(runs)}.values())[::-1]
+    BASE_EVENTS = ("push", "schedule", "workflow_dispatch")  # the runs of the base's own commits; a dispatch is the tool's own remedy
 
-    def base_state(self, base):
-        """-> (verdict, detail) for the red-main brake (decision no-merge-onto-red-main): green, red, or unknown when a read fails.
-        Judged: the newest completed push run on `base` per workflow (newest_runs), so a newer run still going waits its turn. Red: a job of
-        that run whose bucket is a fail, or one gh adds later (classify). A cancelled job, a timed-out one (cancelled at its cap) or a skip is not a red step.
-        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read."""
+    def base_state(self, base, flows):
+        """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
+        Judged: per workflow file in `flows` (the paths on the base), its newest completed run on `base` of BASE_EVENTS. A newer run still going
+        waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
+        A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
+        run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown."""
         try:
-            c, out = self.api("actions/runs", fields={"branch": base, "event": "push", "per_page": 30})
+            c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
-            runs = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["name"] not in self.ignore]
-            red = []
-            for r in self.newest_runs(runs):
+            done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
+                    and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
+            red, unknown = [], []
+            for r in {r["path"]: r for r in reversed(done)}.values():
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
                 got = self.buckets([self.run_row(j, j.get("html_url")) for j in self.pages(f"actions/runs/{r['id']}/jobs", "jobs")], warn=False)
                 steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
                 jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
+                where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
                 if jobs:
-                    red.append(f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')}): " + "; ".join(jobs))
-        except (Stop, ValueError, KeyError, TypeError) as e:
+                    red.append(f"{where}: " + "; ".join(jobs))
+                elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
+                    continue
+                elif r["conclusion"] == "cancelled":
+                    unknown.append(f"{where} was cancelled with no red job")
+                else:
+                    red.append(f"{where} ended {r['conclusion']} with no red job")
+        except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
             return "unknown", " ".join(str(e).split())
-        return ("red", " | ".join(red)) if red else ("green", "")
+        return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
@@ -1793,13 +1801,17 @@ def job_caps(texts):
             caps[i] = max(cap, caps.get(i, 0))  # one id in two files: the larger cap, so neither the floor nor the warning runs short
     return caps
 
-def base_job_caps(root, ref):
-    """job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
+def base_workflows(root, ref):
+    """The workflow files on `ref`, read with git (the base branch, never the local tree)."""
     c, listed = git(root, "ls-tree", "-r", "--name-only", ref, "--", ".github/workflows")
     if c:
         raise Stop(f"cannot read {ref} to look for .github/workflows: {listed}")
+    return [f for f in listed.splitlines() if f.endswith((".yml", ".yaml"))]
+
+def base_job_caps(root, ref):
+    """job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
     texts = []
-    for f in (f for f in listed.splitlines() if f.endswith((".yml", ".yaml"))):
+    for f in base_workflows(root, ref):
         c, text = git(root, "show", f"{ref}:{f}")
         if c:
             raise Stop(f"cannot read {f} on {ref}: {text}")
@@ -1911,17 +1923,25 @@ def ignore_checks(cfg):
         out[e["name"]] = e["reason"]
     return out
 
-def red_base(host, base, red_ok=""):
-    """The red-main brake (decision no-merge-onto-red-main): refuse while the base's latest completed push run has a red step, or cannot be read.
-    --base-red-ok "<reason>" is the way out for the batch that carries the fix, or for a read GitHub cannot answer. It is logged."""
-    verdict, detail = host.base_state(base)
+def base_verdict(root, host, base):
+    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown."""
+    try:
+        flows = base_workflows(root, f"origin/{base}")
+    except (Stop, subprocess.TimeoutExpired, OSError) as e:
+        return "unknown", " ".join(str(e).split())
+    return host.base_state(base, flows)
+
+def red_base(root, host, base, red_ok=""):
+    """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
+    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is: the way out for the batch that carries the fix, or for an unknown read. It is logged."""
+    verdict, detail = base_verdict(root, host, base)
     if verdict == "green":
         return
     what = f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, the read failed: {detail}"
     if red_ok.strip():
-        say(f"merge: {what}. Owner override, reason: {red_ok.strip()}")
+        say(f"merge: {what}. --base-red-ok, reason: {red_ok.strip()}")
         return
-    raise Stop(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with --base-red-ok \"<reason>\".")
+    raise Stop(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
 
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
@@ -1951,7 +1971,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
     held = lock.read(base)
-    verdict, detail = host.base_state(base)  # the red-main brake's read
+    verdict, detail = base_verdict(root, host, base)  # the red-main check's read
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
@@ -1980,7 +2000,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken. Nothing was claimed or pushed.")
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
-        red_base(host, base, red_ok)
+        red_base(root, host, base, red_ok)
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
