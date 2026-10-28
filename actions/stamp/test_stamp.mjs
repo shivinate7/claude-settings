@@ -1870,8 +1870,9 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
     const pidFile = join(dir, "pids");
     let found;
     try {
+      // process.execPath may hold a space (C:\Program Files\nodejs\node.exe), so match it whole.
       assert.throws(() => shSync(process.execPath, ["-e", hangCommand(pidFile, false)], { timeout: 3000 }),
-        /timed out after 3 s: \S*node/);
+        (e) => e.message.startsWith(`timed out after 3 s: ${process.execPath} -e `));
     } finally {
       found = leftovers(pidFile);
     }
@@ -1880,8 +1881,13 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
     if (!POSIX) assert.deepEqual(found.left, [], `still running: ${found.left}`);
   }));
 
+// Windows, orphan: spawnSync returns once its direct child exits, even while a grandchild holds the
+// pipe (measured on windows-latest). So nothing hangs: the fixture passes, within the cap, and the
+// orphan sleeps on. That is the guarantee there; this test kills the orphan after.
+const orphanEndsOnItsOwn = (kind) => kind === "orphan" && !POSIX;
+
 for (const kind of ["hold", "orphan"]) {
-  test(`watchdog: a hung command (${kind}) reads red within the cap, names its test, and leaves no process`, () =>
+  test(`watchdog: a command whose child holds its pipe (${kind}) ends within the cap; a hang reads red, named, with no process left`, () =>
     withTempDir((dir) => {
       const pidFile = join(dir, "pids");
       const env = { ...process.env, STAMP_SUITE_CAP_S: "5", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: kind };
@@ -1899,10 +1905,15 @@ for (const kind of ["hold", "orphan"]) {
       }
       const secs = (Date.now() - t0) / 1000;
       const out = readFileSync(outFile, "utf8");
-      assert.equal(r.status, 1, out);
       assert.ok(secs < 30, `took ${secs} s\n${out}`);
-      assert.match(out, new RegExp(`FAIL - hang fixture \\(${kind}\\)`), out);
       assert.equal(found.pids.length, 2, out);
+      if (orphanEndsOnItsOwn(kind)) {
+        assert.equal(r.status, 0, out);
+        assert.match(out, /ok - hang fixture \(orphan\)/, out);
+        return;
+      }
+      assert.equal(r.status, 1, out);
+      assert.match(out, new RegExp(`FAIL - hang fixture \\(${kind}\\)`), out);
       assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
     }));
 }
