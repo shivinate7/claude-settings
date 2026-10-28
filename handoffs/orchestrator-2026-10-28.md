@@ -1,11 +1,12 @@
-# Orchestrator hand-off, claude-settings build (Oct 28, 01:25 CDT)
+# Orchestrator hand-off, claude-settings build (Oct 28, 02:10 CDT)
 
 Orchestrator session: session_013NEJL1XXYYo8v15nsrgKv7 (cloud, shiv's fresh account).
 After a compaction: re-read this note, the roadmap, then act.
 
 ## Main
-- b09aecee (#737, batch 2: #720 #726 #727 #728 #729 #730 #731 #732 #733 #734), merged 01:19 CDT.
-- #735 (c158) was dropped from batch 2 (Windows tests red); it is batch 3 after it merges main.
+- 3bebbd34 (#741, batch 3: #735 c158, #738 c150, #739 o4), merged 02:02 CDT.
+- Batch 4 open: #745 (#740 c160, #744 c145). #743 c140 is batch 5 (notes.md conflict with #740).
+- Held: #742 o2 until shiv answers items 3 and 32 (home's rolled-out mark).
 
 ## Rulings
 - Oct 27 ~23:20 CDT: freeze (c155) lifted; operating model (lanes, triage, design sessions; 6+ lanes; one batch open).
