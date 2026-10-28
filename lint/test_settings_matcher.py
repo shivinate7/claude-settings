@@ -177,8 +177,8 @@ class JudgeModelIds(unittest.TestCase):
 # AskUserQuestion check keep their own calls. The Stop rows are pinned by script name, not by index.
 DECISION_WATCH_PLUGIN = "decision-watch@claude-settings"
 STOP_SCRIPTS_AFTER_SWAP = sorted([
-    "stall_watch.py", "report_gate.py", "config_watch.py", "ruling_home.py",
-    "precompact_handoff.py", "reply_judge.py", "feedback_gate.py", "reread_check.py",
+    "stall_watch.py", "report_guard.py", "config_watch.py", "ruling_home.py",
+    "precompact_handoff.py", "reply_judge.py", "feedback_guard.py", "reread_check.py",
 ])
 
 
@@ -231,7 +231,7 @@ class ModsAutoUpdate(unittest.TestCase):
 # The question reviewer: ONE agent hook on PreToolUse AskUserQuestion, model
 # pinned to an Opus id, the rubric in the hook prompt. It replaces the prompt judge and
 # hooks/question_outcome.py. A failed or timed-out agent hook lets the question through, so no code
-# gate backs the rubric: the prompt text is the only home of it, and these cases pin that text.
+# guard backs the rubric: the prompt text is the only home of it, and these cases pin that text.
 # An agent hook takes only these keys (probed on Claude Code 2.1.296 on Windows). The prompt
 # hooks beside it carry `continueOnBlock`, which is not one of them.
 COMMAND_HOOK_KEYS = {"type", "command", "if", "timeout", "statusMessage", "once", "async"}
@@ -362,7 +362,7 @@ class QuestionReviewer(unittest.TestCase):
                          "hooks/question_outcome.py must exit 0 and print nothing")
 
 
-# The STE write gate and the markdown sweep are not wired in settings.json.
+# The STE write guard and the markdown sweep are not wired in settings.json.
 # CI's STE lint (actions/ste-lint) carries STE001, STE011 and STE013 on changed lines instead.
 class SteHooksRemoved(unittest.TestCase):
     def test_no_hook_runs_the_removed_scripts(self):
@@ -375,8 +375,8 @@ class SteHooksRemoved(unittest.TestCase):
                          if script in [n for c in command_rows([entry]) for n in script_names(c)]]
                 self.assertEqual(wired, [], "%s is still wired in settings.json" % script)
 
-    def test_the_guard_and_the_question_check_still_gate_pre_tool_use(self):
-        # The two command gates stay: hooks/test_wrappers.py pins that each one fails closed. The question
+    def test_the_guard_and_the_question_check_still_guard_pre_tool_use(self):
+        # The two command guards stay: hooks/test_wrappers.py pins that each one fails closed. The question
         # check is the call_judge.py command hook, matched by its script and its matcher.
         with open(SETTINGS, encoding="utf-8") as f:
             pre = json.load(f)["hooks"]["PreToolUse"]

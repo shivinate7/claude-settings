@@ -30,7 +30,7 @@ Run:
 REPORT MODE (step c95): `python hooks/mutate_guard.py --report [--limit N] [--jobs N] [--only SUBSTR]`
 scores other verdict-deciding files with mechanical mutants (hooks/mutate_shared.py `score_target`)
 and prints, per file, mutants made, killed, kill rate and the suites that killed none. It reads on
-demand and gates nothing: no timer, no CI job.
+demand and refuses nothing: no timer, no CI job.
 """
 
 import os
@@ -687,7 +687,7 @@ MUTATIONS = [
      'CLEAN_OPT_WITH_VALUE = {"-e", "--exclude"}',
      'CLEAN_OPT_WITH_VALUE = set()', "guard", 'subject: an exclude pattern is not a pathspec'),
     # POSIX-only mutant: its required case ("subject: a git that cannot answer the status read
-    # allows, rather than guess") is itself gated `if os.name != "nt":` in test_guard.py, because
+    # allows, rather than guess") is itself wrapped in `if os.name != "nt":` in test_guard.py, because
     # `make_blind_git`'s own docstring records a Windows measurement (2026-09-16): CreateProcess
     # appends `.exe` and never reads PATHEXT, so a `git.cmd` stand-in is skipped and the real
     # `git.exe` further on PATH answers instead, which would make the case pass for the wrong
@@ -1185,24 +1185,24 @@ MUTATIONS = [
      '    for target in targets[:1]:\n        # 8. The agent model cap.',
      "guard", "gap: NotebookEdit, settings cap in notebook_path beside file_path=docs/x.ipynb still asks"),
 
-    # ---- the three git acts: context for a write, the merge gate, and cite by id. Each mutant breaks
+    # ---- the three git acts: context for a write, the merge guard, and cite by id. Each mutant breaks
     # one arm of one clause, and the required case is the one that must read that break.
     ("merge-checks: a pending head merges",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "gh pr merge "',
-     '        if verdict == "red":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict == "red":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
      "guard", 'merge-checks: a pending check denies'),
     ("merge-checks: an unread head merges",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "gh pr merge "',
-     '        if verdict not in ("green", "unknown"):\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict not in ("green", "unknown"):\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
      "guard", 'merge-checks: a gh that answers nothing readable is unknown'),
-    ("merge-checks: the host merge tool is never gated",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
-     '        if False:\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
+    ("merge-checks: the host merge tool is never guarded",
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
+     '        if False:\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
      "guard", 'merge-checks: the merge tool of the host denies on a pending head'),
-    ("merge-checks: --auto skips the gate",
-     '        if merging is None:\n            continue\n        verdict, detail = merge_gate(',
-     '        if merging is None or "--auto" in segment:\n            continue\n        verdict, detail = merge_gate(',
-     "guard", 'merge-checks: --auto is gated like any merge'),
+    ("merge-checks: --auto skips the guard",
+     '        if merging is None:\n            continue\n        verdict, detail = merge_check(',
+     '        if merging is None or "--auto" in segment:\n            continue\n        verdict, detail = merge_check(',
+     "guard", 'merge-checks: --auto is guarded like any merge'),
     ("merge-checks: a head that reports nothing is green in a repo with workflows",
      'nothing_is_green=not has_workflows(where))', 'nothing_is_green=True)', "guard",
      'merge-checks: a head that reports nothing yet is not settled'),
@@ -1210,17 +1210,17 @@ MUTATIONS = [
      '    except FileNotFoundError:\n        return False', '    except FileNotFoundError:\n        return True',
      "guard", 'merge-checks: a head that reports nothing may merge when the repo has no workflows'),
     ("merge-checks: the read runs in the guard's own folder, not the command's",
-     'merge_gate(merging[0], merging[1], cite_where)', 'merge_gate(merging[0], merging[1], cwd)',
+     'merge_check(merging[0], merging[1], cite_where)', 'merge_check(merging[0], merging[1], cwd)',
      "guard", 'merge-checks: a cd names the repo the read runs in'),
     ("merge-checks: the host tool's read runs in the guard's own folder",
-     'repo, cwd)\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
-     'repo, "")\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),\n                   "merge tool "',
+     'repo, cwd)\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
+     'repo, "")\n        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
      "guard", 'merge-checks: the host merge tool reads the repo of the call'),
     ("merge-checks: the read gets no folder",
      'host = module.Host(repo=repo or None, cwd=where or None)',
      'host = module.Host(repo=repo or None)', "guard",
      'merge-checks: a cd names the repo the read runs in'),
-    ("merge-checks: help is gated like a merge",
+    ("merge-checks: help is guarded like a merge",
      '    if "-h" in args or "--help" in args:\n        return None   # help merges nothing',
      '    if False:\n        return None', "guard", 'merge-checks: help merges nothing'),
     ("merge-checks: an unloadable merge tool passes",
@@ -1248,7 +1248,7 @@ MUTATIONS = [
     ("merge-checks: the read has no time limit",
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
      '            module.SH_TIMEOUT = None', "guard",
-     'merge-checks: a gh slower than the gate waits is unknown'),
+     'merge-checks: a gh slower than the guard waits is unknown'),
     ("bare-merge: a stamp with a merge block reads as not using the merge tool",
      '"merge" in config', 'False', "guard",
      'bare-merge: gh pr merge in a repo with a merge block asks'),
@@ -1603,7 +1603,7 @@ MUTATIONS = [
      'reason = line + " " + reason',
      "guard", 'override: a refusal an override lifts ends with the main override line'),
     ("override line: the missing-module deny stops saying that no override lifts it",
-     '"then retry. No override lifts this refusal, because the failed gate cannot check "\n'
+     '"then retry. No override lifts this refusal, because the failed guard cannot check "\n'
      '                    "the acts that no override lifts.")}}))',
      '"then retry.")}}))',
      "guard", 'override: a missing-module deny says that no override lifts it'),
@@ -1641,9 +1641,9 @@ MUTATIONS = [
 # take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
-    ("lint/report_gate.py", ["lint/test_gates.py", "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
+    ("lint/report_guard.py", ["lint/test_report_guard.py", "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
-    ("hooks/feedback_gate.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
+    ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
     ("hooks/stall_watch.py", ["hooks/test_stall_watch.py", "hooks/test_stall_watch_stop.py",
                               "hooks/test_wrappers.py", "lint/test_hook_platform_exit.py",
                               "janitor/test_session_end_sweep.py", "lint/test_settings_matcher.py"]),
@@ -1657,7 +1657,7 @@ REPORT_LIMIT = 10  # mutants per file: the slowest suite (hooks/test_stall_watch
 
 
 def report_main(argv) -> int:
-    """Print the per-file score table. Exit 0 whatever the scores: a report is not a gate."""
+    """Print the per-file score table. Exit 0 whatever the scores: a report is not a check."""
     import argparse
     parser = argparse.ArgumentParser(prog="mutate_guard.py --report")
     parser.add_argument("--report", action="store_true")

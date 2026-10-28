@@ -8,8 +8,8 @@
 # every other command (hooks/ suites, bash, pipx, other uses:) is left out and printed nowhere. The one `uses:`
 # it knows is actions/ste-lint: with --base it runs `bin/ste-changed <base>` in its place (the one home of that
 # step, shared with the action through actions/ste-lint/run.sh); without --base it is skipped. A lane runs
-# `bin/ci-job gates --lint --base origin/main` before it joins a batch. Use it with a job such as gates.
-# Workflow: .github/workflows/gates.yml at the git top level of the current folder, unless --workflow names one.
+# `bin/ci-job checks --lint --base origin/main` before it joins a batch. Use it with a job such as checks.
+# Workflow: .github/workflows/checks.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
 # Multi-line `run: |` steps run whole. Verdicts: PASS, FAIL, unknown (tool missing, or an expression it
@@ -210,7 +210,7 @@ def main(argv):
         return 2
     job = args[0]
     top = git("rev-parse", "--show-toplevel") or os.getcwd()
-    workflow = opts["--workflow"] or os.path.join(top, ".github", "workflows", "gates.yml")
+    workflow = opts["--workflow"] or os.path.join(top, ".github", "workflows", "checks.yml")
     try:
         with open(workflow, encoding="utf-8") as f:
             block = job_block(f.read(), job)

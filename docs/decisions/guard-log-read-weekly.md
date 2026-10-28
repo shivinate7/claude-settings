@@ -11,7 +11,7 @@ The window is the days since the stamp, the stamp day through the day before tod
 - a `crash` line in the window: a guard hook crashed.
 - a guard.log that exists and cannot be read: unknown. A missing guard.log is not a failure.
 
-The STE write gate and the markdown sweep wrote `STE-fallback` and `STE-unchecked` lines. Both are removed (owner, 2026-10-22 10:10 CDT; `ste-gate-fixes-not-nags`), so no new line of either kind is written, and the two checks that read them are removed too. Old rows stay in guard.log and show in `lint/guard_log_report.py` like any other row.
+The STE write guard and the markdown sweep wrote `STE-fallback` and `STE-unchecked` lines. Both are removed (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`), so no new line of either kind is written, and the two checks that read them are removed too. Old rows stay in guard.log and show in `lint/guard_log_report.py` like any other row.
 
 Reason: the table is the outcome meter for the two owner concerns, prompts the owner did not need and agents refused with no allowed path. Judge a rule by its row here, not by its test count.
 

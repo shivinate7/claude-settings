@@ -1,6 +1,6 @@
 name: All jobs passed
 description: >
-  Fan-in gate. Fails when any needed job failed, was cancelled or was skipped. The caller job
+  Fan-in check. Fails when any needed job failed, was cancelled or was skipped. The caller job
   MUST set `needs: [...]` and `if: always()`; without `always()` GitHub skips this job when a
   needed job fails, and a skipped required check reads as green.
 inputs:

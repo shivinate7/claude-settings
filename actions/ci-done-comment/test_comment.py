@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Red run for actions/ci-done-comment, and for its caller in this repo's gates.yml.
+"""Red run for actions/ci-done-comment, and for its caller in this repo's checks.yml.
 
 A run with a red job must post one comment that names each red job. A green run, or one whose
-only non-green jobs were skipped, must post nothing. The gates.yml caller must need every other
+only non-green jobs were skipped, must post nothing. The checks.yml caller must need every other
 job and run when a job failed, or the comment fires before the run ends or never. Stdlib only:
 the CI runner has no PyYAML.
 Run: python3 actions/ci-done-comment/test_comment.py
@@ -15,7 +15,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "comment.sh")
-GATES = os.path.join(HERE, "..", "..", ".github", "workflows", "gates.yml")
+CHECKS = os.path.join(HERE, "..", "..", ".github", "workflows", "checks.yml")
 
 
 def body(needs):
@@ -27,25 +27,25 @@ def body(needs):
 
 class Body(unittest.TestCase):
     def test_failed_job_is_named(self):
-        got = body({"scope": {"result": "success"}, "gates-macos": {"result": "failure"}})
+        got = body({"scope": {"result": "success"}, "checks-macos": {"result": "failure"}})
         self.assertIn("<!-- ci-done -->", got)
-        self.assertIn("CI finished red on 0123456: gates-macos (failure).", got)
+        self.assertIn("CI finished red on 0123456: checks-macos (failure).", got)
         self.assertIn("Run: https://example/run", got)
         self.assertNotIn("scope", got)
 
     def test_cancelled_job_is_named(self):
         # A job that hits its timeout-minutes cap ends cancelled. It is red, not quiet.
-        got = body({"gates": {"result": "cancelled"}, "gates-windows": {"result": "failure"}})
-        self.assertIn("gates (cancelled), gates-windows (failure)", got)
+        got = body({"checks": {"result": "cancelled"}, "checks-windows": {"result": "failure"}})
+        self.assertIn("checks (cancelled), checks-windows (failure)", got)
 
     def test_green_run_posts_nothing(self):
-        got = body({"gates": {"result": "success"}, "gates-macos": {"result": "skipped"}})
+        got = body({"checks": {"result": "success"}, "checks-macos": {"result": "skipped"}})
         self.assertNotIn("ci-done", got)
         self.assertEqual(got.strip(), "No red job: no comment.")
 
 
-def gates_jobs(text):
-    """{job name: its block text} for each job under `jobs:` in gates.yml. Stdlib only: CI has no PyYAML."""
+def checks_jobs(text):
+    """{job name: its block text} for each job under `jobs:` in checks.yml. Stdlib only: CI has no PyYAML."""
     body = text[re.search(r"^jobs:\s*$", text, re.M).end():]
     marks = list(re.finditer(r"^  ([\w-]+):\s*$", body, re.M))
     return {m.group(1): body[m.end():(marks[i + 1].start() if i + 1 < len(marks) else len(body))]
@@ -53,11 +53,11 @@ def gates_jobs(text):
 
 
 def ci_done_problems(text):
-    """Each way the ci-done job in gates.yml fails to comment once, after every job, on a red run."""
-    jobs = gates_jobs(text)
+    """Each way the ci-done job in checks.yml fails to comment once, after every job, on a red run."""
+    jobs = checks_jobs(text)
     job = jobs.get("ci-done")
     if job is None:
-        return ["gates.yml has no ci-done job"]
+        return ["checks.yml has no ci-done job"]
     job = re.sub(r"^\s*#.*\n", "", job, flags=re.M)  # a commented-out line does nothing
     out = []
     needs = re.search(r"^    needs:\s*\n((?:      - [\w-]+\s*\n)+)", job, re.M)
@@ -91,9 +91,9 @@ GOOD = """jobs:
 """
 
 
-class GatesCaller(unittest.TestCase):
-    def test_gates_yml_ci_done_job(self):
-        with open(GATES, encoding="utf-8") as fh:
+class ChecksCaller(unittest.TestCase):
+    def test_checks_yml_ci_done_job(self):
+        with open(CHECKS, encoding="utf-8") as fh:
             self.assertEqual(ci_done_problems(fh.read()), [])
 
     def test_detector_goes_red_on_each_defect(self):

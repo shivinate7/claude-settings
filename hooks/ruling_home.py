@@ -51,7 +51,7 @@ FAIL OPEN, NARROWLY (item 9). `stop_hook_active` set means this Stop firing is a
 rewrite, so the hook stays quiet. Otherwise it stands down (exit 0, no block) only for an
 unreadable transcript, a missing `git` binary, a `git` call that times out, or a repository git
 itself cannot read (`for-each-ref` exiting non-zero, e.g. a `.git` file pointing at a missing
-gitdir): per `docs/decisions/recovery-must-not-gate-on-its-own-state.md`, a recovery control (here,
+gitdir): per `docs/decisions/recovery-independent-of-state.md`, a recovery control (here,
 the owner's own path to seeing a ruling was not filed) must not depend on the very state it is
 meant to recover from. It never stands down over one value's own git answer (`cat-file
 --batch-check` exiting non-zero, or simply answering "not a blob"): that value alone does not

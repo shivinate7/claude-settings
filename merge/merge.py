@@ -813,7 +813,7 @@ class Host:
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
-            red = [f"no check ran on this head (every check skipped). Run `gh workflow run gates.yml --ref {branch}`, or push anew after `gh pr ready`"]
+            red = [f"no check ran on this head (every check skipped). Run `gh workflow run checks.yml --ref {branch}`, or push anew after `gh pr ready`"]
         ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
         return red, pending, ignored
 
@@ -1788,7 +1788,7 @@ def main(argv, host=None, lock=None):
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
         return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
-        print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard's gate.", file=sys.stderr)
+        print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard.", file=sys.stderr)
         return 1
 
 if __name__ == "__main__":

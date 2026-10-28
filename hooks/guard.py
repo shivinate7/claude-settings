@@ -85,7 +85,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.
                        (agent-model-cap)
                        Also an Agent or Task spawn that sets model opus, unless Plan, Explore,
-                       designer, design-reviewer or a builder `Try 3 of 3` covers it. An override lifts the spawn ask only.
+                       designer, design-reviewer or a builder's third-round marker covers it. An override lifts the spawn ask only.
   ask-alone            deny. An ask command chained with other commands. (ask-commands-run-alone)
   guard-crash          crash. The guard itself raised. The call is allowed and the log shows it.
 
@@ -94,8 +94,8 @@ Other tools, in `judge` order:
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        (an-agent-outside-its-home-tree-must-stop)
-  agent-model-floor, roles-third-try-steps-up
-                       deny. A spawn below the model floor, or a round or try on the wrong model.
+  agent-model-floor, roles-third-round-steps-up
+                       deny. A spawn below the model floor, or a third round on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys in each `agent()` call. A model set through a variable,
                        a spread, an alias, a concatenation, a template `${}`, a ternary, a computed key or a
@@ -144,7 +144,7 @@ An "ask" decision puts the answer in the owner's hands. The one lift is the owne
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
 only the Opus spawn ask. No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
-`agent-model-floor`, `roles-third-try-steps-up`, `builder-test-edit` and the other role guards),
+`agent-model-floor`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
@@ -238,7 +238,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, gh_call_of, git_call_of,
-            merge_call_of, merge_gate, merge_gate_reason, records_page_hit, settings_roots,
+            merge_call_of, merge_check, merge_check_reason, records_page_hit, settings_roots,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -289,7 +289,7 @@ while True:
             _loading = "guard_core"
             continue
         # A recovery path must not depend on the module it recovers (CLAUDE.md
-        # verification-recovery-not-gated-on-own-state). guard_core holds `record` and imports
+        # verification-recovery-independent-of-state). guard_core holds `record` and imports
         # `config_dir` from shared_names, so this writer repeats their few lines: one guard.log line
         # that names the module.
         try:
@@ -303,7 +303,7 @@ while True:
             pass
         if __name__ != "__main__":
             raise  # a hook that imports guard fails on its own terms, never by a silent allow
-        # Fail closed (decision gate-hooks-fail-closed): a guard with a missing part judges nothing, so
+        # Fail closed (decision guard-hooks-fail-closed): a guard with a missing part judges nothing, so
         # it refuses the call. The reason tells the reader to reinstall and names no file. `refuse`
         # lives in the module that failed, so the deny is printed here. A SubagentStop has no tool
         # call to refuse, and a block there could trap the agent: it passes, as the log line records.
@@ -315,10 +315,10 @@ while True:
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "deny",
                 "permissionDecisionReason": (
-                    "guard-crash: the gate is missing a part and cannot judge this call, so it refuses "
+                    "guard-crash: the guard is missing a part and cannot judge this call, so it refuses "
                     "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
                     "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
-                    "then retry. No override lifts this refusal, because the failed gate cannot check "
+                    "then retry. No override lifts this refusal, because the failed guard cannot check "
                     "the acts that no override lifts.")}}))
         sys.exit(0)
 
@@ -1743,7 +1743,8 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
-# A builder's third round reads `Round 3 of 3`. The old `Try 3 of 3` still counts until note try-marker-sunset.
+# A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
+# note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
 
 
@@ -1928,7 +1929,7 @@ def load_full(reading) -> list:
 OPUS_SPAWN_REASON = (
     "Rule (configuration): this spawn sets model Opus. Sonnet is the ceiling for an agent; Opus runs "
     "only on the owner's grant for this spawn, except Plan, Explore, the designer, the design "
-    "reviewer and a builder's Try 3 of 3 "
+    "reviewer and a builder's Round 3 of 3 "
     "(decision agent-model-cap). Approve it only when the owner asked for Opus here."
 )
 OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
@@ -1936,7 +1937,7 @@ OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
 
 def opus_spawn_hit(tool: str, tool_input) -> str:
     """The model of an Agent or Task spawn that sets Opus with no standing grant, or "". A standing grant
-    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds a `Try 3 of 3` line (the same marker
+    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds the third-round marker line (the same marker
     step_up_hit reads). A reviewer's spawn is no standing grant, so a reviewer on Opus asks. The spawn ask is liftable by an
     override, so never_lifted does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
@@ -2091,7 +2092,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                     diff_refusal(tool, role, command_root(stripped, cwd))
 
     # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
-    # rule 1 on purpose: the deny wins where the shared-tree gate would only ask (arbiter ruling).
+    # rule 1 on purpose: the deny wins where the shared-tree guard would only ask (arbiter ruling).
     matched = git_env_command_hit(raw, stripped)
     if matched:
         refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
@@ -2353,9 +2354,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         merging = merge_call_of(segment) if segment.strip() else None
         if merging is None:
             continue
-        verdict, detail = merge_gate(merging[0], merging[1], cite_where)
+        verdict, detail = merge_check(merging[0], merging[1], cite_where)
         if verdict != "green":
-            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
+            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
         # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
         if cite_where and uses_merge_tool(cite_where):
@@ -2641,10 +2642,10 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
-    # 9b. Step-up: reviewer round 2 on Sonnet, round 3 on Sonnet or Opus, builder try 3 on Opus.
+    # 9b. Step-up: a reviewer's second round on Sonnet, its third on Sonnet or Opus, a builder's third on Opus.
     step_up = step_up_hit(tool, tool_input)
     if step_up:
-        refuse(tool, "deny", "roles-third-try-steps-up", step_up, str(tool_input.get("model")))
+        refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
     # 9c. The Opus ceiling: a spawn on Opus with no standing grant asks. An override or an Opus
     # pass for the spawn's role lifts it. A spawn with no role runs general-purpose.
@@ -2660,13 +2661,13 @@ def judge(payload) -> None:
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
-    # A merge through the MCP tool is judged by the same check gate as `gh pr merge`.
+    # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
-        verdict, detail = merge_gate("" if number is None else str(number), repo, cwd)
+        verdict, detail = merge_check("" if number is None else str(number), repo, cwd)
         if verdict != "green":
-            refuse(tool, "deny", "merge-checks", merge_gate_reason(verdict, detail),
+            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
 
     # The MCP create tool carries its own `draft` field.

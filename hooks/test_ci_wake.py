@@ -75,13 +75,13 @@ makes every call fail with exit 1. Mode "garbage" makes every call print non-JSO
 A prs, runs or workflows entry with a `repo` field answers only a call that reaches that repo: a call
 with its own -R or --repo (any spelling gh takes), else a PR URL selector's repo, else GH_REPO, else the
 fixture's `cwd_repo`. An entry with no
-`repo` answers every call. `workflows` is the `gh workflow list` answer (one active `gates` workflow
+`repo` answers every call. `workflows` is the `gh workflow list` answer (one active `checks` workflow
 when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
 "garbage") fails that one call and no other.
 
 Draft run, then the real run (debt ci-wake-lists-runs-once): `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
-once waits on the draft run, reads it as skipped, and prints "CI red ...: workflow gates"
+once waits on the draft run, reads it as skipped, and prints "CI red ...: workflow checks"
 (judge_runs' "skipped, no job ran") before the real run shows. The cases below use these rules:
 - A run that ends skipped is no run, whether the list showed it skipped or in progress.
 - While no run that ran has been judged, the hook lists the head again, at most once per 30 s
@@ -198,7 +198,7 @@ def here(entry, args, fx):
         return True
     return entry["repo"] == call_repo(args, fx)
 
-DEFAULT_WORKFLOWS = [{"id": 1, "name": "gates", "path": ".github/workflows/gates.yml", "state": "active"}]
+DEFAULT_WORKFLOWS = [{"id": 1, "name": "checks", "path": ".github/workflows/checks.yml", "state": "active"}]
 
 _SEQ = [0]
 
@@ -500,34 +500,34 @@ def powershell(command):
 
 READY = [pr(12)]
 TWO_PRS = [pr(12), pr(13, branch="second-branch", sha=SHA_B)]
-GREEN = run(901, "gates", "success", [job("lint", "success"), job("unit", "success")])
-RED = run(902, "gates", "failure",
+GREEN = run(901, "checks", "success", [job("lint", "success"), job("unit", "success")])
+RED = run(902, "checks", "failure",
           [job("lint", "success"), job("unit", "failure"), job("e2e", "failure")])
-RED_B = run(911, "gates", "failure", [job("unit", "failure")], sha=SHA_B)
-CANCEL_903 = run(903, "gates", "cancelled", [job("unit", "cancelled")])
-RAN_904 = run(904, "gates", "success", [job("unit", "success")])
-CANCEL_905 = run(905, "gates", "cancelled", [job("unit", "cancelled")])
-INPROG_906 = run(906, "gates", "success", [job("unit", "success")], in_progress_at_list=True)
-LATE_906 = run(906, "gates", "success", [job("unit", "success")], in_progress_at_list=True,
+RED_B = run(911, "checks", "failure", [job("unit", "failure")], sha=SHA_B)
+CANCEL_903 = run(903, "checks", "cancelled", [job("unit", "cancelled")])
+RAN_904 = run(904, "checks", "success", [job("unit", "success")])
+CANCEL_905 = run(905, "checks", "cancelled", [job("unit", "cancelled")])
+INPROG_906 = run(906, "checks", "success", [job("unit", "success")], in_progress_at_list=True)
+LATE_906 = run(906, "checks", "success", [job("unit", "success")], in_progress_at_list=True,
                in_progress_reads=2)  # in progress for 2 reads of `run view`, completed at the 3rd
 LATE_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_at_list=True,
                in_progress_reads=3)  # in progress for 3 reads, completed at the 4th
-PENDING = run(908, "gates", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
-HOLD = run(909, "gates", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
-BAD_STATUS = run(912, "gates", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
-QUEUED_913 = run(913, "gates", "success", [job("unit", "success")], in_progress_reads=2,
+PENDING = run(908, "checks", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
+HOLD = run(909, "checks", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
+BAD_STATUS = run(912, "checks", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
+QUEUED_913 = run(913, "checks", "success", [job("unit", "success")], in_progress_reads=2,
                  early_status="queued")  # queued for 2 reads of `run view`, completed at the 3rd
 # The draft PR's run: every job skipped. DRAFT_LIVE lists with no conclusion at the first list, and ends
 # skipped. DRAFT_DONE lists skipped from the first list.
-DRAFT_LIVE = run(920, "gates", "skipped", [job("unit", "skipped")], unfinished_to_list=1)
-DRAFT_DONE = run(921, "gates", "skipped", [job("unit", "skipped")])
+DRAFT_LIVE = run(920, "checks", "skipped", [job("unit", "skipped")], unfinished_to_list=1)
+DRAFT_DONE = run(921, "checks", "skipped", [job("unit", "skipped")])
 
 
 def late(run_id, appears, conclusion="success", jobs=None):
     """The real run of `gh pr ready`, which the lists before list number `appears` do not show. It
     lists in progress when it first shows, and its first status read is in progress too."""
     jobs = jobs or [job("lint", "success"), job("unit", "success")]
-    return run(run_id, "gates", conclusion, jobs, appears_at_list=appears, unfinished_to_list=appears,
+    return run(run_id, "checks", conclusion, jobs, appears_at_list=appears, unfinished_to_list=appears,
                in_progress_reads=1)
 
 
@@ -765,7 +765,7 @@ def case_one_watcher_per_pr():
 def case_skipped_only_head_is_no_run_yet():
     """A head whose only run is skipped (a draft PR's skipped run) is no run yet: one pause,
     one re-list, then unknown "no run yet". It is never read as red."""
-    skipped = run(910, "gates", "skipped", [job("unit", "skipped")])
+    skipped = run(910, "checks", "skipped", [job("unit", "skipped")])
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [skipped]), extra={"CI_WAKE_DEADLINE": "4"})
     expect_verdict("head whose only run is skipped", res, "unknown")
     v = verdict_of(res)
@@ -882,7 +882,7 @@ def case_real_failed_run_beside_a_draft_run_is_red():
 def case_draft_run_ending_skipped_is_no_run_yet():
     """The draft run is still running at the first list and ends skipped, and no real run comes. A
     real clock and a 4 s deadline: it ends in `CI unknown`, near the deadline. Never red ("CI red
-    ...: workflow gates"), never green. At most one list at the start and one at the deadline."""
+    ...: workflow checks"), never green. At most one list at the start and one at the deadline."""
     label = "head whose draft run ends skipped, no real run by the deadline"
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [DRAFT_LIVE]), extra={"CI_WAKE_DEADLINE": "4"})
     expect_verdict(label, res, "unknown")
@@ -1240,7 +1240,7 @@ def case_wait_for_lists_again_until_a_real_run_shows():
     again, 30 s or more apart, and reads that run. Main lists twice, 20 s apart, and gives up."""
     label = "wait_for, draft run skipped, real run at the third list"
     raised, clock, calls, deadline = wait_for_on_fakes(
-        [DRAFT_DONE, run(922, "gates", "success", [job("unit", "success")], appears_at_list=3)], 3600)
+        [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success")], appears_at_list=3)], 3600)
     times, detail = list_times(calls), wait_detail(raised, clock, calls, deadline)
     check("%s: returns, no exception" % label, raised is None, detail)
     check("%s: lists 3 times or more, the first at once" % label, len(times) >= 3 and times[0] == T0, detail)
@@ -1299,7 +1299,7 @@ REPO_HOME = "shivinate7/home-archive"   # the folder's repo: no workflow files
 
 def wf(state="active", repo=None):
     """One entry of `gh workflow list --json`, as the fixture holds it."""
-    out = {"id": 1, "name": "gates", "path": ".github/workflows/gates.yml", "state": state}
+    out = {"id": 1, "name": "checks", "path": ".github/workflows/checks.yml", "state": state}
     if repo:
         out["repo"] = repo
     return out

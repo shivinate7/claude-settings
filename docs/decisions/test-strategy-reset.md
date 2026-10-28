@@ -32,4 +32,4 @@ that do not touch the OS. A duplicate run costs minutes for no new verdict.
 Accepted risk: a defect in an OS-independent suite that shows only on macOS or Windows is not caught. Unmeasured.
 
 Kind: process
-Home: .github/workflows/gates.yml
+Home: .github/workflows/checks.yml

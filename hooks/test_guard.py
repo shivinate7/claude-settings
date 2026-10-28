@@ -86,7 +86,7 @@ FAMILIES = {
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
-    "merge": "merge into main, draft pull requests and the merge gate",
+    "merge": "merge into main, draft pull requests and the merge guard",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -395,7 +395,7 @@ GHNEED = os.path.join(ROOT, "ghneed")      # green, but only for a call that nam
 GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run reported yet
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
-GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the gate waits
+GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the guard waits
 GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
 GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
@@ -881,7 +881,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     PATH-resolution limits `delay` carries below; use it for a measured, fractional or very long
     wait (a realistic `gh` latency, or a stand-in for a `gh` that never answers at all).
 
-    `delay` whole seconds run before the answer. The merge gate's real subprocess.run carries a real
+    `delay` whole seconds run before the answer. The merge guard's real subprocess.run carries a real
     timeout (MERGE_READ_TIMEOUT). A mutant that shrinks it would race an instant answer instead of
     losing to it: Python's timeout
     clock starts only once communicate() itself runs, and a busy runner can delay THAT call long
@@ -896,8 +896,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     this test process's own full PATH, and that absolute path is written into the fake's body. The
     fake itself runs under a narrow PATH the guard builds (its own folder, then only the Python
     interpreter's folder — see PY_PATH), and calling the tool by bare name there is a silent
-    no-op on machines where that narrow PATH has no `sleep`/`ping` of its own: MEASURED in CI run
-    (gates job, PR #124) setup-python's toolcache folder has no `sleep`, and MEASURED locally
+    no-op on machines where that narrow PATH has no `sleep`/`ping` of its own: on Linux CI
+    setup-python's toolcache folder has no `sleep`, and on Windows
     `C:\\Python314` has no `ping`. Both print a "not found" line to stderr and return instantly, so
     the delay never runs and the race make_fake_gh exists to remove comes right back. A missing
     tool is a raise, not a silent skip: a delay fixture that cannot delay is a defect in the
@@ -912,11 +912,11 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "pr": {"state": "open", "merged": False, "draft": False, "body": None, "mergeable": True, "mergeable_state": "clean",
                "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base}},
         "number": 12,
-        "checks": checks if checks is not None else [{"name": "gates", "bucket": "pass", "link": ""}],
+        "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
         "page_cap": page_cap,
         "runs": runs if runs is not None else [
-            {"status": "completed", "conclusion": "success", "name": "gates"}],
+            {"status": "completed", "conclusion": "success", "name": "checks"}],
         "broken": broken,
         "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
@@ -1064,10 +1064,10 @@ def build_fixtures():
     write(MSG_LANE, "title\n\nLane N20 lands the guard.\n")
     write(MSG_FENCE, "title\n\n```\nLane N20 lands the guard.\n```\n")
     write(PATHSPEC_LIST, "f.txt\n")
-    make_fake_gh(GHPEND, "main", checks=[{"name": "gates", "bucket": "pending", "link": ""}])
-    make_fake_gh(GHRED, "main", checks=[{"name": "gates", "bucket": "fail", "link": ""}])
+    make_fake_gh(GHPEND, "main", checks=[{"name": "checks", "bucket": "pending", "link": ""}])
+    make_fake_gh(GHRED, "main", checks=[{"name": "checks", "bucket": "fail", "link": ""}])
     make_fake_gh(GHRUNPEND, "main",
-                 runs=[{"status": "in_progress", "conclusion": "", "name": "gates"}])
+                 runs=[{"status": "in_progress", "conclusion": "", "name": "checks"}])
     make_fake_gh(GHBROKEN, "main", broken=True)
     make_fake_gh(GHBLANK, "", )
     make_fake_gh(GHNEED, "main", need=["12", "y/x"])
@@ -1095,8 +1095,8 @@ def build_fixtures():
     make_fake_gh(GHSTATRED, "main", statuses=[{"name": "deploy", "bucket": "fail", "link": ""}])
     make_fake_gh(GHPAGE2, "main", page_cap=2, checks=[{"name": "lint", "bucket": "pass", "link": ""},
                                                       {"name": "unit", "bucket": "pass", "link": ""},
-                                                      {"name": "gates", "bucket": "fail", "link": ""}])
-    write(os.path.join(WFREPO, ".github", "workflows", "gates.yml"), "name: gates\n")
+                                                      {"name": "checks", "bucket": "fail", "link": ""}])
+    write(os.path.join(WFREPO, ".github", "workflows", "checks.yml"), "name: checks\n")
     # The guard finds the merge tool beside its own real path, or in the clone the global rules
     # file points at. A mutant copy of the guard sits in a temp folder and takes the second way.
     write(os.path.join(MERGECFG, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
@@ -2784,7 +2784,7 @@ if LINKS_MADE:
 # =========================================================================== 1b. the pointer HEAD
 FAMILY = "pointer"
 #
-# The pointer checkout is the one checkout whose HEAD decides which copy of the rules and the gates
+# The pointer checkout is the one checkout whose HEAD decides which copy of the rules and the guards
 # every session on this machine runs. Its HEAD stays `main`.
 #
 # BOTH DIRECTIONS ARE PINNED, and the GREEN half carries the weight here: a rule this broad would
@@ -7523,7 +7523,7 @@ FAMILY = "merge"
 # merge call is an ALLOW, and the allow is silent: no printed reason and no log line. The silent
 # allows are the cases marked silent below.
 
-# These run against a green head. Section 5b below pins the gate that refuses a head that is not.
+# These run against a green head. Section 5b below pins the guard that refuses a head that is not.
 sh("merge: a base of main is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
    silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge: a base of dev is allowed", "gh pr merge 12 --squash", "allow", cwd=NOGIT,
@@ -7587,7 +7587,7 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
 
-# =========================================================================== 5b. the merge gate
+# =========================================================================== 5b. the merge guard
 #
 # The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
 # a check or a workflow run pending or red, and when that read could not run. Every case names the
@@ -7632,11 +7632,11 @@ sh("merge-checks: a flag value is no pull request", "gh pr merge -b note 12 -R y
 add("merge-checks: the host merge tool reads the pull request and repo it names", "allow",
     silent=True, tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x",
     owner="y", env_path=NEED_ON, config=MERGECFG)
-sh("merge-checks: a gh slower than the gate waits is unknown, and denies",
+sh("merge-checks: a gh slower than the guard waits is unknown, and denies",
    "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
    env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
 # Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
-# so a settled, all-green head still reads as unknown and the gate cries wolf on passing CI.
+# so a settled, all-green head still reads as unknown and the guard cries wolf on passing CI.
 # c53: a branch name, a pull request URL and the current branch are read through REST: the open pull request list matched on head.ref, or the number.
 sh("merge-checks: a branch name is read through the open pull request list", "gh pr merge feat --squash", "allow", silent=True,
    cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
@@ -7678,7 +7678,7 @@ sh("merge-checks: a read run in the wrong folder is unknown, and denies",
 add("merge-checks: the host merge tool reads the repo of the call's folder", "allow", silent=True,
     tool="mcp__github__merge_pull_request", cwd=CTXREPO, pullNumber=5, repo="x", owner="y",
     env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
-sh("merge-checks: --auto is gated like any merge", "gh pr merge 12 --auto --squash", "deny",
+sh("merge-checks: --auto is guarded like any merge", "gh pr merge 12 --auto --squash", "deny",
    "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
    config=MERGECFG)
 sh("merge-checks: help merges nothing", "gh pr merge --help", "allow", silent=True,
@@ -7700,7 +7700,7 @@ sh("merge-checks: a heredoc body that names a merge is data",
 # A bare `gh pr merge` in a repo whose `.github/stamp.json` has a `merge` block skips the shared merge
 # tool: no claim, and the local main stays behind (incident claude-sharables 2026-10-06, four merges
 # left the local main four commits behind origin). The guard ASKS, never denies: a broken merge tool
-# leaves a bare merge as the only way out (`verification-recovery-not-gated-on-own-state`; owner
+# leaves a bare merge as the only way out (`verification-recovery-independent-of-state`; owner
 # ruling, orchestrator call, lane bare-gh-merge-ask). Every other repo state allows, silently: no
 # stamp, a stamp with no `merge` block, a stamp that cannot be read as a stamp. The head is green in
 # every case, so merge-checks (5b) says nothing and only this rule can ask. BARE_MERGE is the rule id
@@ -7718,7 +7718,7 @@ STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside i
 
 def _build_stamp_repos():
     stamp = {"defaultBranch": "main", "kinds": [], "merge": {
-        "method": "merge", "requiredChecks": ["gates"], "deadlineMinutes": 30, "deleteBranch": True}}
+        "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}}
     make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
     make_repo(STAMPNONE, {".github/dependabot.yml": "version: 2\n", "hooks/keep": "x\n"})
     make_repo(STAMPNOBLOCK, {".github/stamp.json": json.dumps({"defaultBranch": "main", "kinds": []}) + "\n"})
@@ -7733,34 +7733,34 @@ def _build_stamp_repos():
 lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK],
              _build_stamp_repos)
 
-_BARE_GATE = dict(env_path=GREEN_ON, config=MERGECFG)
+_BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
 sh("bare-merge: gh pr merge in a repo with a merge block asks",
-   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a URL for the pull request asks",
    "gh pr merge --merge https://github.com/y/x/pull/12", "ask", BARE_MERGE, carries=BARE_SAYS,
-   cwd=STAMPREPO, **_BARE_GATE)
+   cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a cd into the repo names the repo that is read",
    "cd " + slash(STAMPREPO) + " && gh pr merge 3", "ask", BARE_MERGE, carries=BARE_SAYS,
-   cwd=NOGIT, **_BARE_GATE)
+   cwd=NOGIT, **_BARE_GUARD)
 # The stamp is the repo's, not the folder's: a call from a subfolder, or a cd into one, reads the same repo.
 sh("bare-merge: gh pr merge from a subfolder of a repo with a merge block asks",
    "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=os.path.join(STAMPREPO, "hooks"),
-   **_BARE_GATE)
+   **_BARE_GUARD)
 sh("bare-merge: a cd into a subfolder of a repo with a merge block asks",
-   "cd hooks && gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GATE)
+   "cd hooks && gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
 # A cwd that links from outside the repo into it is read where it really is, not where it is spelled.
 if LINKS_MADE:
     sh("bare-merge: a cwd that is a symlink into a subfolder of the repo asks",
-       "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GATE)
+       "gh pr merge 12", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPLINK, **_BARE_GUARD)
 # building-scanner-respects-strings: text in the call's own arguments hides no merge.
 sh("bare-merge: comment openers inside a quoted argument hide no merge",
-   'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+   'gh pr merge 3 --subject "fix // x # y /* z */"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a lone quote in an argument hides no merge",
-   'gh pr merge 3 --body "don\'t"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GATE)
+   'gh pr merge 3 --body "don\'t"', "ask", BARE_MERGE, cwd=STAMPREPO, **_BARE_GUARD)
 sh("bare-merge: a multi-line quoted argument with a # line hides no merge",
    'gh pr merge 3 --body "line one\n# line two\nline three"', "ask", BARE_MERGE, cwd=STAMPREPO,
-   **_BARE_GATE)
+   **_BARE_GUARD)
 # A deny of 5b still wins: an ask must not turn a refusal into an ask.
 sh("bare-merge: a pending head in a repo with a merge block still denies",
    "gh pr merge 12 --squash", "deny", "merge-checks", carries="pending", cwd=STAMPREPO,
@@ -7774,9 +7774,9 @@ for _name, _where in (
     ("a stamp.json that is JSON but not an object", STAMPLIST),
 ):
     sh("bare-merge: %s allows" % _name, "gh pr merge 12 --squash", "allow", silent=True,
-       cwd=_where, **_BARE_GATE)
+       cwd=_where, **_BARE_GUARD)
 sh("bare-merge: a subfolder of a repo with no stamp.json allows", "gh pr merge 12 --squash", "allow",
-   silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GATE)
+   silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GUARD)
 sh("bare-merge: reading a pull request in a repo with a merge block allows",
    "gh pr view 12", "allow", silent=True, cwd=STAMPREPO)
 sh("bare-merge: the merge tool in a repo with a merge block allows",
@@ -8029,7 +8029,7 @@ for _name, _command in (
 # message, so they are read. A double-backtick span and a ~~~ fence are quoted text, as a single
 # backtick span and a ``` fence already are. A cat heredoc is no commit message, so only the
 # commit's own -F - body counts. An unreadable -F file on gh pr merge fails closed, as on create and
-# edit (decision gate-hooks-fail-closed).
+# edit (decision guard-hooks-fail-closed).
 sh("lane-by-slug: an unreadable -F file on gh pr merge is refused, not read as clean",
    "gh pr merge 5 --squash -F /nonexistent/msg.md", "deny", "cite-by-id",
    carries="could not be read", cwd=NOGIT, env_path=GREEN_ON, config=MERGECFG)
@@ -8094,7 +8094,7 @@ def cite_unread_folders_case():
     """A -F message file that cannot be read is refused even when the record folders cannot be read
     either. The copy has no lint/ folder and no pointer, so the folder list is unread. The inline
     probe runs first: it must stand down and log the unread folders, so the pin proves that state.
-    Fail closed: decision gate-hooks-fail-closed."""
+    Fail closed: decision guard-hooks-fail-closed."""
     folder = os.path.join(ROOT, "unreadfolders")
     os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
     copy = os.path.join(folder, "hooks", "guard.py")
@@ -8742,8 +8742,8 @@ add("frozen: an edit in a -live folder whose tail is not 12 hex is allowed", "al
     cwd=NOGIT, file_path=slash(os.path.join(ROOT, "clone-live-scratch", "CLAUDE.md")),
     old_string="a", new_string="b")
 # THE RECOVERY PATH STAYS OPEN. A broken pin is repaired by running the install by hand, or by
-# running the merge tool, so neither may be gated on the pin being healthy (verification-recovery-
-# not-gated-on-own-state). Each runs from the clone, and each from the pin itself.
+# running the merge tool, so neither may depend on the pin being healthy
+# (verification-recovery-independent-of-state). Each runs from the clone, and each from the pin itself.
 sh("recovery: merge/install_from_main.sh run by hand from the clone is allowed",
    "bash merge/install_from_main.sh", "allow", cwd=CLONE)
 sh("recovery: merge/install_from_main.sh run by hand from the live pin is allowed",
@@ -8839,8 +8839,7 @@ if SYM_MADE:
         tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
         file_path=slash(SYM_CFG_HOOK), old_string="# stand-in",
         new_string="# rewritten by a session")
-# THE CLONE PATH BEHIND THAT SYMLINK STAYS EDITABLE (decisions/recovery-must-not-gate-on-its-
-# own-state.md, "the clone is not frozen"): the literal-path check must not freeze the clone
+# THE CLONE PATH BEHIND THAT SYMLINK STAYS EDITABLE (decision recovery-independent-of-state, "the clone is not frozen"): the literal-path check must not freeze the clone
 # just because a symlink elsewhere happens to point at it.
 add("frozen: the clone file the symlink points at is still editable directly",
     "allow", tool="Edit", cwd=NOGIT, config=os.path.join(SYMFROZEN, "cfg"),
@@ -10698,7 +10697,7 @@ for _tool, _path in (("Edit", "docs/x.md"), ("Write", "decisions/y.md"), ("Edit"
     add("record-writer: %s of %s is allowed" % (_tool, _path), "allow", tool=_tool,
         file_path=_path, new_string="x", **RW)
 for _tool in ("Edit", "Write"):
-    for _path in ("hooks/guard.py", "lint/x.json", ".github/workflows/gates.yml",
+    for _path in ("hooks/guard.py", "lint/x.json", ".github/workflows/checks.yml",
                   "hooks/test_guard.py", "settings.json", "notes.md.py"):
         add("record-writer: %s of %s is refused" % (_tool, _path), "deny", rule=RW_RULE,
             carries=("Markdown", "Report"), tool=_tool, file_path=_path, new_string="x", **RW)
@@ -11803,16 +11802,17 @@ for _tool in ("Agent",):
 add("floor: Agent record-writer with model sonnet is still allowed", "allow",
     tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
 
-# ---- Step-up (owner ruling 2026-10-12, rule roles-third-try-steps-up). The brief's fixed form
-# "Round N of 3" steps a reviewer up: round 2 needs sonnet, round 3 sonnet or opus. The
-# fixed form "Try N of 3" steps a builder up: try 3 needs opus, tries 1 and 2 stay on sonnet.
+# ---- Step-up (rule roles-third-round-steps-up, decision agent-model-cap). The brief's fixed form
+# "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet or opus. The
+# same form steps a builder up: the third needs opus, the first two stay on sonnet. The old
+# builder form "Try N of 3" still counts until note try-marker-sunset.
 # A reviewer on the last step-up ("Round N of 3" with N = 3) may run opus: the step-up allows it
 # and the Opus ceiling below asks. The middle step-up stays sonnet only.
 # A reviewer's round 1 runs on the role's table model. Prose that quotes a round without the
 # fixed form is never a signal. A missing model is not read from the env default by the floor,
 # so the floor allows it. Step-up still denies a reviewer round 2 that does not name sonnet, and
 # a round 2 or round 3 that names haiku or inherit (pinned below).
-STEP_UP ="roles-third-try-steps-up"
+STEP_UP ="roles-third-round-steps-up"
 add("floor step-up: reviewer Round 2 of 3 on haiku is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on haiku is denied", "deny", STEP_UP,
@@ -11851,8 +11851,8 @@ add("floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, 
     model="claude-opus-5-5", subagent_type="reviewer")
 add("floor step-up: builder Try 2 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Try 2 of 3. Continue the fix.", model="sonnet", subagent_type="builder")
-# The builder marker is `Round 3 of 3` (owner ruling 2026-10-26, plan o13 group 9: a review and its fix is a
-# round). The old `Try 3 of 3` still counts until the try-marker-sunset note removes it.
+# The builder marker is the `Round N of 3` line (plan o13 group 9: a review and its fix is a round).
+# The old `Try N of 3` line still counts until the try-marker-sunset note removes it.
 add("floor step-up: builder Round 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
 add("floor step-up: builder Round 3 of 3 with no model is denied", "deny", STEP_UP,
@@ -11867,7 +11867,7 @@ add("floor step-up: builder Round 1 of 3 on opus asks (only round 3 is a standin
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
 # Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing grant
-# covers it: Plan, a builder's `Try 3 of 3` line, and Explore (the class-level grant, pinned above).
+# covers it: Plan, a builder's third-round marker line, and Explore (the class-level grant, pinned above).
 # A reviewer's last step-up is a per-spawn word, so it asks. The floor and the step-up deny first,
 # so the middle step-up on opus above stays a deny. The deny cases stay in the floor and step-up blocks,
 # and the sonnet and haiku controls sit there too: floor_hit and step_up_hit judge them as before.
@@ -12120,7 +12120,7 @@ def wsl_split_tag_keeps_backslash_case():
 
 
 def merge_tool_missing_case():
-    """A merge gate that cannot load the merge tool is unknown, and denies.
+    """A merge guard that cannot load the merge tool is unknown, and denies.
 
     The guard is copied into a folder with no `merge/` beside it, under a config directory whose
     rules file points nowhere, so neither place the tool is looked for holds it.
@@ -13075,7 +13075,7 @@ def _c_form_decide(tool, cwd, agent_type=None, agent_id=None, command=None, **to
 
 
 def worktree_home_cwd_merge_case():
-    """Pins the merge rule (judge(), merge_gate) for a `/c/` cwd: main denies a merge whose head it
+    """Pins the merge rule (judge(), merge_check) for a `/c/` cwd: main denies a merge whose head it
     cannot settle, and the merge rule must still deny it from that spelling."""
     if os.name != "nt":
         return SKIP, C_FORM_OFF_WINDOWS
@@ -13457,7 +13457,7 @@ def judge_in_process(command, cwd):
 
 
 # Ratio bounds for the timing cases. The speed bound exists because the guard must finish inside its
-# hook timeout (60 s, settings.json; decision gate-hooks-fail-closed). One
+# hook timeout (60 s, settings.json; decision guard-hooks-fail-closed). One
 # wall-clock case stays live. An absolute bound flaked on busy
 # runners, so each big case is judged in this process next to a small case of the same shape, one
 # eighth of its size. Linear work takes about the scaled baseline, a ratio of 1. The quadratic
@@ -13649,7 +13649,7 @@ LOG_CHECKS_EXTRA.append(("split cache: the PowerShell flag is part of the split,
 
 # --------------------------------------------------------------------------- fail-closed
 #
-# audit-high (owner ruling 2026-10-13; decision gate-hooks-fail-closed): a guard
+# audit-high (decision guard-hooks-fail-closed): a guard
 # whose sibling module is missing refuses the call. guard.py allows instead, and 121 guard-crash
 # lines on 2026-10-13 (12:03 to 12:44) ran with every guard off. A case copies guard.py and its
 # guard_* siblings into a scratch folder, deletes one sibling, and runs a plain Bash call. The control
@@ -14712,7 +14712,7 @@ for _is_timed in (False, True):
 # agent-model-cap, for the typing session and its agents, until it ends. `opus <role> <n>[m|h]`
 # lifts it only for spawns of that role. Every other refusal and ask stands.
 OP_SECONDS = 2 * 3600  # the length of the override these stories type: `opus 2h`
-OP_BUILDER = {"prompt": "Try 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
+OP_BUILDER = {"prompt": "Round 1 of 3. Start the fix.", "model": "opus", "subagent_type": "builder"}
 OP_REVIEWER = {"prompt": "Round 3 of 3. Re-check the diff.", "model": "claude-opus-5-5",
                "subagent_type": "reviewer"}
 
@@ -15250,9 +15250,9 @@ def ov_role_acts(config, session):
               {"file_path": PROJ_LOCAL, "content": cap_settings()}, "agent-model-cap", "ask"),
         OvAct("a spawn on the Haiku model", "Agent",
               {"prompt": "do it", "model": "haiku"}, "agent-model-floor"),
-        OvAct("a builder's third try on Sonnet", "Agent",
-              {"prompt": "Try 3 of 3. Finish the fix.", "model": "sonnet",
-               "subagent_type": "builder"}, "roles-third-try-steps-up"),
+        OvAct("a builder's third round on Sonnet", "Agent",
+              {"prompt": "Round 3 of 3. Finish the fix.", "model": "sonnet",
+               "subagent_type": "builder"}, "roles-third-round-steps-up"),
         OvAct("a builder's edit of a test file", "Edit",
               {"file_path": "src/test_app.py", "new_string": "x = 1"}, "builder-test-edit",
               agent_id="bld1", agent_type="builder"),
