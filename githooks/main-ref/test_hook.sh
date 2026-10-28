@@ -56,7 +56,10 @@ mk relwt .hooks; git worktree add -q -b wtb "$tmp/relwt-2" 2>/dev/null
 bash "$here/install.sh"
 cd "$tmp/relwt-2" && git commit -q --allow-empty -m wt
 t refused "relative hooksPath, move from a second worktree" git branch -f main wtb
-mkdir -p "$tmp/home"; mk tilde '~/hk'
+mkdir -p "$tmp/home"
+# SC2088: the config value must hold a literal "~/"; the installer, not the shell, expands it.
+# shellcheck disable=SC2088
+mk tilde '~/hk'
 HOME="$tmp/home" bash "$here/install.sh"
 t refused "~ hooksPath expands to HOME"          env HOME="$tmp/home" git branch -f main feat
 mk dash
@@ -64,6 +67,9 @@ sh "$here/install.sh"
 t refused "installer run under sh"               git branch -f main feat
 # outside any repo: the installer fails and writes nothing (it once wrote /hooks)
 mkdir "$tmp/norepo"; snap() { cksum /hooks/reference-transaction 2>/dev/null; }; before="$(snap)"
+# SC2016: the inner sh expands $1 and $2, which carry the paths.
+# shellcheck disable=SC2016
 t refused "installer outside a repo"             env GIT_CEILING_DIRECTORIES="$tmp" sh -c 'cd "$1" && sh "$2"' _ "$tmp/norepo" "$here/install.sh"
+# shellcheck disable=SC2016
 t ok      "outside a repo writes nothing"        sh -c '[ -z "$(ls -A "$1")" ] && [ "$(cksum /hooks/reference-transaction 2>/dev/null)" = "$2" ]' _ "$tmp/norepo" "$before"
 rm -rf "$tmp"; exit $bad
