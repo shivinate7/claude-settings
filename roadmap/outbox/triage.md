@@ -6,6 +6,6 @@
 - Overlaps to watch: o2 and c143 both edit lint/layout.json; c139, c122, c145, c147 wait on the c126/d9 lane (skills/waiting-page).
 - Waiting page (this account): https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx, made Oct 28 from skills/waiting-page/page.html (main e0f9e2d), db + comments, 12 items, owner "Triage the roadmap (9)". Read `answers` at each wake and route per the skill. Page source is scratch-only: on a republish, read the live page (Artifact read) and keep its designData block, which holds d4's option pictures (items 13-21, from designs/d4-banchi-phone/png, JPEG-shrunk). Answers routed Oct 28: items 4, 5, 8, 11 (closed). c82 waits on the ping verdict lines.
 - Owed: other-repo plan check (S6Eou4...) still unanswered.
-- Tally: 33 messages, 11 placements (c166 added; item 34 rewritten, item 38 added). Items 36 (c54 setup script, mine) and 37 (archive 19 old cloud sessions, orchestrator's) added. Waiting page items 1-35: open 9, 10, 12-16 and 18-21 (d4), 23, 24, 25, 27 (c146), 31 closed (c), 34 (orchestrator's to redo).
+- Tally: 35 messages, 14 placements. Handed off: handoffs/triage-9-2026-10-28.md.
 - Owed: tell the orchestrator when all d4 picks (items 13-16, 18-21) are in; the d4 build waits on them.
 - Ruling, Oct 28 02:44 CDT (shiv, c164): never answer a waiting-page comment in its thread; write the answer into the item's text and republish the page.
