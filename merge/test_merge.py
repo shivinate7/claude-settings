@@ -2348,20 +2348,14 @@ class RerunAfterRevert(Env):
         self.assertEqual(self.worktrees(), 1)
 
 class Stopped(Env):
-    def test_stopped_run_resumes_then_an_expired_lock_is_broken(self):
+    def test_stopped_run_resumes_after_its_dead_holder_lock_is_taken_over(self):  # c189: its live lock used to refuse with "Run: merge --unlock"
         child = subprocess.run([sys.executable, __file__, "--child", self.co], capture_output=True, text=True)
         self.assertEqual(child.returncode, 9, child.stderr)
         self.assertEqual(self.claims("feat"), 1)
         self.assertTrue(self.lock_ref())  # the run died holding the lock
-        claim_head = self.head()
-        rc, out = self.run_merge("7", "--confirm")  # lock still live
-        self.assertEqual(rc, 1)
-        self.assertIn("held", out)
-        self.assertEqual(self.head(), claim_head)
-        expires = merge.expiry_of(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/heads/merge-lock/main"))  # the expiry the child wrote
-        self.now = expires + 1  # past that lock, whatever its ttl
-        rc, out = self.run_merge("7", "--confirm")
+        rc, out = self.run_merge("7", "--confirm")  # the lock is unexpired, its pid is dead, this host
         self.assertEqual(rc, 0, out)
+        self.assertIn("took over", out)
         self.assertIn("resumed", out)
         self.assertEqual(self.claims(), 1)  # no second claim
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
@@ -6067,7 +6061,7 @@ class SliceSelector(unittest.TestCase):
             "Flow.test_full_merge_claims_pushes_merges_syncs_cleans",
             "GhHalf.test_an_empty_required_list_is_refused",
             "LockHolder.test_a_lock_with_no_platform_line_reads_cannot_tell_never_dead",
-            "LockHolder.test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone",
+            "LockHolder.test_a_lock_on_this_host_whose_pid_is_gone_is_taken_over_with_one_line",
             "LockHolder.test_the_lock_records_the_holder_and_a_second_run_sees_it_alive",
             "LockHolder.test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead",
             "LockHolder.test_windows_liveness_never_calls_os_kill",
