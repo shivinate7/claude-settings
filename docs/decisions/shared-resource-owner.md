@@ -3,7 +3,7 @@
 ## The ruling
 
 Owner, 2026-10-27 13:22 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2FS8R88VGL2A75ER5mnDyai), roadmap step c140: the
-HA Green box (4 GB) is loaded by home, degen, home-app and mailaudit. It crashed 3 times in 8 days. No
+HA Green box (4 GB) is loaded by home, degen and mailaudit. It crashed 3 times in 8 days. No
 repo owned its load budget, and fixes deadlocked across repos.
 
 - Each user repo owns its own deploy and restart scripts.

@@ -5,7 +5,7 @@ description: Use in any repo that ships an iPhone app, before you change its bui
 
 Every iOS app of the owner works the same way: the same build, tests, phone install and TestFlight
 path. This page is the standard. The look of each app stays its own: each app is its own product
-(an owner ruling the iOS kit consultation records). Portability: every repo that ships an iOS app (home-app, degen, mailaudit,
+(an owner ruling the iOS kit consultation records). Portability: every repo that ships an iOS app (home, degen, mailaudit,
 ios-adblock). Not q_max, banchi or joyous, which ship none.
 
 ## The standard

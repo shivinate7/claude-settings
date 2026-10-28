@@ -133,8 +133,8 @@ class LayoutFile(Tree):
         self.assertEqual(self.layout.path(self.tree, "todo"), "specs/todo.md")
 
     def test_a_repo_entry_holds_after_roll_out_and_its_extras_may_repeat_it(self):
-        self.origin("https://github.com/shivinate7/home-app")
-        self.roll_out({"todo": {"path": "records"}})  # home-app's extras file names its task home
+        self.origin("https://github.com/shivinate7/home")
+        self.roll_out({"todo": {"path": "records"}})  # the extras file of home repeats its task home
         self.assertEqual(self.layout.path(self.tree, "todo"), "records")
         self.assertEqual(self.layout.path(self.tree, "decisions"), "docs/decisions")
 
@@ -165,7 +165,7 @@ class LayoutFile(Tree):
         self.assertEqual(self.layout.path(self.tree, "todo"), "docs/todo.md")
 
     def test_an_extras_todo_that_differs_from_the_repo_entry_is_an_error(self):
-        for url in ("https://github.com/shivinate7/home-app", "https://github.com/shivinate7/degen"):
+        for url in ("https://github.com/shivinate7/home", "https://github.com/shivinate7/degen"):
             with self.subTest(url=url):
                 self.origin(url)
                 self.roll_out({"todo": {"path": "elsewhere"}})
