@@ -105,8 +105,9 @@ into `meta/page`.
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
    and make it equal to the key. After the `set`, read the item back (`ArtifactData get
    items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
-   unique key, and no key `none`. If a check fails, fix the item at once. The page refuses to send an
-   answer to a broken item.
+   unique key, and no key `none`. On a look question, check that each option has its own mockup
+   drawing that option's state, and that each `focus` names an element in its mockup. If a check
+   fails, fix the item at once. The page refuses to send an answer to a broken item.
    - Fill `holds` whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
@@ -207,6 +208,9 @@ picks the option. A "View" control, 40px or more high, sits in a row under the p
 of the item, before the options. An option that names a design (`design`) which the item does not
 carry shows a warning line in its card in place of the picture.
 
+Each option gets its own mockup, drawn in that option's state. Two options never share one picture.
+The page refuses an item where two options share a picture, or where a `focus` finds nothing.
+
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
    phone width for a web app. Draw it 390 wide. The page scales it to the card and shows all of it,
    never cropped. The full mockup stays one tap away ("Open full size").
@@ -218,7 +222,8 @@ carry shows a warning line in its card in place of the picture.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element whole, scaled to fit the card, so the part being decided is in frame.
-     Without `focus` the card shows the whole mockup.
+     Without `focus` the card shows the whole mockup. Set `focus` on each design to the element
+     being decided, such as the late-package row with its buttons.
    - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
      focused element, else the whole mockup). The card reserves that height before the mockup loads,
      so the first paint does not jump.
