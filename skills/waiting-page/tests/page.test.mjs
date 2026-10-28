@@ -1648,9 +1648,13 @@ test("a state the mockup does not draw blocks the item and names the option; a d
   await page.evaluate(() => { setDraft(byId("st-bad"), { choice: "a", auto: true }); render(); });
   assert.equal(await page.locator("#send").isDisabled(), true, "Send is not refused");
   const ok = stateItem("st-ok", 75, ["late-package", "default"]);
-  ok.designs = ok.designs.map((d) => ({ ...d, slug: "s-a" })); ok.options.forEach((o) => { o.design = "s-a"; });
+  ok.designs = ok.designs.map((d, i) => ({ ...d, slug: "s-a", option: "ab"[i] })); ok.options.forEach((o) => { o.design = "s-a"; });
   page = await open(t, { items: [ok], designData: STATE_DATA }); if (!page) return;
-  assert.equal(await ALERT(page, ok).count(), 0, "two states of one slug count as one picture");
+  assert.equal(await ALERT(page, ok).count(), 0, "two states of one slug are refused as one picture");
+  const same = stateItem("st-same", 76, ["late-package", "late-package"]);
+  same.designs = same.designs.map((d, i) => ({ ...d, slug: "s-a", option: "ab"[i] })); same.options.forEach((o) => { o.design = "s-a"; });
+  page = await open(t, { items: [same], designData: STATE_DATA }); if (!page) return;
+  assert.match(await ALERT(page, same).textContent(), /A and B.*share one picture/s);
 });
 
 const shortChip = (page, it) => page.locator(`#c-${it.id}`);
