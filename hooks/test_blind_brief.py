@@ -668,6 +668,36 @@ class IosApps(unittest.TestCase):
     def test_blind_brief_with_no_kind_line_in_an_ios_repo_passes(self):
         self.assertEqual(spawn_in(self.ios, "Draw the packages screens for the iPhone Duo. Touch only."), "")
 
+    def device_codes(self, device):
+        """(fault codes, stdout) of one blind brief whose Device section is `device`, in the ios repo. The Job
+        names skill ios-apps, so the Device section is the only part of the brief that can fault."""
+        code, found, out = check_run([brief(job=JOB + "\nFollow skill ios-apps.", device=device)], self.ios)
+        return found, out
+
+    def test_short_form_unfolded_then_folded_gets_duo_order(self):
+        found, out = self.device_codes("Draw iPhone Duo unfolded, then folded.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_short_form_unfolded_first_then_the_folded_pose_gets_duo_order(self):
+        found, out = self.device_codes("Duo unfolded first, then the Duo in folded pose.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_short_form_unfolded_pose_and_folded_pose_gets_duo_order(self):
+        found, out = self.device_codes("Duo unfolded pose and folded pose.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_short_form_folded_first_then_unfolded_gets_no_duo_order(self):
+        found, out = self.device_codes("Folded Duo first, then unfolded Duo.")
+        self.assertEqual(found, set(), out)
+
+    def test_short_form_folded_then_unfolded_in_parentheses_gets_no_duo_order(self):
+        found, out = self.device_codes("Duo (folded) on one hand, Duo (unfolded) on two hands.")
+        self.assertEqual(found, set(), out)
+
+    def test_full_form_folded_then_unfolded_gets_no_duo_order(self):
+        found, out = self.device_codes("iPhone Duo, folded, then iPhone Duo, unfolded.")
+        self.assertEqual(found, set(), out)
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
