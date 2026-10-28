@@ -1,9 +1,9 @@
 {
  "title": "merge.py reads a cancelled duplicate run as red",
  "phase": "cleanup",
- "status": "doing",
+ "status": "done",
  "order": 103.30315,
  "why": "Orchestrator, Oct 28 02:36 CDT: batch PR #745 was opened as a draft and marked ready in the same second, which started two gates runs on one head; concurrency cancelled one, and merge.py read the cancelled run's jobs as red and refused, though run 40648096904 had all 13 required checks green. Cost: one full re-run (40648096446).",
- "note": "Debt, hit today. Green and reviewed Oct 28: draft PR #752 (13bacb86, 3 review rounds), waits for a batch; it drops a cancelled check row only when that name also has a pass or pending row, so a cancel-only or cancel-beside-skip name stays red. Was: merge.py takes, for each required check, the newest completed run on the head that was not cancelled, and ignores a cancelled duplicate; red first on today's case (a cancelled duplicate beside a green run). The other fix, opening batch PRs non-draft, is a flow change that a later draft-and-ready would undo, so it is the fallback. Touches merge/merge.py and merge/test_merge.py; it overlaps no open lane. Needs no answer. Port: no; merge.py lives in claude-settings. Placed ahead of c154, after c150 (triage, Oct 28): every batch can hit it, and each hit costs a 50 to 60 min re-run. Batch 5: PR #754 (Oct 28).",
- "updatedAt": "2026-10-28T08:35:19Z"
+ "note": "Debt, hit today. Green and reviewed Oct 28: draft PR #752 (13bacb86, 3 review rounds), waits for a batch; it drops a cancelled check row only when that name also has a pass or pending row, so a cancel-only or cancel-beside-skip name stays red. Was: merge.py takes, for each required check, the newest completed run on the head that was not cancelled, and ignores a cancelled duplicate; red first on today's case (a cancelled duplicate beside a green run). The other fix, opening batch PRs non-draft, is a flow change that a later draft-and-ready would undo, so it is the fallback. Touches merge/merge.py and merge/test_merge.py; it overlaps no open lane. Needs no answer. Port: no; merge.py lives in claude-settings. Placed ahead of c154, after c150 (triage, Oct 28): every batch can hit it, and each hit costs a 50 to 60 min re-run. Done: merged in batch 5 (PR #754, main 646d23c5, Oct 28 04:19 CDT).",
+ "updatedAt": "2026-10-28T09:21:26Z"
 }
