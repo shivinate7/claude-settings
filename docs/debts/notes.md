@@ -586,3 +586,6 @@
 - waiting-cap-left-wide: at 1440 the viewer caption sits left at x=20 while the mockup is centred (skills/waiting-page/page.html .dcap)
 - waiting-dpos-stale-form: after a resize, `#dPos` keeps its old form ("1/3" or "1 of 3") until the next page turn (skills/waiting-page/page.html showDesign)
 - waiting-head-midwidth-untested: no test runs the viewer head at 521-900 px with a wide font, where the buttons keep their long labels (skills/waiting-page/tests/page.test.mjs)
+- other-checkout-git-pointer: the `.git` exemption covers `<owner>/.git` for every checkout, so from the primary a Write to a linked worktree's `.git` pointer file passes; exempting only `git_common_dir` would close it (hooks/guard.py other_checkout_hit)
+- other-checkout-cp-source: `cd <sibling> && cp a.txt /tmp/o` is refused because the shell write reader treats every `cp` argument as a target, so a copy out of another checkout reads as a write into it (hooks/guard_frozen.py _shell_write_hit)
+- other-checkout-mkdir: `mkdir -p` into another checkout passes, because the shell write reader does not read `mkdir` targets (hooks/guard_frozen.py _shell_write_hit)
