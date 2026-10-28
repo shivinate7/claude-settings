@@ -92,6 +92,20 @@ class Scaffold(unittest.TestCase):
         self.assertIn("publishes the roadmap page", bullet)
         self.assertIn("--live", bullet)
 
+    def test_handoff_template_lists_pages_to_watch(self):
+        text = tree(SKILL)["templates/role-handoff.md"]
+        section = re.search(r"## Pages\n(.*?)(?=\n## |\Z)", text, re.S)
+        self.assertIsNotNone(section, "no Pages section")
+        self.assertIn("URL", section.group(1))
+        self.assertIn("watch", section.group(1))
+
+    def test_handoff_rule_moves_page_watches(self):
+        text = tree(SKILL)["templates/operating-model.md"]
+        rule = re.search(r"## Hand-off rule.*?(?=\n## )", text, re.S).group(0)
+        flat = " ".join(rule.split())
+        self.assertIn("successor watches each page its role owns", flat)
+        self.assertIn("old thread stops watching", flat)
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():
