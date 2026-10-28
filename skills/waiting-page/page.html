@@ -429,6 +429,24 @@ function draftReady(it) {
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
   return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
 }
+// An option's picture must show that option's own difference. Two options whose card pictures are one slug, or one mockup, with one focus, show the same thing.
+// A focus that finds nothing in its mockup shows nothing of what is being decided. A missing mockup is warned in the frame, so it is not flagged here.
+function pictureProblem(it) {
+  const withPic = (it.options || []).map((o) => ({ o, ds: optionDesigns(it, o) })).filter((x) => x.ds.length);
+  for (let i = 0; i < withPic.length; i++) for (let j = i + 1; j < withPic.length; j++) {
+    const a = withPic[i].ds[0], b = withPic[j].ds[0], ha = DESIGN_HTML[a.slug], hb = DESIGN_HTML[b.slug];
+    if ((a.focus || "") === (b.focus || "") && (a.slug === b.slug || (ha != null && ha === hb)))
+      return "Options " + letterOf(it, withPic[i].o.key) + " and " + letterOf(it, withPic[j].o.key) + " share one picture, so neither shows its own difference.";
+  }
+  for (const { o, ds } of withPic) for (const d of ds) {
+    const html = DESIGN_HTML[d.slug];
+    if (!d.focus || html == null) continue;
+    let hit = false;
+    try { hit = !!new DOMParser().parseFromString(html, "text/html").querySelector(d.focus); } catch (e) {}
+    if (!hit) return "The picture of option " + letterOf(it, o.key) + " shows nothing the focus names.";
+  }
+  return null;
+}
 // What is wrong with an item, as { text, blocks }, or null. One home for every check.
 // The page keys on the database key. A bad id field only warns: the answer still lands at answers/<key>.
 // Anything else the session could not read back safely blocks Send.
@@ -445,6 +463,7 @@ function problem(it) {
     const dup = ks.find((k, i) => ks.indexOf(k) !== i);
     if (dup !== undefined) return { text: "Two options of this decision share the key " + dup + ", so it cannot be answered." + fix, blocks: true };
     if (ks.includes(NONE)) return { text: "An option of this decision uses the key none, so it cannot be answered." + fix, blocks: true };
+    const pic = pictureProblem(it); if (pic) return { text: pic + fix, blocks: true };
   }
   // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
   if (it.rawId !== it.id) return { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false };
