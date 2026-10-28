@@ -14,7 +14,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, contextlib, datetime, json, math, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -1041,6 +1041,110 @@ def needles(path):
         out.update(("/".join(parts[:i]), parts[i - 1]))
     return out
 
+READERS = {"open", "listdir", "scandir", "glob", "iglob", "rglob", "iterdir", "Path", "PurePath", "walk", "exists", "isfile", "isdir"}
+DIR_SAME = {"abspath", "realpath", "normpath", "resolve", "Path", "PurePath", "absolute"}
+
+def _words(needle_set):
+    return [re.compile(r"(?<![\w.-])" + re.escape(n) + r"(?![\w-])") for n in needle_set]
+
+def _func_name(call):
+    f = call.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+
+def _constant_path(e):
+    """True when e is a string, or a call (such as os.path.join) on strings only: a path fixed in the source."""
+    if isinstance(e, ast.Constant):
+        return isinstance(e.value, str)
+    return isinstance(e, ast.Call) and bool(e.args) and all(_constant_path(a) for a in e.args)
+
+def _own_nodes(scope):
+    """The nodes of one scope: the module or one function, without the functions nested in it."""
+    todo, out = list(ast.iter_child_nodes(scope)), []
+    while todo:
+        n = todo.pop()
+        out.append(n)
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            todo.extend(ast.iter_child_nodes(n))
+    return out
+
+def python_suite_hits(source, rel, paths):
+    """True when a Python suite at repo path `rel` may read one of `paths` from the checkout. Read with `ast`, so a
+    name inside a string or comment is told from code. A hit is: the exact path or file name anywhere; a folder or stem
+    (needles) as a string constant joined or divided onto a root bound, in its own scope or the module's, from
+    `__file__` through dirname, abspath, join, Path, .parent or `/`; the same given bare to a file reader (CI runs at the
+    repo top); or a path under a folder below the top that such a root names, taken whole by a call (a walk).
+    A folder named only under a temp dir is no hit. SyntaxError when the source does not parse."""
+    tree = ast.parse(source)
+    for p in paths:
+        if any(w.search(source) for w in _words({p, p.split("/")[-1]})):
+            return True
+    words = _words({w for p in paths for w in needles(p)})
+
+    def analyze(nodes, outer):
+        """-> (roots of this scope: name -> folder or None, hit). `outer` is the module's roots, for names not bound here."""
+        bound = {t.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) for t in [n]}
+        roots = {}
+        def root(name):
+            return roots.get(name, False) if name in bound else outer.get(name, False)
+        def folder(e):  # -> the repo folder a root expression names, None when unknown, False when it is no root
+            if isinstance(e, ast.Name):
+                return rel if e.id == "__file__" else root(e.id)
+            if isinstance(e, ast.Attribute) and e.attr == "parent":
+                d = folder(e.value)
+                return d and posixpath.dirname(d) if d is not False else False
+            if isinstance(e, ast.BinOp) and isinstance(e.op, ast.Div):
+                d = folder(e.left)
+                if d is False:
+                    return False
+                return d and posixpath.normpath(posixpath.join(d, e.right.value)) if isinstance(e.right, ast.Constant) and isinstance(e.right.value, str) else None
+            if isinstance(e, ast.Call):
+                name = _func_name(e)
+                head = e.args[0] if e.args else e.func.value if isinstance(e.func, ast.Attribute) else None
+                if head is None or name not in DIR_SAME | {"dirname", "join", "joinpath"}:
+                    return False
+                d = folder(head)
+                if d is False or name in DIR_SAME:
+                    return d
+                if name == "dirname":
+                    return d and posixpath.dirname(d)
+                rest = e.args[1:] if e.args and head is e.args[0] else e.args
+                if d and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in rest):
+                    return posixpath.normpath(posixpath.join(d, *(x.value for x in rest)))
+                return None
+            return False
+        binds = sorted((n for n in nodes if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None), key=lambda n: (n.lineno, n.col_offset))
+        for _ in range(3):  # a root bound from a root bound from __file__: a few passes reach the fixpoint
+            for n in binds:
+                d = folder(n.value)
+                if d is not False:
+                    for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                        if isinstance(t, ast.Name):
+                            roots[t.id] = d
+        consts = []
+        for n in nodes:
+            if isinstance(n, ast.Call):
+                heads = list(n.args) + ([n.func.value] if isinstance(n.func, ast.Attribute) else [])
+                if any(folder(x) is not False for x in heads):
+                    consts += [x.value for x in n.args if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+                    if _func_name(n) not in DIR_SAME | {"dirname", "join", "joinpath"}:  # a root taken whole, as by a walk: every path under it
+                        for x in n.args:
+                            d = folder(x)
+                            if d and d != "." and not d.startswith("..") and any(p.startswith(d + "/") for p in paths):
+                                return roots, True
+                if _func_name(n) in READERS:  # a bare relative path: CI runs at the repo top
+                    for x in n.args:
+                        if _constant_path(x):
+                            consts += [y.value for y in ast.walk(x) if isinstance(y, ast.Constant) and isinstance(y.value, str) and not y.value.startswith("/")]
+            elif isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div) and folder(n.left) is not False:
+                consts += [x.value for x in (n.left, n.right) if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+        return roots, any(w.search(c) for c in consts for w in words)
+
+    module, hit = analyze(_own_nodes(tree), {})
+    if hit:
+        return True
+    funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))]
+    return any(analyze(_own_nodes(f), module)[1] for f in funcs)
+
 def lint_steps(root, base_ref, env=None):
     """-> the names of the `gates` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice."""
     c, out = sh([sys.executable, CI_JOB, "gates", "--lint", "--plan", "--base", base_ref], cwd=root, env=env, timeout=120)
@@ -1077,7 +1181,14 @@ def hit_suites(root, paths, skip):
                     text = f.read()
             except (OSError, UnicodeError) as e:
                 raise Stop(f"the suite {m.group(1)} cannot be read ({type(e).__name__})")
-            if any(w.search(text) for w in words):
+            if m.group(1).endswith(".py"):
+                try:
+                    hit = python_suite_hits(text, m.group(1), paths)
+                except (SyntaxError, ValueError, RecursionError) as e:
+                    raise Stop(f"the suite {m.group(1)} cannot be parsed ({type(e).__name__})")
+            else:  # node and bash suites: any needle in the source is a hit, which fails safe
+                hit = any(w.search(text) for w in words)
+            if hit:
                 if not SUITE_LINE.fullmatch(line):
                     raise Stop(f"the suite line `{line}` reads main's paths and cannot be run as written")
                 hits.append((m.group(1), line))
@@ -1143,7 +1254,8 @@ def small_base_move(wt, base_ref, sha, before_run=None):
             bad = [l.strip() for l in out.splitlines() if l.startswith(("FAIL", "unknown"))]
             return False, f"the lints of the merge are not all PASS ({'; '.join(bad[:3]) or 'exit ' + str(c)}; full output: {log})"
         try:
-            suites = hit_suites(wt, sorted(theirs), lint_steps(wt, base_ref, env))
+            # the records page is left out: it is derived from the records, which are matched, and the generator proves it on the merge
+            suites = hit_suites(wt, sorted(theirs - {RECORDS_PAGE}), lint_steps(wt, base_ref, env))
         except Stop as e:
             return False, str(e)
         if suites and before_run:

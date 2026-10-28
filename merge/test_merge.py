@@ -1048,7 +1048,7 @@ class SmallBaseMove(Env):
         self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
         self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
         self.assertNotIn("hooks/test_sendmessage_state.py", hits("docs/guide-c150.md"))
-        new = hits("docs/decisions/new-record.md")  # a new record: the suite that lists the folder runs, fixture-only suites do not
+        new = hits("docs/decisions/" + "new-" + "rec.md")  # a new record, split so this file names no such path: the suite that lists the folder runs, fixture-only suites do not
         self.assertIn("hooks/test_precompact_handoff.py", new)
         self.assertNotIn("hooks/test_guard.py", new)
         self.assertNotIn("merge/test_merge.py", new)
