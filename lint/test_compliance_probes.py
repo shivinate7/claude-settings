@@ -133,7 +133,7 @@ class Design(unittest.TestCase):
         self.assertIn("screens named: pass - 2 route(s)", out)
         self.assertIn("sizes named: pass - shoot's default", out)
         self.assertIn("token file: pass - src/tokens.css, plus 1 generated", out)
-        self.assertTrue(out.rstrip().endswith("design: in shape"), out)
+        self.assertTrue(out.startswith("design: in shape"), out)
 
     def test_each_gap_is_its_own_line(self):
         repo = Repo(self).write("src/App.tsx").write("Makefile", "screenshot:\n\tnode s.mjs\n")
@@ -144,7 +144,7 @@ class Design(unittest.TestCase):
         self.assertIn("screenshot command: partial - own command, not the shared shoot: Makefile target screenshot\n", out)
         self.assertIn("token file: gap - no tokens file", out)
         self.assertIn("ui copy: known gap", out)
-        self.assertTrue(out.rstrip().endswith("design: out"), out)
+        self.assertTrue(out.startswith("design: out"), out)
 
     def test_a_config_shoot_refuses_is_a_gap(self):
         for bad in ('{"routes": ["/"]}', '{"baseUrl": "http://h", "routes": ["/"], "sizes": "x"}',
@@ -220,7 +220,7 @@ class Ios(unittest.TestCase):
     def test_the_starter_tree_is_in_shape(self):
         code, out = self.gold().run("ios")
         self.assertEqual(code, 0, out)
-        self.assertTrue(out.rstrip().endswith("ios: in shape"), out)
+        self.assertTrue(out.startswith("ios: in shape"), out)
         self.assertEqual(out.count(": pass"), 9, out)
 
     def test_no_ios_app_is_na(self):
@@ -476,8 +476,27 @@ class Scorecard(unittest.TestCase):
         self.assertEqual(rows[at + 2], "| Design: sizes | pass | in shape | ok | none cited |", body)
         self.assertNotIn("## Notes", body)
 
+    def test_skill_order_items_stay_under_their_lower_case_group(self):
+        text = "layout: partial - x (a:1)\n  - extras: gap - none (f)\ndesign: out - bad (c)\n"
+        _, body = self.run_card(Repo(self), text)
+        rows = [line for line in body.splitlines() if line.startswith("| ")]
+        at = rows.index("| layout | partial | in shape | x | a:1 |")
+        self.assertEqual(rows[at + 1], "| layout: extras | gap | in shape | none | f |", body)
+        self.assertNotIn("design: extras", body)
+        self.assertEqual(rows[at + 2], "| design | out | in shape | bad | c |", body)
+
+    def test_probe_output_files_its_items_under_its_own_group(self):
+        repo = Repo(self).write("src/a.py")
+        out = repo.run("layout")[1]
+        self.assertTrue(out.startswith("layout: "), out)
+        _, body = self.run_card(Repo(self), out + "design: in shape - ok (c)\n")
+        rows = [line for line in body.splitlines() if line.startswith("| ")]
+        names = [r.split(" | ")[0] for r in rows]
+        self.assertTrue(any(n.startswith("| layout: ") for n in names), body)
+        self.assertEqual([n for n in names if n.startswith("| design: ")], [], body)
+
     def test_every_probe_item_line_becomes_a_row_after_its_group(self):
-        # Real probe output: each probe prints its item lines, then its group line.
+        # Real probe output: each probe prints its group line, then its item lines.
         repo = Repo(self).write("src/App.tsx").write("src/tokens.css").write("Makefile", "screenshot:\n\tnode s.mjs\n")
         repo.write("briefs/b.md", "Run lanes one or two at a time.\nTwo lanes at a time (owner, 2026-10-12).\n")
         repo.write(".github/workflows/ci.yml", "      - run: npx playwright install --with-deps chromium\n")
@@ -491,7 +510,7 @@ class Scorecard(unittest.TestCase):
         grades = set()
         for out in outs:
             lines = out.rstrip("\n").split("\n")
-            items, group = lines[:-1], lines[-1].split(": ", 1)[0]
+            items, group = lines[1:], lines[0].split(": ", 1)[0]
             self.assertTrue(items and all(i.startswith("  ") for i in items), out)
             at = [n for n, row in enumerate(rows) if row.startswith("| %s | " % group)]
             self.assertEqual(len(at), 1, body)
