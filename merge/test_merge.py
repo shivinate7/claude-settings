@@ -1048,6 +1048,43 @@ class SmallBaseMove(Env):
         self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
         self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
         self.assertNotIn("hooks/test_sendmessage_state.py", hits("docs/guide-c150.md"))
+        new = hits("docs/decisions/new-record.md")  # a new record: the suite that lists the folder runs, fixture-only suites do not
+        self.assertIn("hooks/test_precompact_handoff.py", new)
+        self.assertNotIn("hooks/test_guard.py", new)
+        self.assertNotIn("merge/test_merge.py", new)
+
+    def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
+        hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])
+        self.assertFalse(hit('import os, tempfile\nd = tempfile.mkdtemp()\nos.makedirs(os.path.join(d, "docs", "decisions"))\n'))
+        self.assertFalse(hit('TEXT = "see decisions/other.md"  # a cite in text\n'))
+        self.assertTrue(hit('import os\nROOT = os.path.dirname(os.path.dirname(__file__))\nD = os.path.join(ROOT, "docs", "decisions")\n'))
+        self.assertTrue(hit('import pathlib\nROOT = pathlib.Path(__file__).parent.parent\nD = ROOT / "docs" / "decisions"\n'))
+        self.assertTrue(hit('open("docs/decisions/y.md").read()\n'))
+        self.assertTrue(hit('import os\nos.listdir(os.path.join("docs", "decisions"))\n'))
+        self.assertTrue(hit('X = "docs/decisions/x.md"\n'))  # the exact path, anywhere
+        # a root anchored on __file__ and walked whole: a path under it is read
+        self.assertTrue(merge.python_suite_hits('import os\nHERE = os.path.dirname(__file__)\nSKILL = os.path.dirname(HERE)\nwalk(SKILL)\n',
+                                                "skills/s/tests/test_s.py", ["skills/s/templates/new.md"]))
+        with self.assertRaises(SyntaxError):
+            hit("def (:\n")
+
+    def test_a_records_only_main_move_keeps_the_green_run(self):
+        """A new record and the page rebuilt on main; a gates suite names the record folder only in its temp tree."""
+        self.scoped(workflow=GATES_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(o, "hooks/test_temp_tree.py"), 'import os, sys, tempfile\nd = tempfile.mkdtemp()\n'
+            'os.makedirs(os.path.join(d, "docs", "decisions"))\nsys.exit(1)  # fails if it is ever run on the merge\n')
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "temp suite"); sh(o, "git", "push", "-q", "origin", "feat")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main"); sh(o, "git", "merge", "-q", "--no-edit", "origin/feat")
+        sh(o, "git", "push", "-q", "origin", "main")
+        put(os.path.join(o, "docs/decisions/third.md"), record("D-009", "third"))
+        sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a record"); sh(o, "git", "push", "-q", "origin", "main")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertIn("touching only paths no job of this batch reads", out)
 
     def test_an_unreadable_merge_base_is_refused(self):
         self.scoped()
