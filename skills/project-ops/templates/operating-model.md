@@ -48,7 +48,7 @@ parent, or miss a message while busy.
 - The limits are `<triage limit>` and `<batch runner limit>`.
 - Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
   re-asked question, a reply that contradicts the roadmap, or a missed ruling.
-- On a rotation, in this order:
+- On a rotation, in this order. The coordinator tells the session to rotate.
   1. The old session stops watching each page its role owns (the roadmap page, the project's
      waiting page). It notes the time, then answers each comment still open at that time on
      those pages.

@@ -9,7 +9,7 @@ From "<old session title>" at <the limit hit, or the slip>. Checked: main <commi
 
 ## State
 
-<What merged, what is in flight, and the work order now, in words.>
+<What merged, what is in flight, each wait handed over and to whom, and the work order now, in words.>
 
 ## Deferred for the owner
 
