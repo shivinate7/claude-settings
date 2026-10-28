@@ -39,8 +39,8 @@ The mockup draws with page.html's own `<style>`. The header is left as on main (
 - Check, like `focus`: a `state` with no `[data-state="<state>"]` in its mockup blocks the item:
   "The picture of option C names a state its mockup does not draw. Ask the session to fix item 4." (`#s=refused`).
   Two options with one slug and one focus but different `state` count as different pictures.
-- Rejected: postMessage. The page opens the new tab with `noopener`, so it cannot post to it,
-  and a mockup that only listens for a message shows the default state when opened from disk.
+- Rejected: postMessage. The page opens the new tab with `noopener`, so it cannot post to it.
+  A mockup that only listens for a message shows the default state when opened from disk.
 
 ## 3. Page-review fixes
 
