@@ -594,8 +594,8 @@ function designPreview(it) {
         h("button", { class: "btn quiet", type: "button", "aria-label": "Previous design", onclick: () => { i = (i + list.length - 1) % list.length; draw(); } }, "Prev"),
         h("button", { class: "btn quiet", type: "button", "aria-label": "Next design", onclick: () => { i = (i + 1) % list.length; draw(); } }, "Next"));
     }
-    bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", "aria-label": stateOf(d) ? "Open the " + stateWords(stateOf(d)) + " state in the viewer" : null, onclick: () => { const all = allDesigns(); openDesign(null, all, Math.max(0, all.findIndex((x) => x.it === it && x.slug === d.slug && stateOf(x) === stateOf(d) && x.label === d.label))); } }, stateOf(d) ? "Open this state" : "Open full size"));
-    box.replaceChildren(bar, fitFrame(d.slug, d.label, false, "", 1, null, 0, null, stateOf(d)));
+    bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", "aria-label": stateOf(d) ? "Open the " + stateWords(stateOf(d)) + " state in the viewer" : null, onclick: () => openShown(it, d) }, stateOf(d) ? "Open this state" : "Open full size"));
+    box.replaceChildren(bar, fitFrame(d.slug, designTitle(d), false, "", 1, null, 0, null, stateOf(d)));
   };
   draw(); return box;
 }
@@ -978,6 +978,8 @@ try { DESIGN_HTML = JSON.parse($("designData").textContent) || {}; } catch (e) {
 // A design may carry `state`: the mockup draws that state (an element with data-state) when its hash reads #s=<state>.
 const stateOf = (d) => (d && typeof d.state === "string" ? d.state : "");
 const stateWords = (s) => s.replace(/-/g, " ");
+// One home for a design's name with its state: the viewer title, the caption and each frame's title.
+const designTitle = (d) => d.label + (stateOf(d) ? ", " + stateWords(stateOf(d)) : "");
 const stateHash = (s) => "s=" + encodeURIComponent(s);
 // The script goes after the doctype, never before it, so the mockup keeps standards mode.
 function withState(html, state) {
@@ -1036,11 +1038,11 @@ const STAGE = {};
 // The caption repeats the title only while the head cuts it.
 function capFit() { const t = $("dTitle"); $("dCap").classList.toggle("on", t.scrollWidth > t.clientWidth); }
 const openStateLabel = (d) => "Open the " + stateWords(stateOf(d)) + " state of the full mockup in a new tab";
-function stageFrame(d) { const k = d.slug + "|" + stateOf(d); if (!STAGE[k]) { STAGE[k] = fitFrame(d.slug, d.label, false, "", 2, null, d.drawn, capFit, stateOf(d)); $("dStage").append(STAGE[k]); } return STAGE[k]; }
+function stageFrame(d) { const k = d.slug + "|" + stateOf(d) + "|" + d.label; if (!STAGE[k]) { STAGE[k] = fitFrame(d.slug, designTitle(d), false, "", 2, null, d.drawn, capFit, stateOf(d)); $("dStage").append(STAGE[k]); } return STAGE[k]; }
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
   // The head fields come first: they set the head's width, and the fit reads the stage's width.
-  const vl = d.label + (stateOf(d) ? ", " + stateWords(stateOf(d)) : ""); // one home: every viewer path shows the state
+  const vl = designTitle(d);
   $("dTitle").textContent = vl; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
   $("dCap").textContent = vl;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
@@ -1059,6 +1061,13 @@ $("dFull").onclick = () => {
   const d = dList[dAt]; if (!d) return;
   try { window.open(URL.createObjectURL(new Blob([DESIGN_HTML[d.slug] || ""], { type: "text/html" })) + (stateOf(d) ? "#" + stateHash(stateOf(d)) : ""), "_blank", "noopener"); } catch (e) {}
 };
+// A card keeps its click closures while its content is unchanged, but the items are rebuilt as new objects, so match by id, never by object.
+// No exact match: open by slug and state. No match at all: open nothing, never a wrong design.
+function openShown(it, d) {
+  const all = allDesigns(), same = (x) => x.it.id === it.id && x.slug === d.slug && stateOf(x) === stateOf(d);
+  let at = all.findIndex((x) => same(x) && x.label === d.label); if (at < 0) at = all.findIndex(same);
+  if (at >= 0) openDesign(null, all, at);
+}
 function openDesign(slug, list, at) {
   dList = list || allDesigns(); if (!dList.length) return;
   dFrom = document.activeElement; dY = scrollY; document.body.classList.add("sheet-open"); $("dsheet").hidden = false;

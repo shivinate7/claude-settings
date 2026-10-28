@@ -1683,6 +1683,25 @@ test("a front preview's Open this state opens the viewer at the design shown, ev
   assert.equal(await page.locator("#dFull").getAttribute("aria-label"), "Open the late package state of the full mockup in a new tab");
 });
 
+test("a front preview's Open this state still opens the design shown after the items are rebuilt as new objects", async (t) => {
+  const other = mk("st-first", 70, { designs: [{ slug: "s-b", label: "First item design" }] });
+  const it = looseItem();
+  const page = await open(t, { items: [other, it], designData: STATE_DATA }); if (!page) return;
+  await page.evaluate(() => { state.items = state.items.map((x) => ({ ...x })); render(); });
+  await card(page, it).locator('.dprev button[aria-label="Next design"]').click();
+  await card(page, it).locator(".dprev .dbar button").last().click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Late, late package");
+});
+
+test("each design frame's title names its state, in the viewer stage and in the front preview", async (t) => {
+  const it = looseItem();
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  assert.equal(await card(page, it).locator(".dprev iframe").getAttribute("title"), "Early, default");
+  await page.click("#tabD");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dStage > .dfitwrap:not(.off) iframe").getAttribute("title"), "Late, late package");
+});
+
 test("the Designs tab viewer also names each design's state in its title", async (t) => {
   const it = looseItem();
   const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
