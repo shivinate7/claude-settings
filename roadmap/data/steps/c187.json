@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.3383,
  "why": "From shiv's page comments, Oct 28 12:39 CDT (relayed by the orchestrator): every decision card whose options carry no differs marks shows the text \"null\". Cause: c122's difkey line in skills/waiting-page/page.html passes null to card.append, and the DOM prints it as text. Reproduced headless on c146-exact-numbers, c95-step2-bar, the d4 items and others.",
- "note": "Fix in skills/waiting-page/page.html: append the differs key only when it exists. Red first: a page test that renders a decision item with no differs marks and finds no \"null\" text. Needs no answer. Port: yes, the skill installs on every repo's page. Placed ahead of c186 and c135 (triage 11, Oct 28): a visible defect on shiv's live page, from c122. Doing: lane session_013NEJL1nK4Bpwuo2gsqVVtA, branch wp-null-fix; joins the next batch. After it merges, triage republishes the waiting page from main (c130's rule).",
+ "note": "Fix in skills/waiting-page/page.html: append the differs key only when it exists. Red first: a page test that renders a decision item with no differs marks and finds no \"null\" text. Needs no answer. Port: yes, the skill installs on every repo's page. Placed ahead of c186 and c135 (triage 11, Oct 28): a visible defect on shiv's live page, from c122. Green and reviewed (approve): draft PR #778, e1794be; joins the batch after #746. After it merges, triage republishes the waiting page from main (c130's rule).",
  "updatedAt": "2026-10-28T17:46:00Z"
 }
