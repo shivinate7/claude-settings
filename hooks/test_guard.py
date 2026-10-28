@@ -15795,7 +15795,7 @@ real_popen = subprocess.Popen
 in_popen = [0]
 
 
-# Python 3.13+ starts a Popen child through os.posix_spawn, so the os-level counters skip calls made
+# Python 3.13+ may start a Popen child through os.posix_spawn, so the os-level counters skip calls made
 # inside a counted Popen: one child counts once.
 class CountingPopen(real_popen):
     def __init__(self, *args, **kwargs):
