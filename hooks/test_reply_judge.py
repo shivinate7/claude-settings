@@ -1255,6 +1255,10 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("flag",), ("widen",), ("goes against your uniform ruling (t18)",)), sentences)
     check("prompt: a sentence spares an option where the repo changes to match",
           has_pin(sentences, ("never flag",), ("repo",), ("match",)), sentences)
+    check("prompt: a sentence judges only offered options and spares a reply that describes the rule",
+          has_pin(sentences, ("judge only",), ("options",), ("offers",)), sentences)
+    check("prompt: a sentence never flags a reply that describes the rule itself",
+          has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
 
 
 def case_widens_finding_logs_its_rule():

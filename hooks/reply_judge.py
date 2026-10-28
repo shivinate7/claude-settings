@@ -107,6 +107,7 @@ INSTRUCTIONS = (
     "such as a second accepted form, an allow-list entry or a per-repo exception. "
     "Also flag an option that widens a shared tool offered without the words \"Goes against your uniform ruling (t18)\". "
     "Never flag an option where the repo changes to match the shared format. "
+    "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )

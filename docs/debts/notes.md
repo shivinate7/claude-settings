@@ -608,3 +608,4 @@
 - waiting-stale-preview-dead-button: a design removed or changed under a kept front preview leaves the preview stale, and its "Open this state" now does nothing; the stale keep is old (skills/waiting-page/page.html patch, openShown)
 - waiting-shown-fallback-untested: no test covers openShown's slug+state fallback or its no-match branch (skills/waiting-page/tests/page.test.mjs)
 - waiting-stage-key-label: the stage frame key includes the label. So the Designs tab and an option's View build two frames for one design. A live rename leaves a hidden frame. Harm: extra iframes (skills/waiting-page/page.html showDesign)
+- uniform-pick-update-no-options: an update that sets `pick` without `options` cannot see the stored options, so a pick of a widening option passes; the writer carries `options` again (hooks/guard.py widens_pick_hit; decision uniform-over-variants)
