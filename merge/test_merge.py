@@ -2938,6 +2938,10 @@ try:
 
     elif method == "GET" and (m_run or m_sta):
         sha = (m_run or m_sta).group(1)
+        if sha != feat_head() and sha in {r[1] for r in rows}:  # another open pull request's head, read by the batch brake: nothing running on it, and the read does not count against the head's script
+            if m_run:
+                finish(listing([check_run(("checks", "pass", ""), 0)], "check_runs", params, flags, jq, cap, {"total_count": 1}), 0, include)
+            finish(listing([], "statuses", params, flags, jq, cap, {"state": "pending", "sha": sha, "total_count": 0}), 0, include)
         if sha not in set(S.get("shown", [])) | {feat_head()}:
             raise Refused(api_error(422, "No commit found for SHA: " + sha))
         cf = S.get("checks_fail")  # {"n", "msg"}: the next n reads fail with msg, then it answers
@@ -3275,10 +3279,13 @@ class GhHalf(Env):
         lane_deleted_line(self, out, "lane2")
         self.assertEqual(self.head("lane2"), "", "lane2 is still on origin")
 
-    def test_a_batch_without_lanes_makes_no_open_pr_list_call(self):
+    def test_a_batch_without_lanes_reads_no_open_pr_list_after_the_merge(self):
+        # confirm reads the open pull list before the merge, for the batch brake. Only list reads after the PUT count here.
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertNotIn(LIST_CALL, self.calls())
+        lines = self.calls().splitlines()
+        put = next(i for i, l in enumerate(lines) if l.startswith(MERGE_CALL))
+        self.assertEqual([l for l in lines[put + 1:] if l.startswith(LIST_CALL)], [], self.calls())
 
     def test_5_base_aware_protection_mode_reads_the_protection_of_the_base(self):
         sh(self.other, "git", "fetch", "-q", "origin")
@@ -8199,6 +8206,8 @@ class CapsHost(merge.Host):
             return 0, REST.listing(rows, "check_runs", params, flags, jq, 100, {"total_count": len(rows)})
         if method == "GET" and rel == f"commits/{HEAD_SHA}/status":
             return 0, REST.listing([], "statuses", params, flags, jq, 100, {"state": "pending", "total_count": 0})  # GitHub's combined state for no statuses
+        if method == "GET" and rel == "pulls":  # the batch read: no other open pull request in these cases
+            return 0, REST.listing([], None, params, flags, jq, 100)
         raise AssertionError(f"unexpected gh call: {args}")
 
 
