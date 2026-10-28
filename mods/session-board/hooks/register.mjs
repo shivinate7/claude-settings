@@ -6,7 +6,7 @@ import {
   AGENTS_TIMEOUT_MS, GC_MS, GIT_IDLE_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
   agentRows, configDir, mergeRows, num, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
-  GUARD_PY, QUESTION_RULE, liveAgentCount, questionRefusal, trackedTaskIds, taskNotice,
+  GUARD_PY, QUESTION_RULE, answered, liveAgentCount, questionRefusal, startedCount, startsSession, trackedTaskIds, taskNotice,
 } from './lib.mjs'
 
 const PANE = 'session-board'
@@ -25,6 +25,7 @@ let lastDetail = '' // the detail record as last written, without its stamp
 let board = null // { rows, band, note, now, hidden }
 let view = { id: null, detail: null } // id null: all-sessions view
 const bgTasks = new Set() // background command and workflow task ids seen to start and not yet seen to end
+let started = 0 // sessions this one started; never falls, and rides in the board record across a reload
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -103,6 +104,10 @@ export function register(on) {
       const out = result && result.result
       const task = e.tool === 'Bash' ? out && out.backgroundTaskId : e.tool === 'Workflow' ? out && out.taskId : undefined
       if (typeof task === 'string') bgTasks.add(task)
+      if (startsSession(e.tool) && answered(result)) {
+        started++
+        await soon($, flush($, false)) // the count reaches the board record now, not at the next beat
+      }
       return result
     } finally {
       try { if (tracker.toolCall(e.tool_use_id)) await soon($, flush($, false)) } catch { /* ignore */ }
@@ -110,11 +115,16 @@ export function register(on) {
   }).catch(($, e, next) => next(e))
 
   // The question-box check: refuse AskUserQuestion while this session's agents or background
-  // tasks run. Reads the agent list once per box, on demand; no timer, no new process unless it
-  // writes a guard.log line. An unreadable list fails open and says unknown.
+  // tasks run, or once it has started another session. Reads the agent list once per box, on
+  // demand, and not at all once a session was started; no timer, no new process unless it writes a
+  // guard.log line. An unreadable list fails open and says unknown.
   on('tool.check', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const result = await next(e)
     if (result && result.decision === 'deny') return result
+    if (started) {
+      await soon($, guardLog($, 'deny', `started=${started} tasks=${bgTasks.size}`))
+      return { decision: 'deny', reason: questionRefusal(0, bgTasks.size, started) }
+    }
     let agents
     try {
       agents = liveAgentCount(await bounded($, $.agent.list()), e.agentId)
@@ -197,8 +207,17 @@ async function startUp($) {
   await setRepo($)
   if (beat) beat.cancel()
   beat = $.clock.every(HEARTBEAT_MS, () => { void tick($) })
-  // The first reading and the sweep of killed sessions' entries share one wait of GRACE_MS.
-  await soon($, Promise.all([refreshAll($, true), sweepAll($)]))
+  // The start count comes back from the board record first, so the first write keeps it. Then the
+  // first reading and the sweep of killed sessions' entries; all share one wait of GRACE_MS.
+  await soon($, (async () => { await loadStarted($); await Promise.all([refreshAll($, true), sweepAll($)]) })())
+}
+
+// After a mod reload: this session's start count, from its own board record. Never lowers it.
+async function loadStarted($) {
+  try {
+    const id = await ident($)
+    if (isSessionId(id)) started = Math.max(started, startedCount(await bounded($, $.store.get('sess:' + id))))
+  } catch (err) { note($, 'start count read failed: ' + (err && err.message)) }
 }
 
 async function setRepo($) {
@@ -274,7 +293,9 @@ async function flush($, withDetail) {
     retired.delete(id) // the host answers this id as current
     const now = await $.clock.now()
     if (ended) return
-    await $.store.set('sess:' + id, tracker.entry(now))
+    const entry = tracker.entry(now)
+    if (started) entry.started = started
+    await $.store.set('sess:' + id, entry)
     if (withDetail && !gone(id)) {
       const detail = tracker.detail(now)
       const key = id + JSON.stringify({ ...detail, at: 0 })
