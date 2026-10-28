@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423 (home merged in)",
+    "asOf": "Measured Oct 28: claude-settings a065acd, banchi 63014cf, q_max d3a047a, home-app 9904cac (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Oct 27 at claude-settings d4e1b86",
+    "asOf": "Measured Oct 28 at claude-settings a065acd",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Oct 27: claude-settings d4e1b86, banchi fbb9200, q_max b47bd00, home-app 53ca423 (home merged in)",
+    "asOf": "Measured Oct 28: claude-settings a065acd, banchi 63014cf, q_max d3a047a, home-app 9904cac (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -68,7 +68,7 @@
         "label": "Biggest CLAUDE.md, lines",
         "rule": "banchi 402 (Oct 27, fbb9200), q_max 182, claude-settings 106, home-app 15",
         "target": "200 or fewer",
-        "value": 402
+        "value": 403
       },
       {
         "label": "Remote branches, claude-settings",
@@ -78,9 +78,10 @@
           26,
           31,
           36,
-          55
+          55,
+          79
         ],
-        "value": 55
+        "value": 79
       },
       {
         "label": "Repos with a living roadmap page",
@@ -91,7 +92,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Oct 27: q_max b47bd00, home-app 53ca423",
+    "asOf": "Measured Oct 28: q_max d3a047a, home-app 9904cac",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
@@ -110,7 +111,7 @@
         "label": "home-app padding or spacing literals",
         "rule": "Views.swift (2,701 lines, Oct 25, 65315da): .padding(...) or spacing: calls with a number, counted per match. The Oct 17 audit counted about 95 another way (r3)",
         "target": "0",
-        "value": 168
+        "value": 176
       },
       {
         "label": "home-app web border radii",
