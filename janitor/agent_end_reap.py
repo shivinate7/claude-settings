@@ -18,12 +18,16 @@ A process is stopped only when all of these answer a confirmed yes:
 
 Any read that cannot tell means keep. One signal, by pid, through `sweep.send_signal`.
 
-Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): when the gates above hold for the whole
-worktree, the reap also renames each build folder (`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to
-a sibling trash name, then starts a detached child that deletes the trash. The hook never waits for
-the child. Every build folder stays while the reap keeps any process in the worktree. A folder with
-a process cwd inside, a link, or any unreadable read stays. A later reap
-deletes trash names a child left.
+Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): the ending agent's own tree keeps
+its build folders, since a finished agent is often resumed there. A later agent end reaps them once the
+tree is idle 30 minutes. The worktree stage gives each other `.claude/worktrees/agent-*` tree it keeps a
+build pass when that tree is idle AGENT_END_IDLE_SECONDS or more, holds no live lock, has no live
+session, and no process has a cwd anywhere in it (`build_keep`). A build runs from the worktree root,
+so a cwd check on the folder alone is not enough. The pass renames each build folder
+(`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to a sibling trash name, then starts a detached child that
+deletes the trash, and leftover trash names go with it. The hook never waits for the child. A folder
+with a process cwd inside, a link, or any unreadable read stays. A tree the stage deadline does not
+reach keeps its folders. A tree the stage removes whole needs no pass.
 
 Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
 the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
@@ -241,17 +245,19 @@ DELETE_CHILD = ("import os, shutil, stat, sys\n"
 trash_name, is_trash_name = sweep.trash_name, sweep.is_trash_name  # one home: sweep.py
 
 
-def reap_build_dirs(target: str, cwds):
+def reap_build_dirs(target: str, cwds, stop_at=None):
     """Rename each proven build folder in TARGET to a trash name, then start one detached child
     that deletes those and every leftover trash name. Returns the folders renamed. The caller has
-    proven the worktree gates; this proves the folder gates: no link, no process cwd inside."""
+    proven the worktree gates; this proves the folder gates: no link, no process cwd inside. The
+    scan stops at BUILD_SCAN_SECONDS or at STOP_AT (a `time.monotonic` time), whichever is first."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     names = sweep.build_dir_names(sweep.read_optout(root))
     if names is None:  # bad file: nothing, defaults included
         return []
     if sweep.is_link(target):  # a link as the worktree would send the rename and delete elsewhere
         return []
-    builds, trash = sweep.scan_worktree(target, names, time.monotonic() + BUILD_SCAN_SECONDS)
+    stop = time.monotonic() + BUILD_SCAN_SECONDS
+    builds, trash = sweep.scan_worktree(target, names, stop if stop_at is None else min(stop, stop_at))
 
     def busy(folder):
         return any(sweep._cwd_under_checkout(c, folder) for c in cwds)
@@ -285,12 +291,41 @@ HOOK_BUDGET = 45  # the stage never runs past this many seconds after the hook s
 OWN_TREE_REASON = "own tree: kept for 30 idle min"  # decision when-a-worktree-may-be-removed (own tree waits 30 idle min); a later agent end removes it
 
 
-def reap_worktrees(target: str, deadline: float):
-    """Keep TARGET (the ending agent's own worktree; a later agent end removes it once idle) and remove
-    every other finished `.claude/worktrees/agent-*` worktree of its repository, idle 30 minutes or
-    more, that `sweep.decide_agent_end_worktree` clears. Returns one row for TARGET, one per other
-    tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short."""
-    rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON}]
+def build_keep(entry: dict, idle, cwds):
+    """Why the other agent tree ENTRY keeps its build folders, or None when every gate gives a
+    confirmed yes. IDLE is the tree's idle read, taken before any `git status`. CWDS is every
+    process cwd the hook read. The reap stops no process in this tree, so any process with a cwd
+    anywhere in it keeps every folder: a build runs from the worktree root."""
+    path = entry["path"]
+    if idle is None:
+        return "unreadable-subject: idle"
+    if idle < sweep.AGENT_END_IDLE_SECONDS:
+        return "recently-active: git activity %d minutes ago" % (idle // 60)
+    holder = entry.get("locked_reason")
+    if holder is not None and sweep.stale_agent_lock_verdict(holder or "locked") is not True:
+        return "locked: %s" % (holder or "locked")
+    live = git_reads.worktree_live_session(path)
+    if live is None:
+        return "unreadable-subject: session"
+    if live:
+        return "live-session"
+    if cwds is None:
+        return "unreadable-subject: processes"
+    if any(sweep._cwd_under_checkout(c, path) for c in cwds):
+        return "process-in-worktree"
+    return None
+
+
+def reap_worktrees(target: str, deadline: float, cwds=None):
+    """Keep TARGET (the ending agent's own worktree and its build folders; a later agent end removes
+    them once idle) and remove every other finished `.claude/worktrees/agent-*` worktree of its
+    repository, idle 30 minutes or more, that `sweep.decide_agent_end_worktree` clears. Each other
+    tree it keeps gets a build pass when `build_keep` clears it; CWDS is every process cwd the hook
+    read. Returns one row for TARGET, one per other tree decided, plus one row when DEADLINE (a
+    `time.monotonic` time) cut the stage short. A tree's row carries `buildDirs` (folders renamed)
+    or `buildDirsKept` (why not)."""
+    rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON,
+             "buildDirsKept": OWN_TREE_REASON}]
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     entries = sweep.parse_worktree_list(root)
     if entries is None:
@@ -304,9 +339,19 @@ def reap_worktrees(target: str, deadline: float):
             if time.monotonic() > deadline:
                 rows.append({"action": "keep", "reason": "budget: %d trees not reached" % (len(queue) - done)})
                 break
+            # Idle is read once, before `git status` in the decision can rewrite the index.
+            entry = dict(entry, idle=sweep.worktree_idle_seconds(entry["path"]))
             decision = sweep.decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)
             if decision["action"] == "reap":
                 sweep.remove_worktree(root, entry["path"], decision)
+            elif time.monotonic() > deadline:
+                decision["buildDirsKept"] = "budget"
+            else:
+                kept = build_keep(entry, entry["idle"], cwds)
+                if kept:
+                    decision["buildDirsKept"] = kept
+                else:
+                    decision["buildDirs"] = reap_build_dirs(entry["path"], cwds, deadline)
             rows.append(decision)
     finally:
         sweep._LIVE_HEADS = None
@@ -331,15 +376,9 @@ def handle(raw: str, started=None):
     # claudePid: whether the harness sets CLAUDE_PID in a SubagentStop hook's env is not measured.
     record.update(reason=reason, decisions=decisions, claudePid=os.environ.get("CLAUDE_PID"))
     if reason is None:
-        # A build runs from the worktree root (xcodebuild, swift build), not from inside the folder
-        # it writes. Any process the reap keeps in the worktree means a build may be writing.
-        if any(d["action"] != "reap" for d in decisions):
-            record["buildDirs"], record["buildDirsKept"] = [], "process-in-worktree"
-        else:
-            record["buildDirs"] = reap_build_dirs(target, cwds)
         now = time.monotonic()
         deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
-        record["worktrees"] = reap_worktrees(target, deadline)
+        record["worktrees"] = reap_worktrees(target, deadline, cwds)
     return record
 
 
