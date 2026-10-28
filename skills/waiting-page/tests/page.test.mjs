@@ -1236,9 +1236,11 @@ for (const width of [390, 1440]) {
   });
 }
 
-test("a viewer at 520 wide or less names the design in a one-line caption above it", async (t) => {
+test("a viewer whose head cuts the title names the design in a one-line caption above it", async (t) => {
   const it = viewerItem();
   const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  // Stand-in for CI's wider fallback font, so the head cuts "Layout A (Phone)" at 390.
+  await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
   await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
   const cap = page.locator("#dCap");
   assert.equal(await cap.isVisible(), true, "no caption in the viewer");
@@ -1248,7 +1250,9 @@ test("a viewer at 520 wide or less names the design in a one-line caption above 
   assert.ok(m.capH < 30, "the caption is more than one line: " + m.capH);
   assert.ok(m.right <= m.vw + 0.5, "the mockup is cut");
   await page.setViewportSize({ width: 1440, height: 900 });
-  assert.equal(await cap.isVisible(), false, "the caption shows on a wide screen");
+  // The resize observer hides the caption a frame after the resize.
+  await page.waitForFunction(() => { const c = document.querySelector("#dCap"); return getComputedStyle(c).display === "none"; }, null, { timeout: 2000 }).catch(() => {});
+  assert.equal(await cap.isVisible(), false, "the caption shows on a wide screen, where the title fits");
 });
 
 // The caption names the design whenever the head cuts the title, and only then (design review round 2).

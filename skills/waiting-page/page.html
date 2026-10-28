@@ -245,8 +245,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
 .dsh-body .dfitwrap { width: min(100%, 780px); }
 .dsh-body .dfitwrap.off { display: none; }
-.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
-@media (max-width: 520px) { .dcap { display: block; } }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
 body.sheet-open { overflow: hidden; }
 </style>
 
@@ -928,13 +929,15 @@ const saveFit = () => { try { localStorage.setItem("waiting.fit", JSON.stringify
 const fitScript = (focus) => '<script>(function(){var F=' + JSON.stringify(focus || "").replace(/</g, "\\u003c") + ';function s(){var f=null;try{var e=F&&document.querySelector(F);if(e){var r=e.getBoundingClientRect();f={x:r.left+scrollX,y:r.top+scrollY,w:r.width,h:r.height}}}catch(x){}parent.postMessage({dfit:1,h:Math.ceil(document.documentElement.scrollHeight),f:f},"*")}addEventListener("load",s);if(window.ResizeObserver)new ResizeObserver(s).observe(document.documentElement)})()<\/script>';
 // `size` ({w, h}) is the declared size of what the card shows: the focused element, else the whole mockup. It holds the height until the mockup reports its own.
 // `drawn` is the width in mockup pixels the design is laid out at (default FIT_W). The frame has that width, and the scale is the width it has divided by it.
-function fitFrame(slug, title, inert, focus, maxScale, size, drawn) {
+// `head` (the viewer's) runs before each fit, and the same observer watches the viewer title, so a caption shown or hidden is fitted around.
+function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head) {
   const DW = drawn > 0 ? drawn : FIT_W, key = slug + "|" + (focus || "");
   const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
   f.srcdoc = (DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>") + fitScript(focus);
   f.style.width = DW + "px";
   const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
   const fit = () => {
+    if (head) head();
     const c = FIT[key], ww = wrap.clientWidth || DW;
     const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
     const ht = c ? c.h : (!focus && size ? size.h : 200);
@@ -949,7 +952,7 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn) {
     }
   };
   FITS.push({ f, key, fit });
-  if (window.ResizeObserver) new ResizeObserver(fit).observe(wrap);
+  if (window.ResizeObserver) { const ro = new ResizeObserver(fit); ro.observe(wrap); if (head) ro.observe($("dTitle")); }
   fit(); return wrap;
 }
 window.addEventListener("message", (e) => {
@@ -962,7 +965,9 @@ window.addEventListener("message", (e) => {
 // The sheet's frames are built once and only shown or hidden, so paging never reloads a mockup and closing leaves the list where it was.
 let dList = [], dAt = 0, dFrom = null, dY = 0;
 const STAGE = {};
-function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = fitFrame(d.slug, d.label, false, "", 2, null, d.drawn); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
+// The caption repeats the title only while the head cuts it.
+function capFit() { const t = $("dTitle"); $("dCap").classList.toggle("on", t.scrollWidth > t.clientWidth); }
+function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = fitFrame(d.slug, d.label, false, "", 2, null, d.drawn, capFit); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
   // The head fields come first: they set the head's width, and the fit reads the stage's width.
