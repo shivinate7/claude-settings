@@ -2,8 +2,8 @@
  "title": "The shared browser setup can install WebKit's system libraries, on request",
  "order": 103.371,
  "why": "joyous PR 47 (run 40653154924, Oct 28): WebKit on ubuntu-latest lacks libgtk-4 and more, so 228 WebKit tests were cancelled; actions/playwright-setup runs no apt step by decision one-browser-setup-no-apt.",
- "note": "Next cloud lane: actions/playwright-setup gains an opt-in system-deps input that runs playwright install-deps for the named browser under its own short time cap; chromium stays apt-free. Decision one-browser-setup-no-apt is rewritten in place: no apt for chromium; WebKit and Firefox may opt in. Red first on a WebKit run with the input off. Needs no answer. Port: yes, joyous first (its c78 lane), then any repo testing WebKit. Placed ahead of c127, after c78 (triage, Oct 28): joyous's c78 lane waits on it. Doing: builder lane started Oct 28 (session_013NEJL1AYjyQ2NRN9vRWYzr).",
+ "note": "Next cloud lane: actions/playwright-setup gains an opt-in system-deps input that runs playwright install-deps for the named browser under its own short time cap; chromium stays apt-free. Decision one-browser-setup-no-apt is rewritten in place: no apt for chromium; WebKit and Firefox may opt in. Red first on a WebKit run with the input off. Needs no answer. Port: yes, joyous first (its c78 lane), then any repo testing WebKit. Placed ahead of c127, after c78 (triage, Oct 28): joyous's c78 lane waits on it. Green: PR #757 (cd86879), ready for batch 6; decision one-browser-setup-no-apt rewritten in place. A real WebKit launch is proven only when joyous's c78 lane moves its pin after #757 merges.",
  "phase": "cleanup",
  "status": "doing",
- "updatedAt": "2026-10-28T08:50:49Z"
+ "updatedAt": "2026-10-28T08:57:34Z"
 }
