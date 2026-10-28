@@ -613,3 +613,4 @@
 - waiting-shown-fallback-untested: no test covers openShown's slug+state fallback or its no-match branch (skills/waiting-page/tests/page.test.mjs)
 - waiting-stage-key-label: the stage frame key includes the label. So the Designs tab and an option's View build two frames for one design. A live rename leaves a hidden frame. Harm: extra iframes (skills/waiting-page/page.html showDesign)
 - readme-links-unreachable-forms: the link check still fetches odd IP forms (127.1, decimal, octal), CGNAT 100.64/10 and single-label hosts, and a bracketed IPv6 URL crashes it (the URL regex stops at `]`); main does the same (actions/readme-links/readme_links.py skip_reason, alive)
+- uniform-pick-update-no-options: an update that sets `pick` without `options` cannot see the stored options, so a pick of a widening option passes; the writer carries `options` again (hooks/guard.py widens_pick_hit; decision uniform-over-variants)

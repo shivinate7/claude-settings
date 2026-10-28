@@ -1826,3 +1826,17 @@ test("a named picture's not-equal sign sits inside its View bar", async (t) => {
   }, it.id);
   assert.ok(m.n[0] >= m.v[0] - 0.5 && m.n[2] <= m.v[2] + 0.5 && m.n[1] >= m.v[1] - 0.5 && m.n[3] <= m.v[3] + 0.5, "the sign is outside the View bar: " + JSON.stringify(m));
 });
+
+// ---------------------------------------------------------------- c139: an option that widens a shared tool
+
+test("an option that widens a shared tool says it goes against the uniform ruling; other options do not", async (t) => {
+  const it = mk("wide-q", 79, { pick: "b", options: [
+    { key: "a", label: "Let the tool accept a second form", how: "h", gain: "g", lose: "l", widens: true },
+    { key: "b", label: "The repo matches the shared form", how: "h", gain: "g", lose: "l" },
+  ] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const a = card(page, it).locator('label.opt[for="o-wide-q-a"]'), b = card(page, it).locator('label.opt[for="o-wide-q-b"]');
+  assert.equal(await a.locator(".widens").count(), 1, "the widening option carries no label");
+  assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your uniform ruling (t18)");
+  assert.equal(await b.locator(".widens").count(), 0, "an option that does not widen is labelled");
+});
