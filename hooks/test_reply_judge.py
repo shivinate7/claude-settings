@@ -1165,6 +1165,9 @@ def case_blocked_on_reply_is_judged_off_sample():
     run, _ = second_stop("Plan: the work is blocking nothing; unblocked and moving.", label="c148-none",
                          session="c148-none")
     check("blocked on: a reply without the words is not judged off-sample", len(run.calls) == 0, run.calls)
+    run, _ = second_stop("Plan: the test went green, unblocked on retry.", label="c148-unblocked",
+                         session="c148-unblocked")
+    check("blocked on: unblocked on retry is not judged off-sample", len(run.calls) == 0, run.calls)
 
 
 def case_prompt_flags_a_port_question_marked_blocking():

@@ -384,7 +384,8 @@
     "building-port-keeps-behaviour": {
       "mechanism": {
         "kind": "guard",
-        "ref": "port-question"
+        "ref": "port-question",
+        "reason": "The guard refuses a port item on the repo's waiting page with no Departs from line or with holds. It cannot read intent, so the reply judge (hooks/reply_judge.py, a model, never blocks) notes a reply that marks work blocked on a port question."
       },
       "test": "hooks/test_guard.py::port question: today's item (port words, no Departs from, holds) is denied"
     },

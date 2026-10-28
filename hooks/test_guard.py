@@ -11274,7 +11274,12 @@ PQ_TITLE = "What happens to Suspense cards when Card in Hand closes?"
 PQ_CTX = "Duo Card in Hand ports the web app's Card in Hand screen."
 PQ_DEPARTS = "Departs from: web/src/cardInHand.ts:closeCardInHand \u2014 Suspense cards stay in Suspense"
 PQ_HOLDS = "Card in Hand plan is blocked on this."
-PQ_URL = "https://claude.ai/artifact/x"
+PQ_URL = "https://claude.ai/artifact/pqpage"   # the waiting page of the fixture repo below
+PQ_REPO = os.path.join(ROOT, "pqrepo")
+os.makedirs(os.path.join(PQ_REPO, ".git"), exist_ok=True)
+os.makedirs(os.path.join(PQ_REPO, ".claude"), exist_ok=True)
+with open(os.path.join(PQ_REPO, ".claude", "layout-extras.json"), "w", encoding="utf-8") as _f:
+    json.dump({"kinds": {}, "waiting-page": PQ_URL}, _f)
 
 
 def pq_item(**over):
@@ -11288,7 +11293,7 @@ def pq(name, expected, item, action="set", **extra):
     kw = dict(action=action, collection="items", doc_id="suspense-cards", data=item)
     kw.update(extra)
     add("port question: " + name, expected, "port-question" if expected == "deny" else None,
-        tool="ArtifactData", url=PQ_URL, **kw)
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
 
 
 PQ_GOOD = pq_item(port=True, context=PQ_CTX + "\n" + PQ_DEPARTS, holds=None)
@@ -11306,6 +11311,17 @@ pq("a Departs from phrase mid-line does not count", "deny",
 pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False))
 pq("a non-port item with holds is allowed", "allow",
    pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits."))
+pq("a database port question is not a port of an app", "allow",
+   pq_item(title="Which port should Postgres use?", context="Postgres needs a port.", holds="Setup waits."))
+pq("switch ports in a rack are not a port of an app", "allow",
+   pq_item(title="Patch switch ports in rack A3", context="Rack A3 needs patching.", holds="Cabling waits."))
+pq("a taken port is not a port of an app", "allow",
+   pq_item(title="Dev setup", context="The port is taken.", holds="Setup waits."))
+pq("the incident's own wording is a known limit and is allowed", "allow",
+   pq_item(title="Suspense cards when Card in Hand closes",
+           context="Duo version of the web screen.", holds="Card in Hand plan waits."))
+pq("an item with no kind is allowed", "allow", pq_item(kind=None))
+pq("an items set to another artifact is allowed", "allow", pq_item(), url="https://claude.ai/artifact/other")
 pq("a dev server port is not a port of an app", "allow",
    pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None))
 pq("a port number is not a port of an app", "allow",
@@ -11323,10 +11339,10 @@ pq("an update that changes a status only is allowed", "allow", {"status": "close
 pq("an update that carries no port fields is allowed on today's item", "allow",
    {"rank": 3}, action="update")
 add("port question: a batch with today's item among the sets is denied", "deny", "port-question",
-    tool="ArtifactData", url=PQ_URL, action="batch",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
             {"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": pq_item()}])
-add("port question: a batch of good sets is allowed", "allow", tool="ArtifactData",
+add("port question: a batch of good sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": PQ_GOOD}])
 os.makedirs(os.path.join(ROOT, "pq"), exist_ok=True)
@@ -11337,18 +11353,46 @@ with open(PQ_FILE_BAD, "w", encoding="utf-8") as _f:
 with open(PQ_FILE_GOOD, "w", encoding="utf-8") as _f:
     json.dump(PQ_GOOD, _f)
 add("port question: file_path data with today's item is denied", "deny", "port-question",
-    tool="ArtifactData", url=PQ_URL, action="set", collection="items",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set", collection="items",
     doc_id="suspense-cards", file_path=PQ_FILE_BAD)
-add("port question: file_path data that departs is allowed", "allow", tool="ArtifactData",
+add("port question: file_path data that departs is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards", file_path=PQ_FILE_GOOD)
-add("port question: an unreadable file_path fails open", "allow", tool="ArtifactData",
+add("port question: an unreadable file_path fails open", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards",
     file_path=os.path.join(ROOT, "pq", "missing.json"))
 add("port question: the refusal says what to add", "deny", "port-question",
-    carries=("Departs from:", "holds", "port"), tool="ArtifactData", url=PQ_URL, action="set",
+    carries=("Departs from:", "holds", "port"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="suspense-cards", data=pq_item())
-add("port question: a read is allowed", "allow", tool="ArtifactData", url=PQ_URL, action="list",
+add("port question: a read is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="list",
     collection="items")
+
+
+add("port question: a repo with no waiting page allows today's item", "allow", tool="ArtifactData",
+    cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id="suspense-cards", data=pq_item())
+
+
+def port_get_logs_nothing_case():
+    """An ArtifactData read starts the guard and is allowed, and the guard writes no log line."""
+    path = os.path.join(LOGDIR, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = LOGDIR
+    run = subprocess.run(
+        [sys.executable, GUARD],
+        input=json.dumps({"tool_name": "ArtifactData", "cwd": PQ_REPO,
+                          "tool_input": {"action": "get", "url": PQ_URL, "collection": "items",
+                                         "doc_id": "suspense-cards"}}),
+        capture_output=True, text=True, env=env, timeout=60)
+    if run.stdout.strip():
+        return False, "the read printed %r" % run.stdout[:80]
+    if os.path.exists(path) and open(path, encoding="utf-8").read().strip():
+        return False, "the read wrote a guard.log line"
+    return True, "the read is allowed and writes no line"
+
+
+LOG_CHECKS_EXTRA.append(("port question: an ArtifactData get is allowed and writes no guard.log line",
+                         port_get_logs_nothing_case))
 
 
 # --------------------------------------------------------------------------- the runner

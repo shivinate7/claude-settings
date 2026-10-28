@@ -2476,7 +2476,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # the question. The item is read at the ArtifactData call that writes it.
 DATA_TOOL = "ArtifactData"
 WAITING_ITEMS = "items"
-PORT_WORD = re.compile(r"\b(?:ports?|ported|porting|redesign(?:s|ed)?)\b(?!\s*(?:\d|number))", re.I)
+PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|redesign(?:s|ed|ing)?"
+                       r"|rewrite\s+of|rebuild\s+of)\b", re.I)
 DEPARTS_LINE = re.compile(r"^\s*Departs from:", re.I | re.M)
 PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
                "departs from the app, and it never holds work. Add a line to context that starts "
@@ -2490,7 +2491,9 @@ def _item_text(data) -> str:
 
 def port_item_hit(op: str, data) -> str:
     """The matched text when this write of a waiting item is a port question that skips the rule."""
-    if not isinstance(data, dict) or data.get("kind", "decision") not in ("decision", "task"):
+    if not isinstance(data, dict) or ("kind" in data and data["kind"] not in ("decision", "task")):
+        return ""
+    if op == "set" and "kind" not in data:
         return ""
     if "port" in data:
         on_port = bool(data["port"])
@@ -2518,18 +2521,45 @@ def _write_data(entry):
     return data
 
 
-def data_tool_hit(tool_input) -> str:
+def _is_waiting_page(tool_input, cwd) -> bool:
+    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
+    with no page reads as unknown, and its calls are not judged."""
+    lint = os.path.join(_HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    root = _git_root_of(cwd)
+    page = layout.waiting_page(root) if root else "unknown"
+    url = str(tool_input.get("url") or "").rstrip("/")
+    return page != "unknown" and url == page.rstrip("/")
+
+
+def _git_root_of(cwd):
+    here = os.path.realpath(cwd or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def data_tool_hit(tool_input, cwd="") -> str:
     if not isinstance(tool_input, dict):
         return ""
     if tool_input.get("action") == "batch":
         entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
     else:
         entries = [(tool_input.get("action"), tool_input)]
-    for op, entry in entries:
-        if op in ("set", "update") and entry.get("collection") == WAITING_ITEMS:
-            hit = port_item_hit(op, _write_data(entry))
-            if hit:
-                return hit
+    writes = [(op, e) for op, e in entries
+              if op in ("set", "update") and e.get("collection") == WAITING_ITEMS]
+    if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
+        return ""
+    for op, entry in writes:
+        hit = port_item_hit(op, _write_data(entry))
+        if hit:
+            return hit
     return ""
 
 
@@ -2817,7 +2847,7 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
-        matched = data_tool_hit(tool_input)
+        matched = data_tool_hit(tool_input, cwd)
         if matched:
             refuse(tool, "deny", "port-question", PORT_REASON, matched)
         return
