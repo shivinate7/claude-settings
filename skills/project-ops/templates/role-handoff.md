@@ -19,6 +19,14 @@ From "<old thread title>" at <the limit hit, or the slip>. Checked: main <commit
 
 <Each tool or process trap that cost time, and how to avoid it.>
 
+## Pages
+
+Watches stopped at <time>
+
+<The URL of each page this role owns. The old thread stopped watching each one at that time,
+answered each comment still open at that time, then wrote this file. The successor watches
+each one at once, and reads its comments since that time.>
+
 ## Threads
 
 <Each running thread this role talks to, by title.>
