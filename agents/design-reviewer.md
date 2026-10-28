@@ -38,7 +38,7 @@ Give a verdict per screen at each size and theme: pass or fail, never a descript
 against points 2 and 3 only.
 
 In an iOS repo (skill `ios-apps`, section Mockups), read that section first. Then give one more line per
-screen, built screen or mockup: `native` or `web-like`, with the reason. `native` means the screen uses
+screen, built screen or mockup: `native` or `web-like`, with the reason. `native` means that the screen uses
 the controls and proportions that section names. `web-like` names the part that a web page has and an
 iPhone app does not, and is a finding.
 
