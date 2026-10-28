@@ -1,9 +1,9 @@
 {
  "title": "q_max re-pins code-check and drops its .onnx and .npz excludes",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.338999,
  "why": "Follow-up to c183 and c127 (orchestrator, Oct 28 10:05 CDT): once main's code check skips .onnx and .npz, q_max's own excludes for them are redundant.",
- "note": "Next cloud lane, in q_max, through a PR: read q_max's open branches and PRs first; bump the code-check pin to the main commit that carries c183; remove the .onnx and .npz entries from the exclude list (the list only shrinks). Red first: the pinned check passes with the entries gone. Small; the orchestrator merges under item 2 a. Needs no answer. Port: q_max only. Due after: c183 (#776) merges. Placed after c183 (triage 11, Oct 28): it needs c183's commit.",
- "updatedAt": "2026-10-28T15:08:00Z"
+ "note": "Next cloud lane, in q_max, through a PR: read q_max's open branches and PRs first; bump the code-check pin to the main commit that carries c183; remove the .onnx and .npz entries from the exclude list (the list only shrinks). Red first: the pinned check passes with the entries gone. Small; the orchestrator merges under item 2 a. Needs no answer. Port: q_max only. Due after: c183 (#776) merges. Placed after c183 (triage 11, Oct 28): it needs c183's commit. Doing: lane 013NEJL22mSn, Oct 28 14:10 CDT.",
+ "updatedAt": "2026-10-28T19:25:00Z"
 }
