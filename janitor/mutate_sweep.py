@@ -809,8 +809,8 @@ MUTATIONS = [
 
     ('build dirs: a live session in another idle tree no longer keeps its folders',
      'agent_end_reap',
-     '    if live:\n        return "live-session"\n    edited = ',
-     '    if False:\n        return "live-session"\n    edited = ',
+     '    if live:\n        return "live-session", None\n    edited = ',
+     '    if False:\n        return "live-session", None\n    edited = ',
      'test_a_live_session_inside_the_worktree_keeps_everything'),
 
     ('build dirs: a live build run from another tree\'s root loses its folder',
@@ -828,10 +828,28 @@ MUTATIONS = [
 
     ('build dirs: the build pass uses no fresh process read',
      'agent_end_reap',
-     '                cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
-     '                cwds = []',
+     '    cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
+     '    cwds = []',
      'test_a_build_started_during_the_hook_keeps_its_build_folders',
      "posix"),
+
+    ('build dirs: an unreadable stat or a spent deadline in the edit read reaps',
+     'agent_end_reap',
+     '    except OSError:\n        return None\n    return float("inf")',
+     '    except OSError:\n        pass\n    return float("inf")',
+     'test_edit_idle_keeps_on_an_unreadable_stat_or_a_spent_deadline'),
+
+    ('build dirs: a deletion counts by the files under its parent, not the parent itself',
+     'agent_end_reap',
+     '                    return None\n                found = info.st_mtime',
+     '                    return None\n                found = None',
+     'test_a_tracked_file_deleted_5_minutes_ago_keeps_the_build_folders'),
+
+    ('build dirs: the repository setting hides untracked files from the edit read',
+     'agent_end_reap',
+     '"--porcelain", "-z", "--untracked-files=normal")',
+     '"--porcelain", "-z")',
+     'test_show_untracked_files_no_cannot_hide_a_fresh_file'),
 
     ('build dirs: the idle read moves after git status',
      'agent_end_reap',
@@ -849,7 +867,7 @@ MUTATIONS = [
 
     ('build dirs: an unreadable idle read reaps as idle',
      'agent_end_reap',
-     '        return "unreadable-subject: idle"',
+     '        return "unreadable-subject: idle", None',
      '        idle = float("inf")',
      'test_an_unreadable_idle_read_keeps_the_build_folders'),
 

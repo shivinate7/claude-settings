@@ -329,31 +329,66 @@ def _newest_under(folder: str, path: str, names, deadline: float):
     return newest
 
 
+def changed_paths(path: str):
+    """The paths `git status` lists as changed or untracked in PATH, relative and `/`-separated, or
+    None when it cannot be read. `-z` gives each path exactly, with no quoting. Untracked files show
+    whatever the repository's `status.showUntrackedFiles` says; a folder of only untracked files
+    shows as the folder."""
+    answer = git_reads._git(path, "status", "--porcelain", "-z", "--untracked-files=normal")
+    if answer is None or answer.returncode != 0:
+        return None
+    fields, paths = answer.stdout.split("\0"), []
+    rename_source = False
+    for field in fields:
+        if rename_source:  # `-z` puts a rename's source path in the next field
+            rename_source = False
+            continue
+        if len(field) < 4:
+            continue
+        paths.append(field[3:])
+        rename_source = field[0] in "RC"
+    return paths
+
+
+def _lstat_or_missing(full: str):
+    """`os.lstat(FULL)`, or None when FULL does not exist. Any other failure raises: an unreadable
+    path is never read as deleted."""
+    try:
+        return os.lstat(full)
+    except FileNotFoundError:
+        return None
+
+
 def edit_idle(path: str, deadline: float):
-    """Seconds since the newest change among the dirty and untracked paths of PATH, or None when a
-    read failed. The admin-file idle clock misses edits that are not committed or staged. A deleted
-    path counts by its nearest existing parent folder. Build folders and trash names are skipped.
+    """Seconds since the newest change among the changed and untracked paths of PATH, or None when
+    a read failed or DEADLINE (a `time.monotonic` time) cut a walk short. The admin-file idle clock
+    misses edits that are not committed or staged. A file counts by its own mtime, an untracked
+    folder by the newest file under it. A deleted path counts by the own mtime of its nearest
+    existing parent folder, since the delete moved it. Build folders and trash names are skipped.
     `git status` touches no working-tree mtime, so this read may follow it. No such path: infinity."""
-    lines = git_reads.porcelain(path)
-    if lines is None:
+    rels = changed_paths(path)
+    if rels is None:
         return None
     names = sweep.build_dir_names(sweep.read_optout(
         os.path.dirname(os.path.dirname(os.path.dirname(path))))) or set(sweep.DEFAULT_BUILD_DIRS)
     newest = None
     try:
-        for line in lines:
-            rel = line[3:].split(" -> ")[-1]
-            if rel.startswith('"') and rel.endswith('"'):
-                rel = rel[1:-1]
+        for rel in rels:
             if _skipped(rel, names):
                 continue
             full = os.path.join(path, rel.rstrip("/"))
-            while not os.path.lexists(full) and os.path.dirname(full) != full:
-                full = os.path.dirname(full)  # a deleted path: its nearest existing parent
-            if os.path.isdir(full) and not sweep.is_link(full):
+            info = _lstat_or_missing(full)
+            if info is None:  # a deleted path: the own mtime of its nearest existing parent
+                while info is None and os.path.dirname(full) != full:
+                    full = os.path.dirname(full)
+                    info = _lstat_or_missing(full)
+                if info is None:
+                    return None
+                found = info.st_mtime
+            elif os.path.isdir(full) and not sweep.is_link(full):
                 found = _newest_under(full, path, names, deadline)
             else:
-                found = os.lstat(full).st_mtime
+                found = info.st_mtime
             if found is not None:
                 newest = found if newest is None else max(newest, found)
     except OSError:
@@ -361,45 +396,46 @@ def edit_idle(path: str, deadline: float):
     return float("inf") if newest is None else time.time() - newest
 
 
-def build_keep(entry: dict, idle, cwds, deadline: float):
-    """Why the other agent tree ENTRY keeps its build folders, or None when every gate gives a
-    confirmed yes. IDLE is the tree's admin-file idle read, taken before any `git status`. CWDS is
-    every process cwd, read just before this pass, so a build started during the hook keeps. The
-    reap stops no process in this tree, so any process with a cwd anywhere in it keeps every
-    folder: a build runs from the worktree root."""
+def build_keep(entry: dict, idle, deadline: float):
+    """`(reason, cwds)`: why the other agent tree ENTRY keeps its build folders (None when every
+    gate gives a confirmed yes), and every process cwd read for the pass. IDLE is the tree's
+    admin-file idle read, taken before any `git status`. The cwds are read last, after the edit
+    walk, so a build started during the hook keeps. The reap stops no process in this tree, so any
+    process with a cwd anywhere in it keeps every folder: a build runs from the worktree root."""
     path = entry["path"]
     if idle is None:
-        return "unreadable-subject: idle"
+        return "unreadable-subject: idle", None
     if idle < sweep.AGENT_END_IDLE_SECONDS:
-        return "recently-active: git activity %d minutes ago" % (idle // 60)
+        return "recently-active: git activity %d minutes ago" % (idle // 60), None
     # The live host holds an agent lock on every agent tree all session, so that lock says nothing
     # about activity. Any other lock (a person's, empty or unknown text) keeps.
     holder = entry.get("locked_reason")
     if holder is not None and not sweep.AGENT_LOCK_RE.match(holder):
-        return "locked: %s" % (holder or "locked")
+        return "locked: %s" % (holder or "locked"), None
     live = git_reads.worktree_live_session(path)
     if live is None:
-        return "unreadable-subject: session"
+        return "unreadable-subject: session", None
     if live:
-        return "live-session"
+        return "live-session", None
     edited = edit_idle(path, deadline)
     if edited is None:
-        return "unreadable-subject: edits"
+        return "unreadable-subject: edits", None
     if edited < sweep.AGENT_END_IDLE_SECONDS:
-        return "recently-edited: newest uncommitted change %d minutes ago" % (edited // 60)
+        return "recently-edited: newest uncommitted change %d minutes ago" % (edited // 60), None
+    cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))
     if cwds is None:
-        return "unreadable-subject: processes"
+        return "unreadable-subject: processes", None
     if any(sweep._cwd_under_checkout(c, path) for c in cwds):
-        return "process-in-worktree"
-    return None
+        return "process-in-worktree", cwds
+    return None, cwds
 
 
 def reap_worktrees(target: str, deadline: float):
     """Keep TARGET (the ending agent's own worktree and its build folders; a later agent end removes
     them once idle) and remove every other finished `.claude/worktrees/agent-*` worktree of its
     repository, idle 30 minutes or more, that `sweep.decide_agent_end_worktree` clears. Each other
-    tree it keeps gets a build pass when `build_keep` clears it. Returns one row for TARGET, one per other tree decided, plus one row when DEADLINE (a
-    `time.monotonic` time) cut the stage short. A tree's row carries `buildDirs` (folders renamed)
+    tree it keeps gets a build pass when `build_keep` clears it. Returns one row for TARGET, one per
+    other tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short. A tree's row carries `buildDirs` (folders renamed)
     or `buildDirsKept` (why not)."""
     rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON,
              "buildDirsKept": OWN_TREE_REASON}]
@@ -424,8 +460,7 @@ def reap_worktrees(target: str, deadline: float):
             elif time.monotonic() > deadline:
                 decision["buildDirsKept"] = "budget"
             else:
-                cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))
-                kept = build_keep(entry, entry["idle"], cwds, deadline)
+                kept, cwds = build_keep(entry, entry["idle"], deadline)
                 if kept:
                     decision["buildDirsKept"] = kept
                 else:

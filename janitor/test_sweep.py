@@ -4757,6 +4757,58 @@ class BuildDirReapTests(unittest.TestCase):
         with self.subTest(arm="new untracked folder written now, admin idle 31 min"):
             self.assert_all_kept(untracked, "a fresh untracked file did not keep the build folders")
 
+    def test_a_tracked_file_deleted_5_minutes_ago_keeps_the_build_folders(self):
+        # A deletion leaves no file to stat; it moves its parent folder's own mtime.
+        primary = self.make_primary("deleted")
+        gone, quiet = self.add_agent(primary, "bdrGone"), self.add_agent(primary, "bdrQuietDel")
+        self.fill(gone)
+        self.fill(quiet)
+        old = time.time() - 40 * 60  # every file left in the tree is old: only the deletion is fresh
+        for dirpath, _dirs, files in os.walk(gone):
+            for name in files:
+                os.utime(os.path.join(dirpath, name), (old, old))
+        os.remove(os.path.join(gone, "f.txt"))
+        then = time.time() - 5 * 60
+        os.utime(gone, (then, then))
+        self.later_end(primary, gone, quiet)
+        with self.subTest(control="tree with no edit"):
+            self.assert_all_reaped(quiet)
+        with self.subTest(arm="tracked file deleted 5 min ago, admin idle 31 min"):
+            self.assert_all_kept(gone, "a fresh deletion did not keep the build folders")
+
+    def test_show_untracked_files_no_cannot_hide_a_fresh_file(self):
+        # A repository setting must not hide new files from the edit clock.
+        primary = self.make_primary("hidden")
+        run_vcs(primary, "config", "status.showUntrackedFiles", "no")
+        hidden, quiet = self.add_agent(primary, "bdrHidden"), self.add_agent(primary, "bdrQuietHid")
+        self.fill(hidden)
+        self.fill(quiet)
+        write(os.path.join(hidden, "Sources", "new file \u00e9.swift"), "let x = 1\n")
+        self.later_end(primary, hidden, quiet)
+        with self.subTest(control="tree with no edit"):
+            self.assert_all_reaped(quiet)
+        with self.subTest(arm="fresh untracked file under showUntrackedFiles=no"):
+            self.assert_all_kept(hidden, "a hidden untracked file did not keep the build folders")
+
+    def test_edit_idle_keeps_on_an_unreadable_stat_or_a_spent_deadline(self):
+        primary = self.make_primary("failsafe")
+        tree = self.add_agent(primary, "bdrSafe")
+        write(os.path.join(tree, "f.txt"), "edited\n")
+        write(os.path.join(tree, "Sources", "x.swift"), "let x = 1\n")
+        later = time.monotonic() + 60
+        self.assertIsNotNone(self.reap.edit_idle(tree, later), "control: a readable tree reads")
+        real = os.lstat
+
+        def refused(target, *args, **kwargs):
+            if os.path.basename(str(target)) == "f.txt":
+                raise PermissionError(13, "refused", target)
+            return real(target, *args, **kwargs)
+
+        with self.subTest(arm="an unreadable stat"), mock.patch.object(os, "lstat", new=refused):
+            self.assertIsNone(self.reap.edit_idle(tree, later))
+        with self.subTest(arm="a walk past the deadline"):
+            self.assertIsNone(self.reap.edit_idle(tree, time.monotonic() - 1))
+
     def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
         # A build that starts after the hook's first process read must still keep its folders.
         primary = self.make_primary("late-build")
