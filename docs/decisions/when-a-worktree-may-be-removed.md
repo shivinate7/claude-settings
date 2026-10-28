@@ -50,7 +50,7 @@ Reason: pushed proves that a copy exists. It does not prove that the work is don
 
 Owner rulings, 2026-10-15 and 2026-10-16 (including the 30 min wait, 00:47 CDT).
 
-At each SubagentStop, the reaper (`janitor/agent_end_reap.py`) removes each finished agent's worktree that is idle 30 min or more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the others. A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop`).
+At each SubagentStop, the reaper (`janitor/agent_end_reap.py`) removes each finished agent's worktree that is idle 30 min or more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the others, and so do its build folders (`build-dirs-reaped-at-agent-end`). A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop`).
 
 Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is the debt `finished-agent-shells-keep-tree`.
 
