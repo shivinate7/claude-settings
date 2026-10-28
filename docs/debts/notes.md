@@ -413,9 +413,10 @@
 - sendmessage-judge-blind-recvs: The busy-state layer reads an agent id, a uds: address, main and * as unseen and allows. only the wording judge covers them (hooks/sendmessage_state.py, mods/session-board/hooks/lib.mjs). Decision: agent-model-cap
 - stamp-scan-frontmatter-links: The near-miss scan does not skip frontmatter or link targets (actions/stamp/stamp.mjs). Decision: none
 - step-up-prefix-forms: roles-third-round-steps-up counts only a line starting Round N of 3 or Try N of 3. forms like Round 2/3, '- Round 2 of 3', bold and '# ' pass unseen. Decision: agent-model-cap
-- step-up-plugin-types: roles-third-round-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked, and a Workflow agent() call is not checked. Decision: agent-model-cap
+- step-up-plugin-types: roles-third-round-steps-up compares the role exactly, so a plugin type such as x:reviewer is not checked. Decision: agent-model-cap
 - step-up-sonnet-substring: the reviewer check is a substring match on sonnet, so a made-up model such as opus-sonnet passes. Decision: agent-model-cap
 - step-up-round1-prose-line: a round 1 reviewer brief with a prose line that starts Round 2 of 3 is refused. the refusal names the fix. Decision: agent-model-cap
+- step-up-workflow-hex-escape: a Workflow prompt that writes a newline as \x0a or \u000a is not decoded, so a Round N of 3 line after it passes unseen. Decision: agent-model-cap
 - floor-workflow-runtime-models: agent-model-floor reads string literals in each agent( call. a model or role built at run time, or a call after a regex literal holding a quote, is unseen. Decision: agent-model-cap
 - floor-builtin-agents: a built-in agent with no file in agents/ picks its own model and never puts it in the tool input. Decision: agent-model-cap
 - explore-audit-judge-misread: the Agent prompt judge is a model and can misread a borderline Explore brief. the caller spot-checks findings before acting on an audit. Decision: agent-model-cap
@@ -574,10 +575,17 @@
 - ci-job-ste-ignores-inputs: ci-job runs the checks STE step as `bin/ste-changed <base>` and reads neither its `if:` nor its `with:`, so a `full_ste_audit` dispatch (scope all, fail false) is not mirrored locally. The local run is stricter, never looser (bin/ci-job is_ste_action)
 - waiting-opt-shared-slug: two options that share one mockup slug open the first one's sheet and label on "Open full size", as `openDesign` takes the first match (skills/waiting-page/page.html openDesign)
 - waiting-opt-sel-untested: no test asserts the `.sel` class after a pick that keeps the option frames, so a stale highlight from a dropped attribute copy would pass (skills/waiting-page/tests/page.test.mjs)
-- waiting-opt-lone-empty-slot: above 710 px a fourth option alone in a second row still shows an empty mockup slot, as CSS cannot see a card's row (skills/waiting-page/page.html)
 - waiting-opt-id-namespace: the trade-off id `t-<item>-<key>` shares a namespace with the title id `t-<item>`, so items `foo` and `foo-a` would both own `t-foo-a` (skills/waiting-page/page.html optCard)
 - waiting-sheet-brand-border: with a brand colour the Designs sheet's 50% `--on-hdr` button border can fall under 3:1 (about 18% of 648 sampled brands); the ring stays 4.5:1 or better (skills/waiting-page/page.html .dsh-head .btn)
 - scorecard-indented-caution-row: an indented `x: y` line, such as an indented Caution line, becomes a `finding` row on the group before it, not a Notes line. Nothing is dropped (lint/compliance_probes.py FINDING_LINE)
 - try-marker-sunset: hooks/guard.py still reads the old builder marker `Try 3 of 3` beside `Round 3 of 3`, so a brief sent before the rename is not refused. Remove `"try"` from BUILDER_MARKERS, its mutant and its cases on or after 2026-11-12, 14 days after the planned merge (move the date if the merge slips). Decision: agent-model-cap
-- step-up-log-restarts: guard.log rows for the third-round step-up name `roles-third-try-steps-up` before the o13 rename and `roles-third-round-steps-up` after it, so a cull that counts one id sees a short history. Count both ids at the next cull (decision building-guard-needs-incident)
+- step-up-log-restarts: guard.log rows for the third-round step-up name the old id (its row in lint/test_retired_names.py RETIRED) before the o13 rename and `roles-third-round-steps-up` after it, so a cull that counts one id sees a short history. Count both ids at the next cull (decision building-guard-needs-incident)
 - round-marker-role-cases: no guard case pins `Round 3 of 3` for a test-author or general-purpose role on Opus, or mid-line in a builder brief. The regex and the role check are shared with `Try 3 of 3`, whose cases and mutants cover them (hooks/test_guard.py rule9)
+- waiting-designs-mixed-shape: an item that lists `designs` has its options' `design` slugs ignored, so an option whose slug is not in the list warns "No picture" even when its HTML exists (skills/waiting-page/page.html designsOf)
+- waiting-viewer-option-letter: an option design from an item with no `designs` list is labelled by `o.label` alone, so the viewer head does not name the option letter (skills/waiting-page/page.html allDesigns)
+- waiting-drawn-infinity: `drawn: Infinity` passes the `> 0` check and gives a blank frame; 0, negative, NaN and missing fall back to 390 (skills/waiting-page/page.html fitFrame)
+- waiting-fit-cache-drawn: the `FIT` cache key is `slug|focus` and leaves out `drawn`, so two entries for one slug at two widths share one cached box (skills/waiting-page/page.html FIT)
+- waiting-cap-font-swap: a web font that swaps in after the viewer opens without changing the title's box leaves the caption state stale until the next fit (skills/waiting-page/page.html capFit)
+- waiting-cap-left-wide: at 1440 the viewer caption sits left at x=20 while the mockup is centred (skills/waiting-page/page.html .dcap)
+- waiting-dpos-stale-form: after a resize, `#dPos` keeps its old form ("1/3" or "1 of 3") until the next page turn (skills/waiting-page/page.html showDesign)
+- waiting-head-midwidth-untested: no test runs the viewer head at 521-900 px with a wide font, where the buttons keep their long labels (skills/waiting-page/tests/page.test.mjs)

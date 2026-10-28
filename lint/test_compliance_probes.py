@@ -84,6 +84,11 @@ class Layout(unittest.TestCase):
         code, out = repo.run("layout")
         self.assertEqual((code, out.strip()), (0, "layout: in shape"))
 
+    def test_scorecard_file_is_a_layout_kind(self):
+        repo = Repo(self).core().write(EXTRAS, '{"kinds": {}}').write("docs/health/compliance.md")
+        code, out = repo.run("layout")
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"))
+
     def test_legacy_folder_names_its_move(self):
         legacy = layout.legacy("decisions")
         if legacy == kind_path("decisions"):
@@ -438,6 +443,14 @@ class Scorecard(unittest.TestCase):
         self.assertIn("| Group | Score | Gold standard | Gap | Source |", body)
         self.assertIn("| Layout | out | in shape | 1 folder | lint/compliance_probes.py layout |", body)
         self.assertIn("| Design | in shape | in shape | one token file | lint/compliance_probes.py design |", body)
+
+    def test_writes_to_the_path_the_layout_kind_names(self):
+        repo = Repo(self)
+        done = subprocess.run([sys.executable, PROBES, "scorecard", repo.root], input=self.LINES, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stdout)
+        self.assertEqual(layout.path(repo.root, "scorecard"), kind_path("scorecard"))
+        self.assertTrue(os.path.isfile(os.path.join(repo.root, *kind_path("scorecard").split("/"))))
+        self.assertIn("wrote " + kind_path("scorecard") + " ", done.stdout)
 
     def test_second_run_overwrites_and_leaves_one_file(self):
         repo = Repo(self)

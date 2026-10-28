@@ -21,7 +21,8 @@ Any read that cannot tell means keep. One signal, by pid, through `sweep.send_si
 Build folders (docs/decisions/build-dirs-reaped-at-agent-end.md): when the checks above hold for the whole
 worktree, the reap also renames each build folder (`sweep.DEFAULT_BUILD_DIRS` plus `buildDirs`) to
 a sibling trash name, then starts a detached child that deletes the trash. The hook never waits for
-the child. A folder with a process cwd inside, a link, or any unreadable read stays. A later reap
+the child. Every build folder stays while the reap keeps any process in the worktree. A folder with
+a process cwd inside, a link, or any unreadable read stays. A later reap
 deletes trash names a child left.
 
 Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the checks above hold for the whole worktree,
@@ -330,7 +331,12 @@ def handle(raw: str, started=None):
     # claudePid: whether the harness sets CLAUDE_PID in a SubagentStop hook's env is not measured.
     record.update(reason=reason, decisions=decisions, claudePid=os.environ.get("CLAUDE_PID"))
     if reason is None:
-        record["buildDirs"] = reap_build_dirs(target, cwds)
+        # A build runs from the worktree root (xcodebuild, swift build), not from inside the folder
+        # it writes. Any process the reap keeps in the worktree means a build may be writing.
+        if any(d["action"] != "reap" for d in decisions):
+            record["buildDirs"], record["buildDirsKept"] = [], "process-in-worktree"
+        else:
+            record["buildDirs"] = reap_build_dirs(target, cwds)
         now = time.monotonic()
         deadline = min(now + WORKTREE_SECONDS, (now if started is None else started) + HOOK_BUDGET)
         record["worktrees"] = reap_worktrees(target, deadline)

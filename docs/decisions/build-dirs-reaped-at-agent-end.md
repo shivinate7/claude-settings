@@ -13,7 +13,9 @@ means keep.
 1. The target is `<primary>/.claude/worktrees/<name>`, it exists, and it is not a primary checkout.
 2. No live session has a cwd inside the target (`guard.worktree_live_session`).
 3. No process has a cwd inside the folder.
-4. The reap never follows a link. A link named as a build folder is kept.
+4. No process the reap keeps has a cwd anywhere in the worktree. A build runs from the worktree root and writes
+   into the folder, so a cwd check on the folder alone deleted live builds (likely risk, 2026-10-27).
+5. The reap never follows a link. A link named as a build folder is kept.
 
 - Delete in two steps. The reap renames each proven folder to a sibling trash name in the same worktree. Then a detached child
   deletes the trash, and the hook does not wait. A later reap or the janitor deletes trash that a child left, when the checks hold

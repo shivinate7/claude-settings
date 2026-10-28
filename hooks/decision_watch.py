@@ -142,6 +142,10 @@ ACTION_WORDS = (
 
 UNKNOWN_PREFIX = "Decision watch: UNKNOWN, could not verify this turn against recorded decisions/guards/settings. "
 FLAG_PREFIX = "Decision watch: FLAG. "
+# A folder with no git repo has nothing for this hook to watch; that is a fact about the
+# folder, not a failed check, so it is said plainly and once per session (NO_REPO_SEEN_KEY).
+NO_REPO_MESSAGE = "Decision watch is off here: this folder is not a git repo."
+NO_REPO_SEEN_KEY = "no-git-repo"
 
 # WHY_MAX_LEN bounds the model's own `why` text before it is printed into the parent
 # session's transcript. That text is the judge model's summary of a diff built from
@@ -762,6 +766,14 @@ def run(hook, model_call=invoke_model, expect_key=None):
     baseline = last_human_epoch(path)
     changed, untracked = changed_this_turn(cwd, baseline)
     if changed is None:
+        # Checked only after a failure, so a turn inside a repo pays nothing extra. With no
+        # session_id the store cannot dedupe, so the line is said every time rather than never.
+        if not is_git_work_tree(cwd):
+            session_id = hook.get("session_id") or ""
+            if NO_REPO_SEEN_KEY in _load_seen(session_id):
+                return ""
+            _mark_seen(session_id, NO_REPO_SEEN_KEY)
+            return NO_REPO_MESSAGE
         return UNKNOWN_PREFIX + "git status could not be read for this working directory."
 
     protected = [rel for rel in changed if looks_protected(rel, cwd)]

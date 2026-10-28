@@ -11864,6 +11864,87 @@ add("floor step-up: builder Round 2 of 3 on sonnet is allowed", "allow",
 add("floor step-up: builder Round 1 of 3 on opus asks (only round 3 is a standing grant)", "ask",
     "agent-model-cap", tool="Agent", prompt="Round 1 of 3. Start the fix.", model="opus",
     subagent_type="builder")
+# A Workflow agent() call steps up the same way, read statically. The prompt is the first argument
+# or a `prompt` key. A prompt, model or options object the scan cannot read as plain literals is
+# unseen and passes.
+# Failure classes: a false allow (a stepped-up reviewer with no model runs the Haiku pin), a false deny
+# (a model or prompt set through code the scan cannot read).
+
+
+def _step_flow(prompt, opts):
+    return "const r = await agent(%s, {%s}); return r" % (prompt, opts)
+
+
+for _name, _verdict, _script in (
+        ("reviewer Round 2 with no model", "deny",
+         _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer'")),
+        ("reviewer Round 2 on sonnet", "allow",
+         _step_flow("'Round 2 of 3. Re-check the diff.'", "agentType: 'reviewer', model: 'sonnet'")),
+        ("reviewer Round 3 on opus", "allow",
+         _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'")),
+        ("reviewer Round 3 on haiku", "deny",
+         _step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'haiku'")),
+        ("builder Try 3 on sonnet", "deny",
+         _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
+        ("builder Try 3 on opus", "allow",
+         _step_flow('"Try 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
+        ("builder Round 3 on sonnet", "deny",
+         _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "sonnet"')),
+        ("builder Round 3 with no model", "deny",
+         _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
+        ("builder Round 3 on opus", "allow",
+         _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
+        ("builder Round 3 as a prompt key on sonnet", "deny",
+         "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
+        ("builder Round 2 on sonnet", "allow",
+         _step_flow("'Round 2 of 3. Continue the fix.'", "agentType: 'builder', model: 'sonnet'")),
+        ("reviewer Round 1 with no model", "allow",
+         _step_flow("'Round 1 of 3. Check the diff.'", "agentType: 'reviewer'")),
+        ("reviewer Round 2 with the model in a variable", "allow",
+         _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', model: m")),
+        ("reviewer Round 2 with a shorthand model", "allow",
+         _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', model")),
+        ("reviewer Round 2 with a spread", "allow",
+         _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', ...opts")),
+        ("reviewer Round 2 with a templated model", "allow",
+         _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', model: `${fam}`")),
+        ("reviewer with the prompt in a variable", "allow",
+         _step_flow("brief", "agentType: 'reviewer'")),
+        ("reviewer with a concatenated prompt", "allow",
+         _step_flow("'Round 2 of 3. ' + rest", "agentType: 'reviewer'")),
+        ("reviewer Round 2 in an interpolated template prompt", "deny",
+         _step_flow("`Round 2 of 3. ${rest}`", "agentType: 'reviewer'")),
+        ("reviewer Round 2 on line two of an interpolated template on haiku", "deny",
+         _step_flow("`Role: reviewer.\\nRound 2 of 3.\\nBranch ${b}`",
+                    "agentType: 'reviewer', model: 'haiku'")),
+        ("reviewer Round 2 as an interpolated prompt key with no model", "deny",
+         "await agent({prompt: `Round 2 of 3. Branch ${b}`, agentType: 'reviewer'})"),
+        ("reviewer whose marker is only interpolated", "allow",
+         _step_flow("`${'Round 2 of 3.'} Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer whose round number is interpolated", "allow",
+         _step_flow("`Round ${n} of 3. Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer whose marker is split by an interpolation", "allow",
+         _step_flow("`Round 2${x} of 3. Re-check.`", "agentType: 'reviewer'")),
+        ("reviewer Round 1 in an interpolated template", "allow",
+         _step_flow("`Round 1 of 3. Branch ${b}`", "agentType: 'reviewer'")),
+        ("reviewer Round 2 after an escaped newline and tab", "deny",
+         _step_flow("'ctx\\n\\tRound 2 of 3.'", "agentType: 'reviewer'")),
+        ("reviewer Round 2 in a template prompt with no model", "deny",
+         _step_flow("`Round 2 of 3. Re-check the diff.`", "agentType: 'reviewer'")),
+        ("reviewer Round 2 on line two of an escaped prompt", "deny",
+         _step_flow("'Context first.\\nRound 2 of 3. Re-check.'", "agentType: 'reviewer'")),
+        ("reviewer Round 2 as a prompt key with no model", "deny",
+         "await agent({prompt: 'Round 2 of 3. Re-check.', agentType: 'reviewer'})"),
+        ("reviewer Round 2 as a prompt key on sonnet", "allow",
+         "await agent({prompt: 'Round 2 of 3. Re-check.', agentType: 'reviewer', model: 'sonnet'})"),
+        ("reviewer with a ternary agentType", "allow",
+         _step_flow("'Round 2 of 3. Re-check.'", "agentType: x ? 'reviewer' : 'builder'")),
+        ("prose round 2 only", "allow",
+         _step_flow("'The round 2 of 3 notes are in the record.'", "agentType: 'reviewer'")),
+        ("a commented-out Round 2 call", "allow",
+         "// agent('Round 2 of 3.', {agentType: 'reviewer'})\nawait agent('x', {model: 'sonnet'})")):
+    add("floor step-up: Workflow %s is %s" % (_name, "denied" if _verdict == "deny" else "allowed"),
+        _verdict, *((STEP_UP,) if _verdict == "deny" else ()), tool="Workflow", script=_script)
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or
 # Task spawn that sets model opus asks the owner under `agent-model-cap`, unless a standing grant

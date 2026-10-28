@@ -30,7 +30,7 @@ playwright: a Playwright install that also runs apt (`--with-deps`, `install-dep
 ios: drift from the iOS standard of skills/ios-apps, one item per line: the make targets, the ship
   path, the project file, the Kit package, Swift 6, the CI runner, the CI checks, slow tests on each
   pull request, and account IDs in the repo. A repo with no iOS app is n/a. Comments do not count.
-scorecard: not a probe. It reads the group lines from stdin and rewrites docs/health/compliance.md in
+scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
 """
@@ -493,14 +493,18 @@ def scorecard(root):
         text += "| " + " | ".join(cells) + " |\n"
     if notes:
         text += "\n## Notes\n\n" + "".join("- %s\n" % n for n in notes)
-    folder = os.path.join(root, "docs", "health")
     try:
-        os.makedirs(folder, exist_ok=True)
-        with open(os.path.join(folder, "compliance.md"), "w", encoding="utf-8", newline="\n") as handle:
+        rel = layout.path(root, "scorecard")
+    except layout.LayoutError as err:
+        raise CannotRun(str(err))
+    target = os.path.join(root, *rel.split("/"))
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
     except OSError as err:
         raise CannotRun(str(err))
-    return finish("scorecard", [], "wrote docs/health/compliance.md (%d row(s), %d note(s))" % (len(rows), len(notes)), 0)
+    return finish("scorecard", [], "wrote %s (%d row(s), %d note(s))" % (rel, len(rows), len(notes)), 0)
 
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
