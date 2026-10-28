@@ -86,8 +86,8 @@ check("the step hands the input to the script as DEPS and the CLI from the pin s
 cap = env_value(block, "CAP")
 check("the step has a time cap CAP, in seconds, of at most 600 (under the 11 min incident)",
       cap is not None and cap.isdigit() and 0 < int(cap) <= 600, block)
-check("the install-deps call runs under `timeout \"$CAP\"`",
-      re.search(r'timeout "\$CAP" node "\$CLI" install-deps \$DEPS', script) is not None, script)
+check("the install-deps call runs under `timeout -k 30 \"$CAP\"`, so a process that ignores SIGTERM is killed",
+      re.search(r'timeout -k 30 "\$CAP" node "\$CLI" install-deps \$DEPS', script) is not None, script)
 
 if script:
     rc, out, calls = fake_run(script, "webkit")
@@ -104,6 +104,11 @@ if script:
             check("%r on %s: fails with one line, no apt" % (deps, os_name),
                   rc != 0 and calls == [] and len(out.splitlines()) == 1 and "::error" in out,
                   "%s %r %s" % (rc, out, calls))
+    for deps in (" ", "\n", " \n "):
+        rc, out, calls = fake_run(script, deps)
+        check("blank system-deps %r: fails with one line, no install-deps (it would install every browser)" % deps,
+              rc != 0 and calls == [] and len(out.splitlines()) == 1 and "::error" in out,
+              "%s %r %s" % (rc, out, calls))
     rc, out, calls = fake_run(script, "webkit", cap="1", node_sleep=5)
     check("a run past the cap fails with one line that names the cap",
           rc != 0 and len(out.splitlines()) == 1 and "::error" in out and "1 s" in out, "%s %r" % (rc, out))

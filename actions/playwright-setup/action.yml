@@ -68,6 +68,8 @@ runs:
         DEPS: ${{ inputs.system-deps }}
         CAP: "300"
       run: |
+        # A blank value would run install-deps with no names, which installs every browser's libraries.
+        [ -n "${DEPS//[[:space:]]/}" ] || { echo "::error::system-deps holds no browser name. Name webkit or firefox, or leave it unset."; exit 1; }
         for b in $DEPS; do
           case "$b" in
             webkit|firefox) ;;
@@ -76,7 +78,8 @@ runs:
         done
         [ "$RUNNER_OS" = Linux ] || exit 0
         # shellcheck disable=SC2086  # DEPS is a space-separated list, split on purpose
-        timeout "$CAP" node "$CLI" install-deps $DEPS || {
+        # -k 30: a process that ignores SIGTERM at the cap is killed 30 s later.
+        timeout -k 30 "$CAP" node "$CLI" install-deps $DEPS || {
           rc=$?
           [ "$rc" = 124 ] && echo "::error::system-deps apt step passed its $CAP s cap." >&2
           exit "$rc"
