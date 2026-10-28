@@ -797,14 +797,14 @@ MUTATIONS = [
      'agent_end_reap',
      '        if busy(folder):\n            continue\n        new',
      '        if False:\n            continue\n        new',
-     'test_a_folder_with_a_live_process_cwd_inside_is_kept',
+     'test_reap_build_dirs_skips_the_folder_that_holds_a_cwd',
      "posix"),
 
     ('build dirs: a trash name with a live process cwd inside is deleted by the reap',
      'agent_end_reap',
      'doomed = [t for t in trash if not busy(t)]',
      'doomed = list(trash)',
-     'test_a_trash_name_with_a_live_process_inside_is_kept',
+     'test_reap_build_dirs_keeps_a_trash_name_that_holds_a_cwd',
      "posix"),
 
     ('build dirs: the reap deletes under a live session or a primary checkout',

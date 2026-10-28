@@ -4641,6 +4641,43 @@ class BuildDirReapTests(unittest.TestCase):
         with self.subTest(arm="leftover trash with a live cwd"):
             self.assertTrue(os.path.isdir(live), "a trash name with a live process inside was deleted")
 
+    # The hook keeps every build folder when any process sits in the worktree, so the per-folder
+    # cwd check in reap_build_dirs is only reachable by calling it with the cwds list directly.
+    def reap_capturing_delete(self, wt, cwds):
+        """Run reap_build_dirs with the detached delete child stubbed. Return (renamed, the paths
+        handed to the child)."""
+        handed = []
+        with mock.patch.object(self.reap._nowindow, "Popen",
+                               side_effect=lambda argv, **kw: handed.extend(argv[3:])):
+            renamed = self.reap.reap_build_dirs(wt, cwds)
+        return renamed, [os.path.realpath(p) for p in handed]
+
+    def test_reap_build_dirs_skips_the_folder_that_holds_a_cwd(self):
+        primary = self.make_primary("direct-cwd")
+        wt = self.add_agent(primary, "bdrC")
+        self.fill(wt, ("native/build", "DerivedData"))
+        held = os.path.join(wt, "DerivedData")
+        renamed, _ = self.reap_capturing_delete(wt, [os.path.join(held, "sub")])
+        with self.subTest(control="native/build with no cwd inside"):
+            self.assertEqual(renamed, [os.path.join(wt, "native", "build")])
+        with self.subTest(arm="DerivedData with a cwd inside"):
+            self.assertTrue(os.path.isfile(os.path.join(held, "payload.bin")),
+                            "DerivedData with a cwd inside was renamed")
+
+    def test_reap_build_dirs_keeps_a_trash_name_that_holds_a_cwd(self):
+        primary = self.make_primary("direct-trash")
+        wt = self.add_agent(primary, "bdrC")
+        free = self.reap.trash_name(os.path.join(wt, "native", "build"))
+        live = self.reap.trash_name(os.path.join(wt, "DerivedData"))
+        self.fill(os.path.dirname(free), (os.path.basename(free),))
+        self.fill(os.path.dirname(live), (os.path.basename(live),))
+        _, handed = self.reap_capturing_delete(wt, [live])
+        with self.subTest(control="leftover trash with no cwd inside"):
+            self.assertIn(os.path.realpath(free), handed)
+        with self.subTest(arm="leftover trash with a cwd inside"):
+            self.assertNotIn(os.path.realpath(live), handed,
+                             "a trash name with a cwd inside was handed to the delete child")
+
     def test_the_janitor_deletes_a_leftover_trash_name_and_keeps_one_with_a_live_process(self):
         primary = self.make_primary("janitor")
         wt = self.add_agent(primary, "bdrJ")
