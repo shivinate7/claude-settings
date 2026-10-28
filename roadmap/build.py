@@ -18,9 +18,9 @@ SCANNED, and writes no page. Cost: one more git process and one read of each sca
 
 `python roadmap/build.py --check-staged` is the pre-commit hook (roadmap/hooks/pre-commit, installed by
 `git config core.hooksPath roadmap/hooks`; step c138). It reads the step files from the index, not the
-working tree, and refuses the commit when an open step's note that the commit adds or changes is over
-NOTE_WORDS words. An over-cap note the commit leaves alone passes, so one writer's note never blocks
-another's commit. It writes no page.
+working tree, and refuses the commit when it adds or grows an open step's note past NOTE_WORDS words, or
+stages a symlink as a step file. A long note the commit leaves alone or trims passes, so one writer's
+note never blocks another's commit. It writes no page.
 """
 import datetime
 import json
@@ -97,76 +97,94 @@ def conflict_markers(repo):
     return hits
 
 
+def note_words(d):
+    """The one count of a note's length."""
+    return len((d.get("note") or "").split())
+
+
 def over_cap(steps):
-    """'id (words)' for each open step whose note is over NOTE_WORDS words: the one count of the cap."""
-    hits = []
-    for k, d in steps.items():
-        if not isinstance(d, dict) or d.get("status") == "done":
-            continue
-        words = len((d.get("note") or "").split())
-        if words > NOTE_WORDS:
-            hits.append(f"{k} ({words})")
-    return hits
+    """(id, words) for each open step whose note is over NOTE_WORDS words."""
+    return [(k, n) for k, d in steps.items()
+            if isinstance(d, dict) and d.get("status") != "done" and (n := note_words(d)) > NOTE_WORDS]
 
 
-STEPS_PATH = "roadmap/data/steps/"
+STEPS_PATH = "roadmap/data/steps"
 
 
 def staged_notes_over_cap(repo):
-    """over_cap() for the open step notes the staged commit adds or changes, read from the index.
+    """(over_cap pairs, refusal lines) for the step files the staged commit adds or changes, read from the index.
 
-    A note counts as changed when its text differs from HEAD's (and, while a merge is being committed,
-    from each MERGE_HEAD's, so a note the other side wrote passes). A staged file that is not valid JSON
-    is skipped: it has no note to count, and build.py fails loudly on it at the next build.
+    Only files directly in STEPS_PATH count, as in load(). An open note over the cap passes only when some
+    base (HEAD, or a MERGE_HEAD while a merge is committed) held the same step open with at least as many
+    words: a commit may keep or trim a long note, never add or grow one. A staged symlink there is refused,
+    since load() would follow it. A staged file that is not valid JSON is skipped: it has no note to count,
+    and the next build fails loudly on it.
     """
     def git(*args):
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                              encoding="utf-8", errors="surrogateescape")
 
-    def note_at(rev, path):
+    def shown(path):
+        return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+    def step_at(rev, path):
         r = git("show", f"{rev}:{path}")
-        if r.returncode:
-            return None
         try:
-            d = json.loads(r.stdout)
+            d = json.loads(r.stdout) if r.returncode == 0 else None
         except ValueError:
             return None
-        return d.get("note") if isinstance(d, dict) else None
+        return d if isinstance(d, dict) else None
 
     bases = ["HEAD"] if git("rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
     merge_head = pathlib.Path(repo, git("rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
     if merge_head.is_file():
         bases += merge_head.read_text().split()
+    entries = []  # (mode, blob, path)
     if bases:
-        out = git("diff", "--cached", "--no-renames", "--name-only", "-z", "--diff-filter=AM", "HEAD", "--",
-                  STEPS_PATH).stdout
+        fields = git("diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
+                     STEPS_PATH).stdout.split("\0")
+        for meta, path in zip(fields[0::2], fields[1::2]):
+            _, mode, _, blob, _ = meta.split(" ", 4)
+            entries.append((mode, blob, path))
     else:
-        out = git("ls-files", "-z", "--", STEPS_PATH).stdout
-    steps = {}
-    for path in filter(None, out.split("\0")):
-        if not path.endswith(".json"):
+        for line in filter(None, git("ls-files", "-s", "-z", "--", STEPS_PATH).stdout.split("\0")):
+            meta, path = line.split("\t", 1)
+            mode, blob, _ = meta.split(" ")
+            entries.append((mode, blob, path))
+    steps, refused = {}, []
+    for mode, blob, path in entries:
+        p = pathlib.PurePosixPath(path)
+        if str(p.parent) != STEPS_PATH or p.suffix != ".json":
             continue
-        r = git("show", f":{path}")
+        if mode == "120000":
+            refused.append(f"{shown(path)} is a symlink; build.py would follow it. Commit the file itself.")
+            continue
         try:
-            d = json.loads(r.stdout)
+            d = json.loads(git("cat-file", "blob", blob).stdout)
         except ValueError:
-            print(f"pre-commit: {path} is not valid JSON; its note was not counted", file=sys.stderr)
+            print(f"pre-commit: {shown(path)} is not valid JSON; its note was not counted", file=sys.stderr)
             continue
         if not isinstance(d, dict):
             continue
-        if any(note_at(b, path) == d.get("note") for b in bases):
+        olds = [step_at(b, path) for b in bases]
+        if any(o and o.get("status") != "done" and note_words(o) >= note_words(d) for o in olds):
             continue
-        steps[pathlib.PurePosixPath(path).stem] = d
-    return over_cap(steps)
+        steps[shown(p.stem)] = d
+    return over_cap(steps), refused
 
 
 def check_staged():
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                         encoding="utf-8", errors="surrogateescape")
     repo = top.stdout.strip() if top.returncode == 0 else str(ROOT.parent)
-    hits = staged_notes_over_cap(repo)
+    hits, refused = staged_notes_over_cap(repo)
     if hits:
         print(f"Commit refused: these notes are over {NOTE_WORDS} words. Cut them, stage, and commit again:",
               file=sys.stderr)
-        print("\n".join(f"  {h[:-1]} words)" for h in hits), file=sys.stderr)
+        print("\n".join(f"  {k} ({n} words)" for k, n in hits), file=sys.stderr)
+    if refused:
+        print("Commit refused:\n" + "\n".join("  " + r for r in refused), file=sys.stderr)
+    if hits or refused:
         raise SystemExit(1)
 
 
@@ -214,7 +232,7 @@ def upkeep(steps):
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
                    key=lambda kd: kd[1].get("order", 1e9))
     live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
-    long_, stale, empty, unasked = over_cap(dict(open_)), [], [], []
+    long_, stale, empty, unasked = [f"{k} ({n})" for k, n in over_cap(dict(open_))], [], [], []
     for k, d in open_:
         note = d.get("note") or ""
         if DEFERRED_ON_SHIV.search(note) and not any(a in note for a in ASKED):

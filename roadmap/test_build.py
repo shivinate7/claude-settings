@@ -16,7 +16,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build  # noqa: E402
 
 STEP = {"title": "t", "status": "open", "phase": "p", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
+HERE = pathlib.Path(__file__).resolve().parent
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
+
+
+def words(n):
+    return " ".join(["w"] * n)
 
 
 class ConflictMarkers(unittest.TestCase):
@@ -76,6 +81,19 @@ class ConflictMarkers(unittest.TestCase):
         self.assertTrue((self.root / "roadmap.html").exists())
 
 
+class OverCap(unittest.TestCase):
+    def test_pairs_of_open_steps_over_cap(self):
+        steps = {"c1": dict(STEP, note=words(251)), "c2": dict(STEP, note=words(250)),
+                 "c3": dict(STEP, status="done", note=words(400))}
+        self.assertEqual(build.over_cap(steps), [("c1", 251)])
+
+    def test_upkeep_text_is_unchanged(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            build.upkeep({"c122": dict(STEP, note=words(263))})
+        self.assertIn("  notes over 250 words: c122 (263)\n", out.getvalue())
+
+
 class DeferredWithNoQuestion(unittest.TestCase):
     def count(self, note):
         out = io.StringIO()
@@ -96,13 +114,6 @@ class DeferredWithNoQuestion(unittest.TestCase):
 
     def test_deferred_by_triage_is_not_on_shiv(self):
         self.assertEqual(self.count("Deferred (triage, Oct 27): not now."), "0")
-
-
-HERE = pathlib.Path(__file__).resolve().parent
-
-
-def words(n):
-    return " ".join(["w"] * n)
 
 
 class NoteCapHook(unittest.TestCase):
@@ -242,6 +253,68 @@ class NoteCapHook(unittest.TestCase):
         self.git("add", "-A")
         self.assert_passed(self.commit("merge"))
         self.assertIn("c9.json", self.git("show", "--stat", "HEAD^2").stdout)
+
+    def test_done_to_open_flip_of_long_note_is_refused(self):
+        self.seed(("c1", 300, "done"))
+        self.step("c1", 300, "open")
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c1 (300 words)")
+
+    def test_trimmed_long_note_passes_and_grown_is_refused(self):
+        self.seed(("c9", 300))
+        self.step("c9", 280)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.step("c9", 281)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c9 (281 words)")
+
+    def test_symlinked_step_is_refused(self):
+        (self.repo / "notes").mkdir()
+        (self.repo / "notes" / "long.json").write_text(json.dumps(dict(STEP, note=words(300))), encoding="utf-8")
+        (self.repo / "roadmap" / "data" / "steps" / "c4.json").symlink_to("../../../notes/long.json")
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "roadmap/data/steps/c4.json", "symlink")
+
+    def test_non_utf8_filename_does_not_crash(self):
+        steps = os.fsencode(self.repo / "roadmap" / "data" / "steps")
+        with open(steps + b"/c\xff.json", "w", encoding="utf-8") as f:
+            f.write(json.dumps(dict(STEP, note=words(5))))
+        self.git("add", "-A")
+        r = self.commit()
+        self.assert_passed(r)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_only_top_level_step_files_count(self):
+        nested = self.repo / "roadmap" / "data" / "steps" / "old"
+        nested.mkdir()
+        (nested / "c2.json").write_text(json.dumps(dict(STEP, note=words(300))), encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.step("c3", 300)
+        (nested / "c3.json").write_text(json.dumps(dict(STEP, note=words(5))), encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c3 (300 words)")
+
+    def path_with(self, *tools):
+        bin_ = pathlib.Path(self.tmp.name) / ("bin-" + "-".join(tools))
+        bin_.mkdir()
+        for t in ("git", "sh", "dirname", *tools):
+            (bin_ / t).symlink_to(shutil.which(t if t != "python" else "python3"))
+        return dict(self.env, PATH=str(bin_))
+
+    def test_hook_falls_back_to_python(self):
+        self.step("c122", 263)
+        self.git("add", "-A")
+        self.env = self.path_with("python")
+        self.assert_refused(self.commit(), "c122 (263 words)")
+
+    def test_hook_with_no_python_says_so(self):
+        (self.repo / "f").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.env = self.path_with()
+        r = self.commit()
+        self.assert_refused(r, "neither python3 nor python")
 
     def test_hook_runs_in_a_worktree(self):
         self.seed(("c1", 10))

@@ -1,4 +1,10 @@
 #!/bin/sh
-# Refuse a commit whose staged open-step notes go over build.NOTE_WORDS (step c138).
+# Refuse a commit that adds or grows an open step's note past build.NOTE_WORDS (step c138).
 # Installed by: git config core.hooksPath roadmap/hooks
-cd "$(git rev-parse --show-toplevel)" && exec python3 roadmap/build.py --check-staged
+cd "$(git rev-parse --show-toplevel)" || exit 1
+for py in python3 python; do
+  command -v "$py" >/dev/null 2>&1 && exec "$py" roadmap/build.py --check-staged
+done
+echo "pre-commit: neither python3 nor python is on PATH, so the roadmap note cap (step c138) was not checked." >&2
+echo "Install Python, or commit with --no-verify if you must." >&2
+exit 1
