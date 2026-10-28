@@ -270,6 +270,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
     ];
     const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
+    await noAnchor(page);
     // With option designs, the in-card frames must be the same DOM nodes after each pick, so none reloads.
     let sent = false;
     if (withDesigns) {
@@ -289,7 +290,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
     sent = true;
-    // A receipt holds its height only while in view (c193), so after Send only what is on screen is compared.
+    // A receipt holds its height only while in view (owner report 1, Oct 28 13:19 CDT, c193), so after Send only what is on screen is compared.
     const onScreen = () => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.id, c.getBoundingClientRect()]).filter(([, r]) => r.bottom > 0 && r.top < innerHeight).map(([id, r]) => [id, Math.round(r.top), Math.round(r.height)]));
     const seen = await onScreen();
     await send(page);
@@ -1834,6 +1835,8 @@ test("a named picture's not-equal sign sits inside its View bar", async (t) => {
 
 // ---------------------------------------------------------------- sizes: receipt height, rail chips, option pictures (c193)
 const SIZES = [2200, 1280, 390];
+// Chromium's scroll anchoring would hide a missing compensation (Safari has none), so these tests switch it off.
+const noAnchor = (page) => page.addStyleTag({ content: "*, html { overflow-anchor: none !important; }" });
 const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { context: LONG }));
 
 for (const scheme of ["light", "dark"]) {
@@ -1841,6 +1844,7 @@ for (const scheme of ["light", "dark"]) {
     const target = mk("target", 2, { context: LONG });
     const items = [mk("above", 1, { context: LONG }), target, ...FILLER];
     const page = await open(t, { items, scheme, viewport: { width: 1280, height: 700 } }); if (!page) return;
+    await noAnchor(page);
     const c = card(page, target);
     const full = (await c.boundingBox()).height;
     await choose(page, target, "a");
@@ -1897,3 +1901,30 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
     }
   });
 }
+
+test("a rail jump after Send still lands on its card when held receipts drop mid-scroll", async (t) => {
+  const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
+  const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
+  await noAnchor(page);
+  await choose(page, items[0], "a"); await choose(page, items[1], "a");
+  await send(page);
+  await page.locator("#item-q0 .receipt").waitFor();
+  await page.click("#c-q9");
+  await page.waitForTimeout(2500);
+  const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
+  assert.ok(top >= 0 && top <= 120, "the jump missed its card; it sits at " + top);
+});
+
+test("a receipt wholly below the screen drops its height without moving the page", async (t) => {
+  const items = Array.from({ length: 40 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
+  const page = await open(t, { items, viewport: { width: 390, height: 360 } }); if (!page) return;
+  await noAnchor(page);
+  await choose(page, items[0], "a");
+  await page.evaluate(() => window.scrollTo(0, 60));
+  const railTop = () => page.evaluate(() => Math.round(document.querySelector(".ov-prog").getBoundingClientRect().top));
+  const at = await railTop();
+  await send(page);
+  await page.locator("#item-q0 .receipt").waitFor();
+  await page.waitForTimeout(600);
+  assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
+});

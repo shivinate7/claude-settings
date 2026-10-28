@@ -721,13 +721,21 @@ async function withdrawAll() {
 /* ---------- Painting: a card is rebuilt only when what it shows changed, and a live design preview is never detached ---------- */
 const cards = {}, heights = {};
 // Once a held receipt is wholly off screen it drops its height, and the scroll moves by what that shifted, so nothing in view moves.
-const heldWatch = new IntersectionObserver((entries) => entries.forEach((e) => {
-  const el = e.target;
-  if (e.isIntersecting || !el.style.minHeight) { if (!el.style.minHeight) heldWatch.unobserve(el); return; }
-  const mark = [...document.querySelectorAll("article.card")].find((c) => c !== el && c.getBoundingClientRect().bottom > 0), was = mark ? mark.getBoundingClientRect().top : 0;
+// A drop waits for the scroll to go idle: a rail jump is a smooth scroll to a fixed target, and a shift mid-flight would move it.
+let lastScroll = 0;
+addEventListener("scroll", () => { lastScroll = performance.now(); }, { passive: true });
+function releaseHeld(el) {
+  if (!el.isConnected || !el.style.minHeight) { heldWatch.unobserve(el); return; }
+  if (performance.now() - lastScroll < 150) { setTimeout(() => releaseHeld(el), 160); return; }
+  const r = el.getBoundingClientRect();
+  if (r.bottom > 0 && r.top < innerHeight) return; // back in view: the observer fires again when it leaves
+  const above = r.bottom <= 0;
+  // Everything after the receipt moves with it, so the first later card is the witness.
+  const mark = above ? [...document.querySelectorAll("article.card")].find((c) => el.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) : null, was = mark ? mark.getBoundingClientRect().top : 0;
   el.style.minHeight = ""; heldWatch.unobserve(el);
   if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - was);
-}));
+}
+const heldWatch = new IntersectionObserver((entries) => entries.forEach((e) => { if (!e.isIntersecting) releaseHeld(e.target); }));
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
