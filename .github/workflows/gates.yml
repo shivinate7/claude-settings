@@ -400,6 +400,9 @@ jobs:
       - name: STE lint action fixture suite
         run: python3 actions/ste-lint/test_action.py
 
+      - name: Playwright setup action suite
+        run: python3 actions/playwright-setup/test_action.py
+
       # Its own 4 min watchdog reads a hang red, names the hung test and prints the process tree.
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
