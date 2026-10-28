@@ -1619,7 +1619,7 @@ test("a design with a state opens its mockup at that state, in the card frame an
   await fr.waitForLoadState();
   assert.equal(await fr.evaluate(() => location.hash), "#s=late-package");
   const src = await page.locator(optFrame(it, "a")).getAttribute("srcdoc");
-  assert.ok(src.search(/<!doctype/i) < src.search(/location\.hash/), "the state script sits before the doctype and puts the frame in quirks mode");
+  assert.ok(src.search(/<!doctype/i) < src.search(/location\.hash/), "the state script must come after the doctype, or the mockup renders in quirks mode");
 });
 
 test("the viewer names the state in its title and offers Open this state, which opens the blob at #s=<state>", async (t) => {
@@ -1666,4 +1666,46 @@ test("the wide rail chip shows the short title; no or an over-long short falls b
   assert.equal(await shortChip(page, items[2]).locator(".nt").textContent(), "Third long question title here");
   assert.equal(await shortChip(page, items[0]).getAttribute("title"), "A very long question title for the rail");
   assert.match(await shortChip(page, items[0]).getAttribute("aria-label"), /^No\. 80, A very long question title for the rail, /);
+});
+
+const looseItem = () => mk("st-loose", 77, { designs: [{ slug: "s-a", label: "Early", state: "default" }, { slug: "s-a", label: "Late", state: "late-package" }] });
+
+test("a front preview's Open this state opens the viewer at the design shown, even when two designs share a slug", async (t) => {
+  const it = looseItem();
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  const btn = card(page, it).locator(".dprev .dbar button").last();
+  assert.equal(await btn.textContent(), "Open this state");
+  assert.equal(await btn.getAttribute("aria-label"), "Open the default state in the viewer");
+  await card(page, it).locator('.dprev button[aria-label="Next design"]').click();
+  assert.equal(await btn.getAttribute("aria-label"), "Open the late package state in the viewer");
+  await btn.click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Late, late package");
+  assert.equal(await page.locator("#dFull").getAttribute("aria-label"), "Open the late package state of the full mockup in a new tab");
+});
+
+test("the Designs tab viewer also names each design's state in its title", async (t) => {
+  const it = looseItem();
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  await page.click("#tabD");
+  assert.equal(await page.locator("#dTitle").textContent(), "Early, default");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Late, late package");
+  assert.equal(await page.locator("#dCap").textContent(), "Late, late package");
+});
+
+test("an Undo where one delete works and a later one fails names only the items still sent", async (t) => {
+  const items = [mk("d-one", 1), mk("d-two", 2), mk("d-three", 3)];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await page.evaluate(`(() => {
+    const col = state.db.collection;
+    state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const del = y.delete; y.delete = async () => { if (n === "answers" && id === "d-two") throw { code: "denied" }; return del(); }; return y; }; return x; };
+    document.getElementById("undoBtn").click();
+  })()`);
+  await page.locator("#barStatus", { hasText: "Undo failed" }).waitFor();
+  const text = await page.locator("#barStatus").innerText();
+  assert.match(text, /Not undone: No\. 1 and No\. 2\./, text);
+  assert.doesNotMatch(text, /No\. 3/, "No. 3 was undone and must not be named: " + text);
 });

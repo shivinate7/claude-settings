@@ -593,7 +593,7 @@ function designPreview(it) {
         h("button", { class: "btn quiet", type: "button", "aria-label": "Previous design", onclick: () => { i = (i + list.length - 1) % list.length; draw(); } }, "Prev"),
         h("button", { class: "btn quiet", type: "button", "aria-label": "Next design", onclick: () => { i = (i + 1) % list.length; draw(); } }, "Next"));
     }
-    bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", "aria-label": stateOf(d) ? openStateLabel(d) : null, onclick: () => openDesign(d.slug) }, stateOf(d) ? "Open this state" : "Open full size"));
+    bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", "aria-label": stateOf(d) ? "Open the " + stateWords(stateOf(d)) + " state in the viewer" : null, onclick: () => { const all = allDesigns(); openDesign(null, all, Math.max(0, all.findIndex((x) => x.it === it && x.slug === d.slug && stateOf(x) === stateOf(d) && x.label === d.label))); } }, stateOf(d) ? "Open this state" : "Open full size"));
     box.replaceChildren(bar, fitFrame(d.slug, d.label, false, "", 1, null, 0, null, stateOf(d)));
   };
   draw(); return box;
@@ -1039,8 +1039,9 @@ function stageFrame(d) { const k = d.slug + "|" + stateOf(d); if (!STAGE[k]) { S
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
   // The head fields come first: they set the head's width, and the fit reads the stage's width.
-  $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
-  $("dCap").textContent = d.label;
+  const vl = d.label + (stateOf(d) ? ", " + stateWords(stateOf(d)) : ""); // one home: every viewer path shows the state
+  $("dTitle").textContent = vl; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
+  $("dCap").textContent = vl;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
   const st = stateOf(d);
@@ -1049,7 +1050,7 @@ function showDesign(i) {
 }
 // The viewer of one item: every option's design at every width the item carries, in option order.
 function openViewer(it, o) {
-  const list = (it.options || []).flatMap((x) => optionDesigns(it, x).map((d) => ({ ...d, label: x.label + " (" + (d.width || "Phone") + ")" + (stateOf(d) ? ", " + stateWords(stateOf(d)) : ""), it, optKey: x.key })));
+  const list = (it.options || []).flatMap((x) => optionDesigns(it, x).map((d) => ({ ...d, label: x.label + " (" + (d.width || "Phone") + ")", it, optKey: x.key })));
   const at = list.findIndex((d) => d.optKey === o.key);
   openDesign(null, list, Math.max(0, at));
 }

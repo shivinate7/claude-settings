@@ -30,8 +30,9 @@ The mockup draws with page.html's own `<style>`. The header is left as on main (
   `<script>try{location.hash="s=<state>"}catch(e){}</script>` in front of the srcdoc, before the
   mockup's own script. The card picture and the viewer then show that state. Measured with Playwright: in
   a `sandbox="allow-scripts"` srcdoc frame, `location.hash` reads `#s=late-package`, and the hashchange fires.
-- "Open full size" (viewer `#dFull`, and the front preview's button) opens the blob URL plus
-  `#s=<state>`. Measured: the new tab's mockup shows `late-package`.
+- The viewer's "Open full size" (`#dFull`) opens the blob URL plus `#s=<state>` in a new tab.
+  Measured: the new tab's mockup shows `late-package`. The front preview's button opens the viewer
+  at that design and its state, as on main. It does not open a new tab.
 - Strings, with `state`: button "Open this state" (phone: the same ⤢ icon), aria-label "Open the
   <state words> state of the full mockup in a new tab". The viewer title and caption read
   "<option title> (<width>), <state words>", where state words are the slug with `-` as a space.
