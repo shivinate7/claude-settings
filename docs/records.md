@@ -227,7 +227,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | Slug | Gist | Link |
 |---|---|---|
 | `agents-get-standing-rules` | Owner, 2026-10-12: a SubagentStart hook injects the standing rules, so a brief need not retype them. | [`docs/decisions/agents-get-standing-rules.md`](../docs/decisions/agents-get-standing-rules.md) |
-| `an-agent-outside-its-home-tree-must-stop` | An agent whose worktree is gone must stop and report. | [`docs/decisions/an-agent-outside-its-home-tree-must-stop.md`](../docs/decisions/an-agent-outside-its-home-tree-must-stop.md) |
+| `an-agent-outside-its-home-tree-must-stop` | Each session writes only inside its own checkout. | [`docs/decisions/an-agent-outside-its-home-tree-must-stop.md`](../docs/decisions/an-agent-outside-its-home-tree-must-stop.md) |
 | `bare-merge-asks` | Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. | [`docs/decisions/bare-merge-asks.md`](../docs/decisions/bare-merge-asks.md) |
 | `catalog-cells-never-cut` | The cell cap in `docs/catalog.md` sits above the longest cell, so no cell is cut. | [`docs/decisions/catalog-cells-never-cut.md`](../docs/decisions/catalog-cells-never-cut.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`docs/decisions/ci-wait-reads-run-status.md`](../docs/decisions/ci-wait-reads-run-status.md) |
