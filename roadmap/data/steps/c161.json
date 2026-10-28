@@ -2,8 +2,8 @@
  "title": "The guard's load-brake probe test counts one child on every machine",
  "order": 103.33899986,
  "why": "c150's lane (Oct 28): hooks/test_guard.py case \"load-brake: probe control: a child process the probe starts is counted\" fails on main e0f9e2d in a cloud container (counted 2, want 1). Not caused by c150.",
- "note": "Debt. Unknown whether CI hits it. Also red in the cloud on main e0f9e2d (c108's lane): hooks/test_handoff_wave2 \"root can delete the pointer\", 2 checks; same lane reads both. In such a container c150's merge tool refuses a records-only main move, since test_handoff_wave2 is a hit suite. Next cloud lane: run the case in a fresh container and read CI's last runs of it; find what the second count is (the shell wrapper, or a process the container adds); fix the probe or the test's control, never skip it; red first on today's count. Touches hooks/guard.py's load-brake probe and hooks/test_guard.py. Needs no answer. Port: no. Placed ahead of c107 (triage, Oct 28): a local gate red on clean main teaches lanes to ignore it.",
+ "note": "Debt. Unknown whether CI hits it. Also red in the cloud on main e0f9e2d (c108's lane): hooks/test_handoff_wave2 \"root can delete the pointer\", 2 checks; same lane reads both, plus githooks main-ref (c160's fix is in batch 4) and install_from_main case 8, also red on main in the cloud (o13's lane, Oct 28). In such a container c150's merge tool refuses a records-only main move, since test_handoff_wave2 is a hit suite. Next cloud lane: run the case in a fresh container and read CI's last runs of it; find what the second count is (the shell wrapper, or a process the container adds); fix the probe or the test's control, never skip it; red first on today's count. Touches hooks/guard.py's load-brake probe and hooks/test_guard.py. Needs no answer. Port: no. Placed ahead of c107 (triage, Oct 28): a local gate red on clean main teaches lanes to ignore it.",
  "phase": "cleanup",
  "status": "todo",
- "updatedAt": "2026-10-28T06:50:00Z"
+ "updatedAt": "2026-10-28T07:55:00Z"
 }
