@@ -6,14 +6,16 @@ description: Use when the owner asks to give a repo standing roles, counted hand
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
 adopt it. The owner decides when a repo adopts it. Never set it up in a repo without the owner's grant.
 
-The model assumes a claude.ai project: a coordinator session in the project chat starts one thread
-per role. Without a project, each role is one Claude Code session, and the owner acts as the coordinator.
+The model assumes a claude.ai project: one coordinator session per repo starts every other
+session. It starts triage and the batch runner together, as a trio, before any lane session.
+Without a project, each tier is one Claude Code session, and the owner acts as the coordinator.
 
 ## What it packages
 
-- **Standing roles.** Triage, build advisor, local liaison and merge hand. `templates/operating-model.md`
-  says what each role owns and the hand-off rule that replaces it.
-- **The roster.** One list of who holds each role now. `templates/roster.md`.
+- **Session tiers.** The coordinator, triage, the batch runner and lane sessions.
+  `templates/operating-model.md` says what each tier owns, and how triage and the batch runner
+  rotate by a usage tally. The coordinator compacts in place and has no successor.
+- **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** A step that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
@@ -26,7 +28,7 @@ per role. Without a project, each role is one Claude Code session, and the owner
 
 A role hand-off note is not a session handoff. A session handoff is the notes file of one session
 under `~/.claude/handoffs/` (GLOSSARY.md, "handoff"). A role hand-off note is a file in the record
-branch's `handoffs/` folder that a standing role writes for its successor.
+branch's `handoffs/` folder that triage or the batch runner writes for its successor.
 
 ## Steps
 
@@ -38,7 +40,7 @@ branch's `handoffs/` folder that a standing role writes for its successor.
    It writes `CLAUDE.md`, `roadmap/README.md`, `roadmap/outbox/README.md` and the empty folders `roadmap/data/steps`,
    `roadmap/data/topics`, `roadmap/data/meta`, `briefs` and `handoffs`. It prints each path it
    writes. It refuses, and writes nothing, when one of those files exists.
-4. **Fill the roles.** Copy `templates/operating-model.md` and `templates/roster.md` into the
+4. **Fill the tiers.** Copy `templates/operating-model.md` and `templates/roster.md` into the
    project's instructions on claude.ai. Fill each `<placeholder>`. The roster's home is the project
    instructions, so keep no second copy in the repo.
 5. **Commit and push** the record branch. It needs no PR and runs no CI.

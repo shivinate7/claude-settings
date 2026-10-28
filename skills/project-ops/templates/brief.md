@@ -1,6 +1,6 @@
 # <step id>: <plain name of the step>
 
-<Who runs it: a cloud build thread or a local session.> Base: <branch and commit>. Never rebase
+<Who runs it: a cloud lane session, or a lane session on a named local machine.> Base: <branch and commit>. Never rebase
 onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
 
 ## Task
@@ -26,4 +26,4 @@ of the checks job, the STE lint among them, and no full suite.
 ## Report
 
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
-no, and why". Send the green, reviewed head and branch to the build advisor. Do not merge.
+no, and why". Send the green, reviewed head and branch to the coordinator. Do not merge.

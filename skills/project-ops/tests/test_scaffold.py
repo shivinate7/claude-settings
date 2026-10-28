@@ -114,7 +114,7 @@ class Scaffold(unittest.TestCase):
 
     def test_handoff_rule_moves_page_watches(self):
         text = tree(SKILL)["templates/operating-model.md"]
-        rule = re.search(r"## Hand-off rule.*?(?=\n## )", text, re.S).group(0)
+        rule = re.search(r"## Rotation of standing sessions.*?(?=\n## )", text, re.S).group(0)
         flat = " ".join(rule.split())
         self.assertInOrder(flat, (
             "old thread stops watching each page its role owns",
@@ -122,12 +122,16 @@ class Scaffold(unittest.TestCase):
             "answers each comment still open at that time",
             "writes the hand-off file",
             "with that time",
+            "It drains its work in flight",
+            "coordinator archives the old session",
             "coordinator starts the successor from the hand-off file",
             "successor watches each page at once",
             "reads each page's comments since the time in the hand-off file"))
         self.assertIn("The coordinator sends no broadcast. Threads read the roster.", flat)
         self.assertEqual(flat.count("coordinator starts the successor from"), 1,
                          "one hand-off, one bullet")
+        self.assertIn("context_usage", flat)
+        self.assertIn("The coordinator never hands its own sessions to a successor", flat)
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")

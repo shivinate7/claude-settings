@@ -3,58 +3,69 @@
 Paste this into the project instructions. Replace each `<placeholder>`. The roster goes with it,
 from `roster.md`.
 
-## Standing roles
+## Session tiers
 
-Each role is one long-running thread. A coordinator starts each role, and replaces it by the
-hand-off rule below.
+Every session that starts agents is an orchestrator. The tiers below are kinds of orchestrator.
 
-- **Triage.** The gatekeeper of the roadmap. Only triage writes a new step, merges two steps,
-  changes the work order, or closes a step. Only triage publishes the roadmap page, from the head
-  of the record branch, with `--live` at each publish (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner asks.
-- **Build advisor.** Keeps about <4 to 6> build threads running, in roadmap order. Owns the build
-  order, the merge queue and the integration branch. Dispatches no deferred step.
-- **Local liaison.** Writes briefs for work that needs a local machine, and reads back the
-  reports. May drive a Remote Control session on the owner's machine.
-- **Merge hand.** Runs the merge command on an integration PR that the build advisor sends through
-  the coordinator, on a machine that can run it. Prints the merge output on the terminal and never to a log only.
+- **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
+  triage and the batch runner together, as a trio, before any lane session. It holds lane state,
+  starts each lane session in roadmap order, and talks with the owner. The load brake, not a
+  number, decides how many lanes run at once. It does not rotate (see below).
+- **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
+  merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
+  Only triage publishes the roadmap page, from the head of the record branch, with `--live` at each
+  publish (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
+  asks. It may run agents.
+- **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
+  tool runs and archiving finished lanes. Each merge go names `frozen at <sha>`. It prints the
+  merge output on the terminal, never to a log only. It dispatches no deferred step.
+- **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
+  It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
+  names the machine. It may drive a Remote Control session on the owner's machine.
 
-## Hand-off rule
+When the owner names the wrong tier, or brings work that belongs to another tier, the session
+says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
 
-Count each limit. Never wait for the owner to notice.
+A coordinator may work in another repo, by hand-off or by its own lane PR there. Before it acts,
+it checks whether that repo has an active coordinator. If one is active, it coordinates with it.
+If none is active, it proceeds.
 
-| Role | Messages | Second limit |
-| --- | --- | --- |
-| Triage | 40 | 25 placements |
-| Build advisor | 40 | 12 build threads dispatched |
-| Local liaison | 40 | 8 briefs written |
+## Rotation of standing sessions
 
-- Hand off at the first limit hit, at a phase change, or at once after a slip. A slip is a
+Count the use of triage and the batch runner. Never wait for the owner to notice.
+
+The coordinator does not rotate. It writes its own handoffs and compacts in place. The coordinator
+never hands its own sessions to a successor: a session may refuse a new coordinator as not its
+parent, or miss a message while busy.
+
+- At each wake, the coordinator reads each standing session's tally from `get_session`:
+  `context_usage` (`used_tokens` of `max_tokens`). The limit is `<limit>`.
+- Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
   re-asked question, a reply that contradicts the roadmap, or a missed ruling.
-- Each standing thread ends every reply with `tally: N messages, M <placements|dispatches|briefs>`.
-- The coordinator reads the tally at each wake from a standing thread. It starts the successor
-  when a limit is hit.
-- On a hand-off, in this order:
+- On a rotation, in this order:
   1. The old thread stops watching each page its role owns (the roadmap page, the project's
      waiting page). It notes the time, then answers each comment still open at that time on
      those pages.
   2. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
-     `role-handoff.md`, with that time.
-  3. The coordinator starts the successor from the hand-off file, updates the roster, and
-     resolves the old thread. The coordinator sends no broadcast. Threads read the roster.
+     `role-handoff.md`, with that time. It drains its work in flight: it starts nothing new and
+     ends or hands over each wait it holds.
+  3. The coordinator archives the old session, then the coordinator starts the successor from
+     the hand-off file and updates the roster. The coordinator sends no broadcast. Threads read
+     the roster.
   4. The successor watches each page at once. It reads each page's comments since the time in
      the hand-off file.
-- The owner may exempt a role from a limit. Write the exemption, with its date, in the roster.
+- The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
 
 - Never wait on the owner. A step that needs the owner's answer gets a note line
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
-- A lane sends its green, reviewed head to the build advisor. A lane never rebases onto main and
-  never merges.
-- Each merge go names `frozen at <sha>`. Nobody pushes to that branch until the result is back.
-- A role that waits on CI sets a timed check-in on each wait, and again after each red job.
-- Stall check: at each wake, a standing role asks whether any lane, PR or batch moved since its last
+- A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
+  A lane never rebases onto main and never merges.
+- Nobody pushes to a branch frozen for a merge go until the result is back.
+- A session that waits on CI sets a timed check-in on each wait, and again after each red job.
+- Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   It ends each turn that leaves work in flight with a timed check-in, so a lost wake costs one gap.
 
