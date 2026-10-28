@@ -46,10 +46,11 @@ def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, **env):
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
-    the PR's files then go on the base. `base` and `main` name a ref outright. Returns (exit, output)."""
+    the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
+    Returns (exit, output)."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
@@ -63,7 +64,7 @@ def check(files, base_files=None, base=None, main_files=None, main=None, **env):
             git(d, "checkout", "-q", base)
         put(d, files)
         git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
-        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base else []) + (["--main", main] if main else [])
+        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
         p = subprocess.run(args, capture_output=True, text=True, env=dict(os.environ, CODE_CHECK_TOOLS="path", **env))
         return p.returncode, p.stdout + p.stderr
 
@@ -173,13 +174,35 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config(["b.py"]), "a.py": None, "b.py": GOOD_PY}, base_files=base)
         self.assertEqual(rc, 0, out)
 
-    def test_shrink_against_main_is_red(self):
-        # Fine against the PR base, but main has since listed b.py, so merging drops it.
+    def test_branch_behind_main_is_green(self):
+        # main listed b.py after the fork; the branch never touched the list, so a merge keeps main's entry.
         base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
         rc, out = check({"c.py": GOOD_PY}, base_files=base, main_files={".code-check.json": config(["a.py", "b.py"])})
+        self.assertEqual(rc, 0, out)
+
+    def test_shrink_against_main_and_fork_point_is_red(self):
+        # No usable --base: main and the merge-base both list b.py, and the branch drops it.
+        base = {".code-check.json": config(["a.py", "b.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}
+        rc, out = check({".code-check.json": config(["a.py"])}, base_files=base, main_files={"c.py": GOOD_PY},
+                        send_base=False)
         self.assertNotEqual(rc, 0, out)
         self.assertIn("shrank: b.py", out)
-        self.assertEqual(len([l for l in out.splitlines() if "shrank" in l and not l.startswith("::")]), 1, out)
+
+    def test_module_renamed_into_excluded_folder_says_move_it_back(self):
+        base = {".code-check.json": config(["a.py"], ["vendor/"]), "a.py": GOOD_PY}
+        rc, out = check({".code-check.json": config([], ["vendor/"]), "a.py": None, "vendor/a.py": GOOD_PY},
+                        base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("mypy list lost a.py, renamed to vendor/a.py", out)
+        self.assertIn("move it back", out)
+        self.assertNotIn("list vendor/a.py", out)
+
+    def test_module_renamed_to_non_python_path_says_move_it_back(self):
+        base = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
+        rc, out = check({".code-check.json": config([]), "a.py": None, "a.txt": GOOD_PY}, base_files=base)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("renamed to a.txt", out)
+        self.assertIn("move it back", out)
 
     def test_same_failure_from_base_and_main_prints_once(self):
         base = {".code-check.json": config(["a.py", "b.py"]), "a.py": GOOD_PY, "b.py": GOOD_PY}

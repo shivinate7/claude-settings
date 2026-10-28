@@ -4,6 +4,9 @@
 Fails when a tracked file has a language with no row, when a row is malformed, when a tool finds a bug, or when the
 repo's mypy list (.code-check.json, "mypy_modules") lost a module since --base or since --main, the current default
 branch (the exclude list likewise only shrinks). A module renamed since that ref must be listed at its new path.
+Against main, only entries the branch's merge-base with main also holds count, so a branch merely behind main passes.
+Known limit: a move whose edits fall below git's 50% rename similarity reads as a plain delete and may leave the list.
+Rare false alarm: a deleted module paired by git with an unrelated, similar new file reads as a rename.
 Tools are pinned in standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
 @astrojs/check CLI that `astro check` calls. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests,
 a dev machine). Formatter layers are skipped until o2 (one layout) lands; their rows say so."""
@@ -105,6 +108,24 @@ def base_config(root, base, label="base"):
     return json.loads(old.stdout) if old.returncode == 0 else None  # none: first adoption
 
 
+def main_config(root, main):
+    """main's config cut to what the branch's fork point also holds, and the fork point, or (None, None) as
+    unknown. A loss counts against main only when the merge-base lists it too; else the branch is just behind
+    main and a merge keeps main's entry. An exclude entry main dropped after the fork counts as still there."""
+    cfg = base_config(root, main, "main")
+    if cfg is None:
+        return None, None
+    p = sh(["git", "merge-base", main, "HEAD"], root)
+    if p.returncode:
+        print("code-check: list shrink check unknown: main %s shares no merge-base with HEAD" % main)
+        return None, None
+    fork = p.stdout.strip()
+    at_fork = base_config(root, fork, "merge-base") or {}
+    held = at_fork.get("mypy_modules", [])
+    return {"mypy_modules": [m for m in cfg.get("mypy_modules", []) if m in held],
+            "exclude": cfg.get("exclude", []) + at_fork.get("exclude", [])}, fork
+
+
 def renames(root, ref):
     """{old path: new path} for files git sees renamed between ref and the working tree, so it holds pre-commit."""
     p = sh(["git", "diff", "-M", "--name-status", "-z", "--diff-filter=R", ref], root)
@@ -122,8 +143,16 @@ def list_problems(old, cfg, files, moved=None):
     lost = [m for m in old.get("mypy_modules", []) if m not in now]
     out = ["mypy list shrank: %s left %s while the file still exists; the list only grows" % (m, CONFIG)
            for m in lost if m in files]
-    out += ["mypy list lost %s, renamed to %s; list %s in %s" % (m, moved[m], moved[m], CONFIG)
-            for m in lost if m not in files and m in moved and moved[m] not in now]
+    for m in lost:
+        new = moved.get(m)
+        if m in files or not new or new in now:
+            continue
+        if new in files and new.endswith((".py", ".pyi")):
+            out.append("mypy list lost %s, renamed to %s; list %s in %s" % (m, new, new, CONFIG))
+        else:
+            # Listing the new path cannot work: tracked() drops excluded paths, and mypy checks only Python.
+            out.append("mypy list lost %s, renamed to %s, which mypy cannot check (excluded or not Python); "
+                       "move it back, or out of the excluded folder" % (m, new))
     out += ["exclude grew: %s is new in %s; the list only shrinks" % (e, CONFIG)
             for e in cfg.get("exclude", []) if e not in old.get("exclude", [])]
     return out
@@ -227,7 +256,10 @@ def main(argv):
     if main_commit is None or main_commit != commit(root, args.base):
         refs.append((args.main, "main"))
     for ref, label in refs:
-        old = base_config(root, ref, label)
+        if label == "main":
+            old, ref = main_config(root, ref)
+        else:
+            old = base_config(root, ref, label)
         moved = renames(root, ref) if old is not None else {}
         # Both refs often report the same loss; print it once.
         failures += [f for f in list_problems(old, cfg, files, moved) if f not in failures]
