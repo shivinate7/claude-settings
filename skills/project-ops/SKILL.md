@@ -52,6 +52,20 @@ skill keeps no copy. Its `SKILL.md` says how to build and what `--live` passes. 
 An adopting repo keeps its record in `roadmap/data/` on the record branch, and the builder
 reads it there.
 
+## Shared resources
+
+Decision `shared-resource-owner` (a shared machine names one owning repo) governs this section.
+
+- A shared machine has one owning repo. Its `.claude/layout-extras.json` lists the machine under
+  `shared-resources` with the owner, the preflight path and the hold record path.
+- Each user repo owns its own deploy and restart scripts. The owner repo owns only the preflight
+  and the hold record.
+- Before a deploy, a restart or a bulk import, run the owner's preflight and read its holds.
+  A hold stops the act.
+- A user repo that needs a change to the preflight or the holds writes a hand-off to the owner
+  repo's session: a note in the owner's outbox on its record branch. It never edits the owner's
+  files. It never overrides the owner's guard.
+
 ## Rules this skill does not restate
 
 - `git-integration-branch-merge`: how lanes join a batch and how a red batch drops a lane.
