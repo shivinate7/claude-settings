@@ -1211,7 +1211,7 @@ test("SKILL.md names the page's one writer and the rank field", async () => {
   assert.match(rule, /`rank`/);
 });
 
-// Decision questions-go-to-owner, "Answer on the page, not in a comment thread" (2026-10-28 02:44 CDT):
+// Decision questions-go-to-owner, "Answer on the page, not in a comment thread":
 // a rebuilt page drops its threads, so a session rewrites the item instead.
 test("SKILL.md answers a comment by rewriting the item, never in a comment thread", async () => {
   const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");

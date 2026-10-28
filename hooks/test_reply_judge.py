@@ -1231,7 +1231,7 @@ def case_prompt_flags_a_visual_pick_that_only_links():
 # --------------------------------------------------------------------------- c164
 # A session answers a waiting-page comment by rewriting the item, never by a comment-thread reply:
 # a rebuilt page drops its threads (decision questions-go-to-owner, "Answer on the page, not in a
-# comment thread", 2026-10-28 02:44 CDT).
+# comment thread").
 
 THREAD_REPLY = (
     "Done: read the owner's comment on waiting-page item 27 and replied on the thread with the "
