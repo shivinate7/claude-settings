@@ -1228,6 +1228,34 @@ def case_prompt_flags_a_visual_pick_that_only_links():
           has_pin(sentences, ("picture", "image", "design"), ("each option", "every option")), sentences)
 
 
+# --------------------------------------------------------------------------- c164
+# A session answers a waiting-page comment by rewriting the item, never by a comment-thread reply:
+# a rebuilt page drops its threads (decision questions-go-to-owner, "Answer on the page, not in a
+# comment thread", 2026-10-28 02:44 CDT).
+
+THREAD_REPLY = (
+    "Done: read the owner's comment on waiting-page item 27 and replied on the thread with the "
+    "reason for option B.\n"
+)
+
+
+def case_prompt_flags_a_thread_reply_to_a_waiting_page_comment():
+    run = run_hook(THREAD_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, THREAD_REPLY)
+    check("prompt: a sentence flags a waiting-page comment answered in a comment thread",
+          has_pin(sentences, ("flag",), ("waiting-page", "waiting page"), ("comment",), ("thread",)),
+          sentences)
+    check("prompt: a sentence says the session rewrites the item instead",
+          has_pin(sentences, ("thread",), ("rewrit",), ("item",)), sentences)
+
+
+def case_prompt_spares_a_reply_that_rewrote_the_item():
+    run = run_hook(THREAD_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, THREAD_REPLY)
+    check("prompt: never flag a reply that says it rewrote or updated the waiting-page item",
+          has_pin(sentences, ("never flag",), ("rewrote", "updated"), ("item",)), sentences)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1274,6 +1302,8 @@ CASES = (
     case_prompt_spares_irreversible_and_goal_picks,
     case_undoable_pick_finding_logs_its_rule,
     case_prompt_flags_a_visual_pick_that_only_links,
+    case_prompt_flags_a_thread_reply_to_a_waiting_page_comment,
+    case_prompt_spares_a_reply_that_rewrote_the_item,
     case_blocked_on_reply_is_judged_off_sample,
     case_prompt_flags_a_port_question_marked_blocking,
     case_prompt_spares_a_departure_not_marked_blocking,
