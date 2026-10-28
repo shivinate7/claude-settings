@@ -1042,7 +1042,10 @@ def needles(path):
     return out
 
 READERS = {"open", "listdir", "scandir", "glob", "iglob", "rglob", "iterdir", "Path", "PurePath", "walk", "exists", "isfile", "isdir"}
-DIR_SAME = {"abspath", "realpath", "normpath", "resolve", "Path", "PurePath", "absolute"}
+SAME_DIR = {"abspath", "realpath", "normpath", "resolve", "Path", "PurePath", "absolute", "str", "fspath", "expanduser"}  # a call that names the folder it is given
+# a call that builds a path or a string and reads nothing
+BUILDERS = SAME_DIR | {"dirname", "join", "joinpath", "normcase", "relpath", "basename", "splitext", "as_posix", "commonpath",
+                       "replace", "lower", "strip", "rstrip", "lstrip", "encode", "decode", "split", "rsplit", "startswith", "endswith", "format"}
 
 def _words(needle_set):
     return [re.compile(r"(?<![\w.-])" + re.escape(n) + r"(?![\w-])") for n in needle_set]
@@ -1067,83 +1070,141 @@ def _own_nodes(scope):
             todo.extend(ast.iter_child_nodes(n))
     return out
 
-def python_suite_hits(source, rel, paths):
+def _top_exprs(stmt):
+    """The largest expressions of one statement: an expression held by a `with` item or an argument list counts too."""
+    for child in ast.iter_child_nodes(stmt):
+        if isinstance(child, ast.expr):
+            yield child
+        elif not isinstance(child, ast.stmt):
+            yield from _top_exprs(child)
+
+def _up(d, n=1):
+    """The folder n levels above repo folder d ("." is the top), or None above the top."""
+    for _ in range(n):
+        if d is None or d == ".":
+            return None
+        d = posixpath.dirname(d) or "."
+    return d
+
+def _under(d, *parts):
+    d = posixpath.normpath(posixpath.join(d, *(x.strip("/") for x in parts)))
+    return None if d == ".." or d.startswith("../") else d
+
+def python_suite_hits(source, rel, paths, read=None, depth=1):
     """True when a Python suite at repo path `rel` may read one of `paths` from the checkout. Read with `ast`, so a
-    name inside a string or comment is told from code. A hit is: the exact path or file name anywhere; a folder or stem
-    (needles) as a string constant joined or divided onto a root bound, in its own scope or the module's, from
-    `__file__` through dirname, abspath, join, Path, .parent or `/`; the same given bare to a file reader (CI runs at the
-    repo top); or a path under a folder below the top that such a root names, taken whole by a call (a walk).
+    name inside a string or comment is told from code. A root is a name bound, in its own scope or the module's, from
+    an expression that holds `__file__` or a root. A hit is:
+    - the exact path or file name anywhere in the source;
+    - a folder below the top or a stem (needles) in any string of an expression that holds a root, in any form
+      (join, `/`, `+`, f-string, format, `%`), or given bare to a file reader (CI runs at the repo top);
+    - a path under the folder a root names, when a call that builds no path takes that root whole (a walk). A root at
+      the top takes every path.
+    `read(path)` -> the text of a repo file or None: each local module the suite imports, from its own folder or a
+    folder it puts on sys.path, is read the same way, `depth` levels deep. A module that resolves to no file is no hit.
     A folder named only under a temp dir is no hit. SyntaxError when the source does not parse."""
     tree = ast.parse(source)
     for p in paths:
         if any(w.search(source) for w in _words({p, p.split("/")[-1]})):
             return True
     words = _words({w for p in paths for w in needles(p)})
+    path_dirs = set()
+    # a function of this file that calls only builders builds a path too, such as a helper that turns `\\` into `/`
+    builders = BUILDERS | {f.name for f in tree.body if isinstance(f, ast.FunctionDef)
+                           and all(_func_name(c) in BUILDERS for c in ast.walk(f) if isinstance(c, ast.Call))}
 
-    def analyze(nodes, outer):
+    def analyze(scope, outer):
         """-> (roots of this scope: name -> folder or None, hit). `outer` is the module's roots, for names not bound here."""
-        bound = {t.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) for t in [n]}
+        nodes = _own_nodes(scope)
+        bound = {n.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            bound |= {a.arg for a in ast.walk(scope.args) if isinstance(a, ast.arg)}
         roots = {}
-        def root(name):
-            return roots.get(name, False) if name in bound else outer.get(name, False)
-        def folder(e):  # -> the repo folder a root expression names, None when unknown, False when it is no root
+        def is_root(name):
+            return name == "__file__" or (name in roots if name in bound else name in outer)
+        def has_root(e):
+            return any(isinstance(n, ast.Name) and is_root(n.id) for n in ast.walk(e))
+        def folder(e):  # the repo folder a root expression names, or None when it cannot be told
             if isinstance(e, ast.Name):
-                return rel if e.id == "__file__" else root(e.id)
+                return rel if e.id == "__file__" else roots.get(e.id) if e.id in bound else outer.get(e.id)
             if isinstance(e, ast.Attribute) and e.attr == "parent":
-                d = folder(e.value)
-                return d and posixpath.dirname(d) if d is not False else False
-            if isinstance(e, ast.BinOp) and isinstance(e.op, ast.Div):
+                return _up(folder(e.value))
+            if isinstance(e, ast.Subscript) and isinstance(e.value, ast.Attribute) and e.value.attr == "parents":
+                k = e.slice
+                return _up(folder(e.value.value), k.value + 1) if isinstance(k, ast.Constant) and isinstance(k.value, int) else None
+            if isinstance(e, ast.BinOp) and isinstance(e.right, ast.Constant) and isinstance(e.right.value, str):
                 d = folder(e.left)
-                if d is False:
-                    return False
-                return d and posixpath.normpath(posixpath.join(d, e.right.value)) if isinstance(e.right, ast.Constant) and isinstance(e.right.value, str) else None
+                if d is not None and (isinstance(e.op, ast.Div) or isinstance(e.op, ast.Add) and e.right.value.startswith("/")):
+                    return _under(d, e.right.value)
+                return None
+            if isinstance(e, ast.JoinedStr) and e.values and isinstance(e.values[0], ast.FormattedValue):
+                d = folder(e.values[0].value)
+                rest = e.values[1:]
+                if d is not None and all(isinstance(x, ast.Constant) for x in rest):
+                    return _under(d, "".join(x.value for x in rest))
+                return None
             if isinstance(e, ast.Call):
                 name = _func_name(e)
                 head = e.args[0] if e.args else e.func.value if isinstance(e.func, ast.Attribute) else None
-                if head is None or name not in DIR_SAME | {"dirname", "join", "joinpath"}:
-                    return False
+                if head is None or name not in BUILDERS:
+                    return None
+                rest = e.args[1:] if e.args and head is e.args[0] else e.args
                 d = folder(head)
-                if d is False or name in DIR_SAME:
+                if name in SAME_DIR:
                     return d
                 if name == "dirname":
-                    return d and posixpath.dirname(d)
-                rest = e.args[1:] if e.args and head is e.args[0] else e.args
-                if d and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in rest):
-                    return posixpath.normpath(posixpath.join(d, *(x.value for x in rest)))
-                return None
-            return False
+                    return _up(d)
+                if d is not None and all(isinstance(x, ast.Constant) and isinstance(x.value, str) for x in rest):
+                    return _under(d, *(x.value for x in rest))
+            return None
         binds = sorted((n for n in nodes if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None), key=lambda n: (n.lineno, n.col_offset))
         for _ in range(3):  # a root bound from a root bound from __file__: a few passes reach the fixpoint
             for n in binds:
-                d = folder(n.value)
-                if d is not False:
+                if has_root(n.value):
                     for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
                         if isinstance(t, ast.Name):
-                            roots[t.id] = d
+                            roots[t.id] = folder(n.value)
         consts = []
         for n in nodes:
+            if isinstance(n, ast.stmt):
+                for e in _top_exprs(n):  # any expression that holds a root: each string in it may be a path part
+                    if has_root(e):
+                        consts += [y.value for y in ast.walk(e) if isinstance(y, ast.Constant) and isinstance(y.value, str)]
             if isinstance(n, ast.Call):
-                heads = list(n.args) + ([n.func.value] if isinstance(n.func, ast.Attribute) else [])
-                if any(folder(x) is not False for x in heads):
-                    consts += [x.value for x in n.args if isinstance(x, ast.Constant) and isinstance(x.value, str)]
-                    if _func_name(n) not in DIR_SAME | {"dirname", "join", "joinpath"}:  # a root taken whole, as by a walk: every path under it
-                        for x in n.args:
-                            d = folder(x)
-                            if d and d != "." and not d.startswith("..") and any(p.startswith(d + "/") for p in paths):
-                                return roots, True
-                if _func_name(n) in READERS:  # a bare relative path: CI runs at the repo top
+                name = _func_name(n)
+                if name in READERS:  # a bare relative path: CI runs at the repo top
                     for x in n.args:
                         if _constant_path(x):
                             consts += [y.value for y in ast.walk(x) if isinstance(y, ast.Constant) and isinstance(y.value, str) and not y.value.startswith("/")]
-            elif isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div) and folder(n.left) is not False:
-                consts += [x.value for x in (n.left, n.right) if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+                heads = list(n.args) + ([n.func.value] if isinstance(n.func, ast.Attribute) else [])
+                for x in heads:
+                    d = folder(x) if has_root(x) else None
+                    if d is None:
+                        continue
+                    if name in ("insert", "append") and isinstance(n.func, ast.Attribute):
+                        path_dirs.add(d)  # sys.path.insert(0, <root>): a folder its imports come from
+                    if name not in builders and (d == "." or any(p.startswith(d + "/") for p in paths)):
+                        return roots, True  # a root taken whole, as by a walk: every path under it
         return roots, any(w.search(c) for c in consts for w in words)
 
-    module, hit = analyze(_own_nodes(tree), {})
-    if hit:
+    module, hit = analyze(tree, {})
+    if hit or any(analyze(f, module)[1] for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))):
         return True
-    funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))]
-    return any(analyze(_own_nodes(f), module)[1] for f in funcs)
+    if read is None or depth < 1:
+        return False
+    mods = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    mods |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module and not n.level}
+    for mod in sorted(mods):
+        for d in [posixpath.dirname(rel) or ".", *sorted(path_dirs)]:
+            for cand in (_under(d, mod.replace(".", "/") + ".py"), _under(d, mod.replace(".", "/"), "__init__.py")):
+                text = cand and read(cand)
+                if text is not None and text is not False and cand != rel:
+                    try:
+                        if python_suite_hits(text, cand, paths, read, depth - 1):
+                            return True
+                    except SyntaxError:
+                        return True  # a module it cannot read is read as a hit
+                    break
+    return False
 
 def lint_steps(root, base_ref, env=None):
     """-> the names of the `gates` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice."""
@@ -1166,7 +1227,14 @@ def hit_suites(root, paths, skip):
         raise Stop(f"the workflow cannot be read ({type(e).__name__})")
     if block is None:
         raise Stop("the workflow has no `gates` job")
-    words = [re.compile(r"(?<![\w.-])" + re.escape(n) + r"(?![\w-])") for p in paths for n in needles(p)]
+    words = _words({n for p in paths for n in needles(p)})
+    names = _words({x for p in paths for x in (p, p.split("/")[-1], *(p.rsplit("/", i)[0] for i in range(1, p.count("/") + 1)))})
+    def read(path):
+        try:
+            with open(os.path.join(root, *path.split("/")), encoding="utf-8") as f:
+                return f.read()
+        except (OSError, UnicodeError):
+            return None
     hits = []
     for step in step_blocks(block):
         if step_key(step, "name") in skip:
@@ -1174,7 +1242,11 @@ def hit_suites(root, paths, skip):
         for line in (run_body(step) or "").splitlines():
             line = line.strip()
             m = re.match(r"(?:python3|node|bash) +(\S+\.(?:py|mjs|sh))\b", line)
-            if not m or "mutate" in m.group(1):
+            if not m:  # a line of no suite form is never read, so one that names main's paths or their folders refuses
+                if line and any(w.search(line) for w in names):
+                    raise Stop(f"the gates line `{line}` names main's paths and is no suite this tool can read")
+                continue
+            if "mutate" in m.group(1):
                 continue
             try:
                 with open(os.path.join(root, *m.group(1).split("/")), encoding="utf-8") as f:
@@ -1183,7 +1255,7 @@ def hit_suites(root, paths, skip):
                 raise Stop(f"the suite {m.group(1)} cannot be read ({type(e).__name__})")
             if m.group(1).endswith(".py"):
                 try:
-                    hit = python_suite_hits(text, m.group(1), paths)
+                    hit = python_suite_hits(text, m.group(1), paths, read)
                 except (SyntaxError, ValueError, RecursionError) as e:
                     raise Stop(f"the suite {m.group(1)} cannot be parsed ({type(e).__name__})")
             else:  # node and bash suites: any needle in the source is a hit, which fails safe

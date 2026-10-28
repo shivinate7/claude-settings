@@ -1051,7 +1051,8 @@ class SmallBaseMove(Env):
         new = hits("docs/decisions/" + "new-" + "rec.md")  # a new record, split so this file names no such path: the suite that lists the folder runs, fixture-only suites do not
         self.assertIn("hooks/test_precompact_handoff.py", new)
         self.assertNotIn("hooks/test_guard.py", new)
-        self.assertNotIn("merge/test_merge.py", new)
+        self.assertIn("merge/test_merge.py", new)  # this suite reads the real tree whole, just above, so every path hits it
+        self.assertIn("skills/ios-apps/tests/test_new_app.py", hits("skills/ios-apps/templates/" + "new.md"))  # through new_app.py
 
     def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
         hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])
