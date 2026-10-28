@@ -628,6 +628,11 @@ class IosApps(unittest.TestCase):
         code, found, out = check_run([brief(device=device)], self.ios)
         self.assertIn("duo-order", found, out)
 
+    def test_unfolded_named_after_folded_gets_no_duo_order(self):
+        device = "iPhone Duo, unfolded, drawn after the folded pose."
+        code, found, out = check_run([brief(device=device)], self.ios)
+        self.assertNotIn("duo-order", found, out)
+
     def test_blind_brief_that_never_names_ios_apps_gets_ios_skill(self):
         code, found, out = check_run([brief(device=IOS_DEVICE_NO_SKILL)], self.ios)
         self.assertIn("ios-skill", found, out)

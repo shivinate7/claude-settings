@@ -94,6 +94,32 @@ class Faults(ModuleCase):
         css = "body { font-family: system-ui, sans-serif; }\n.screen { padding: env(safe-area-inset-top); }"
         self.assertEqual(self.found(mockup(css=css)), [])
 
+    def test_system_font_in_font_shorthand_passes(self):
+        css = "body { font: 600 17px/1.3 -apple-system, sans-serif; }\n.screen { padding: env(safe-area-inset-top); }"
+        self.assertEqual(self.found(mockup(css=css)), [])
+
+    def test_system_font_through_a_custom_property_passes(self):
+        css = (":root { --font: -apple-system, sans-serif; }\nbody { font-family: var(--font); }\n"
+               ".screen { padding: env(safe-area-inset-top); }")
+        self.assertEqual(self.found(mockup(css=css)), [])
+
+    def test_dynamic_type_keyword_in_font_shorthand_passes(self):
+        css = "body { font: -apple-system-body; }\n.screen { padding: env(safe-area-inset-top); }"
+        self.assertEqual(self.found(mockup(css=css)), [])
+
+    def test_important_after_system_font_passes(self):
+        css = "body { font-family: -apple-system !important; }\n.screen { padding: env(safe-area-inset-top); }"
+        self.assertEqual(self.found(mockup(css=css)), [])
+
+    def test_georgia_in_font_shorthand_fires_system_font_alone(self):
+        css = "body { font: 600 17px/1.3 Georgia, serif; }\n.screen { padding: env(safe-area-inset-top); }"
+        self.assertEqual(self.codes(mockup(css=css)), {"system-font"})
+
+    def test_georgia_through_a_custom_property_fires_system_font_alone(self):
+        css = (":root { --font: Georgia, serif; }\nbody { font-family: var(--font); }\n"
+               ".screen { padding: env(safe-area-inset-top); }")
+        self.assertEqual(self.codes(mockup(css=css)), {"system-font"})
+
     def test_font_and_safe_area_in_style_attributes_count(self):
         body = ('<main style="font-family: -apple-system, sans-serif; padding: env(safe-area-inset-top);">\n'
                 + FOLDED + "\n" + UNFOLDED + "\n</main>")
