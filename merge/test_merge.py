@@ -120,6 +120,9 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
+    def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
+        return "green", ""
+
     def wait_checks(self, n, sha, d, prior=None):
         self.waits.append((sha, prior))
         if prior is not None and self.on_wait:  # on_wait plays the rival during the wait after the claim push
@@ -2528,6 +2531,7 @@ class BaseAware(Env):
             def required_names(h): return ["checks"]
             def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
             def runs(h, sha): return []
+            def base_state(h, base, flows): return "green", ""
             def head_state(h, n, *a, **k): return "green"
             def wait_checks(h, *a, **k):
                 h.in_wait = True
@@ -2831,10 +2835,11 @@ try:
     m_pr, m_put = re.fullmatch(r"pulls/(\d+)", rel), re.fullmatch(r"pulls/(\d+)/merge", rel)
     m_run, m_sta = re.fullmatch(r"commits/([^/]+)/check-runs", rel), re.fullmatch(r"commits/([^/]+)/status", rel)
     m_req = re.fullmatch(r"branches/(.+)/protection/required_status_checks", rel)
+    m_jobs = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)  # main's runs (the red-main check): none unless a case sets base_runs / base_jobs
     after = bool(S.get("put_done")) and bool(m_pr) and method == "GET"
     note("calls.log", line + (" after-merge" if after else ""))
     note("repos.log", repo)
-    kind = "merge" if m_put else "check-runs" if m_run else "status" if m_sta else "pr" if m_pr else "list" if rel == "pulls" else "repo" if not rel else "required" if m_req else "other"
+    kind = "merge" if m_put else "check-runs" if m_run else "status" if m_sta else "pr" if m_pr else "list" if rel == "pulls" else "repo" if not rel else "required" if m_req else "base-runs" if rel == "actions/runs" else "base-jobs" if m_jobs else "other"
     hold(kind)
     rf = (S.get("route_fail") or {}).get(kind)  # {kind: {"n", "msg"}}: the next n calls of that route fail with msg, then it answers
     if rf and rf["n"] > 0:
@@ -2944,6 +2949,14 @@ try:
         if m_run:
             finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
         finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+
+    elif method == "GET" and rel == "actions/runs":
+        runs = S.get("base_runs", [])
+        finish(one({"total_count": len(runs), "workflow_runs": runs}, jq), 0, include)
+
+    elif method == "GET" and m_jobs:
+        jobs = (S.get("base_jobs") or {}).get(m_jobs.group(1), [])
+        finish(listing(jobs, "jobs", params, flags, jq, cap, {"total_count": len(jobs)}), 0, include)
 
     elif method == "GET" and m_req:
         af = S.get("api_fail")  # {"msg", "after_checks"}: once the checks have been read that many times, each read fails with msg
@@ -3118,6 +3131,17 @@ class GhHalf(Env):
 
     def go(self, **kw):
         return self.run_merge("7", "--confirm", host=self.gh_host(**kw))
+
+    def test_a_red_main_run_read_through_gh_refuses_the_merge(self):
+        # the red-main check's REST reads through the real gh call: one page of main's runs, then the red run's jobs
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
+        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
+        rc, out = self.go()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("run 901", out)
+        self.assertIn("checks: fail", out)
+        self.assertIn("GET actions/runs branch=main per_page=50", self.calls())
+        self.assertNotIn("PUT pulls/7/merge", self.calls())
 
     def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
         # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A lane whose open PR is past row 30 would be deleted, and its PR closed.
@@ -8355,6 +8379,199 @@ class NestedCheckout(Env):
         host = CapsHost(nested, [check("checks", "cancel", 50)], [run("cancelled")])
         (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
         self.assertNotIn(RE_CAP, why)
+
+
+MAIN_WORKFLOW = "\n".join([
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+    "  scope:", "    runs-on: ubuntu-latest", "    timeout-minutes: 10", "    steps:", "      - run: echo ok",
+    "  checks-macos:", "    runs-on: macos-latest", "    timeout-minutes: 30", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml"):
+    """One run on main, as `GET actions/runs` lists it."""
+    return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
+            "head_sha": f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
+
+
+def main_job(name, conclusion, minutes=1):
+    """One completed job of a main run, as `GET actions/runs/<id>/jobs` lists it: it ran from START for `minutes`."""
+    return {"name": name, "status": "completed", "conclusion": conclusion, "started_at": at(0), "completed_at": at(minutes),
+            "html_url": f"https://github.com/o/r/actions/runs/1/job/{len(name)}"}
+
+
+class MainRunsHost(FakeHost, merge.Host):
+    """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
+    `runs_fail` / `jobs_fail`: that read fails with this text."""
+    base_state = getattr(merge.Host, "base_state", None)
+
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None):
+        FakeHost.__init__(self, root, other)
+        self.ignore, self.cwd, self.warned = {}, root, set()
+        self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
+
+    def api(self, rel, *extra, method="GET", fields=None):
+        self.reads.append(rel)
+        assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
+        if self.runs_fail:
+            return 1, self.runs_fail
+        runs = [r for r in self.main_runs if fields.get("event") in (None, r["event"])]  # GitHub's event filter, when one is sent
+        return 0, json.dumps({"total_count": len(runs), "workflow_runs": runs})
+
+    def pages(self, rel, key=None, fields=None):
+        self.reads.append(rel)
+        m = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)
+        assert m and key == "jobs", rel
+        if self.jobs_fail:
+            raise merge.Stop(f"reading {rel} from GitHub failed: {self.jobs_fail}")
+        return self.jobs[int(m.group(1))]
+
+
+class RedMainBrake(Env):
+    """c166: no batch merge onto a red main. The red-main check judges main's latest completed run, job by job (decision no-merge-onto-red-main)."""
+    def setUp(self):
+        super().setUp()
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # the caps the timeout verdict reads
+
+    def go(self, runs, jobs, *flags, confirm=True, **kw):
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, **kw)
+        before = self.refs()
+        rc, out = self.run_merge("7", *(["--confirm"] if confirm else []), *flags)
+        return rc, out, before
+
+    def refused(self, rc, out, before):
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.refs(), before, "a refused run claims and pushes nothing")
+        self.assertFalse(self.lock_ref(), "the lock is freed")
+
+    def merged(self, rc, out):
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    # Oct 13-14: the latest main run has one failed job among passes, and a job cancelled at its cap.
+    OCT14 = {901: [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "cancelled", 30)]}
+
+    def test_a_red_main_refuses_and_names_the_red_job_and_the_run(self):
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
+        self.refused(rc, out, before)
+        self.assertIn("checks: fail", out)
+        self.assertIn("run 901", out)
+        self.assertIn("https://github.com/o/r/actions/runs/901", out)
+        self.assertNotIn("checks-macos", out, "a job cancelled at its cap is not a red step")
+        self.assertIn("--base-red-ok", out)
+
+    def test_a_main_run_red_only_by_a_timeout_does_not_refuse(self):
+        jobs = {902: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "cancelled", 30)]}
+        rc, out, _ = self.go([main_run(902, "failure")], jobs)
+        self.merged(rc, out)
+
+    def test_a_main_run_red_only_by_a_cancelled_twin_job_does_not_refuse(self):
+        # the timeout explains the failure; the cancelled twin beside its passing job is no red job
+        jobs = {903: [main_job("checks-macos", "cancelled", 30), main_job("checks", "cancelled", 2), main_job("checks", "success", 20)]}
+        rc, out, _ = self.go([main_run(903, "failure")], jobs)
+        self.merged(rc, out)
+
+    def test_a_newest_run_cancelled_with_no_red_job_is_unknown_not_an_older_run(self):
+        # on main the twin rule would reach across commits: the cancelled run is judged itself, never swapped for an older green one
+        jobs = {904: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+        rc, out, before = self.go([main_run(904, "cancelled"), main_run(903, "success")], jobs)
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("run 904", out)
+
+    def test_a_newest_run_cancelled_by_a_timeout_is_not_red(self):
+        jobs = {904: [main_job("scope", "success"), main_job("checks-macos", "cancelled", 30)]}
+        rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
+        self.merged(rc, out)
+
+    def test_a_failed_run_with_no_judged_job_is_red(self):
+        # a broken workflow file: startup_failure and no job; or failure with every job passing
+        for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("checks", "success", 20)])):
+            with self.subTest(conclusion=conclusion, jobs=len(jobs)):
+                rc, out, before = self.go([main_run(913, conclusion)], {913: jobs})
+                self.refused(rc, out, before)
+                self.assertIn("run 913", out)
+                self.assertIn(conclusion, out)
+
+    def test_a_run_of_a_workflow_file_gone_from_main_is_not_judged(self):
+        # a renamed or deleted workflow: its last red run stays in the page, but no new run will ever replace it
+        rc, out, _ = self.go([main_run(910, "success", name="checks"), main_run(909, "failure", path=".github/workflows/old-checks.yml")],
+                             {909: [main_job("checks", "failure", 20)]})
+        self.merged(rc, out)
+
+    def test_runs_are_judged_per_workflow_file_not_per_name(self):
+        # the workflow's name changed in the same file: the newer run is the verdict
+        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure", name="old-checks")], {911: [main_job("checks", "failure", 20)]})
+        self.merged(rc, out)
+
+    def green_run_of(self, event):
+        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")], {914: [main_job("checks", "failure", 20)]})
+        self.merged(rc, out)
+
+    def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
+        self.green_run_of("workflow_dispatch")  # `gh workflow run checks.yml --ref main`, the remedy classify prints
+
+    def test_a_green_schedule_run_clears_an_older_red_push_run(self):
+        self.green_run_of("schedule")
+
+    def test_a_pull_request_run_is_not_judged(self):
+        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("checks", "failure", 20)]})
+        self.merged(rc, out)
+
+    def test_a_newer_run_in_progress_is_skipped_for_the_latest_completed_one(self):
+        rc, out, before = self.go([main_run(906, None, status="in_progress"), main_run(905, "failure")],
+                                  {905: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 905", out)
+        self.assertNotIn("run 906", out)
+        self.assertNotIn("actions/runs/906/jobs", self.host.reads, "a run in progress is not judged")
+
+    def test_a_green_latest_run_reads_no_jobs_and_merges(self):
+        rc, out, _ = self.go([main_run(908, "success"), main_run(907, "failure")], {})
+        self.merged(rc, out)
+        self.assertEqual(self.host.reads.count("actions/runs"), 1)
+        self.assertFalse([r for r in self.host.reads if r.endswith("/jobs")], "a green run needs no jobs read")
+
+    def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", "this batch carries the checks fix")
+        self.merged(rc, out)
+        self.assertIn("run 901", out)
+        self.assertIn("--base-red-ok, reason: this batch carries the checks fix", out)
+        self.assertNotIn("Owner override", out, "a reason flag Claude can type is not the owner's override")
+
+    def test_the_flag_with_no_reason_does_not_lift(self):
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", " ")
+        self.refused(rc, out, before)
+
+    def test_unreadable_runs_are_unknown_and_refuse(self):
+        rc, out, before = self.go([], {}, runs_fail="gh: HTTP 500: Server Error")
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertNotIn("is red", out, "an unread run is never called red")
+        self.assertIn("--base-red-ok", out)
+
+    def test_unreadable_jobs_are_unknown_and_refuse(self):
+        rc, out, before = self.go([main_run(901, "failure")], {}, jobs_fail="HTTP 404")
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+
+    def test_the_reason_flag_lifts_unknown_and_logs_it(self):
+        rc, out, _ = self.go([], {}, "--base-red-ok", "GitHub is down, owner read main", runs_fail="gh: HTTP 500")
+        self.merged(rc, out)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("--base-red-ok, reason: GitHub is down, owner read main", out)
+
+    def test_the_preview_reports_a_red_main_and_presses_nothing(self):
+        rc, out, before = self.go([main_run(901, "failure")], self.OCT14, confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("red", line[0])
+        self.assertIn("run 901", line[0])
+        self.assertIn("--confirm refuses it", line[0])
 
 
 if __name__ == "__main__":

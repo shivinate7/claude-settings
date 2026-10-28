@@ -2,8 +2,11 @@
 # Usage: sim-test <xcodebuild test args without -destination>   (run from the folder that holds the project)
 # Runs the tests on one phone simulator. It reuses the first booted iPhone. With none booted, it boots the shared
 # iPhone 18 Pro, tests, then shuts that simulator down. It never shuts down a simulator it did not boot.
-# The exit code is xcodebuild's. The tool takes no lock and waits for no load: the guard caps booted simulators.
+# Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
+# names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool.
+# The exit code is otherwise xcodebuild's. The tool takes no lock and waits for no load.
 # macOS only. It runs under /bin/bash 3.2.
+CAP=2 # guard.SIM_BOOT_CAP: bash cannot import it; hooks/test_guard.py checks the two are equal
 SHARED=8787FE1C-48CC-4213-9B5C-8605AFE7F9B3 # iPhone 18 Pro, booted only when no iPhone is booted
 booted_by_me=
 
@@ -11,8 +14,16 @@ cleanup() { [ -n "$booted_by_me" ] && xcrun simctl shutdown "$SHARED"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-udid=$(xcrun simctl list devices booted | sed -n 's/^ *.*iPhone.* (\([0-9A-F-]\{36\}\)) (Booted).*/\1/p' | head -1)
+booted=$(xcrun simctl list devices booted | sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\1 (\2)/p')
+udid=$(printf '%s\n' "$booted" | sed -n 's/^.*iPhone.* (\([0-9A-F-]\{36\}\))$/\1/p' | head -1)
 if [ -z "$udid" ]; then
+  count=$(printf '%s\n' "$booted" | grep -c .)
+  if [ "$count" -ge "$CAP" ]; then
+    echo "sim-test: $count simulators are already booted, the cap is $CAP:" >&2
+    printf '%s\n' "$booted" | sed 's/^/  /' >&2
+    echo "sim-test: use one, or ask the owner to stop one." >&2
+    exit 1
+  fi
   udid=$SHARED
   xcrun simctl boot "$udid" || exit 1
   booted_by_me=1

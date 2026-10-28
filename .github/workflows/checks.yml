@@ -89,7 +89,7 @@ jobs:
       - name: Workflow supply-chain audit (zizmor)
         run: pipx run zizmor==1.30.1 .github/ actions/
 
-      # Ruff, mypy (strict, over the .code-check.json list), ShellCheck and tsc, from the table in
+      # Ruff, mypy (strict, over the .code-check.json list), ShellCheck, tsc and astro-check, from the table in
       # actions/code-check/standard.json. Fails on a tracked language with no row. No format step.
       - name: Code check
         uses: $/actions/code-check
@@ -104,6 +104,8 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: |
           for spec in $(python3 actions/code-check/code_check.py --pins); do pipx install "$spec"; done
+          npm ci --ignore-scripts --prefix actions/code-check/tools
+          export PATH="$PWD/actions/code-check/tools/node_modules/.bin:$PATH"
           python3 actions/code-check/test_action.py
 
       - name: Ruling-kind records-dir input
@@ -289,6 +291,12 @@ jobs:
       - name: Layout readers hold no record path
         run: python3 lint/check_layout.py
 
+      - name: Shared resource declaration fixture suite
+        run: python3 lint/test_check_shared_resources.py
+
+      - name: Shared resource declaration check
+        run: python3 lint/check_shared_resources.py
+
       - name: Compliance probes fixture suite
         run: python3 lint/test_compliance_probes.py
 
@@ -399,6 +407,9 @@ jobs:
 
       - name: STE lint action fixture suite
         run: python3 actions/ste-lint/test_action.py
+
+      - name: Playwright setup action suite
+        run: python3 actions/playwright-setup/test_action.py
 
       # Its own 4 min watchdog reads a hang red, names the hung test and prints the process tree.
       - name: Record stamp engine fixture suite

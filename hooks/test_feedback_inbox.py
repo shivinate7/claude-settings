@@ -759,7 +759,7 @@ def case_guard_standing_homed_to_handoff_passes():
 
 
 def case_guard_task_home_from_the_todo_kind():
-    repo = make_repo("rolled", tracked=("docs/todo.md", "docs/decisions/r.md"), extras='{"kinds": {}}')
+    repo = make_repo("rolled", tracked=("docs/todo.md", "docs/decisions/r.md"), extras='{"kinds": {}, "rolled-out": true}')
     cfg = new_cfg()
     expect_silent("homes: a task homed to the layout's todo kind passes",
                   homed(cfg, "t-todo", ("- fb-8 [task] -> docs/todo.md",
@@ -770,7 +770,7 @@ def case_guard_task_home_from_the_todo_kind():
     expect_silent("homes: a task homed to the todo path legacy-repos keeps for its repo passes",
                   homed(cfg, "t-kept", ("- fb-8 [task] -> specs/todo.md",), cwd=kept))
     moved = make_repo("extras-todo", tracked=("tasks.md",),
-                      extras=json.dumps({"kinds": {"todo": {"path": "tasks.md"}}}))
+                      extras=json.dumps({"kinds": {"todo": {"path": "tasks.md"}}, "rolled-out": True}))
     cfg = new_cfg()
     p = homed(cfg, "t-moved", ("- fb-8 [task] -> tasks.md",), cwd=moved)
     check("homes: an extras file that moves the todo kind is a layout fault, so the check stands down",

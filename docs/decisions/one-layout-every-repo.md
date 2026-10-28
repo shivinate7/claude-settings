@@ -23,7 +23,10 @@ The layout:
 - Repos with screens add: `docs/design/` (`DESIGN.md`, `mockups/`, `reference/`); `tokens/tokens.json`;
   `shots/`, ignored by git.
 - A repo names its own extra kinds (home's `records/`) in its extras file, `.claude/layout-extras.json`.
-  An extra kind never replaces a core or screen kind. The extras file also marks the repo as rolled out.
+  An extra kind never replaces a core or screen kind. The extras file marks the repo as rolled out only with
+  its own key, `"rolled-out": true`. An extras file with no mark leaves the repo at its legacy folders. Its keys
+  that are not about folder placement (`waiting-page`, `kind`, `caution`, `visibility`, `devices`, `roadmap`)
+  read whenever the file exists.
 
 A repo that has not rolled out is read at its legacy folders, the ones each tool read before the
 layout. So no tool changes its verdict on a repo before that repo moves its own files. A kind that one
@@ -37,10 +40,11 @@ file may repeat a path that map keeps for the kind, never name another. The last
   design ideas.
 - Owner ruling, 2026-10-26 (o15 answer a): the layout gets a core `todo` kind at `docs/todo.md`, with a
   legacy entry for each repo that keeps its tasks elsewhere.
-- Owner ruling, 2026-10-28 (waiting-page item 3 a): a repo counts as rolled out only with `"rolled-out": true`
-  in its `.claude/layout-extras.json`, a mark separate from its other keys.
+- Owner ruling, 2026-10-27 (waiting-page item 29 a) and 2026-10-28 (item 3 a): a repo counts as rolled out
+  only with `"rolled-out": true` in its `.claude/layout-extras.json`, a mark separate from its other keys. A repo
+  that holds the file only for a `waiting-page` key is not read as rolled out.
 - Owner ruling, 2026-10-28 (waiting-page item 32, answer c): home gets its mark at its own roll-out, not
-  before. The mark change waits for that roll-out.
+  before. Home's roll-out (home PR 370) landed with the mark on 2026-10-28.
 - A move keeps each file name. No record is renumbered or renamed (one-shared-record-stamp).
 
 Reason: the tools disagreed on where records live. `lint/ste_lint.py` read `docs/decisions` by default,

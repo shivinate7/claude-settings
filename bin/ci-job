@@ -6,16 +6,18 @@
 # list: a step whose whole run: is `python3 lint/<script>.py ...`, `python3 actions/<script>.py ...` or
 # `bin/ste-changed ...`, one command per line, no `&&`, `|` or `;`. A mutation script (a name with "mutate") and
 # every other command (hooks/ suites, bash, pipx, other uses:) is left out and printed nowhere. The one `uses:`
-# it knows is actions/ste-lint: with --base it runs `bin/ste-changed <base>` in its place (the one home of that
-# step, shared with the action through actions/ste-lint/run.sh); without --base it is skipped. A lane runs
-# `bin/ci-job checks --lint --base origin/main` before it joins a batch. Use it with a job such as checks.
+# it knows is actions/ste-lint: it runs `bin/ste-changed <base>` in its place (the one home of that step, shared
+# with the action through actions/ste-lint/run.sh). --lint with no --base takes origin/main as CI does and says so
+# in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
+# line names each pull-request step it skips. A lane runs `bin/ci-job checks --lint --base origin/main` before it
+# joins a batch. Use it with a job such as checks.
 # Workflow: .github/workflows/checks.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
 # Multi-line `run: |` steps run whole. Verdicts: PASS, FAIL, unknown (tool missing, or an expression it
-# cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no --base).
+# cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no base).
 # A step's `if:` reads every needs.scope.outputs flag as true, !cancelled(), always() and success() as true,
-# and github.event_name == 'pull_request' as true only with --base. ${{ github.base_ref }} is --base without
+# and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
@@ -223,14 +225,27 @@ def main(argv):
     if re.search(r"^    (?:env|defaults):", block, re.M):
         print("unknown  job %r sets a job-level env: or defaults:, which this runner does not read" % job)
         return 2
-    base = opts["--base"]
+    base, no_base = opts["--base"], False
+    if lint and not base:
+        # A no-base lint run once read as a pass while CI's pull-request steps failed: default to CI's base.
+        if git("rev-parse", "--verify", "-q", "origin/main^{commit}", cwd=top):
+            base = "origin/main"
+            print("base: origin/main (default; pass --base to change)")
+        else:
+            idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": ""}
+            unread = [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(step_blocks(block), 1)
+                      if is_lint(st) and plan(st, False, idle)[0] == "skipped"]
+            if unread:
+                print("unknown         no base resolved (origin/main is absent; pass --base), so these pull-request "
+                      "steps are skipped: %s" % ", ".join(unread))
+                no_base = True
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
               "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
         os.close(fd)
-    tally = {"FAIL": 0, "unknown": 0}
+    tally = {"FAIL": 0, "unknown": int(no_base)}
     unshallow(block, top, dry, tally)
     for n, step in enumerate(step_blocks(block), 1):
         if lint and not is_lint(step):

@@ -40,7 +40,9 @@ invent a size: a device with no written size is drawn at the brief's size, and y
 Sample figures. Put a "Sample" banner at the top of each mockup: it says that no figure on it is
 real. Label what exists with a dashed "Today: <part>" and what the option adds with a dashed
 "New: <part>". When the owner picks by looking at the mockup, name the element that carries the
-decision with an id, so the waiting page can focus on it.
+decision with an id, so the waiting page can focus on it. Draw one mockup per option, each in that
+option's own state, and set `focus` on each to the element being decided. The waiting page refuses an
+item where two options show the same picture with the same focus, or a focus finds nothing.
 
 For each screen the brief names, write two files in the design folder:
 

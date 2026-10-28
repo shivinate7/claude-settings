@@ -8,6 +8,8 @@
 #  - One booted iPhone is reused by UDID: no boot, no shutdown. An iPad is not an iPhone. With two, the first is used.
 #  - None booted: boot the shared iPhone 18 Pro, test, then shut down that simulator, also on failure, INT and TERM.
 #  - A failed boot exits non-zero and runs no xcodebuild.
+#  - At the cap (2 booted devices of any kind, no iPhone among them): no boot, no xcodebuild, exit non-zero, and
+#    the booted devices and the remedy are printed. Under the cap it boots.
 #  - The exit code is xcodebuild's. The tool takes no lock and runs no top.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
@@ -143,6 +145,26 @@ need "exit is non-zero" test $rc -ne 0
 need "boot was tried" has_call "simctl boot $SHARED"
 need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
 end_case "18 failed boot exits non-zero and runs no xcodebuild"
+
+fresh; booted "iPad Pro 13-inch" $OTHER; booted "Apple Watch Ultra 3" $THIRD; run
+need "exit is non-zero" test $rc -ne 0
+need "no boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
+need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
+need "names the first booted device" grep -Fq "iPad Pro 13-inch ($OTHER)" "$work/run.out"
+need "names the second booted device" grep -Fq "Apple Watch Ultra 3 ($THIRD)" "$work/run.out"
+need "prints the remedy" grep -Fq "use one, or ask the owner to stop one" "$work/run.out"
+end_case "21 two non-iPhones booted: at the cap, boots nothing and runs no xcodebuild"
+
+fresh; booted "Apple Watch Ultra 3" $THIRD; run
+need "exit code" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+end_case "22 one non-iPhone booted: under the cap, boots the shared iPhone"
+
+fresh; booted "iPad Pro 13-inch" $OTHER; booted "iPhone 18 Pro" $SHARED; run
+need "exit code" rc_is 0
+need "destination is the booted iPhone" has_call "$DEST$SHARED"
+need "steps are run only" steps_are "run "
+end_case "23 an iPhone and an iPad booted: the iPhone is reused, which is not a boot"
 
 # sig_case SIGNAL: the tool boots its own simulator and waits in xcodebuild. A signal to the whole process group
 # (as a terminal sends it) must still shut that simulator down.

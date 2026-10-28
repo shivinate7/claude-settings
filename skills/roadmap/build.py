@@ -284,7 +284,7 @@ def extras(repo, source):
     try:
         sys.path.insert(0, str(LINT))
         import layout
-        if layout.rolled_out(str(repo)):
+        if layout.has_extras(str(repo)):
             path = repo / layout.layout()["extras"]
             found = json.loads(path.read_text(encoding="utf-8")).get("roadmap")
             if isinstance(found, dict):

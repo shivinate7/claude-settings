@@ -266,14 +266,64 @@ class SteAction(Job):
                                       args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
-    def test_with_no_base_the_ste_step_is_skipped_not_passed(self):
-        self.branch_with("A short sentence.")
+    def test_with_no_base_the_ste_step_runs_against_origin_main(self):
+        self.branch_with(" ".join(["word"] * 40) + " end.")
         rc, lines, out = self.run_job(step("STE lint", uses="$/actions/ste-lint"), args=("--lint",))
-        self.assertEqual(self.verdicts(lines), ["skipped"], out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["base:", "FAIL"]), out)
 
     def test_another_action_is_still_not_run_locally(self):
         rc, lines, out = self.run_job(step("other", uses="actions/checkout@v4"), args=("--base", "origin/main"))
         self.assertEqual(self.verdicts(lines), ["not run locally"], out)
+
+
+class LintBase(Job):
+    """`--lint` with no --base must never read as a pass while CI's pull-request steps would fail."""
+
+    PR = "${{ github.event_name == 'pull_request' }}"
+    NARRATION = step("Comment narration check", 'python3 lint/check_comment_narration.py --base "origin/$BASE_REF"',
+                     **{"if": PR}, env={"BASE_REF": "${{ github.base_ref }}"})
+
+    def git(self, *a):
+        subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
+
+    def lane_adds_narration(self, origin=True):
+        for rel in ("lint/check_comment_narration.py", "hooks/_nowindow.py"):
+            os.makedirs(os.path.join(self.root, os.path.dirname(rel)), exist_ok=True)
+            shutil.copy(os.path.join(HERE, "..", rel), os.path.join(self.root, rel))
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        if origin:
+            self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-qb", "lane")
+        with open(os.path.join(self.root, "a.py"), "w", encoding="utf-8") as f:
+            f.write("# fixed on 2026-10-28\nx = 1\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "change")
+
+    def test_no_base_defaults_to_origin_main_and_the_narration_step_fails(self):
+        self.lane_adds_narration()
+        rc, lines, out = self.run_job(self.NARRATION, args=("--lint",))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["base:", "FAIL"]), out)
+        self.assertIn("origin/main (default", lines[0])
+
+    def test_no_base_and_no_origin_main_is_unknown_and_names_the_skipped_steps(self):
+        self.lane_adds_narration(origin=False)
+        rc, lines, out = self.run_job(self.NARRATION, step("STE lint", uses="$/actions/ste-lint"),
+                                      step("plain lint", "python3 lint/check_comment_narration.py --help"),
+                                      args=("--lint",))
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(self.verdicts(lines)[0], "unknown", out)
+        self.assertIn("Comment narration check", lines[0])
+        self.assertIn("STE lint", lines[0])
+        self.assertNotIn("plain lint", lines[0])
+        self.assertNotIn("PASS", self.verdicts(lines)[:3], out)
+
+    def test_an_explicit_base_wins_over_the_default(self):
+        self.lane_adds_narration()
+        self.git("update-ref", "refs/remotes/origin/other", "HEAD")
+        rc, lines, out = self.run_job(self.NARRATION, args=("--lint", "--base", "origin/other"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        self.assertNotIn("default", out)
 
 
 class RealChecks(unittest.TestCase):

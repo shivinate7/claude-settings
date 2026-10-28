@@ -14,7 +14,8 @@ cannot run, so the group is unknown.
 
 layout: lint/layout.json through lint/layout.py, plus the child's extras file. It names each
   folder that is neither a layout kind nor an extra, and each core kind the child lacks. A child
-  with no extras file is "not rolled out": it exits 0, and lists the same findings as a preview.
+  with no extras file, or none marked "rolled-out": true, is "not rolled out": it exits 0, and
+  lists the same findings as a preview.
 design: screen readiness against docs/design/. The shoot config names the screens, sizes and themes. The
   shared `bin/shoot` is the screenshot command, and a config it would refuse is a gap. One token
   file: a `tokens.*` file (the layout's tokens path is one), tests and generated files aside. Each item
@@ -24,9 +25,10 @@ lanecap: a guessed lane cap in a brief or a plan (rule parallelism-no-guessed-la
   of quotes is cited, and passes.
 playwright: a Playwright install that also runs apt (`--with-deps`, `install-deps`) in a workflow, an
   action, a Makefile, a shell script, a Dockerfile, a justfile, a Taskfile, a dev container file or a
-  package.json script. The runner image already has the
-  browsers' libraries, and that apt step once timed a job out on a slow mirror. The shared
-  actions/playwright-setup installs with no apt step. Comments do not count.
+  package.json script. The runner image already has Chromium's libraries, and that apt step once
+  timed a job out on a slow mirror. The shared actions/playwright-setup runs no apt for Chromium.
+  WebKit and Firefox opt in through its `system-deps` input, which this probe does not flag.
+  Comments do not count.
 ios: drift from the iOS standard of skills/ios-apps, one item per line: the make targets, the ship
   path, the project file, the Kit package, Swift 6, the CI runner, the CI checks, slow tests on each
   pull request, and account IDs in the repo. A repo with no iOS app is n/a. Comments do not count.
@@ -146,7 +148,7 @@ def probe_layout(root):
             lines.append("  missing core kind %s: %s" % (name, kind["path"]))
     if not rolled:
         lines = ["  preview" + line[1:] for line in lines]
-        return finish("layout", lines, "not rolled out (no %s); %d preview finding(s)" % (extras, len(lines)), 0)
+        return finish("layout", lines, "not rolled out (no %s with rolled-out: true); %d preview finding(s)" % (extras, len(lines)), 0)
     if lines:
         return finish("layout", lines, "out - %d finding(s)" % len(lines), 1)
     return finish("layout", lines, "in shape", 0)

@@ -2,9 +2,12 @@
 
 lint/layout.json holds the kinds. A repo adds its own kinds in its extras file (the layout's
 "extras" path, read from the repo root): {"kinds": {"<name>": {"path": "<folder>", ...}}}. An
-extra kind may not replace a layout kind. The extras file may hold no kinds: it is also the mark
-that the repo has rolled out to the layout. Its "waiting-page" key holds the URL of the repo's
-waiting page (`waiting_page()`, skill waiting-page).
+extra kind may not replace a layout kind. The mark that the repo has rolled out to the layout is
+its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
+extras file with no mark does not roll a repo out. Its keys that are not about folder placement
+("waiting-page", "kind", "caution", "visibility", "devices", "roadmap") read whenever the file
+exists (`has_extras()`). The "waiting-page" key holds the URL of the repo's waiting page
+(`waiting_page()`, skill waiting-page).
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
 layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. A kind
@@ -50,9 +53,18 @@ def _extras(root):
     return os.path.join(root, *layout().get("extras", "").split("/"))
 
 
-def rolled_out(root):
-    """True when `root` holds its extras file, so it keeps every kind at its layout path."""
+ROLLED_OUT = "rolled-out"  # the extras key that marks a repo as rolled out to the layout
+
+
+def has_extras(root):
+    """True when `root` holds its extras file. The keys that are not about folder placement read from it."""
     return bool(layout().get("extras")) and os.path.isfile(_extras(root))
+
+
+def rolled_out(root):
+    """True when `root` holds its extras file and the file's "rolled-out" key is true, so it keeps
+    every kind at its layout path."""
+    return has_extras(root) and _read(_extras(root)).get(ROLLED_OUT) is True
 
 
 def kinds(root=None):
@@ -182,9 +194,9 @@ ARTIFACT_LINK = ("https://claude.ai/artifact/", "https://claude.ai/code/artifact
 
 
 def waiting_page(root):
-    """The URL of the waiting page of `root` (skill waiting-page), from its extras file. "unknown"
-    when the repo has no extras file or no key: a repo with no page is not an error."""
-    if not rolled_out(root):
+    """The URL of the waiting page of `root` (skill waiting-page), from its extras file, mark or not.
+    "unknown" when the repo has no extras file or no key: a repo with no page is not an error."""
+    if not has_extras(root):
         return "unknown"
     found = _read(_extras(root)).get(WAITING_PAGE)
     if found is None:
@@ -208,7 +220,7 @@ def live_pages(roots):
 
 def _repo_keys(root):
     """The extras file of `root` as a dict, or {} when the repo has none."""
-    return _read(_extras(root)) if rolled_out(root) else {}
+    return _read(_extras(root)) if has_extras(root) else {}
 
 
 def _named(root, key, table):
@@ -273,6 +285,42 @@ def describe_caution(root):
                       + ["act: " + a for a in found["acts"]])
 
 
+SHARED_RESOURCES = "shared-resources"  # the extras key: [{name, owner, preflight, holds}]
+
+
+def shared_resources(root):
+    """[{name, owner, preflight, holds}] from the "shared-resources" key of `root`'s extras file, [] when
+    it has none. owner is `<gh-owner>/<repo>`; preflight and holds are paths inside the owner repo. When
+    `root` is the owner, its preflight file must exist. LayoutError names the extras file and the entry."""
+    found = _repo_keys(root).get(SHARED_RESOURCES)
+    if found is None:
+        return []
+    where = _extras(root)
+    if not isinstance(found, list):
+        raise LayoutError("%s: %s is not a list" % (where, SHARED_RESOURCES))
+    names = set()
+    for number, item in enumerate(found, 1):
+        label = "%s entry %d (%s)" % (SHARED_RESOURCES, number, item.get("name") if isinstance(item, dict) else item)
+        if not isinstance(item, dict):
+            raise LayoutError("%s: %s is not an object" % (where, label))
+        for field in ("name", "owner", "preflight") + (("holds",) if "holds" in item else ()):
+            if not isinstance(item.get(field), str) or not item[field].strip("/ "):
+                raise LayoutError("%s: %s has no %s" % (where, label, field))
+        if item["name"] in names:
+            raise LayoutError("%s: %s name appears twice" % (where, label))
+        names.add(item["name"])
+        if not re.fullmatch(r"[^/\s]+/[^/\s]+", item["owner"]) or item["owner"].endswith(".git"):
+            raise LayoutError("%s: %s owner %r is not <owner>/<repo>" % (where, label, item["owner"]))
+        for field in ("preflight", "holds"):
+            if field in item:
+                if item[field] != item[field].strip():
+                    raise LayoutError("%s: %s %s has whitespace around it" % (where, label, field))
+                _safe(item[field], "%s: %s %s" % (where, label, field))
+        if repo_name(root) == item["owner"].lower() and not os.path.isfile(os.path.join(root, *item["preflight"].split("/"))):
+            raise LayoutError("%s: %s preflight %s is missing in the owner repo" % (where, label, item["preflight"]))
+    return found
+
+
 def folders(root, flag):
     """The paths in `root` of each kind whose `flag` (record, listed) is true, in layout order."""
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
@@ -285,9 +333,10 @@ if __name__ == "__main__":
     # Pages of several repos: live_pages(roots), read by skills/waiting-page/stale_pages.py.
     # python3 lint/layout.py devices <root>: the repo's devices, first drawn first, or "unknown".
     # python3 lint/layout.py caution <root>: the repo's caution level with its facts and acts.
-    ROOT_VERBS = (WAITING_PAGE, "devices", "caution")
+    # python3 lint/layout.py shared-resources <root>: the repo's shared machines as JSON, [] when none.
+    ROOT_VERBS = (WAITING_PAGE, "devices", "caution", SHARED_RESOURCES)
     if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] in ROOT_VERBS):
-        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution <root>")
+        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources <root>")
     try:
         here = os.path.abspath(sys.argv[2])
         if sys.argv[1] == WAITING_PAGE:
@@ -296,6 +345,8 @@ if __name__ == "__main__":
             print(describe_devices(here))
         elif sys.argv[1] == "caution":
             print(describe_caution(here))
+        elif sys.argv[1] == SHARED_RESOURCES:
+            print(json.dumps(shared_resources(here)))
         else:
             print(path(here, sys.argv[3]))
     except (LayoutError, KeyError) as err:
