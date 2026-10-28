@@ -238,6 +238,23 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
 
+    def test_round_three_false_refusals_pass(self):
+        for where, line in (("job", "A customer gets a text about order #1234."), ("job", "A paper slip #1234 comes in."),
+                            ("job", "Each card has a title in English."), ("job", "The heading in German is odd."),
+                            ("job", "A courier in San Francisco ships it."), ("job", "Montserrat sellers ship late."),
+                            ("job", "Order #1A2B3C arrived."), ("device", "The lab (north wing) holds a phone.")):
+            with self.subTest(line=line):
+                text = brief(**{where: (JOB if where == "job" else DEVICE) + "\n" + line})
+                self.assertEqual(self.m.brief_faults(text), [])
+
+    def test_round_three_leaks_are_refused(self):
+        for key, line in (("token-colour", "A solid #121212 background."), ("token-colour", "Mid #888888 for lines."),
+                          ("token-colour", "A grid #333333 under it."), ("token-font", "The brand font is Inter."),
+                          ("token-font", "The typeface is Lato."), ("token-font", "Font: Lato."),
+                          ("token-font", "Use font Lato.")):
+            with self.subTest(line=line):
+                self.assertIn(key, codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
     def test_device_gap_inset_and_scale_sizes_pass(self):
         for line in ("8 px gap at the hinge.", "Hinge gap: 8 pt.", "Safe area: 47 pt top inset.",
                      "1114 x 705 pt, a grid of two screens.", "240 pt, one step down.",

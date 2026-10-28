@@ -40,8 +40,9 @@ step c191. A Device section may name written sizes, so it is exempt from the spa
 Limits: the designer's reads are barred by its own instruction, not by a hook: the guard `designer-scope`
 limits writes only, and no hook knows the lane kind of a read. A designer that opens a barred file is
 caught only by the orchestrator's hex check of the finished mockup. The value patterns catch hex, rgb and
-hsl colours, named fonts and font-family words. They also catch px or rem steps near a spacing word. They
-miss a paraphrase such as "Banchi blue" with no hex. The word lists catch the common forms of a keep rule and of a current-view name, not every
+hsl colours, named fonts and font-family words. They also catch a px, rem or dp value anywhere in the Job.
+They miss a paraphrase such as "Banchi blue" with no hex, a font that is not on the list and is not named
+after the word font, and a short hex such as #fff with no colour word before it. The word lists catch the common forms of a keep rule and of a current-view name, not every
 paraphrase. The check refuses a view name only when the orchestrator passes it with `--current`.
 The spawn hook does not know view names. The `Blind lanes:` line is the orchestrator's own
 count, not a count of spawned lanes.
