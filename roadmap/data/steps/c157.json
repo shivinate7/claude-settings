@@ -1,9 +1,9 @@
 {
  "title": "Cleanup never deletes a live agent's build folders",
  "phase": "cleanup",
- "status": "active",
+ "status": "doing",
  "order": 103.3033,
  "why": "Your ask (cmsg_01DoF7thf3iq2Srr1UsfXgh239AWxeRqxYqdRJxDTTE96w): the agent-end reap deletes DerivedData and .build while a process still runs, and the moment an agent ends, though a finished agent is resumed into its own worktree, so it rebuilds from nothing and loads the Mac.",
- "note": "Part 1 merged in batch #737 (main b09aece, Oct 28 01:19 CDT): PR #720 keeps build folders while a process runs in the agent worktree. Next cloud lane, part 2: build folders follow the worktree's 30-minute idle clock, reaped only in agent worktrees idle 30 min or more at a later agent end, keeping #720's process gate (a long build makes no git activity). Windows runs the same code. Parked, later: what drove the Mac to load 123 (several xcodebuild and simulator runs at once?) and a proposed cap. Needs no answer. Port: no; the janitor installs from here. Placed ahead of c82 (triage, Oct 28): a lane is open on it now.",
- "updatedAt": "2026-10-28T06:45:00Z"
+ "note": "Part 1 merged in batch #737 (main b09aece, Oct 28 01:19 CDT): PR #720 keeps build folders while a process runs in the agent worktree. Part 2 doing: lane started Oct 28 01:24 CDT (orchestrator), branch c157-build-idle-clock: build folders follow the worktree's 30-minute idle clock, reaped only in agent worktrees idle 30 min or more at a later agent end, keeping #720's process gate (a long build makes no git activity). Windows runs the same code. Parked, later: what drove the Mac to load 123 (several xcodebuild and simulator runs at once?) and a proposed cap. Needs no answer. Port: no; the janitor installs from here. Placed ahead of c82 (triage, Oct 28): a lane is open on it now.",
+ "updatedAt": "2026-10-28T07:20:00Z"
 }
