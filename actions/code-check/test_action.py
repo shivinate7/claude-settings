@@ -2,7 +2,7 @@
 Asserts: a tracked language with no row is red (by extension and by shebang), a planted mypy error in
 a listed module is red, a shrunk mypy list is red against the base ref, a missing listed module is red,
 a listed module renamed off the list is red, a shrink against --main (current main) is red,
-Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
+Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason).
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
@@ -85,6 +85,13 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config([]), ".env.example": "KEY=\n", ".worktreeinclude": ".env\n",
                          "app/public/manifest.webmanifest": "{}\n", "tests/fixtures/rows.csv": "a,b\n1,2\n",
                          "img/a.jpg": "x", "img/b.jpeg": "x", "img/c.webp": "x", "img/d.png": "x"})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("no row", out)
+
+    def test_archive_sheet_model_and_node_config_files_have_rows(self):
+        # A data app repo's binary and dotfile kinds; .nvmrc and .npmrc match by whole name, as .gitignore does.
+        rc, out = check({".code-check.json": config([]), "data/a.csv.gz": "x", "reports/r.xlsx": "x",
+                         "models/m.onnx": "x", "data/w.npz": "x", ".nvmrc": "20\n", ".npmrc": "save-exact=true\n"})
         self.assertEqual(rc, 0, out)
         self.assertNotIn("no row", out)
 

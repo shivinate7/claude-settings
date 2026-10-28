@@ -669,6 +669,14 @@
         "reason": "Judged by the AskUserQuestion agent hook (model claude-opus-5-5, in settings.json); it moves to a mechanism after the hook makes a real catch."
       }
     },
+    "style-option-widens-marked": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "uniform-pick",
+        "reason": "The guard refuses a waiting-page item whose pick names an option marked widens (decision uniform-over-variants). It cannot read a reply, so the reply judge (hooks/reply_judge.py, a model, never blocks) notes a reply that recommends an option that widens a shared tool, or offers one without its label."
+      },
+      "test": "hooks/test_guard.py::uniform pick: today's item (pick names the widening option) is denied"
+    },
     "style-question-inside-box": {
       "mechanism": {
         "kind": "unmechanized",
