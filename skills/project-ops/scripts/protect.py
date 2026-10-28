@@ -12,8 +12,11 @@ Exit 0 done or previewed, 1 a gh call failed, 2 a bad argument.
 import argparse
 import json
 import re
-import subprocess
+import os
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a child start with no console window (hooks/_nowindow.py)
 
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
@@ -21,7 +24,7 @@ BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 
 def run_gh(args, body=None):
     """-> (code, output) of `gh api`, with `body` as its JSON input."""
-    p = subprocess.run(["gh", "api", *args] + (["--input", "-"] if body is not None else []),
+    p = _nowindow.run(["gh", "api", *args] + (["--input", "-"] if body is not None else []),
                        input=json.dumps(body) if body is not None else None, capture_output=True, text=True)
     return p.returncode, (p.stdout + p.stderr).strip()
 
