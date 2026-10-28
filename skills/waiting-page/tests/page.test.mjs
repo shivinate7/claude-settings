@@ -304,18 +304,31 @@ test("a saved answer from an earlier page shows as a receipt and nothing is writ
   assert.deepEqual(await page.evaluate(() => window.__log), []);
 });
 
-test("the receipt trail lights Read and Filed from receipts and shows only Saved without them", async (t) => {
+test("an answered card without a filing shows Answered, filing pending, never waited", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
-  const lit = () => card(page, DECISION).locator(".trail li.on").allTextContents();
-  const first = (await lit()).map((x) => x.trim());
-  assert.equal(first.length, 1);
-  assert.match(first[0], /^Saved /);
-  await page.close();
-  const page2 = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } });
-  const on = (await card(page2, DECISION).locator(".trail li.on").allTextContents()).map((x) => x.trim());
-  assert.equal(on.length, 3);
-  assert.match(on[1], /Read by test thread/);
-  assert.match(on[2], /Filed in c1/);
+  const c = card(page, DECISION);
+  const ans = (await c.locator(".ans").textContent()).trim();
+  assert.match(ans, /^Answered, filing pending Oct \d+, \d\d:\d\d C[DS]T$/);
+  assert.doesNotMatch(await c.locator(".top").textContent(), /waited|Added/i);
+  assert.equal(await c.locator(".ans.filed").count(), 0);
+  assert.match(await page.locator("#c-" + DECISION.id).getAttribute("aria-label"), /answered, filing pending$/);
+});
+
+test("an answered card with receipts shows Answered, filed in the home with the filed time", async (t) => {
+  const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } }); if (!page) return;
+  const c = card(page, DECISION);
+  assert.match((await c.locator(".ans.filed").textContent()).trim(), /^Answered, filed in c1 Oct 25, 22:00 CDT$/);
+  assert.equal(await c.locator(".trail").count(), 0);
+  assert.doesNotMatch(await c.locator(".top").textContent(), /waited/i);
+  assert.match(await page.locator("#c-" + DECISION.id).getAttribute("aria-label"), /answered, filed$/);
+  assert.match(await page.locator("#c-" + DECISION.id).getAttribute("class"), /filed/);
+});
+
+test("a read but unfiled answer shows Read by the owner beside Change", async (t) => {
+  const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } } }); if (!page) return;
+  const c = card(page, DECISION);
+  assert.match(await c.locator(".receipt .read").textContent(), /^Read by test thread /);
+  assert.match((await c.locator(".ans").textContent()).trim(), /^Answered, filing pending /);
 });
 
 test("times are 24-hour Chicago time with the zone named", async (t) => {
