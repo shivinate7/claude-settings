@@ -111,6 +111,27 @@ def git_common_dir(where: str):
     return _common_dir(where)
 
 
+def clone_checkouts(where: str):
+    """Return the root of every checkout of the clone that `where` sits in, the primary and each
+    linked worktree, realpath'd. None when git gives no answer (no git, no tree, a git too old for
+    `-z`). One `git worktree list` call. A bare entry has no tree and is left out."""
+    if not where or not os.path.isdir(where):
+        return None
+    answer = _git(where, "worktree", "list", "--porcelain", "-z")
+    if answer is None or answer.returncode != 0:
+        return None
+    roots = []
+    for field in answer.stdout.split("\0"):
+        if field.startswith("worktree "):
+            roots.append(field[len("worktree "):])
+        elif field == "bare" and roots:
+            roots.pop()
+    try:
+        return [os.path.realpath(root) for root in roots if root] or None
+    except Exception:
+        return None
+
+
 def _inside_work_tree(where: str):
     """True inside a git working tree, False when git says this is no git tree, None when git
     gives no answer at all (git missing, a timeout, a crash).

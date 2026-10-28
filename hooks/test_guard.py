@@ -12910,6 +12910,94 @@ def worktree_home_case():
     return True, "orchestrator, no-record, home, outside-home, removed-home, unreadable all correct"
 
 
+def _cross_checkout_fixture(name):
+    """A primary checkout with two nested worktrees, `.claude/worktrees/lane-a` and `lane-b`, the
+    shape the harness makes, and a scratch folder outside the clone. Returns the four paths."""
+    primary = os.path.join(ROOT, name + "_primary")
+    lane_a = os.path.join(primary, ".claude", "worktrees", "lane-a")
+    lane_b = os.path.join(primary, ".claude", "worktrees", "lane-b")
+    scratch = os.path.join(ROOT, name + "_scratch")
+    if not os.path.isdir(lane_b):
+        make_repo(primary, {"src/app.py": "print(1)\n"})
+        run_vcs(primary, "worktree", "add", "-q", lane_a, "-b", name + "-lane-a")
+        run_vcs(primary, "worktree", "add", "-q", lane_b, "-b", name + "-lane-b")
+        os.makedirs(scratch, exist_ok=True)
+    return primary, lane_a, lane_b, scratch
+
+
+def worktree_home_cross_checkout_case():
+    """Rule 0, `other-checkout`, beside `worktree-home`: any session, agent or not, may not write
+    into a checkout of its clone other than the one its cwd stands in. A target in no checkout of
+    the clone is allowed. A nested worktree belongs to itself, not to the primary that holds it.
+    Incident 2026-09-06 and the notes-folder refusal: docs/decisions/an-agent-outside-its-home-tree-must-stop.md."""
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xco")
+    in_a = os.path.join(lane_a, "src", "app.py")
+    in_b = os.path.join(lane_b, "src", "app.py")
+    in_primary = os.path.join(primary, "src", "app.py")
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # First: a top-level session (no agent_id) in one worktree writes into its sibling.
+    check("top-level Write into a sibling worktree", "deny", "Write", lane_a,
+          file_path=in_b, content="x")
+    check("primary Write into a nested worktree", "deny", "Write", primary,
+          file_path=in_b, content="x")
+    check("worktree Edit into the primary's own files", "deny", "Edit", lane_a,
+          file_path=in_primary, old_string="1", new_string="2")
+    check("worktree MultiEdit into the primary's own files", "deny", "MultiEdit", lane_b,
+          file_path=in_primary, edits=[{"old_string": "1", "new_string": "2"}])
+    check("relative climb out of the worktree into its sibling", "deny", "Write", lane_a,
+          file_path=os.path.join("..", "lane-b", "src", "app.py"), content="x")
+    check("Write to a folder in no checkout", "allow", "Write", lane_a,
+          file_path=os.path.join(scratch, "note.md"), content="x")
+    check("Write within its own worktree", "allow", "Write", lane_a, file_path=in_a, content="x")
+    check("primary Write into its own files", "allow", "Write", primary,
+          file_path=in_primary, content="x")
+    check("primary Write of a new file under .claude", "allow", "Write", primary,
+          file_path=os.path.join(primary, ".claude", "notes.md"), content="x")
+    check("Read of a sibling worktree", "allow", "Read", lane_a, file_path=in_b)
+    check("unreadable git state at the cwd", "allow", "Write", NOGIT, file_path=in_b, content="x")
+    # The shell form: the write targets the guard already extracts for frozen paths.
+    check("shell redirect into a sibling worktree", "deny", "Bash", lane_a,
+          command="echo x > " + slash(in_b))
+    check("shell cp into the primary's files", "deny", "Bash", lane_a,
+          command="cp src/app.py " + slash(in_primary))
+    check("shell read of a sibling worktree", "allow", "Bash", lane_a,
+          command="cat " + slash(in_b))
+    check("shell git read of a sibling worktree", "allow", "Bash", primary,
+          command=VCS + " -C " + slash(lane_b) + " log --oneline -1")
+    check("shell redirect within its own worktree", "allow", "Bash", lane_a,
+          command="echo x > " + slash(os.path.join(lane_a, "src", "new.txt")))
+    check("shell redirect to a folder in no checkout", "allow", "Bash", lane_a,
+          command="echo x > " + slash(os.path.join(scratch, "out.txt")))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
+
+
+def worktree_home_cross_checkout_override_case():
+    """other-checkout is liftable: the owner may mean a write into another checkout. worktree-home,
+    the agent-home part, stays unliftable (ov_drift_acts)."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcoov")
+    config = ov_config("cross-checkout")
+    session = "ov-cross-checkout"
+    call = lambda s: ov_call("Write", {"file_path": os.path.join(lane_b, "src", "app.py"),
+                                       "content": "x"}, lane_a, config, session, s)
+    problem = ov_want(*call(0), "deny", "other-checkout")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "other-checkout")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
 def worktree_home_later_field_case():
     """Rule 0 judges EVERY path field of a write call, not only the first (PR #306 review gap).
 
@@ -13280,6 +13368,10 @@ LOG_CHECKS = (
      session_is_live_backwards_clock_step_case),
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "
      "unreadable", worktree_home_case),
+    ("worktree-home: any session's write into another checkout of its clone is refused; outside "
+     "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: an owner override lifts the cross-checkout refusal",
+     worktree_home_cross_checkout_override_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
@@ -16728,6 +16820,8 @@ LOG_RULE_FAMILY = (
     ("liveness: worktree_live_session answers None when", "branch-worktree"),
     ("liveness: session_is_live reads an implied", "branch-worktree"),
     ("worktree-home: orchestrator", "worktree-home"),
+    ("worktree-home: any session's write into another checkout", "worktree-home"),
+    ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
     ("worktree-home: a lone cd or Set-Location", "worktree-home"),
     ("worktree-home: a cd or Set-Location into the home chained", "worktree-home"),
