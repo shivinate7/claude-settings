@@ -8,7 +8,7 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, norm, split_segments,
+    REDIRECT, _expanded, _resolved, dir_before_segment, norm, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -548,9 +548,11 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
-def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None) -> str:
+def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
-    `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`)."""
+    `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
+    `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
+    when that folder cannot be told."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -582,12 +584,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None) -> str:
             else:
                 words.extend(_words_of(word) if "'" in word or '"' in word else [word])
         text = " ".join(words)
+        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if predicate(word, cwd) and writes_to(word, text):
+            if predicate(word, at) and writes_to(word, text):
                 return word
     return ""
 

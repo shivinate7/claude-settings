@@ -4,9 +4,13 @@
 
 Each session writes only inside its own checkout. An agent whose worktree is gone must stop and report. `hooks/guard.py` rule 0 holds both parts and runs before every other rule.
 
-Why: an agent resumed after the harness removed its worktree (folder and branch) ran in the shared checkout and killed another process (incident 2026-09-06). A session in one checkout also wrote into another checkout of the same clone, and the agent-only rule did not see it. The Banchi notes-folder refusal showed the other edge: a notes folder outside every checkout must stay writable.
+Why, three events:
 
-Risk: incident (2026-09-06, and the notes-folder refusal). `other-checkout` landed 2026-10-28.
+- An agent resumed after the harness removed its worktree (folder and branch) ran in the shared checkout and killed another process. Date not recorded.
+- Incident 2026-09-06, a write into another checkout: a session wrote into a different checkout of the same clone. `worktree-home` judges only isolated agents, so it could not see a top-level session or one started in `.claude/worktrees/<x>`.
+- Banchi notes-folder refusal, 2026-10-27 (outbox `banchi-guard-shared-notes`, Banchi's guard blocks shared notes): Banchi's own guard clause `tree` in `scripts/guard-shell.py` refuses every write outside the checkout, so it refused `~/Library/Application Support/Claude-Work/side-session-notes/`, where the Claude app keeps side-session notes. A folder in no checkout must stay writable.
+
+Risk: incident (2026-09-06). `other-checkout` landed 2026-10-28.
 
 ### `worktree-home`: an agent stays in its recorded home
 
@@ -22,8 +26,11 @@ Risk: incident (2026-09-06, and the notes-folder refusal). `other-checkout` land
 - **Who.** Every session: the top-level session, a session started in `.claude/worktrees/<x>`, and every agent.
 - **The act.** A write whose resolved target sits in a checkout of the clone other than the checkout that holds `cwd`. The checkouts are the primary and each linked worktree. A nested worktree under `<primary>/.claude/worktrees/` owns its own files; the deepest checkout that holds a path owns it. So primary to nested worktree, worktree to primary, and worktree to sibling are refused. A write inside the call's own checkout passes.
 - **Outside the clone passes.** A scratchpad, `~/.claude`, or a notes folder such as `~/Library/Application Support/Claude-Work/side-session-notes/` is in no checkout.
-- **Tools.** Write, Edit, MultiEdit and NotebookEdit targets, and the shell write targets that frozen-path reads (`_shell_write_hit`: a redirect, a mutating command, `sed -i`). A shell read, or a git command run with `-C` into another checkout, is no write here.
-- **Cost.** One `git worktree list --porcelain -z` per write call. A shell command with no `>`, mutating command or `sed` spends none. No file, log or process is added.
+- **The common git directory passes.** `<primary>/.git` is shared by every checkout, so a linked worktree may write `.git/info/exclude`.
+- **Removing a worktree by hand is refused.** `rm -rf .claude/worktrees/<x>` from the primary is a write into another checkout. The refusal names `git worktree remove` and the janitor sweep, the proper tools.
+- **Tools.** Write, Edit, MultiEdit and NotebookEdit targets, and the shell write targets that frozen-path reads (`_shell_write_hit`: a redirect, a mutating command, `sed -i`). A relative shell target resolves against the folder a leading `cd` moved to (`dir_before_segment`), or against `cwd` when that folder cannot be told. A shell read, or a git command run with `-C` into another checkout, is no write here.
+- **Ceiling.** A target named through a variable the scan cannot resolve, `$(...)`, or an interpreter (`python -c`) is not seen, as for frozen-path.
+- **Cost.** At most one `git worktree list --porcelain -z` per call. A Read or Grep spends none. A shell command spends none unless it holds a `>`, a mutating command or `sed` once redirects onto a stream (`2>&1`) or `/dev/null` are dropped. A call whose `cwd` has no `.git` at or above it spends none (a stat walk). No file, log or process is added. `worktree_home_cross_checkout_cost_case` counts the spawns.
 - **An owner override lifts it.** The owner may mean the write. It has its own rule id so that `worktree-home` stays outside every override.
 
 ### Both parts

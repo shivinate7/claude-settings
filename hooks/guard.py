@@ -96,8 +96,9 @@ Other tools, in `judge` order:
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
                        other than the one holding its cwd. A nested worktree owns its own files.
-                       A target in no checkout passes; unreadable git passes. The shell form
-                       reads the targets frozen-path reads. An override lifts it.
+                       A target in no checkout, or in the clone's `.git`, passes; unreadable git
+                       passes. The shell form reads the targets frozen-path reads, after a
+                       leading `cd`. An override lifts it.
                        (an-agent-outside-its-home-tree-must-stop)
   agent-model-floor, roles-third-try-steps-up
                        deny. A spawn below the model floor, or a round or try on the wrong model.
@@ -831,7 +832,8 @@ OTHER_CHECKOUT_REASON = (
     "Rule (other checkout): this write lands in another checkout of this clone, not the one this "
     "session stands in. "
     "Remedy: write only inside your own checkout, or report the change to the session that owns "
-    "the other one."
+    "the other one. To remove a whole worktree, use `git worktree remove`, or leave it to the "
+    "janitor sweep."
 )
 
 
@@ -2675,7 +2677,9 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
-# A shell command with none of these can write no named file, so it spends no git read here.
+# A shell command with none of these can write no named file, so it spends no git read here. A
+# redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
+SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
 SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
 
 
@@ -2697,7 +2701,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
     elif tool in SHELL_TOOLS:
         targets = None
         command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
-        if not SHELL_WRITE_HINT.search(command):
+        if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)):
             return ""
     else:
         return ""
@@ -2711,13 +2715,16 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
 
     def elsewhere(target, at):
         try:
-            owner = _owning_checkout(_resolved(target, at), roots)
+            resolved = _resolved(target, at)
+            owner = _owning_checkout(resolved, roots)
         except Exception:
             return False
-        return bool(owner) and owner != own
+        # The primary's `.git` is the clone's common directory, shared by every checkout.
+        return (bool(owner) and owner != own
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
 
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere)
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)
         return "shell write into another checkout: " + hit if hit else ""
     for target in targets:
         if elsewhere(target, where):

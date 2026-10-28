@@ -12977,9 +12977,68 @@ def worktree_home_cross_checkout_case():
           command="echo x > " + slash(os.path.join(lane_a, "src", "new.txt")))
     check("shell redirect to a folder in no checkout", "allow", "Bash", lane_a,
           command="echo x > " + slash(os.path.join(scratch, "out.txt")))
+    # A leading cd moves the folder a relative target resolves against.
+    check("shell cd into a sibling, then a relative write", "deny", "Bash", primary,
+          command="cd " + slash(lane_b) + " && echo x > a.txt")
+    check("shell cd out of the clone, then a relative write", "allow", "Bash", lane_a,
+          command="cd " + slash(scratch) + " && echo x > a.txt")
+    # The clone's common git directory belongs to no one checkout.
+    exclude = os.path.join(primary, ".git", "info", "exclude")
+    check("worktree Write into the common git directory", "allow", "Write", lane_a,
+          file_path=exclude, content="x")
+    check("shell append into the common git directory", "allow", "Bash", lane_b,
+          command="echo x >> " + slash(exclude))
+    # A whole worktree removed by hand: refused, and the remedy names the proper tool.
+    got, reason = _decide_full("Bash", primary, command="rm -rf .claude/worktrees/lane-b")
+    if got != "deny" or "other-checkout" not in reason or "git worktree remove" not in reason \
+            or "lane-b" in reason:
+        problems.append("rm -rf of a worktree: want deny naming git worktree remove and no path, "
+                        "got %s (%s)" % (got, reason[:160]))
     if problems:
         return False, "; ".join(problems)
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
+
+
+def worktree_home_cross_checkout_cost_case():
+    """other-checkout's stated cost: one `git worktree list` per write call, none for a Read, a
+    Grep, a shell call that writes no file (a `2>&1` or `/dev/null` redirect included), or a write
+    from a cwd with no `.git` at or above it. A stand-in git on PATH logs each spawn."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    real = shutil.which(VCS)
+    if not real:
+        return False, "no git on PATH"
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
+    folder = os.path.join(ROOT, "xcocost_bin")
+    log = os.path.join(ROOT, "xcocost_spawns.log")
+    stand_in = os.path.join(folder, VCS)
+    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
+    os.chmod(stand_in, 0o755)
+    path = folder + os.pathsep + os.environ.get("PATH", "")
+    problems = []
+    for label, tool, cwd, tool_input, want_all, want_list in (
+        ("Read", "Read", lane_a, {"file_path": os.path.join(lane_b, "src", "app.py")}, 0, 0),
+        ("Grep", "Grep", lane_a, {"pattern": "x", "path": lane_b}, 0, 0),
+        ("shell ls", "Bash", lane_a, {"command": "ls " + slash(lane_b)}, None, 0),
+        ("shell quiet redirects", "Bash", lane_a,
+         {"command": "ls " + slash(lane_b) + " 2>&1 >/dev/null"}, None, 0),
+        ("Write into its own checkout", "Write", lane_a,
+         {"file_path": os.path.join(lane_a, "n.txt"), "content": "x"}, None, 1),
+        ("Write from a cwd in no repository", "Write", NOGIT,
+         {"file_path": os.path.join(lane_b, "n.txt"), "content": "x"}, None, 0),
+    ):
+        if os.path.exists(log):
+            os.remove(log)
+        decide({"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": path,
+                "config": None, "agent_id": None, "tool_input": tool_input})
+        spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        listed = sum(1 for line in spawns if "worktree list" in line)
+        if (want_all is not None and len(spawns) != want_all) or listed != want_list:
+            problems.append("%s: %d git spawn(s), %d worktree list, want %s and %d" % (
+                label, len(spawns), listed, "any" if want_all is None else want_all, want_list))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Read, Grep, quiet shell and no-repo writes spawn no worktree list; a write spawns one"
 
 
 def worktree_home_cross_checkout_override_case():
@@ -13372,6 +13431,8 @@ LOG_CHECKS = (
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
     ("worktree-home: an owner override lifts the cross-checkout refusal",
      worktree_home_cross_checkout_override_case),
+    ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
+     worktree_home_cross_checkout_cost_case),
     ("worktree-home: a later path field outside the recorded home is refused, not skipped",
      worktree_home_later_field_case),
     ("worktree-home: a lone cd or Set-Location into the recorded home is allowed from outside "
@@ -16822,6 +16883,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: orchestrator", "worktree-home"),
     ("worktree-home: any session's write into another checkout", "worktree-home"),
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
+    ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
     ("worktree-home: a lone cd or Set-Location", "worktree-home"),
     ("worktree-home: a cd or Set-Location into the home chained", "worktree-home"),
