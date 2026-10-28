@@ -1,6 +1,6 @@
 # Debts
 
-A debt is an open finding, or deferred work. The rule `roles-findings-are-debts-or-notes` in `CLAUDE.md` makes a finding a debt when Claude is likely to hit it in normal work. This folder is the debt store for this repo, and the one home for deferred work (owner ruling 2026-10-17 23:46 CDT).
+A debt is the filed record of a known gap, or of deferred work. The rule `roles-findings-are-debts-or-notes` in `CLAUDE.md` makes a finding a debt when Claude is likely to hit it in normal work. This folder is the debt store for this repo, and the one home for deferred work (owner ruling 2026-10-17 23:46 CDT).
 
 ## Shape
 
