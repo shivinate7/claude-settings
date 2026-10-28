@@ -223,7 +223,7 @@ class WaitingPage(Tree):
 
 
 class RolledOutMark(Tree):
-    """An extras file alone is not the mark: "rolled-out": true is (waiting page item 29 (a)).
+    """An extras file alone is not the mark: "rolled-out": true is (waiting page item 29 (a), the rolled-out mark is its own key).
     Keys that are not about folder placement read whenever the file exists."""
     URL = "https://claude.ai/artifact/abc123"
 

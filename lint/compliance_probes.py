@@ -14,7 +14,8 @@ cannot run, so the group is unknown.
 
 layout: lint/layout.json through lint/layout.py, plus the child's extras file. It names each
   folder that is neither a layout kind nor an extra, and each core kind the child lacks. A child
-  with no extras file, or none marked "rolled-out": true, is "not rolled out": it exits 0, and lists the same findings as a preview.
+  with no extras file, or none marked "rolled-out": true, is "not rolled out": it exits 0, and
+  lists the same findings as a preview.
 design: screen readiness against docs/design/. The shoot config names the screens, sizes and themes. The
   shared `bin/shoot` is the screenshot command, and a config it would refuse is a gap. One token
   file: a `tokens.*` file (the layout's tokens path is one), tests and generated files aside. Each item
