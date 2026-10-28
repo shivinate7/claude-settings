@@ -11,7 +11,7 @@ Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only a
   - `.github/scripts/ci-scope.sh`, run on that merge, turns on no job and no suite for main's paths. A repo without the script gets no exception.
   - On that merge, `bin/ci-job gates --lint --base <base>` passes.
   - On that merge, each other `gates` suite that may read one of main's paths passes. The suites come from the workflow, not a list. All of them share a 1200 s budget. The records page is not matched: the records are.
-    - A Python suite, read with `ast`, is hit when its source names the exact path or file name anywhere. A folder below the top or a stem is a hit only as a string joined or divided onto a root bound from `__file__`, or given bare to a file reader such as `open` or `os.listdir`. A root taken whole by a call, as by a walk, hits every path under its folder. A folder named only under a temp dir is no hit. A suite `ast` cannot parse refuses.
+    - A Python suite, read with `ast`, is hit when its source names the exact path or file name anywhere. A folder below the top or a stem is a hit only in two forms. One is a string joined or divided onto a root bound from `__file__`. The other is a string given bare to a file reader such as `open` or `os.listdir`. A root taken whole by a call, as by a walk, hits every path under its folder. A folder named only under a temp dir is no hit. A suite `ast` cannot parse refuses.
     - A node or bash suite is hit when its source names any of those words.
 - It reads the head two times, with the same check. The first read is before the claim, so nothing is claimed. The second read is after the check wait, on the base tip fetched then. A base that moved during the wait, and is not a small move, reverts the claim.
 - A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
@@ -21,7 +21,7 @@ Why: branch protection on `main` has `strict` false (`main-branch-protection`, m
 
 Cost of a small move check: only when the head lacks the base tip, at most three times per merge. Each check starts about 10 git processes, one ci-scope run, two ci-job runs (a plan, and the lints at two processes per step, about 50 steps, about 4 minutes) and one process per hit suite. A records-only move (a new record and the page) hits 6 suites, about 50 s in all; the whole check took 4 min 43 s on this repo (measured 2026-10-28). It writes one temp file, and keeps one ci-job log only on a failure. The lock is extended to cover each lint run.
 
-Residual risk: a suite is not hit when it reads a doc only through an imported helper, through a root not bound from `__file__` (an attribute, an argument, a working-directory read built from names), or by walking the whole repo. Node and bash suites are matched by words only, which fails safe.
+Residual risk: some suites that read a doc are not hit. One reads it only through an imported helper. One reads it through a root not bound from `__file__`, such as an attribute, an argument or a path built from names. One walks the whole repo. Node and bash suites are matched by words only, which fails safe.
 
 Risk: likely. Batches run while other batches merge, so main often moves under a green head. Landed 2026-10-27; the small move 2026-10-28.
 
