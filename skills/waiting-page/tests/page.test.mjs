@@ -1510,3 +1510,44 @@ for (const width of [390, 1440]) {
     if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "not centered on open");
   });
 }
+
+// ---------------------------------------------------------------- c100 review defects
+
+// Each helper wraps db.doc().delete so the test controls what a delete does inside Undo.
+const hookDelete = (fn) => (page) => page.evaluate(`(() => {
+  const col = state.db.collection;
+  state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const del = y.delete; y.delete = (${fn})(n, del); return y; }; return x; };
+  document.getElementById("undoBtn").click();
+})()`);
+
+test("a partial Undo lists late items with commas and one final and", async (t) => {
+  const items = [mk("d-one", 1), mk("d-two", 2), mk("d-three", 3), mk("d-four", 4)];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await hookDelete(`(n, del) => async () => { await del(); const real = Date.now; Date.now = () => real() + 9000; }`)(page);
+  await page.locator("#barStatus", { hasText: "Too late to undo" }).waitFor();
+  const text = await page.locator("#barStatus").innerText();
+  assert.match(text, /Too late to undo No\. 1, No\. 2,? and No\. 3\./, text);
+});
+
+test("a failed Undo names every item it could not undo", async (t) => {
+  const items = [mk("d-one", 1), mk("d-two", 2), mk("d-three", 3)];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await hookDelete(`(n, del) => async () => { if (n === "answers") throw { code: "denied" }; return del(); }`)(page);
+  await page.locator("#barStatus", { hasText: "Undo failed" }).waitFor();
+  const text = await page.locator("#barStatus").innerText();
+  for (const n of [1, 2, 3]) assert.match(text, new RegExp("No\\. " + n + "\\b"), "the bar does not name No. " + n + ": " + text);
+});
+
+test("a failed receipt delete leaves no old receipt in the page state", async (t) => {
+  const page = await open(t, { receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } }, failDeleteIn: "receipts" }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction((id) => !(id in state.answers), DECISION.id);
+  assert.equal(await page.evaluate((id) => id in state.receipts, DECISION.id), false, "the old receipt is still in the page state");
+});
