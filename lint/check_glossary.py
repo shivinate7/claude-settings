@@ -3,7 +3,8 @@
 
 GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, not. Three tests:
 
-- Each row's home is an existing file, or `rule:<id>` that names a rule marker in RULE_FILES.
+- Each row's home is an existing file, or `rule:<id>` that names a rule marker in RULE_FILES, and
+  each tagged "not" name uses the one tag, `(this sense)`.
 - Each file the change adds (against origin/main, renames counted as adds) has no path segment
   that holds a name from a row's "not" cell. A name matches whole lowercase words inside one
   segment. Words split on any character that is not a letter or a digit, and the segment is read
