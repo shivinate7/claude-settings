@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waiting page choices</title>
+<style>
+/* Tokens: skills/waiting-page/page.html :root (c193-wp-sizes, 767645b9). */
+:root {
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --line: #d9dee5; --chip: #eef1f4;
+  --good: #1d7445; --good-soft: #e0f2e7; --ground: #f3f4f6; --hdr: #4b5a6b; --on-hdr: #ffffff;
+  --acc: #4b5a6b; --on-acc: #ffffff; --acc-soft: #eceff3; --guide: #b3261e;
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --line: #2c3440; --chip: #222a35;
+  --good: #6fcf98; --good-soft: #15301f; --ground: #11151b; --hdr: #2b3440; --on-hdr: #ffffff;
+  --acc: #9fb0c2; --on-acc: #11151b; --acc-soft: #222a35; --guide: #ff8b7f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --line: #2c3440; --chip: #222a35;
+  --good: #6fcf98; --good-soft: #15301f; --ground: #11151b; --hdr: #2b3440; --on-hdr: #ffffff;
+  --acc: #9fb0c2; --on-acc: #11151b; --acc-soft: #222a35; --guide: #ff8b7f; color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.5 var(--body); }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+main { padding: 16px; }
+section { display: grid; gap: 12px; }
+h1 { margin: 0; font-size: 16px; line-height: 1.3; }
+.why { margin: 0; font-size: 14px; color: var(--muted); }
+
+/* The focus box. Every state's box is 358 x 480, so the page scales each pair by one factor. */
+.fig { position: relative; width: 358px; height: 480px; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+.tag { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.lbl { display: inline-block; padding: 1px 8px; border: 1.5px dashed var(--muted); border-radius: 8px; font: 600 13px/18px var(--body); }
+.lbl.new { border-color: var(--acc); color: var(--acc); }
+.stag { margin-left: auto; padding: 0 6px; border-radius: 4px; background: #5b21b6; color: #fff; font: 700 11px/18px var(--body); }
+.cap { margin: 0; font: 500 12px/16px var(--body); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cap b { color: var(--ink); }
+
+/* A fake 390 x 844 screen, drawn in percent so it scales with its box. */
+.pic { position: relative; justify-self: center; overflow: hidden; background: #fff; border: 1px solid var(--line); border-radius: 4px;
+  background-image: linear-gradient(#4b5a6b 0 8%, transparent 8%),
+    repeating-linear-gradient(transparent 0 6%, #e3e7ec 6% 8.5%, transparent 8.5% 11%); background-size: 100% 100%, 80% 100%; background-position: 0 0, 50% 0; background-repeat: no-repeat; }
+.pic.long { background-image: linear-gradient(#4b5a6b 0 2.8%, transparent 2.8%), repeating-linear-gradient(transparent 0 2%, #e3e7ec 2% 2.8%, transparent 2.8% 3.6%); }
+.vw { display: flex; align-items: center; justify-content: center; border-radius: 3px; background: var(--hdr); color: var(--on-hdr); font: 600 9px var(--body); overflow: hidden; }
+
+/* Q1: option cards at --k of real size. Card = padding 15, picture, gap 8, View 44, padding 15. */
+.q1 { --k: 0.24; }
+.orow { display: flex; gap: calc(10px * var(--k)); align-items: stretch; }
+.ocard { display: grid; align-content: start; gap: calc(8px * var(--k)); width: calc(var(--cw) * var(--k) * 1px); padding: calc(15px * var(--k)); border: 1px solid var(--line); border-radius: 3px; background: var(--surface); }
+.ocard .pic { width: calc(var(--pw) * var(--k) * 1px); height: calc(var(--ph) * var(--k) * 1px); border-radius: 2px; }
+.ocard .vw { height: calc(44px * var(--k)); }
+.cols { display: flex; gap: 12px; align-items: flex-start; }
+.col { display: grid; gap: 4px; align-content: start; }
+.note { margin: 0; font: 12px/16px var(--body); color: var(--muted); }
+
+/* Q2: a phone option card (319 wide) at half size, beside the long mockup at 15%. */
+.q2 { --k: 0.5; }
+.q2 .ocard { position: relative; }
+.guide { position: absolute; left: 0; right: 0; border-top: 1.5px dashed var(--guide); }
+.guide span { position: absolute; right: 2px; top: 1px; font: 600 10px/12px var(--body); color: var(--guide); }
+.src { width: calc(390px * 0.15); height: calc(2400px * 0.15); }
+.big { margin: 0; font: 700 15px/20px var(--body); font-variant-numeric: tabular-nums; }
+
+/* Q3: the phone rail at real size. Page CSS: .rail padding 12, gap 10 at 960 and narrower; .chips-n gap 6; .pairchips gap 4, padding 4. */
+.rail { display: grid; gap: 10px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .bigl { font: 700 15px/1.3 var(--body); }
+.ov-prog .bigl b { color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.track i { display: block; height: 100%; }
+.ov-tier { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; font: 700 16px var(--body); }
+.ov-head .ct { margin-left: auto; color: var(--muted); font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--acc); }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: var(--ch); padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); display: inline-flex; align-items: center; justify-content: center; }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.pairchips { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.c32 { --ch: 32px; }
+.c44 { --ch: 44px; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No item, number, name or time on this page is real.</div>
+<main>
+
+<!-- Q1 a: built. page.html optPic passes maxH 480 to fitFrame. Figures: docs/design/c193-sizes.md item 3. -->
+<section data-state="q1-cap">
+  <h1>Option picture size, a: capped at 480 px high</h1>
+  <div class="fig q1" id="q1-cap-card">
+    <div class="tag"><span class="lbl">Today: picture at most 480 px high, centred (built)</span><span class="stag">Sample</span></div>
+    <div class="cols">
+      <div class="col">
+        <p class="cap">Wide, 3 options: <b>221.8 × 480</b></p>
+        <div class="orow">
+          <div class="ocard" style="--cw:261.7"><div class="pic" style="--pw:221.8;--ph:480"></div><div class="vw"></div></div>
+          <div class="ocard" style="--cw:261.7"><div class="pic" style="--pw:221.8;--ph:480"></div><div class="vw"></div></div>
+          <div class="ocard" style="--cw:261.7"><div class="pic" style="--pw:221.8;--ph:480"></div><div class="vw"></div></div>
+        </div>
+      </div>
+      <div class="col">
+        <p class="cap">Phone: <b>221.8 × 480</b></p>
+        <div class="ocard" style="--cw:319"><div class="pic" style="--pw:221.8;--ph:480"></div><div class="vw"></div></div>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <p class="cap">Wide, 2 options: <b>221.8 × 480</b></p>
+        <div class="orow">
+          <div class="ocard" style="--cw:397.5"><div class="pic" style="--pw:221.8;--ph:480"></div><div class="vw"></div></div>
+          <div class="ocard" style="--cw:397.5"><div class="pic" style="--pw:221.8;--ph:480"></div><div class="vw"></div></div>
+        </div>
+      </div>
+      <p class="note">Drawn at 24% of real size. Wide: the 805 px options row of the 1160 px column. Each picture is one 390 × 844 mockup.</p>
+    </div>
+  </div>
+  <p class="why">Every picture is the same size at every width. A card with two options has space at the sides of its picture.</p>
+</section>
+
+<!-- Q1 b: picture fills the card (no 480 cap). -->
+<section data-state="q1-fill">
+  <h1>Option picture size, b: the picture fills the card</h1>
+  <div class="fig q1" id="q1-fill-card">
+    <div class="tag"><span class="lbl new">New: picture fills the card width</span><span class="stag">Sample</span></div>
+    <div class="cols">
+      <div class="col">
+        <p class="cap">Wide, 3 options: <b>231.7 × 501</b></p>
+        <div class="orow">
+          <div class="ocard" style="--cw:261.7"><div class="pic" style="--pw:231.7;--ph:501"></div><div class="vw"></div></div>
+          <div class="ocard" style="--cw:261.7"><div class="pic" style="--pw:231.7;--ph:501"></div><div class="vw"></div></div>
+          <div class="ocard" style="--cw:261.7"><div class="pic" style="--pw:231.7;--ph:501"></div><div class="vw"></div></div>
+        </div>
+      </div>
+      <div class="col">
+        <p class="cap">Phone: <b>289 × 625</b></p>
+        <div class="ocard" style="--cw:319"><div class="pic" style="--pw:289;--ph:625"></div><div class="vw"></div></div>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <p class="cap">Wide, 2 options: <b>367.5 × 795</b></p>
+        <div class="orow">
+          <div class="ocard" style="--cw:397.5"><div class="pic" style="--pw:367.5;--ph:795"></div><div class="vw"></div></div>
+          <div class="ocard" style="--cw:397.5"><div class="pic" style="--pw:367.5;--ph:795"></div><div class="vw"></div></div>
+        </div>
+      </div>
+      <p class="note">Drawn at 24% of real size. Wide: the 805 px options row of the 1160 px column. Each picture is one 390 × 844 mockup.</p>
+    </div>
+  </div>
+  <p class="why">Pictures are larger and easier to read. With two options, each card is about 800 px high.</p>
+</section>
+
+<!-- Q2 a: built. fitFrame: sc = min(1, cardW / w, max(480 / h, MIN_PIC / w)), MIN_PIC = 120. The floor acts only when h > 4 w. -->
+<section data-state="q2-floor">
+  <h1>Tall mockups, a: the picture is never narrower than 120 px</h1>
+  <div class="fig q2" id="q2-floor-card">
+    <div class="tag"><span class="lbl">Today: 120 px width floor (built)</span><span class="stag">Sample</span></div>
+    <div class="cols">
+      <div class="ocard" style="--cw:319">
+        <div class="pic long" style="--pw:120;--ph:738.5"></div><div class="vw">View</div>
+        <div class="guide" style="top:calc(15px * var(--k) + 480px * var(--k))"><span>480</span></div>
+      </div>
+      <div class="col">
+        <p class="big">Picture 120 × 738.5</p>
+        <p class="note">Runs 258.5 px past the 480 line.</p>
+        <p class="cap">The mockup, 390 × 2400 (15%):</p>
+        <div class="pic long src"></div>
+      </div>
+    </div>
+  </div>
+  <p class="why">Card drawn at 50%. The floor acts only when a mockup or focus box is more than 4 times as high as it is wide.</p>
+</section>
+
+<!-- Q2 b: no floor. sc = min(1, cardW / w, 480 / h). -->
+<section data-state="q2-nofloor">
+  <h1>Tall mockups, b: no floor, always 480 px high or less</h1>
+  <div class="fig q2" id="q2-nofloor-card">
+    <div class="tag"><span class="lbl new">New: no floor, height cap 480 always</span><span class="stag">Sample</span></div>
+    <div class="cols">
+      <div class="ocard" style="--cw:319">
+        <div class="pic long" style="--pw:78;--ph:480"></div><div class="vw">View</div>
+        <div class="guide" style="top:calc(15px * var(--k) + 480px * var(--k))"><span>480</span></div>
+      </div>
+      <div class="col">
+        <p class="big">Picture 78 × 480</p>
+        <p class="note">Stays inside the 480 line. Text in it is at 20%.</p>
+        <p class="cap">The mockup, 390 × 2400 (15%):</p>
+        <div class="pic long src"></div>
+      </div>
+    </div>
+  </div>
+  <p class="why">Card drawn at 50%. Every card picture is 480 px high or less. A long page becomes a thin strip.</p>
+</section>
+
+<!-- Q3 a: built. page.html .nchip height 32 at 960 px and narrower. -->
+<section data-state="q3-32">
+  <h1>Phone rail chips, a: 32 px high</h1>
+  <div class="fig" id="q3-32-rail">
+    <div class="tag"><span class="lbl">Today: chips 48 × 32 (built)</span><span class="stag">Sample</span></div>
+    <nav class="rail c32" aria-label="Sample rail">
+      <div class="ov-prog"><div class="bigl"><b>3</b>of 13 sent</div><div class="sub"><i class="sw"></i>2 ready to send</div><div class="track"><i style="width:23%;background:var(--good)"></i><i style="width:15%;background:color-mix(in srgb, var(--acc) 55%, transparent)"></i></div></div>
+      <div class="ov-tier"><div class="ov-head"><i class="dot"></i>Holds work<span class="ct">7</span></div>
+        <div class="chips-n"><span class="nchip sent">1</span><span class="nchip sent">2</span><span class="nchip ready">3</span><span class="nchip">4</span><span class="nchip">5</span><span class="nchip">6</span><span class="nchip">7</span><span class="nchip ready">8</span><span class="pairchips"><span class="nchip">9</span><span class="nchip">10</span></span></div></div>
+      <div class="ov-tier"><div class="ov-head"><i class="dot"></i>Due soon<span class="ct">2</span></div>
+        <div class="chips-n"><span class="nchip sent">11</span><span class="nchip">12</span><span class="nchip">13</span></div></div>
+    </nav>
+    <p class="note">Under the 44 px touch floor in a11y.md.</p>
+  </div>
+  <p class="why">Rail at real size, at a 390 px page. Chips are 32 px high, less than the 44 px touch target.</p>
+</section>
+
+<!-- Q3 b: 44 px chips. Each chip row grows by 12 px. -->
+<section data-state="q3-44">
+  <h1>Phone rail chips, b: 44 px high</h1>
+  <div class="fig" id="q3-44-rail">
+    <div class="tag"><span class="lbl new">New: chips 48 × 44</span><span class="stag">Sample</span></div>
+    <nav class="rail c44" aria-label="Sample rail">
+      <div class="ov-prog"><div class="bigl"><b>3</b>of 13 sent</div><div class="sub"><i class="sw"></i>2 ready to send</div><div class="track"><i style="width:23%;background:var(--good)"></i><i style="width:15%;background:color-mix(in srgb, var(--acc) 55%, transparent)"></i></div></div>
+      <div class="ov-tier"><div class="ov-head"><i class="dot"></i>Holds work<span class="ct">7</span></div>
+        <div class="chips-n"><span class="nchip sent">1</span><span class="nchip sent">2</span><span class="nchip ready">3</span><span class="nchip">4</span><span class="nchip">5</span><span class="nchip">6</span><span class="nchip">7</span><span class="nchip ready">8</span><span class="pairchips"><span class="nchip">9</span><span class="nchip">10</span></span></div></div>
+      <div class="ov-tier"><div class="ov-head"><i class="dot"></i>Due soon<span class="ct">2</span></div>
+        <div class="chips-n"><span class="nchip sent">11</span><span class="nchip">12</span><span class="nchip">13</span></div></div>
+    </nav>
+    <p class="note">Meets the 44 px touch floor. Each chip row is 12 px higher: this rail is 36 px higher.</p>
+  </div>
+  <p class="why">Rail at real size, at a 390 px page. Chips are 44 px high, the touch target in a11y.md.</p>
+</section>
+
+</main>
+<script>
+// Runs before load, so the page's fit script measures the picked state.
+(function () {
+  var secs = document.querySelectorAll("[data-state]");
+  function apply() {
+    var p = new URLSearchParams(location.hash.slice(1)), s = p.get("s"), t = p.get("t"), hit = false;
+    secs.forEach(function (e) { e.hidden = e.getAttribute("data-state") !== s; if (!e.hidden) hit = true; });
+    if (!hit) secs[0].hidden = false;
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    else document.documentElement.removeAttribute("data-theme");
+  }
+  apply();
+  addEventListener("hashchange", apply);
+})();
+</script>
+</body>
+</html>
