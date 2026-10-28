@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-22 10:10 CDT: `settings.json` wires no STE write gate (`ste_gate.py`) and no markdown
+Owner, 2026-10-22 10:10 CDT: `settings.json` wires no STE write guard (`ste_gate.py`) and no markdown
 sweep (`md_sweep.py`). Both scripts are deleted. A hook that rewrites or refuses a write
 sends the writer back for another write, and it starts a process on every Write, Edit and MultiEdit.
 
@@ -12,8 +12,8 @@ sends the writer back for another write, and it starts a process on every Write,
   Markdown. No hook calls it.
 - STE020 (label length) is dropped. STE021 (bad UI escape) folds away with it. The icon-and-label rule
   and design review carry label length.
-- The real safety gates stay fail-closed: `guard.py` and `rm_prompt_answer.py`
-  (`gate-hooks-fail-closed`).
+- The real safety guards stay fail-closed: `guard.py` and `rm_prompt_answer.py`
+  (`guard-hooks-fail-closed`).
 
 Unmeasured: how often a writer now meets an STE error first in CI instead of at the write.
 

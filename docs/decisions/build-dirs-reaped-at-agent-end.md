@@ -10,7 +10,7 @@ Owner, 2026-10-11: the agent-end reap also deletes build folders. The low-disk b
 
 Build folders follow the worktree's 30-minute idle clock. The ending agent's own tree keeps its build folders at
 its own end, because a finished agent is often resumed there and would rebuild from nothing. A later agent end reaps them. The reap
-deletes a folder only when each gate gives a confirmed yes. Any read that cannot tell means keep.
+deletes a folder only when each check gives a confirmed yes. Any read that cannot tell means keep.
 
 1. The tree is another `<primary>/.claude/worktrees/agent-*` tree, not the ending agent's own tree and not a primary checkout.
 2. The tree is idle 30 minutes or more (`sweep.worktree_idle_seconds`, read before any `git status`). So is its newest dirty or
@@ -32,7 +32,7 @@ deletes a folder only when each gate gives a confirmed yes. Any read that cannot
 - The pass shares the stage deadline (`WORKTREE_SECONDS`, `HOOK_BUDGET`). A tree the deadline does not reach keeps its folders.
 - Each tree's row in the payload log carries `buildDirs` (folders renamed) or `buildDirsKept` (why not).
 - Delete in two steps. The reap renames each proven folder to a sibling trash name in the same worktree. Then a detached child
-  deletes the trash, and the hook does not wait. Trash a child left follows the same gates: a later reap or the janitor deletes it.
+  deletes the trash, and the hook does not wait. Trash a child left follows the same checks: a later reap or the janitor deletes it.
 - A name with `/` matches one path under the worktree root. A bare name matches at any depth under the worktree, and the search
   does not cross a link.
 - A `buildDirs` value that is not a list of strings deletes nothing, defaults included. `sweep.read_optout` is the one reader of
@@ -44,7 +44,7 @@ deletes a folder only when each gate gives a confirmed yes. Any read that cannot
 - The sweep deletes leftover trash only in registered, non-primary worktrees directly under `.claude/worktrees`.
 
 Reason: native agents built the iOS app in their own worktrees. The disk filled and `native-check` failed with ENOSPC. The daily
-janitor skips registered worktrees and the agent-end reap stopped only processes. Governing records: `agent-end-reap-stops-what-a-finished-agent-left` (the process reap; its gates and 60 s timeout apply here),
+janitor skips registered worktrees and the agent-end reap stopped only processes. Governing records: `agent-end-reap-stops-what-a-finished-agent-left` (the process reap; its checks and 60 s timeout apply here),
 `the-janitor-is-one-machine-wide-sweep` (its `huskNames` key covers unregistered folders only, so it is not reused),
 `unattended-sweep-stops-proven-orphans`.
 

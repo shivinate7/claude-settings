@@ -21,7 +21,7 @@ The install links it whole into `~/.claude/skills/plain-english-map`.
 - A host may pin a copy of the skill folder, and it need not stay byte-equal to this one.
   A host may bind its own readers. With none bound, the AI calls tab is empty.
 - The skill's tests live in `skills/plain-english-map/tests/`, with a small fixture
-  repository. The `gates` workflow runs them after `npm ci`.
+  repository. The `checks` workflow runs them after `npm ci`.
 
 ## Safety holes, named
 

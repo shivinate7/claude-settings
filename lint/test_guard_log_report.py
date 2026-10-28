@@ -20,7 +20,7 @@ Pinned contract:
   included. No hook writes an STE code now, so an STE row appears only when the log holds one.
   A rule id that only the log holds keeps its row. A line of any decision
   (override, reverted, crash too) counts as the rule having fired. A combined STE line
-  (`STE007,STE008`) credits each code, and so does one the gate's logger cut at its field limit
+  (`STE007,STE008`) credits each code, and so does one the guard's logger cut at its field limit
   (`STE001,STE003 [cut]`). AllRulesTests checks the ids against the source.
 - --days all reads the whole log. Any other word is refused. AllRulesTests checks it.
 
@@ -487,7 +487,7 @@ def guard_log_sites(folders=("hooks", "lint")):
 
 
 # The only tab splits of guard.log lines allowed in the repo. The reader's own split, and the one
-# fallback the owner named (decision gate-hooks-fail-closed: an unread safety note must not vanish
+# fallback the owner named (decision guard-hooks-fail-closed: an unread safety note must not vanish
 # when the reader cannot be imported). Nothing else may split a guard.log line.
 ALLOWED_SPLITS = (
     ("lint/guard_log_report.py", "parse_line", "plain"),
@@ -755,7 +755,7 @@ class UnreadNotesFailOpenTests(unittest.TestCase):
 
 
 class FixedDecisionTests(unittest.TestCase):
-    """A `fixed` line (an STE gate rewrite) is counted under the noted column. Pinned choice: map
+    """A `fixed` line (an STE guard rewrite) is counted under the noted column. Pinned choice: map
     fixed to noted, the smaller change. A column of its own would change every old-only table, and
     GOLDEN_OLD_ONLY would break. The rule column still tells the STE codes apart from guard notes."""
 
@@ -878,7 +878,7 @@ def emitted_guard_rules(source):
 
 def emitted_rules():
     """Every id the guard writes. No STE id is emitted: no hook writes one now (decision
-    ste-gate-fixes-not-nags), so an STE row of --all-rules comes from the log alone."""
+    ste-guard-fixes-not-nags), so an STE row of --all-rules comes from the log alone."""
     ids = set()
     for path in GUARD_SOURCES:
         with open(path, encoding="utf-8") as handle:
@@ -903,7 +903,7 @@ class EmittedRuleReaderTests(unittest.TestCase):
                        "builder-test-edit", "test-author-scope", "record-writer-scope",  # role-scope table
                        "agent-model-cap"):                           # guard.py and config_watch.py
             self.assertIn(needle, ids)
-        self.assertEqual(sorted(i for i in ids if i.startswith("STE")), [],  # only the removed gate wrote these
+        self.assertEqual(sorted(i for i in ids if i.startswith("STE")), [],  # only the removed guard wrote these
                          "an STE id no hook writes would show as never-fired in a cull")
         self.assertGreaterEqual(len(ids), 40)  # a floor: a reader that finds fewer has lost a call shape
 
@@ -1019,7 +1019,7 @@ class AllRulesTests(unittest.TestCase):
                          [days_ago(5), days_ago(4), days_ago(3)])
 
     def test_a_combined_ste_line_credits_each_code(self):
-        # The gate writes the codes it found as one id, `STE007,STE008`. STE007 fired on that line.
+        # The guard writes the codes it found as one id, `STE007,STE008`. STE007 fired on that line.
         out = self.report([stamped(2, "deny", "STE007,STE008")], "--all-rules", "--days", "7")
         rows = rule_table(out)
         self.assertEqual((first_seen(rows["STE007"]), first_seen(rows["STE008"])), (days_ago(2), days_ago(2)))
@@ -1034,7 +1034,7 @@ class AllRulesTests(unittest.TestCase):
         self.assertEqual(sorted(r for r in rows if r.startswith("STE")), ["STE008"])
         self.assertEqual((counts(rows["STE008"]), first_seen(rows["STE008"])), ((1, 0, 0), days_ago(2)))
 
-    def test_the_listed_ids_equal_the_ids_the_guard_and_gates_emit(self):
+    def test_the_listed_ids_equal_the_ids_the_guard_and_the_other_guards_emit(self):
         listed = set(rule_table(self.report([], "--all-rules", "--days", "all")))
         expected = emitted_rules()
         self.assertEqual(
@@ -1050,7 +1050,7 @@ class AllRulesTests(unittest.TestCase):
             "right: rule_audit reads it, the oracle does not")
 
     def cut_id(self):
-        """The rule field the deleted STE gate's logger wrote for a combined id past its 40-character
+        """The rule field the deleted STE guard's logger wrote for a combined id past its 40-character
         limit. An old guard.log still holds such lines, and nothing writes them now. The cut is made
         by guard_core.log_cut, so the mark is never copied here. Returns (field, the codes it kept)."""
         import guard_core
@@ -1062,7 +1062,7 @@ class AllRulesTests(unittest.TestCase):
         return field, kept
 
     def test_a_code_seen_only_in_a_cut_combined_line_gets_its_count_and_first_date(self):
-        # The old gate's logger cut the rule field at 40 characters and marked it ` [cut]`. The cut id is no
+        # The old guard's logger cut the rule field at 40 characters and marked it ` [cut]`. The cut id is no
         # longer a clean combined id, but the codes it kept did fire: `never` would let a cull delete them.
         field, kept = self.cut_id()
         out = self.report([stamped(3, "deny", field), stamped(1, "ask", field)], "--all-rules", "--days", "7")

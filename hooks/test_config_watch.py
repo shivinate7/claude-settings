@@ -38,7 +38,7 @@ def _find_git_bash():
 
     A bare "bash" prints "/mnt/c/Users/..." (the WSL stub). The full path to
     Git's own bash.exe prints "C:/Users/..." (the real MINGW64 mount). The
-    `shell: bash` steps of `.github\\workflows\\gates.yml` already use that path.
+    `shell: bash` steps of `.github\\workflows\\checks.yml` already use that path.
     """
     if os.name != "nt":
         return shutil.which("bash") or "bash"

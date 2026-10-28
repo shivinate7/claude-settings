@@ -1,5 +1,5 @@
 """Runs the ste-lint step script on a fixture repo. `python3 actions/ste-lint/test_action.py`.
-Asserts the gated finding reaches the job log and the ::error annotation, both exit codes,
+Asserts the failing finding reaches the job log and the ::error annotation, both exit codes,
 that an advisory finding is a ::warning that never fails the step, the changed-lines scope, the diff range, the exclude split, and annotation escaping.
 Also asserts bin/ste-changed matches the step on the same diff: scope, findings, verdict, exit code.
 Excludes are the target repo's own .ste-lint-exclude plus the action's `exclude` input, never this repo's file.
@@ -126,7 +126,7 @@ def run_pair(change, base=BASE_FILES, exclude=EXCLUDE_TEXT, command_env=None, su
 
 
 def parts(out):
-    """What a job log shows about scope: the header, the scoped files, the gated findings, the verdict."""
+    """What a job log shows about scope: the header, the scoped files, the failing findings, the verdict."""
     lines = out.splitlines()
     head = next((l for l in lines if " file(s) in scope," in l or l == "ste-lint: no markdown changed"), "")
     files = []
@@ -178,7 +178,7 @@ rc, out = run("all")
 check("all: exit 0, finding logged", rc == 0 and "a.md:5: STE001" in out and "::error file=a.md,line=5::" in out, out)
 
 
-# This step gates STE001, STE011 and STE013 on changed lines. STE001 is above.
+# This step fails on STE001, STE011 and STE013 on changed lines. STE001 is above.
 for code, line in (("STE011", "In conclusion, the plan works."), ("STE013", "This step is not unsafe.")):
     def kept_change(work, line=line):
         write(work, "a.md", "\n" + line + "\n", "a")
@@ -200,14 +200,14 @@ check("changed UI file: STE011 on the copy still fails the step", rc == 1 and "B
 check("changed UI file: a five-word button is not a finding", "STE020" not in out and "B.tsx:2:" not in out, out)
 
 
-# Gate only the lines the diff added: a long line already on main is not gated (the job summary lists it).
+# Fail only on the lines the diff added: a long line already on main does not fail (the job summary lists it).
 def touch_elsewhere(work):
     write(work, "a.md", "# T\n\n" + LONG + "\n\nAnother short line.\n")
     git(work, "commit", "-qam", "touch")
 
 
 rc, out = run("changed", base={"a.md": "# T\n\n" + LONG + "\n"}, change=touch_elsewhere)
-check("unchanged line: a finding there never fails the gate",
+check("unchanged line: a finding there never fails the check",
       rc == 0 and "ste-lint: PASS, 0 error(s)" in out and "STE001" not in out, out)
 
 
@@ -222,7 +222,7 @@ check("one-line hunk with no count: linted", rc == 1 and "a.md:3: STE001" in out
 
 
 # A pull request diffs origin/base...HEAD, wider than the last commit: an earlier commit's
-# finding must fail the gate.
+# finding must fail the check.
 def two_commits(work):
     default_change(work)
     write(work, "a.md", "\nTiny.\n", "a")
@@ -287,7 +287,7 @@ rc, out = run("changed", change=pct_file)
 check("annotation escapes % in the file property", "::error file=50%25.md,line=3::STE001 " in out, out)
 
 
-# bin/ste-changed <base> lints the files the gates job lints for the same diff, and gives the same
+# bin/ste-changed <base> lints the files the checks job lints for the same diff, and gives the same
 # header, files, findings, verdict and exit code. Each case runs the step and the command on one repo,
 # so the expected scope is the step's own output, never a copy of its rules.
 def skill_change(work):
@@ -402,7 +402,7 @@ check("no final newline: the command excludes it too, same header, files, findin
       and c["findings"] == s["findings"] and c["verdict"] == s["verdict"], c_out)
 
 
-# The command run from a subdirectory lints what it lints at the root, and gates the same lines.
+# The command run from a subdirectory lints what it lints at the root, and fails on the same lines.
 # `git diff --name-only` prints root-relative paths, so the pathspecs and the file names must not
 # depend on the current directory.
 SUB_BASE = {"a.md": "# A\n", "sub/keep.txt": "x\n"}
@@ -421,7 +421,7 @@ for label, change, files in [("a changed root file", default_change, ["a.md"]),
     s, c = parts(s_out), parts(c_out)
     check("subdirectory, %s: the step at the root lints them and fails" % label,
           s_rc == 1 and s["files"] == files and len(s["findings"]) == len(files), s_out)
-    check("subdirectory, %s: the command lints the same files, gates the same lines, exits 1" % label,
+    check("subdirectory, %s: the command lints the same files, fails on the same lines, exits 1" % label,
           c_rc == s_rc and c["head"] == s["head"] and c["files"] == s["files"] and c["findings"] == s["findings"]
           and c["verdict"] == s["verdict"], c_out)
 
@@ -443,7 +443,7 @@ check("double-star exclude: the command excludes them too, same header, files, f
       and c["findings"] == s["findings"] and c["verdict"] == s["verdict"], c_out)
 
 
-# Exit-code parity on three diffs: a gated finding, a finding only on an unchanged line, no change.
+# Exit-code parity on three diffs: a failing finding, a finding only on an unchanged line, no change.
 for label, change, base, want in [
         ("a finding on a changed line", default_change, BASE_FILES, 1),
         ("a finding only on an unchanged line", touch_elsewhere, {"a.md": "# T\n\n" + LONG + "\n"}, 0),

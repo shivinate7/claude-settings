@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Fixture tests for report_gate.py (Stop) and the STE linter, lint/ste_lint.py.
+"""Fixture tests for report_guard.py (Stop) and the STE linter, lint/ste_lint.py.
 
 Each test writes a fake transcript JSONL to a temp dir, builds the hook JSON, and runs the
-gate as a subprocess, the way Claude Code's Stop hook does. Run with:
+guard as a subprocess, the way Claude Code's Stop hook does. Run with:
 
-    python lint/test_gates.py -v
+    python lint/test_report_guard.py -v
 """
 import errno
 import importlib.util
@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPORT_GATE = os.path.join(HERE, "report_gate.py")
+REPORT_GUARD = os.path.join(HERE, "report_guard.py")
 HOOKS = os.path.join(HERE, "..", "hooks")
 
 sys.path.insert(0, HERE)
@@ -28,7 +28,7 @@ import ste_lint  # noqa: E402
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 
-# Isolation. Every spawned gate inherits this process's environment (env=None, or a copy
+# Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
 # of os.environ). Point CLAUDE_CONFIG_DIR at a temporary folder for the whole module, so no test
 # appends to the user's guard.log. tearDownModule restores the value it found. A test that sets its
 # own folder (the config report) still wins.
@@ -92,10 +92,10 @@ def write_transcript(records, tmpdir, name="transcript.jsonl"):
     return path
 
 
-def run_gate(gate, hook, raw_stdin=None, env=None):
+def run_guard(guard, hook, raw_stdin=None, env=None):
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
     run = subprocess.run(
-        [sys.executable, gate],
+        [sys.executable, guard],
         input=stdin_text,
         capture_output=True,
         text=True,
@@ -145,7 +145,7 @@ def run_config_report(hook, env=None):
                           capture_output=True, text=True, timeout=15, env=env)
 
 
-class ReportGateTests(unittest.TestCase):
+class ReportGuardTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -173,7 +173,7 @@ class ReportGateTests(unittest.TestCase):
                     assistant_text(text),
                 ]
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 self.assertEqual(run.returncode, 0)
                 self.assertEqual(run.stdout.strip(), "")
 
@@ -185,7 +185,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("> **Done** BUILT\n> ```\n> code\n> ```"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
@@ -207,7 +207,7 @@ class ReportGateTests(unittest.TestCase):
                     assistant_text(text),
                 ]
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 out = json.loads(run.stdout)
                 self.assertEqual(out.get("decision"), "block")
 
@@ -227,7 +227,7 @@ class ReportGateTests(unittest.TestCase):
                     assistant_text(text),
                 ]
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 out = json.loads(run.stdout)
                 self.assertEqual(out.get("decision"), "block")
 
@@ -239,7 +239,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Here is what I found, no report needed."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
@@ -251,20 +251,20 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Done BUILT abc123"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path, stop_hook_active=True))
+        run = run_guard(REPORT_GUARD, self.hook_for(path, stop_hook_active=True))
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
     def test_10_garbage_stdin_no_output(self):
         rows = [
-            # Catches: unparseable stdin crashes the gate.
+            # Catches: unparseable stdin crashes the guard.
             "not json",
-            # Catches: valid JSON that is not an object crashes the gate.
+            # Catches: valid JSON that is not an object crashes the guard.
             "[1,2,3]",
         ]
         for raw in rows:
             with self.subTest(raw=raw):
-                run = run_gate(REPORT_GATE, None, raw_stdin=raw)
+                run = run_guard(REPORT_GUARD, None, raw_stdin=raw)
                 self.assertEqual(run.returncode, 0)
                 self.assertEqual(run.stdout.strip(), "")
 
@@ -276,7 +276,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Merged feature in."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
@@ -292,7 +292,7 @@ class ReportGateTests(unittest.TestCase):
         ]
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
@@ -301,7 +301,7 @@ class ReportGateTests(unittest.TestCase):
         rows = [
             # Catches: prose above a good report after a question blocks it.
             ("why does it only fire sometimes?",
-             "The gate fires on a landing turn only.\n\n" + GOOD_REPORT),
+             "The guard fires on a landing turn only.\n\n" + GOOD_REPORT),
             # Catches: prose above a good report with no question blocks it.
             ("do the task", "Here is some prose.\n\n" + GOOD_REPORT),
         ]
@@ -314,13 +314,13 @@ class ReportGateTests(unittest.TestCase):
                     assistant_text(text),
                 ]
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 self.assertEqual(run.returncode, 0)
                 self.assertEqual(run.stdout.strip(), "")
 
     def test_58_quoted_git_commit_in_probe_list_passes(self):
         # A read-only Bash call quoting a probe list, 'git commit -q -m x' 'git push --quiet',
-        # landed nothing, so the gate must not demand a report. The words sit inside single
+        # landed nothing, so the guard must not demand a report. The words sit inside single
         # quotes, never run as a command.
         rows = [
             # Catches: a quoted probe list is read as a landing command.
@@ -351,7 +351,7 @@ class ReportGateTests(unittest.TestCase):
                     assistant_text(text),
                 ]
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 self.assertEqual(run.returncode, 0)
                 self.assertEqual(run.stdout.strip(), "")
 
@@ -365,7 +365,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Wrote the note, no report needed."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
@@ -385,7 +385,7 @@ class ReportGateTests(unittest.TestCase):
                     assistant_text(text),
                 ]
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 self.assertEqual(run.returncode, 0)
                 out = json.loads(run.stdout)
                 self.assertEqual(out.get("decision"), "block")
@@ -398,7 +398,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Pushed."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
@@ -430,7 +430,7 @@ class ReportGateTests(unittest.TestCase):
         for i, records in enumerate(rows):
             with self.subTest(row=i), tempfile.TemporaryDirectory() as tmp:
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 self.assertEqual(run.returncode, 0)
                 self.assertEqual(run.stdout.strip(), "")
 
@@ -446,7 +446,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Committed."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
@@ -458,7 +458,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Pushed."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
@@ -470,7 +470,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Committed."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
@@ -482,12 +482,12 @@ class ReportGateTests(unittest.TestCase):
             assistant_text(GOOD_REPORT + "\n\nOne more thought."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
     def test_67_every_github_landing_tool_with_no_report_blocks(self):
-        # Pinned by hand, not read from report_gate.LANDING_TOOLS: an emptied set must fail here.
+        # Pinned by hand, not read from report_guard.LANDING_TOOLS: an emptied set must fail here.
         # Catches: a GitHub landing tool with no report is not blocked.
         for tool in ("mcp__github__merge_pull_request", "mcp__github__create_pull_request",
                      "mcp__github__push_files", "mcp__github__create_or_update_file"):
@@ -499,7 +499,7 @@ class ReportGateTests(unittest.TestCase):
                     assistant_text("Landed it."),
                 ]
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 self.assertEqual(run.returncode, 0)
                 self.assertEqual(json.loads(run.stdout).get("decision"), "block")
         # Catches: a GitHub landing with a good report is blocked.
@@ -511,7 +511,7 @@ class ReportGateTests(unittest.TestCase):
                 assistant_text(GOOD_REPORT),
             ]
             path = write_transcript(records, tmp)
-            run = run_gate(REPORT_GATE, self.hook_for(path))
+            run = run_guard(REPORT_GUARD, self.hook_for(path))
             self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stdout.strip(), "")
 
@@ -523,7 +523,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("> **Deviations** none\n> **Next** ship it"),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         self.assertEqual(json.loads(run.stdout).get("decision"), "block")
 
     def test_69_event_other_than_stop_never_blocks(self):
@@ -537,7 +537,7 @@ class ReportGateTests(unittest.TestCase):
         for event in ("SubagentStop", "PreToolUse", "SessionEnd"):
             hook = self.hook_for(path)
             hook["hook_event_name"] = event
-            run = run_gate(REPORT_GATE, hook)
+            run = run_guard(REPORT_GUARD, hook)
             self.assertEqual(run.returncode, 0, event)
             self.assertEqual(run.stdout.strip(), "", event)
 
@@ -547,7 +547,7 @@ class ReportGateTests(unittest.TestCase):
         rows = [
             # Catches: a hook registered on another event imports the shell parser and the linter.
             ("event other than Stop", {"hook_event_name": "PreToolUse", "transcript_path": idle}),
-            # Catches: a rewrite turn, which the gate never judges, imports them.
+            # Catches: a rewrite turn, which the guard never judges, imports them.
             ("stop_hook_active", {"hook_event_name": "Stop", "transcript_path": idle,
                                   "stop_hook_active": True}),
             # Catches: a Stop with no transcript to read imports them.
@@ -557,7 +557,7 @@ class ReportGateTests(unittest.TestCase):
         ]
         for label, hook in rows:
             with self.subTest(label):
-                out, imported = run_import_probe(REPORT_GATE, hook)
+                out, imported = run_import_probe(REPORT_GUARD, hook)
                 self.assertEqual(out.strip(), "", "the input was not ignored")
                 self.assertEqual(imported, [], "imported before it had work to do")
 
@@ -572,8 +572,8 @@ class ReportGateTests(unittest.TestCase):
             assistant_text("Renamed it and committed."),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
-        self.assertNotEqual(run.stdout.strip(), "", "the gate stayed silent on a landed turn")
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
+        self.assertNotEqual(run.stdout.strip(), "", "the guard stayed silent on a landed turn")
         self.assertEqual(json.loads(run.stdout).get("decision"), "block")
 
     def test_72_commit_then_peer_reply_then_stop_with_good_report_passes(self):
@@ -586,7 +586,7 @@ class ReportGateTests(unittest.TestCase):
             assistant_text(GOOD_REPORT),
         ]
         path = write_transcript(records, self.tmp.name)
-        run = run_gate(REPORT_GATE, self.hook_for(path))
+        run = run_guard(REPORT_GUARD, self.hook_for(path))
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout.strip(), "")
 
@@ -606,17 +606,17 @@ class ReportGateTests(unittest.TestCase):
         for label, records, want in rows:
             with self.subTest(label), tempfile.TemporaryDirectory() as tmp:
                 path = write_transcript(records, tmp)
-                run = run_gate(REPORT_GATE, self.hook_for(path))
+                run = run_guard(REPORT_GUARD, self.hook_for(path))
                 self.assertEqual(run.returncode, 0)
                 if want == "block":
-                    self.assertNotEqual(run.stdout.strip(), "", "the gate stayed silent on a landed turn")
+                    self.assertNotEqual(run.stdout.strip(), "", "the guard stayed silent on a landed turn")
                     self.assertEqual(json.loads(run.stdout).get("decision"), "block")
                 else:
                     self.assertEqual(run.stdout.strip(), "")
 
 
 class DoneFormatAndCiteTests(unittest.TestCase):
-    """reports-done-format and speak-cite-id-plus-gloss, both in report_gate.py's Stop hook."""
+    """reports-done-format and speak-cite-id-plus-gloss, both in report_guard.py's Stop hook."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -631,7 +631,7 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         ]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        run = run_gate(REPORT_GATE, hook)
+        run = run_guard(REPORT_GUARD, hook)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -649,65 +649,65 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED, or OTHER")
 
     def test_df_red_done_without_ref_blocks(self):
-        self.assert_blocked("> **Done** BUILT the gate\n> **Next** none", "BUILT, RECORDED, or OTHER")
+        self.assert_blocked("> **Done** BUILT the guard\n> **Next** none", "BUILT, RECORDED, or OTHER")
 
     def test_df_red_one_bullet_lacks_ref_blocks(self):
         rows = [
             # Catches: a RECORDED bullet with no ref passes.
-            ("> **Done**\n> - BUILT gate, PR #5\n> - RECORDED the ruling\n> **Next** none",
+            ("> **Done**\n> - BUILT guard, PR #5\n> - RECORDED the ruling\n> **Next** none",
              "RECORDED the ruling"),
             # Catches: a bullet with no kind word passes.
             ("> **Done**\n> - swept the stale branches\n> **Next** none", "swept the stale"),
             # Catches: a top bullet after sub-bullets is not checked.
-            ("> **Done**\n> - BUILT gate, PR #5\n>   - detail\n> - RECORDED ruling\n> **Next** none",
+            ("> **Done**\n> - BUILT guard, PR #5\n>   - detail\n> - RECORDED ruling\n> **Next** none",
              "RECORDED ruling"),
             # Catches: a lead-in line with a kind word hides a bullet with no ref.
-            ("> **Done** BUILT it:\n> - BUILT gate, PR #5\n> **Next** none", "BUILT it"),
+            ("> **Done** BUILT it:\n> - BUILT guard, PR #5\n> **Next** none", "BUILT it"),
         ]
         for reply, needle in rows:
             with self.subTest(reply=reply):
                 self.assert_blocked(reply, needle)
 
     def test_df_allowed_other_needs_no_ref(self):
-        self.assert_allowed("> **Done**\n> - BUILT gate, PR #5\n> - OTHER swept the stale branches\n> **Next** none")
+        self.assert_allowed("> **Done**\n> - BUILT guard, PR #5\n> - OTHER swept the stale branches\n> **Next** none")
 
     def test_df_allowed_inline_with_pr(self):
-        self.assert_allowed("> **Done** BUILT the gate, PR #226\n> **Next** none")
+        self.assert_allowed("> **Done** BUILT the guard, PR #226\n> **Next** none")
 
     def test_df_allowed_bullets_with_sha_and_pr_url(self):
         self.assert_allowed(
-            "> **Done**\n> - BUILT gate, abc1234\n"
+            "> **Done**\n> - BUILT guard, abc1234\n"
             "> - RECORDED ruling, https://github.com/o/r/pull/12\n> **Next** none")
 
     def test_df_false_alarm_ref_on_wrapped_line_passes(self):
-        self.assert_allowed("> **Done**\n> - BUILT the gate and\n>   its tests, commit abc1234\n> **Next** none")
+        self.assert_allowed("> **Done**\n> - BUILT the guard and\n>   its tests, commit abc1234\n> **Next** none")
 
     def test_df_false_alarm_deviations_text_not_read_as_done(self):
-        self.assert_allowed("> **Done** BUILT gate, PR #226\n> **Deviations** none of the kind words here")
+        self.assert_allowed("> **Done** BUILT guard, PR #226\n> **Deviations** none of the kind words here")
 
     # speak-cite-id-plus-gloss
     def test_cite_red_bare_d_id_blocks(self):
         rows = [
             # Catches: a bare D-id in prose after "Per" passes.
-            ("Per D12 this is fine.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'"),
+            ("Per D12 this is fine.\n\n> **Done** BUILT guard, PR #226\n> **Next** none", "'D12'"),
             # Catches: a bare D-id inside the report body passes.
-            ("> **Done** BUILT gate, PR #226\n> **Next** follow D258 next", "'D258'"),
+            ("> **Done** BUILT guard, PR #226\n> **Next** follow D258 next", "'D258'"),
             # Catches: a gloss-like phrase after a bare D-id hides the id.
-            ("Per D12 and more.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "'D12'"),
+            ("Per D12 and more.\n\n> **Done** BUILT guard, PR #226\n> **Next** none", "'D12'"),
         ]
         for reply, needle in rows:
             with self.subTest(reply=reply):
                 self.assert_blocked(reply, needle)
 
     def test_cite_red_bare_decision_number_blocks(self):
-        self.assert_blocked("See decision 136.\n\n> **Done** BUILT gate, PR #226\n> **Next** none", "decision 136")
+        self.assert_blocked("See decision 136.\n\n> **Done** BUILT guard, PR #226\n> **Next** none", "decision 136")
 
     def test_cite_allowed_id_plus_gloss(self):
         rows = [
             # Catches: false alarm on an id followed by its gloss.
-            "Per D12, short titles for records, this holds.\n\n> **Done** BUILT gate, PR #226\n> **Next** none",
+            "Per D12, short titles for records, this holds.\n\n> **Done** BUILT guard, PR #226\n> **Next** none",
             # Catches: false alarm on a gloss in parentheses before the id.
-            "Short titles for records (D12) hold.\n\n> **Done** BUILT gate, PR #226\n> **Next** none",
+            "Short titles for records (D12) hold.\n\n> **Done** BUILT guard, PR #226\n> **Next** none",
         ]
         for reply in rows:
             with self.subTest(reply=reply):
@@ -717,18 +717,18 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assert_allowed(
             "Merged https://github.com/o/r/pull/218 and [D12](https://x/y), sha d1234567890abcdef, "
             "version v1.2.3, decision 1.2 notes, and PR #218.\n\n"
-            "> **Done** BUILT gate, PR #218\n> **Next** none")
+            "> **Done** BUILT guard, PR #218\n> **Next** none")
 
     def test_cite_false_alarm_code_span_and_path(self):
         self.assert_allowed(
             "The heading `## D012` is refused, see decisions/D258-slug.md.\n\n"
-            "> **Done** BUILT gate, PR #226\n> **Next** none")
+            "> **Done** BUILT guard, PR #226\n> **Next** none")
 
     def test_cite_false_alarm_not_a_report_turn(self):
         records = [human("what is D12?"), assistant_text("D12 is a record.")]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
+        self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
     # review fixes
     def test_df_red_facade_is_not_a_sha(self):
@@ -736,35 +736,35 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     def test_df_allowed_sub_bullets_are_details(self):
         self.assert_allowed(
-            "> **Done**\n> - BUILT gate, PR #5\n>   - touched the parser\n>   - no ref here\n> **Next** none")
+            "> **Done**\n> - BUILT guard, PR #5\n>   - touched the parser\n>   - no ref here\n> **Next** none")
 
     def test_df_allowed_lead_in_text_with_bullets_is_not_an_item(self):
-        self.assert_allowed("> **Done** two items:\n> - BUILT gate, PR #5\n> - OTHER swept, abc1234\n> **Next** none")
+        self.assert_allowed("> **Done** two items:\n> - BUILT guard, PR #5\n> - OTHER swept, abc1234\n> **Next** none")
 
     def test_cite_allowed_more_gloss_shapes(self):
         for lead in ("D12 = short titles for records", "D12 -- short titles for records",
                      "D12 says short titles win", "Short titles ruling, D12"):
-            self.assert_allowed("Per " + lead + " here.\n\n> **Done** BUILT gate, PR #226\n> **Next** none")
+            self.assert_allowed("Per " + lead + " here.\n\n> **Done** BUILT guard, PR #226\n> **Next** none")
 
     def test_cite_false_alarm_cell_range_and_vitamin(self):
         self.assert_allowed("Sum A1:D12 and take vitamin D3 daily, or D12:F20.\n\n"
-                            "> **Done** BUILT gate, PR #226\n> **Next** none")
+                            "> **Done** BUILT guard, PR #226\n> **Next** none")
 
     def test_cite_and_done_block_once_with_both_reasons(self):
-        out = self.verdict("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")
+        out = self.verdict("Per D12.\n\n> **Done** BUILT guard\n> **Next** none")
         self.assertIn("BUILT, RECORDED, or OTHER", out["reason"])
         self.assertIn("'D12'", out["reason"])
 
     def test_df_cite_quiet_on_rewrite(self):
         records = [human("x"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text("Per D12.\n\n> **Done** BUILT gate\n> **Next** none")]
+                   assistant_text("Per D12.\n\n> **Done** BUILT guard\n> **Next** none")]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True}
-        self.assertEqual(run_gate(REPORT_GATE, hook).stdout.strip(), "")
+        self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
 
 class DoneNamesModelsTests(unittest.TestCase):
-    """reports-done-names-models, in report_gate.py's Stop hook."""
+    """reports-done-names-models, in report_guard.py's Stop hook."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -785,7 +785,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
-        run = run_gate(REPORT_GATE, hook, env=env)
+        run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -793,65 +793,65 @@ class DoneNamesModelsTests(unittest.TestCase):
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
 
     def test_dm_red_builder_unnamed_blocks(self):
-        out = self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none", [self.BUILDER])
+        out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [self.BUILDER])
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_red_one_of_two_roles_unnamed_blocks(self):
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
                            [self.BUILDER, self.REVIEWER_R2])
         self.assertIn("no model named for reviewer", out["reason"])
 
     def test_dm_red_builder_named_opus_ran_sonnet_blocks(self):
         # The builder file has no pin, so the spawn reads CLAUDE_CODE_SUBAGENT_MODEL, sonnet.
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
                            [self.BUILDER])
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
     def test_dm_red_reviewer_named_sonnet_ran_file_pin_blocks(self):
         # No model field: the reviewer runs its agents/reviewer.md pin, haiku.
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none",
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none",
                            [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}])
         self.assertIn("ran haiku", out["reason"])
 
     def test_dm_green_names_match_spawns(self):
         self.assertIsNone(self.verdict(
-            "> **Done** BUILT the gate, PR #5 (builder sonnet, reviewer sonnet)\n> **Next** Unstarted: none",
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n> **Next** Unstarted: none",
             [self.BUILDER, self.REVIEWER_R2]))
 
-    def test_dm_green_try3_builder_opus(self):
+    def test_dm_green_round3_builder_opus(self):
         self.assertIsNone(self.verdict(
-            "> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
-            [{"subagent_type": "builder", "model": "opus", "prompt": "Try 3 of 3"}]))
+            "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
+            [{"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}]))
 
     def test_dm_red_denied_opus_builder_does_not_back_opus_name(self):
-        out = self.verdict("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
                            [self.BUILDER], denied=[{"subagent_type": "builder", "model": "opus"}])
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
 
     def test_dm_false_alarm_denied_spawn_then_solo_passes(self):
-        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none", [],
+        self.assertIsNone(self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [],
                                        denied=[{"subagent_type": "builder", "model": "opus"}]))
 
     def test_dm_false_alarm_other_name_forms_pass(self):
         for done in ("(builder and reviewer sonnet)", "(builder: sonnet, reviewer (sonnet))",
                      "(builder, reviewer sonnet)"):
             self.assertIsNone(self.verdict(
-                "> **Done** BUILT the gate, PR #5 " + done + "\n> **Next** Unstarted: none",
+                "> **Done** BUILT the guard, PR #5 " + done + "\n> **Next** Unstarted: none",
                 [self.BUILDER, self.REVIEWER_R2]), done)
 
     def test_dm_false_alarm_no_agent_passes(self):
-        self.assertIsNone(self.verdict("> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none", []))
+        self.assertIsNone(self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", []))
 
     def test_dm_false_alarm_search_only_spawns_pass(self):
         # An Explore search or a Plan spawn builds and reviews nothing, so Done names no model.
         self.assertIsNone(self.verdict(
-            "> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none",
+            "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
 
 
 class UnstartedItemsTests(unittest.TestCase):
-    """reports-name-unstarted-items, in report_gate.py's Stop hook."""
+    """reports-name-unstarted-items, in report_guard.py's Stop hook."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -866,12 +866,12 @@ class UnstartedItemsTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
-        run = run_gate(REPORT_GATE, hook, env=env)
+        run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
-    DONE = "> **Done** BUILT the gate, PR #5 (builder sonnet)\n"
+    DONE = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n"
 
     def test_un_red_builder_turn_without_line_blocks(self):
         rows = [
@@ -886,7 +886,7 @@ class UnstartedItemsTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 out = self.verdict(reply, [self.BUILDER])
                 self.assertEqual(out["decision"], "block")
-                self.assertIn("Unstarted gate", out["reason"])
+                self.assertIn("Unstarted guard", out["reason"])
 
     def test_un_green_line_forms_pass(self):
         rows = [
@@ -904,9 +904,9 @@ class UnstartedItemsTests(unittest.TestCase):
     def test_un_false_alarm_no_builder_passes(self):
         rows = [
             # Catches: a solo turn, or one that spawned only a reviewer, must name unstarted items.
-            ([], "> **Done** BUILT the gate, PR #5\n> **Next** none"),
+            ([], "> **Done** BUILT the guard, PR #5\n> **Next** none"),
             ([{"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}],
-             "> **Done** BUILT the gate, PR #5 (reviewer sonnet)\n> **Next** none"),
+             "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** none"),
         ]
         for spawns, reply in rows:
             with self.subTest(reply=reply):
@@ -914,7 +914,7 @@ class UnstartedItemsTests(unittest.TestCase):
 
 
 class NoResendTests(unittest.TestCase):
-    """A report gate never makes a session send its whole report twice (roadmap c101)."""
+    """A report guard never makes a session send its whole report twice (roadmap c101)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -932,7 +932,7 @@ class NoResendTests(unittest.TestCase):
         hook = {"hook_event_name": "Stop", "transcript_path": path,
                 "stop_hook_active": stop_hook_active}
         env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
-        run = run_gate(REPORT_GATE, hook, env=env)
+        run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -941,13 +941,13 @@ class NoResendTests(unittest.TestCase):
             # Catches: the label-word block asks for the report again.
             ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
             # Catches: the model-name block asks for the report again.
-            ("model names", "> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none",
+            ("model names", "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
              (self.BUILDER,)),
             # Catches: the Unstarted block asks for the report again.
-            ("Unstarted line", "> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** merge",
+            ("Unstarted line", "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge",
              (self.BUILDER,)),
             # Catches: the cite-gloss block asks for the report again.
-            ("cite gloss", "Per D12.\n\n> **Done** BUILT gate, PR #5\n> **Next** none", ()),
+            ("cite gloss", "Per D12.\n\n> **Done** BUILT guard, PR #5\n> **Next** none", ()),
             # Catches: two joined reasons each carry the tail.
             ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
@@ -985,7 +985,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
     """The rewrite after a missing-report block is checked once for model names and the Unstarted line."""
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
-    GOOD = "> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
+    GOOD = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -996,7 +996,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
                 "session_id": self.sid}
-        run = run_gate(REPORT_GATE, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
+        run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -1012,23 +1012,23 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 
     def test_rw_red_rewrite_without_unstarted_blocks(self):
         self.missing_report_block()
-        out = self.stop("> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** merge", True)
+        out = self.stop("> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge", True)
         self.assertEqual(out["decision"], "block")
-        self.assertIn("Unstarted gate", out["reason"])
+        self.assertIn("Unstarted guard", out["reason"])
         self.assertIn("post only the corrected lines", out["reason"].lower())
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
-        for reply in ("> **Done** BUILT the gate, PR #5 (builder opus)\n> **Next** Unstarted: none",
-                      "> **Done** BUILT the gate, PR #5\n> **Next** Unstarted: none"):
+        for reply in ("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
+                      "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none"):
             with self.subTest(reply=reply):
                 self.missing_report_block()
                 out = self.stop(reply, True)
                 self.assertEqual(out["decision"], "block")
-                self.assertIn("Model-name gate", out["reason"])
+                self.assertIn("Model-name guard", out["reason"])
 
     def test_rw_second_rewrite_stays_quiet(self):
         self.missing_report_block()
-        bad = "> **Done** BUILT the gate, PR #5 (builder sonnet)\n> **Next** merge"
+        bad = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge"
         self.assertEqual(self.stop(bad, True)["decision"], "block")
         self.assertIsNone(self.stop(bad, True))
 
@@ -1038,12 +1038,12 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNone(self.stop(self.GOOD, True))
 
     def test_rw_no_prior_missing_report_block_stays_quiet(self):
-        bad = "> **Done** BUILT the gate, PR #5\n> **Next** merge"
+        bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
         self.assertIsNone(self.stop(bad, True))
 
     def test_rw_correction_block_leaves_no_marker(self):
         # A correction block (report present) must not arm a check on the next rewrite.
-        bad = "> **Done** BUILT the gate, PR #5\n> **Next** merge"
+        bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
         self.assertEqual(self.stop(bad, False)["decision"], "block")
         self.assertIsNone(self.stop(bad, True))
 
@@ -1051,7 +1051,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         # The rewrite never ran, so the marker is stale. A new turn's Stop must clear it.
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, False))
-        bad = "> **Done** BUILT the gate, PR #5\n> **Next** merge"
+        bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
         self.assertIsNone(self.stop(bad, True))
 
     def test_rw_feedback_record_counted_as_human_keeps_spawns(self):
@@ -1060,18 +1060,18 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         records = [human("do the task"), tool_use_msg("Agent", self.BUILDER), tool_result_msg(),
                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                    assistant_text("All done."), human("Stop hook feedback: send the report"),
-                   assistant_text("> **Done** BUILT the gate, PR #5\n> **Next** merge")]
+                   assistant_text("> **Done** BUILT the guard, PR #5\n> **Next** merge")]
         out = self.run_hook(records, True)
-        self.assertIn("Unstarted gate", out["reason"])
+        self.assertIn("Unstarted guard", out["reason"])
 
 
-class PickGateTests(unittest.TestCase):
+class PickGuardTests(unittest.TestCase):
     """decisions-reach-a-clickable-pick: an Input Needed pick needs the question box or a linked waiting-page item."""
 
     PAGE = "https://claude.ai/artifact/waitpage1"
     OTHER = "https://claude.ai/artifact/otherrepo9"
     PICK = ("> **Done** OTHER read the code\n"
-            "> **Input Needed** Two ways:\n> A (my pick): fold the gate\n> B: add a second hook\n"
+            "> **Input Needed** Two ways:\n> A (my pick): fold the guard\n> B: add a second hook\n"
             "> **Next** wait")
 
     def setUp(self):
@@ -1095,7 +1095,7 @@ class PickGateTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                 "cwd": repo or self.repo}
-        run = run_gate(REPORT_GATE, hook)
+        run = run_guard(REPORT_GUARD, hook)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -1109,13 +1109,13 @@ class PickGateTests(unittest.TestCase):
             with self.subTest(landed=landed):
                 out = self.verdict(self.PICK, landed=landed)
                 self.assertEqual(out["decision"], "block")
-                self.assertIn("Pick gate", out["reason"])
+                self.assertIn("Pick guard", out["reason"])
                 self.assertIn("question box", out["reason"])
 
     def test_pk_red_option_forms_block(self):
         rows = [
             "> **Input Needed** A or B: fold it or add a hook?",
-            "> **Input Needed** Two ways:\n> 1. fold the gate\n> 2. add a hook",
+            "> **Input Needed** Two ways:\n> 1. fold the guard\n> 2. add a hook",
             "> **Input Needed** Two ways: 1. stack them (my pick). 2. one per file.",
             "> **Input Needed** Is it A or B? A (my pick) keeps the hook.",
             "> **Input Needed**\n> A) fold it\n> B) add a hook",
@@ -1165,7 +1165,7 @@ class PickGateTests(unittest.TestCase):
     def test_pk_green_no_false_alarm(self):
         rows = [
             # Catches: a plain ask with no options refused.
-            "> **Done** OTHER read it\n> **Input Needed** Should the gate also cover Codex? I wait.\n> **Next** wait",
+            "> **Done** OTHER read it\n> **Input Needed** Should the guard also cover Codex? I wait.\n> **Next** wait",
             # Catches: a quoted earlier answer read as a pick.
             "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait",
             "> **Done** OTHER read it\n> **Input Needed** A decision is open. B was the old plan.",
@@ -1286,7 +1286,7 @@ class ConfigReportTests(unittest.TestCase):
         self.assertEqual(run.stdout.strip(), "")
 
     def test_19_merge_into_main_after_last_human_names_it_by_pr_number(self):
-        # The report gate is a CHECK now: when
+        # The report guard checks this now: when
         # the reply's own report block does not already name the merge, it fires, by PR
         # number, never by the raw command line.
         rows = [
@@ -1589,7 +1589,7 @@ class PromotedRuleTests(unittest.TestCase):
     """Plain-prose lint (decisions/plain-prose-lint.md): a rule either blocks or does not exist,
     and six advisory codes are the one exception. Three rules block: STE001, STE011, STE013.
     Six are advisory: STE003, STE007, STE008, STE009, STE015, STE017 are
-    warnings that the linter reports and no gate ever blocks on. Each case here proves a rule
+    warnings that the linter reports and no guard ever blocks on. Each case here proves a rule
     fires at its severity, the thing a table-row edit alone cannot prove. STE006 and STE018 are
     deleted, so they get their own no-finding cases instead, since a deleted rule has no
     severity left to assert.

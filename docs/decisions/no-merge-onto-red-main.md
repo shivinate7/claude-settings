@@ -14,7 +14,7 @@ The red-main check: the merge tool refuses `merge <pr> --confirm` while the base
 Why: Oct 13 to 14, 14 main runs in a row were red, and batch merges kept landing on top. Main's latest run was not green for 311 of 366 hours. Each merge onto a red main hides the next defect and makes the repair lane longer (roadmap step c166, from plan c95-step2-escapes, option C's brake).
 
 - Risk: named incident, the Oct 13 to 14 red episode. Landed 2026-10-28.
-- The owner's `override` prompt does not reach this check. The override check has one home, `refuse()` in `hooks/guard_core.py`. The merge tool runs after the guard's gate, and decision owner-override lists the `bin/merge` shim as outside every override. The tool also cannot tell a session's run from its agent's, and a one-act override must not reach an agent.
+- The owner's `override` prompt does not reach this check. The override check has one home, `refuse()` in `hooks/guard_core.py`. The merge tool runs after the guard, and decision owner-override lists the `bin/merge` shim as outside every override. The tool also cannot tell a session's run from its agent's, and a one-act override must not reach an agent.
 - Check: `merge/test_merge.py`, class `RedMainBrake` and `GhHalf.test_a_red_main_run_read_through_gh_refuses_the_merge`.
 - Cost: at each `--confirm` and each preview, one `git ls-tree` of the base, one `actions/runs` read (one page of 50), and one jobs read for each judged run that did not succeed. No process starts, no file written, no timer.
 

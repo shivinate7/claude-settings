@@ -15,7 +15,7 @@ to the repo (`rule:building-land-design-or-abandon` had no mechanism).
 - The hook checks only that the value resolves. It never compares text, so a paraphrase cannot
   make it cry wolf.
 - When git or the transcript cannot be read, the hook stands down with no refusal
-  (recovery-must-not-gate-on-its-own-state).
+  (recovery-independent-of-state).
 
 Process state stays in memory with `home: process-only`: merge order, which agent holds which
 branch, a merge grant for one act, a personal preference. `lint/ruling_census.py` counts those lines.

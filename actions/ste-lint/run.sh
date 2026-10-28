@@ -151,7 +151,7 @@ for f in d["findings"][:50]:
     print("| %s | %d | %s | %s |" % (f["path"], f["line"], f["code"], f["message"].replace("|", "\\|").replace("\n", " ")))
 with open(sys.argv[3], "w") as o:
     emit(d["findings"], o)
-    print("ste-lint: audit, %d error(s), %d warning(s), not gated" % (s["error"], s["warning"]), file=o)
+    print("ste-lint: audit, %d error(s), %d warning(s), report only" % (s["error"], s["warning"]), file=o)
 PYEOF
   python3 "$AUDIT_PY" "$JSON_OUT" "$EXCLUDED_COUNT" "$LOG_OUT" >> "$SUMMARY"
   cat "$LOG_OUT"
@@ -188,7 +188,7 @@ PYEOF
 HUNKS="$(mktemp)"
 git diff -U0 "$RANGE" -- ${FILES[@]+"${FILES[@]}"} | python3 "$HUNK_MAP_PY" > "$HUNKS"
 
-# Split findings into in-hunk (gated) and out-of-hunk (pre-existing, report only).
+# Split findings into in-hunk (can fail the job) and out-of-hunk (pre-existing, report only).
 # A finding without a line number counts as in-hunk.
 SPLIT_PY="$(mktemp)"
 cat > "$SPLIT_PY" <<'PYEOF'
@@ -226,15 +226,15 @@ def table(items):
 print("### STE lint")
 print()
 print("Files checked: %d. Excluded: %d." % (d["files"], int(excluded)))
-print("Gated, changed lines: %d error(s), %d warning(s)."
+print("Can fail the job, changed lines: %d error(s), %d warning(s)."
       % (sev_count(in_hunk, "error"), sev_count(in_hunk, "warning")))
-print("Pre-existing, not gated: %d error(s), %d warning(s)."
+print("Pre-existing, report only: %d error(s), %d warning(s)."
       % (sev_count(out_hunk, "error"), sev_count(out_hunk, "warning")))
 print()
 table(in_hunk)
 if out_hunk:
     print()
-    print("#### Pre-existing, not gated")
+    print("#### Pre-existing, report only")
     print()
     table(out_hunk)
 
@@ -249,8 +249,8 @@ PYEOF
 
 set +e
 python3 "$SPLIT_PY" "$JSON_OUT" "$HUNKS" "$EXCLUDED_COUNT" "$FAIL" "$LOG_OUT" >> "$SUMMARY"
-GATE_EXIT=$?
+CHECK_EXIT=$?
 set -e
 cat "$LOG_OUT"
 
-exit "$GATE_EXIT"
+exit "$CHECK_EXIT"
