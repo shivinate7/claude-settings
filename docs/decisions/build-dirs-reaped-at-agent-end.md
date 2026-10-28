@@ -13,13 +13,16 @@ its own end, because a finished agent is often resumed there and would rebuild f
 deletes a folder only when each gate gives a confirmed yes. Any read that cannot tell means keep.
 
 1. The tree is another `<primary>/.claude/worktrees/agent-*` tree, not the ending agent's own tree and not a primary checkout.
-2. The tree is idle 30 minutes or more (`sweep.worktree_idle_seconds`, read before any `git status`). An unreadable idle keeps.
+2. The tree is idle 30 minutes or more (`sweep.worktree_idle_seconds`, read before any `git status`). So is its newest dirty or
+   untracked file (`edit_idle`): the admin-file clock misses edits not yet staged or committed. Build folders and trash names do
+   not count. An unreadable read, or a walk the deadline cut short, keeps.
 3. The tree holds no lock other than a Claude agent lock (`sweep.AGENT_LOCK_RE`). A person's lock, an empty reason or unknown
    text keeps. An agent lock does not keep, live or stale: the live host holds one on every agent tree all session, so it says
    nothing about activity. Keeping on it would keep every build folder until the session ends, the disk-full failure this record
    exists to prevent.
 4. No live session has a cwd inside the tree (`guard.worktree_live_session`).
-5. No process has a cwd anywhere in the tree. The reap stops no process there. A build runs from the worktree root and writes
+5. No process has a cwd anywhere in the tree, read again just before the pass, so a build started during the hook keeps. The
+   reap stops no process there. A build runs from the worktree root and writes
    into the folder, so a cwd check on the folder alone deleted live builds (likely risk, 2026-10-27).
 6. The reap never follows a link. A link named as a build folder is kept.
 

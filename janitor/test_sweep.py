@@ -4643,6 +4643,8 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(os.path.dirname(trash), (os.path.basename(trash),))
         notes = os.path.join(wt, "notes-not-trash")
         write(os.path.join(notes, "keep.txt"), "not trash\n")
+        then = time.time() - 31 * 60  # an untracked file edited now would keep the whole tree
+        os.utime(os.path.join(notes, "keep.txt"), (then, then))
         self.later_end(primary, wt)
         with self.subTest(arm="notes-not-trash"):
             self.assertTrue(os.path.isfile(os.path.join(notes, "keep.txt")),
@@ -4730,6 +4732,65 @@ class BuildDirReapTests(unittest.TestCase):
             self.assert_all_kept(person, "a person's lock did not keep the build folders")
         with self.subTest(arm="a lock with no reason, idle 31 min"):
             self.assert_all_kept(empty, "a lock with no reason did not keep the build folders")
+
+    def test_an_uncommitted_edit_newer_than_30_minutes_keeps_the_build_folders(self):
+        # The admin-file idle clock misses edits that are not committed or staged. A builder that
+        # built, then edits sources for 35 minutes, must keep its build output.
+        primary = self.make_primary("edits")
+        edited, untracked, old = (self.add_agent(primary, n) for n in ("bdrEdit", "bdrNew", "bdrOldEdit"))
+        for tree in (edited, untracked, old):
+            self.fill(tree)
+        write(os.path.join(edited, "f.txt"), "edited 5 min ago\n")
+        then = time.time() - 5 * 60
+        os.utime(os.path.join(edited, "f.txt"), (then, then))
+        write(os.path.join(untracked, "Sources", "new", "x.swift"), "let x = 1\n")
+        write(os.path.join(old, "f.txt"), "edited 31 min ago\n")
+        then = time.time() - 31 * 60
+        os.utime(os.path.join(old, "f.txt"), (then, then))
+        self.later_end(primary, edited, untracked, old)
+        with self.subTest(control="tree whose last edit is 31 min old"):
+            self.assert_all_reaped(old)
+        with self.subTest(arm="tracked file edited 5 min ago, admin idle 31 min"):
+            self.assert_all_kept(edited, "a fresh uncommitted edit did not keep the build folders")
+            self.assertIn("recently-edited",
+                          str(self.tree_row(self.last_row(), edited).get("buildDirsKept")))
+        with self.subTest(arm="new untracked folder written now, admin idle 31 min"):
+            self.assert_all_kept(untracked, "a fresh untracked file did not keep the build folders")
+
+    def test_a_build_started_during_the_hook_keeps_its_build_folders(self):
+        # A build that starts after the hook's first process read must still keep its folders.
+        primary = self.make_primary("late-build")
+        late, quiet = self.add_agent(primary, "bdrLateBuild"), self.add_agent(primary, "bdrQuiet")
+        ender = self.add_agent(primary, "bdrEnd")
+        self.fill(late)
+        self.fill(quiet)
+        _age_admin_files(late, 31 * 60)
+        _age_admin_files(quiet, 31 * 60)
+        real = self.reap._decide
+
+        def then_start_build(target):
+            answer = real(target)
+            self.hold_cwd(late)  # the build's cwd is the worktree root
+            return answer
+
+        with mock.patch.object(self.reap, "_decide", new=then_start_build):
+            record = self.run_in_process(ender)
+        with self.subTest(control="tree with no process"):
+            self.assert_all_reaped(quiet)
+        with self.subTest(arm="build started after the first process read"):
+            self.assert_all_kept(late, "a build started during the hook lost its folders")
+            self.assertEqual(self.tree_row(record, late).get("buildDirsKept"), "process-in-worktree")
+
+    def test_the_idle_read_comes_before_git_status_rewrites_the_index(self):
+        # A tracked file with a changed mtime but the same content makes `git status` refresh and
+        # rewrite the index, so an idle read after the decision would see the tree as active.
+        primary = self.make_primary("order")
+        tree = self.add_agent(primary, "bdrOrder")
+        self.fill(tree)
+        then = time.time() - 40 * 60
+        os.utime(os.path.join(tree, "f.txt"), (then, then))
+        self.later_end(primary, tree)
+        self.assert_all_reaped(tree)
 
     def run_in_process(self, ender):
         payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": "bdrEnd",

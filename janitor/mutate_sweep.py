@@ -809,8 +809,8 @@ MUTATIONS = [
 
     ('build dirs: a live session in another idle tree no longer keeps its folders',
      'agent_end_reap',
-     '    if live:\n        return "live-session"\n    if cwds is None:',
-     '    if False:\n        return "live-session"\n    if cwds is None:',
+     '    if live:\n        return "live-session"\n    edited = ',
+     '    if False:\n        return "live-session"\n    edited = ',
      'test_a_live_session_inside_the_worktree_keeps_everything'),
 
     ('build dirs: a live build run from another tree\'s root loses its folder',
@@ -819,6 +819,27 @@ MUTATIONS = [
      '    if False:\n        return "process-in-worktree"',
      'test_a_live_build_with_its_cwd_at_the_worktree_root_keeps_every_build_folder',
      "posix"),
+
+    ('build dirs: an uncommitted edit under 30 minutes old no longer keeps the folders',
+     'agent_end_reap',
+     '    if edited < sweep.AGENT_END_IDLE_SECONDS:\n        return "recently-edited',
+     '    if False:\n        return "recently-edited',
+     'test_an_uncommitted_edit_newer_than_30_minutes_keeps_the_build_folders'),
+
+    ('build dirs: the build pass uses no fresh process read',
+     'agent_end_reap',
+     '                cwds = all_cwds(max(1, min(BATCH_TIMEOUT, deadline - time.monotonic())))',
+     '                cwds = []',
+     'test_a_build_started_during_the_hook_keeps_its_build_folders',
+     "posix"),
+
+    ('build dirs: the idle read moves after git status',
+     'agent_end_reap',
+     '            entry = dict(entry, idle=sweep.worktree_idle_seconds(entry["path"]))\n'
+     '            decision = sweep.decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)\n',
+     '            decision = sweep.decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)\n'
+     '            entry = dict(entry, idle=sweep.worktree_idle_seconds(entry["path"]))\n',
+     'test_the_idle_read_comes_before_git_status_rewrites_the_index'),
 
     ('build dirs: a tree idle under 30 minutes loses its folders',
      'agent_end_reap',
