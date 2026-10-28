@@ -1,0 +1,55 @@
+# Session tiers
+
+## The ruling
+
+Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk.
+
+- **Session shape** (owner, 15:18). A new session in a repo reads what the owner asks, and picks one shape.
+  - Solo. It builds the change itself.
+  - One lane. It runs one line of work, and it orchestrates its own agents.
+  - Coordinator. It runs a standing build. It starts triage and the batch runner, then lane sessions.
+  - The shape stays dynamic. A session may grow to a larger shape, as a solo session grows to orchestrate today (`roles-solo-grows-switch-to-orchestrate`). It says so in one line.
+- **Orchestrator, the catch-all word** (owner, 15:18). Any session that spawns agents is an orchestrator. Coordinator, triage, batch runner and lane session are kinds of orchestrator. Analogy: a square is a rectangle.
+- **A coordinator in another repo** (owner, 15:18). A coordinator may work in another repo, by hand-off or by its own lane PR there. No hard block applies. Before it acts, it checks whether that repo has an active coordinator. If one is active, it coordinates with that coordinator. If none is active, it proceeds. It does not hold back for lack of a reply.
+- **Who starts which session** (owner, 15:18). The coordinator is the one session that starts other sessions. It starts triage and the batch runner together, as a trio, before any lane session. This refines the triage-first ruling below.
+- **Rotation of standing sessions** (owner, 15:23). Triage and the batch runner each report a tally of their own use, in turns or context, to the coordinator. When a tally nears its limit, the coordinator has that session write its handoff, archives it, and starts a fresh one from the handoff. The coordinator writes its own handoffs and compacts as today.
+- **No coordinator succession** (owner, 15:24). Handing children to a new coordinator failed in the owner's runs, in two ways.
+  - A child refused the new coordinator as not its parent. That was a safety reflex.
+  - A child missed a message while busy, after the old coordinator archived itself.
+  So a coordinator never hands its children to a successor. It writes its own handoffs and compacts in place.
+- **Coordinator.** One coordinator runs each repo (owner, 14:59): "one coordinator per repo is exactly/indeed what i meant ... coordinators even talk to one another on my local setup if they need to share something like an iphone simulator on the pc because its under load ... coordinators can touch multiple repos if need be, but yes it's laregly to manage its own repo's lanes."
+  - Coordinators may talk to one another. The reason is a shared scarce machine, such as an iPhone simulator under load.
+  - A coordinator may touch several repos. Its main job is its own repo's lanes.
+  - claude-settings is the special case. It touches every repo a little.
+- **Triage.** Triage is a standing session (owner, 15:03).
+  - Owner, 15:03: "triage should always be a standing session that if anything is the first thing a coordinator spawns before it spawns any other orchestrator sessions".
+  - Triage may run agents (owner, about 14:55).
+  - Triage is the only writer of the roadmap and the waiting page (owner, 2026-10-28, time not given).
+- **Lane session.** A lane session runs its own lane as an orchestrator. It spawns its own builder and reviewer agents under `agent-model-cap` (the model per role). It reports up to the coordinator. Owner, about 14:52, in short: sessions that spawn under a coordinator are their own orchestrators, reporting up to it.
+- **Overlapping files.** No coded guard and no file-ownership record covers lanes that touch the same file. A good brief is enough. Orchestrators resolve overlapping edits. The owner wants better file splitting (owner, 15:01). A false "done" is already covered. The shared merge tool, `merge/merge.py`, reads the head and CI from GitHub.
+- **Batch runner.** A third standing role (owner, 15:11): "B for sure actually". The batch runner owns:
+  - the integration batch,
+  - the CI waits,
+  - the merge tool runs,
+  - archiving finished lanes.
+  The coordinator holds only lane state and talks with the owner.
+- **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
+  - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
+  - "... and want it so that u push back on me somehow being like by the way, im coordinator ..."
+  - "... you should really be messaging triage for this part to save context, etc, it's a learning experience for me."
+  - The line names the session's own tier, the right tier, and why, such as saving context.
+  - The session then still handles the message, or routes it.
+
+## Why
+
+- Coordinators share a scarce machine by talking to each other (14:59).
+- The batch runner leaves the coordinator with lane state only. The coordinator then talks with the owner (15:11).
+- A wrong-tier line saves context in the tier that should do the work. It also teaches the owner the setup (15:12).
+- No coded overlap guard. A false "done" fails at merge, because the merge tool reads GitHub's head and CI (15:01).
+
+## Open
+
+Open: lane sessions on Sonnet or Opus (waiting item 50). Per-tier context limits (waiting item 53). What the tally measures, and its limit.
+
+Kind: process
+Home: docs/decisions/session-tiers.md
