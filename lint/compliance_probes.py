@@ -530,15 +530,15 @@ def probe_words(root):
         raise CannotRun("%s has no rows under '%s'" % (check_glossary.GLOSSARY, check_glossary.SECTION))
     found = []
 
-    def add(rel, line, problems):
-        for problem in problems:
-            word = WORD_HIT.search(problem)
-            item = (word.group(1) if word else problem, rel, line)
-            if item not in found:
-                found.append(item)
+    def add(rel, line, problem, detail):
+        word = WORD_HIT.search(problem)
+        item = (word.group(1) if word else "?", rel, line, detail)
+        if item not in found:
+            found.append(item)
 
     for rel in tracked(root):
-        add(rel, "-", check_glossary.path_problems(rel, table))
+        for problem in check_glossary.path_problems(rel, table):  # "<path> uses '<word>'; ..."
+            add(rel, "-", problem, problem[len(rel):].strip())
         if rel.startswith(check_glossary.SKIP_CODE):
             continue
         body = read(root, rel)
@@ -549,9 +549,10 @@ def probe_words(root):
         except SyntaxError as err:
             raise CannotRun("%s does not parse (%s)" % (rel, err.msg))
         for problem in problems:  # "<rel>:<line>: <where> uses '<word>'; ..."
-            add(rel, problem[len(rel) + 1:].partition(":")[0], [problem])
+            line, _, detail = problem[len(rel) + 1:].partition(": ")
+            add(rel, line, problem, detail)
     sha = glossary_commit(check_glossary.ROOT)
-    lines = ["  %s: %s:%s uses a retired word; see GLOSSARY.md" % item for item in found]
+    lines = ["  %s: %s:%s %s" % item for item in found]
     lines.append("glossary read at %s of claude-settings" % (sha or "an unknown commit"))
     if found:
         return finish("words", lines, "out", 1)
