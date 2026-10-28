@@ -1,0 +1,10 @@
+# c201 lane L3: session-start tiers (stopped at design)
+
+- c201 L3, Oct 28 18:40 CDT. Built nothing. The brief says: if a hook cannot reach the session list, stop at the design.
+- Finding 1: a hook cannot reach the session list. `get_session` and `list_sessions` are MCP tools, which only the model can call. The one hook-side route is calling the sessions API with the container's ingress token. That is the workaround the brief bars, so it was not tried.
+- Finding 2: the parent id and tier are in the session record only, in `parent_session_id` and the `cs-build:<tier>` tag. A lane read both with `get_session` (no id) on Oct 28.
+- Finding 3: `CLAUDE_CODE_CHILD_SESSION=1` is set in this lane's Bash tool commands. It is absent from the claude process's own environment, so it is added per tool call. Whether hooks get it: unknown, not tested.
+- Finding 4: `list_sessions mine:true` rows carry `tags` and `parent_session_id`. The `tags` filter errors for in-session callers, so a coordinator check lists rows and filters them itself.
+- Design A (no network, fits the cost rule). session_start.sh prints one fixed line, chosen by the env flag: child, "call get_session with no id; your parent is parent_session_id, your tier is the cs-build tag"; top, "pick solo, one lane or coordinator from the request; before acting as coordinator, list_sessions mine:true and look for a live cs-build:coordinator row tagged for this repo; if one is found, coordinate with it; else proceed, no block". Cost: one env read in the running hook, no network, no new process, no timer. Test: run the hook with the flag set and unset. Needs first: proof that hooks get the flag.
+- Design B: the same lines as rule text in CLAUDE.md (lane L1's fence), with no hook.
+- Deferred: why. Is Design A, where the hook tells the model to call the tools, in scope for L3, or a workaround? The coordinator decides. Also open: the coordinator tag needs a repo tag, such as `cs-repo:<owner>/<repo>`. Coordinators do not set one today.
