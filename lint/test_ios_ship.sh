@@ -1045,12 +1045,12 @@ need "notice names /.config/ios-ship/account.json: $(tail -1 "$out")" not grep -
 need "notice lacks ASC_KEY_PATH" grep -qF ASC_KEY_PATH "$out"
 end_case "tf: HOME unset, no key in env or config: refused, and the notice does not name /.config/ios-ship/account.json"
 
-# No CONFIG outside a git repo: there is no toplevel, so the notice must not claim one or name /tools/ios-ship.json.
+# No CONFIG outside a git repo: there is no toplevel, so the notice must not say it has one or name /tools/ios-ship.json.
 # No file is made at that root path: the test would have to write to / on the owner's Mac.
 for job in testflight install; do
   run_in "$work/nowhere" "$job" "$work/n6"
   need "$job: rc=$rc, want 2" test "$rc" -eq 2
-  need "$job: the notice claims a git toplevel: $(cat "$out")" not grep -qF toplevel "$out"
+  need "$job: the notice says it has a git toplevel: $(cat "$out")" not grep -qF toplevel "$out"
   need "$job: the notice names /tools/ios-ship.json" not grep -qF '/tools/ios-ship.json' "$out"
   end_case "$job: no CONFIG outside a git repo: the notice names no git toplevel and no /tools/ios-ship.json"
 done

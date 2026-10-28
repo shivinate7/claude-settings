@@ -574,7 +574,7 @@ def order_problems(listed, ppid_of=None):
 
 
 def job_problems(shell, template, pidfiles=()):
-    """Stall template in shell and check the claim: the STALL line lists the job's shell and every
+    """Stall template in shell and check its statement: the STALL line lists the job's shell and every
     process under it, parent first, and stopping them all in that order ends the job with nothing
     left. template may hold @MARK@ (a token that only this job carries in its ps lines) and @NEVER@
     (a file path that only a command after the stall point creates, so it must stay absent).

@@ -783,7 +783,7 @@ def case_handoffs_dir_keeps_other_sessions():
 
 # --------------------------------------------------------------------------- premises
 # Spec to build: a handoff holds a `## Working premises` section, one line per premise:
-#   - P<n> [<kind>] <claim> Source: <where>. Checked <date or never>.
+#   - P<n> [<kind>] <statement> Source: <where>. Checked <date or never>.
 # The kinds are ruling, measured, read, notes and assumed. After a compaction the reorient
 # message lists every premise id except a `ruling`. After /clear or a fork it lists every id.
 
@@ -837,9 +837,9 @@ def case_prompt_lists_working_premises():
     check("prompt: a numbered step 'Check premises' exists", len(heads) == 1,
           "found %d" % len(heads))
     body = heads[0].lower() if heads else ""
-    check("prompt: Check premises says a premise is a claim, weak or stale ones are "
+    check("prompt: Check premises says a premise is a statement, weak or stale ones are "
           "checked first, then the line is rewritten",
-          "claim" in body and ("weak" in body or "stale" in body) and "rewrite" in body,
+          "statement" in body and ("weak" in body or "stale" in body) and "rewrite" in body,
           "body: %r" % body[:200])
 
 
@@ -1076,7 +1076,7 @@ def premises_listed(c, kinds_of_lines, patched_kinds=None):
     no [kind] at all), run the compaction reorient, and return (ids it lists, the process).
     patched_kinds replaces PREMISE_KINDS in the child; None leaves the module's own."""
     text = "## Working premises\n" + "".join(
-        "- P%d%s A claim. Source: none. Checked never.\n"
+        "- P%d%s A statement. Source: none. Checked never.\n"
         % (i, "" if k is None else " [%s]" % k) for i, k in enumerate(kinds_of_lines, 1))
     put(c.handoff_path(), text)
     args = [sys.executable, "-c", PATCHED_REORIENT, MODULE]

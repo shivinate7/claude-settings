@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -2348,20 +2348,14 @@ class RerunAfterRevert(Env):
         self.assertEqual(self.worktrees(), 1)
 
 class Stopped(Env):
-    def test_stopped_run_resumes_then_an_expired_lock_is_broken(self):
+    def test_stopped_run_resumes_after_its_dead_holder_lock_is_taken_over(self):  # c189: its live lock used to refuse with "Run: merge --unlock"
         child = subprocess.run([sys.executable, __file__, "--child", self.co], capture_output=True, text=True)
         self.assertEqual(child.returncode, 9, child.stderr)
         self.assertEqual(self.claims("feat"), 1)
         self.assertTrue(self.lock_ref())  # the run died holding the lock
-        claim_head = self.head()
-        rc, out = self.run_merge("7", "--confirm")  # lock still live
-        self.assertEqual(rc, 1)
-        self.assertIn("held", out)
-        self.assertEqual(self.head(), claim_head)
-        expires = merge.expiry_of(sh(self.bare, "git", "log", "-1", "--format=%B", "refs/heads/merge-lock/main"))  # the expiry the child wrote
-        self.now = expires + 1  # past that lock, whatever its ttl
-        rc, out = self.run_merge("7", "--confirm")
+        rc, out = self.run_merge("7", "--confirm")  # the lock is unexpired, its pid is dead, this host
         self.assertEqual(rc, 0, out)
+        self.assertIn("took over", out)
         self.assertIn("resumed", out)
         self.assertEqual(self.claims(), 1)  # no second claim
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
@@ -2630,6 +2624,18 @@ class GhLockTest(unittest.TestCase):
         self.lock.unlock("main")
         self.assertIsNone(self.lock.read("main"))
         self.lock.unlock("main")  # none left: fine
+
+    @unittest.skipIf(os.name == "nt", "the fake gh loses the lock message's newline under cmd.exe (see the test above)")
+    def test_a_live_lock_whose_holder_is_dead_is_taken_over_and_a_live_holder_is_not(self):  # c189 part 3
+        self.lock.holder = {"pr": 7, "branch": "b"}
+        first = self.lock.acquire("main", 600)
+        with unittest.mock.patch.object(merge, "pid_alive", return_value=True), self.assertRaises(merge.Held):
+            self.lock.acquire("main", 600)
+        out = io.StringIO()
+        with unittest.mock.patch.object(merge, "pid_alive", return_value=False), contextlib.redirect_stdout(out):
+            second = self.lock.acquire("main", 600)
+        self.assertNotEqual(first, second)
+        self.assertEqual(len([l for l in out.getvalue().splitlines() if "took over" in l]), 1, out.getvalue())
 
 
 # The fake GitHub REST API behind `gh api`. One home for the routes the merge tool reads and writes (c53): the shim FAKE_GH_PR
@@ -3861,11 +3867,11 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
 
-    def test_protection_names_come_from_the_api_and_the_deadline_stops_the_wait(self):
+    def test_protection_names_come_from_the_api_and_an_absent_one_stops_the_wait(self):  # c189: re-pointed from the deadline; the absent name ends the wait at once
         self.set(contexts=["checks", "needed"], checks_seq=[[("checks", "pass", "")]])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
-        self.assertIn("deadline of 5 minutes passed. Still pending: needed", out)
+        self.assertIn("no run reports the required check needed", out)
         self.assertTrue(self.reverted())
 
     def test_no_protection_and_no_list_stops_with_the_remedy(self):
@@ -5325,9 +5331,11 @@ class LockHolder(Env):
     def old_message(self, expires):
         return f"merge lock\nexpires: {int(expires)}\nowner: abc123"
 
-    def new_message(self, host, pid, expires=None, platform=None):
+    def new_message(self, host, pid, expires=None, platform=None, boot=None):
+        boot = merge.boot_stamp() if boot is None else boot  # "" writes no boot line, as a lock from before c189 has none
         return (f"merge lock\nexpires: {int(expires or self.now + 600)}\nowner: abc123\n"
-                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000\nplatform: {platform or sys.platform}")
+                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000\nplatform: {platform or sys.platform}"
+                + (f"\nboot: {boot}" if boot else ""))
 
     def held(self, message):
         self.push_lock(message)
@@ -5356,11 +5364,38 @@ class LockHolder(Env):
         self.assertNotIn("session:", msg)
 
     @windows_slice
-    def test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone(self):
-        out = self.held(self.new_message(socket.gethostname(), dead_pid()))
-        for want in ("PR #445", "branch b", "dead", "merge --unlock"):
-            self.assertIn(want, out)
-        self.assertNotIn("Cannot tell", out)
+    def test_a_lock_on_this_host_whose_pid_is_gone_is_taken_over_with_one_line(self):  # c189: it was refused with "Run: merge --unlock" (#746)
+        pid = dead_pid()
+        self.push_lock(self.new_message(socket.gethostname(), pid))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        said = [l for l in out.splitlines() if "took over" in l]
+        self.assertEqual(len(said), 1, out)
+        for want in ("PR #445", "branch b", f"pid {pid}", "dead"):
+            self.assertIn(want, said[0])
+        self.assertFalse(self.lock_ref())
+        self.assertNotIn("merge --unlock", out)
+
+    def test_a_pid_missing_on_a_machine_that_booted_apart_stays_refused(self):  # cloud VMs share a hostname: a pid absent here proves nothing about the holder's VM
+        out = self.held(self.new_message(socket.gethostname(), dead_pid(), boot="some-other-boot"))
+        self.assertNotIn("took over", out)
+        self.assertIn("Cannot tell if the holder is alive", out)
+
+    def test_a_lock_with_no_boot_line_stays_refused(self):
+        out = self.held(self.new_message(socket.gethostname(), dead_pid(), boot=""))
+        self.assertNotIn("took over", out)
+        self.assertIn("Cannot tell if the holder is alive", out)
+
+    def test_the_lock_records_the_boot(self):
+        self.assertIn(f"boot: {merge.boot_stamp()}", self.peek()[0].splitlines())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the pid namespace link is Linux's")
+    def test_the_linux_boot_stamp_names_the_pid_namespace(self):  # the same boot id runs under any container's own pid numbers
+        self.assertIn(os.readlink("/proc/self/ns/pid"), merge.boot_stamp())
+
+    def test_a_dead_holder_on_another_host_stays_refused(self):
+        out = self.held(self.new_message("some-other-host-xyz", dead_pid()))
+        self.assertNotIn("took over", out)
 
     def test_held_says_cannot_tell_for_another_host(self):
         out = self.held(self.new_message("some-other-host-xyz", os.getpid()))
@@ -6045,7 +6080,7 @@ class SliceSelector(unittest.TestCase):
             "Flow.test_full_merge_claims_pushes_merges_syncs_cleans",
             "GhHalf.test_an_empty_required_list_is_refused",
             "LockHolder.test_a_lock_with_no_platform_line_reads_cannot_tell_never_dead",
-            "LockHolder.test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone",
+            "LockHolder.test_a_lock_on_this_host_whose_pid_is_gone_is_taken_over_with_one_line",
             "LockHolder.test_the_lock_records_the_holder_and_a_second_run_sees_it_alive",
             "LockHolder.test_the_same_host_name_on_another_platform_reads_cannot_tell_never_dead",
             "LockHolder.test_windows_liveness_never_calls_os_kill",
@@ -6200,6 +6235,49 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assertTrue(lines and lines[0][0] < READ_SECONDS, f"no line before the first read; lines {lines}")
         self.assertIn("checks", lines[0][1])
+
+class AbsentRequiredCheck(unittest.TestCase):
+    """c189 part 2: a required check no run reports ends the wait at once, once every reported check has ended (#746: the pinned checks* names)."""
+    wait = WaitProgress.wait
+
+    def host(self, checks_at):
+        h = ClockedHost(checks_at)
+        h.required = ["checks", "needed"]
+        return h
+
+    def test_an_absent_required_check_stops_the_wait_before_the_deadline_naming_it(self):
+        host = self.host(lambda t: {"checks": [("pass", "")]})
+        ok, why, _, _, end = self.wait(host, 55)
+        self.assertFalse(ok)
+        self.assertIn("needed", why)
+        self.assertLess(end, 300, f"waited {end:.0f} s")
+
+    def test_an_absent_required_check_does_not_stop_the_wait_while_another_check_runs(self):
+        host = self.host(lambda t: {"checks": [("pending" if t < 400 else "pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_required_status_posted_45_seconds_after_the_last_job_ended_is_waited_for(self):  # an external status can lag the jobs by a minute
+        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 45 else {})})
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_pending_workflow_run_keeps_the_wait_going(self):
+        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
+        host.runs = lambda sha: [{"name": "ci", "status": "in_progress" if host.clock[0] < 400 else "completed", "conclusion": None if host.clock[0] < 400 else "success"}]
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_required_check_created_late_inside_the_settle_pause_is_waited_for(self):
+        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 20 else {})})
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_head_with_no_check_reported_yet_is_waited_on_to_the_deadline(self):  # GitHub lags a push
+        host = self.host(lambda t: {})
+        ok, why, _, _, end = self.wait(host, 5)
+        self.assertFalse(ok)
+        self.assertIn("deadline of 5 minutes", why)
 
 class SilentWait(Env):
     """Silence: merge printed only the launch line for minutes. A long step printed
@@ -8573,8 +8651,104 @@ class RedMainBrake(Env):
         self.assertIn("run 901", line[0])
         self.assertIn("--confirm refuses it", line[0])
 
+class PinnedMismatchStopsMain(Env):
+    """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
+    def test_main_refuses_before_taking_the_lock(self):
+        fake = self.host
+        def refuse():
+            raise merge.Stop("merge.requiredChecks pins gates, but the branch protection of main requires checks.")
+        fake.refuse_pinned_mismatch = refuse
+        with unittest.mock.patch.object(merge, "Host", lambda: fake):
+            out_buf, err = io.StringIO(), io.StringIO()
+            cwd = os.getcwd()
+            os.chdir(self.co)
+            try:
+                with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err):
+                    rc = merge.main(["7", "--confirm"], lock=self.lock)
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(rc, 1, out_buf.getvalue() + err.getvalue())
+        self.assertIn("pins gates", err.getvalue())
+        self.assertFalse(self.lock_ref())
+
+class ProtectionHost(merge.Host):
+    """Host whose branch protection read answers `contexts` (a list) or fails (None); no gh."""
+    def __init__(self, required, contexts):
+        super().__init__(required=required, base="main", pause=lambda s: None)
+        self.contexts = contexts
+
+    def gh(self, args, cwd=None):
+        return (0, json.dumps(self.contexts)) if self.contexts is not None else (1, "HTTP 404: Not Found")
+
+class MergeChecksFromProtection(unittest.TestCase):
+    """c189 part 1: main's own stamp.json reads the required checks from branch protection, and a pinned list that disagrees with it is refused."""
+    def test_main_stamp_reads_required_checks_from_protection(self):
+        with open(os.path.join(HERE, "..", ".github", "stamp.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["merge"]["requiredChecks"], "protection")
+
+    def test_a_pinned_list_that_disagrees_with_protection_is_refused_naming_both_sets(self):  # #746: pinned gates*, protection held checks*
+        host = ProtectionHost(["gates", "gates-guard"], ["checks", "checks-guard"])
+        with self.assertRaises(merge.Stop) as cm:
+            host.refuse_pinned_mismatch()
+        for name in ("gates", "gates-guard", "checks", "checks-guard"):
+            self.assertIn(name, str(cm.exception))
+
+    def test_a_pinned_list_equal_to_protection_passes_in_any_order(self):
+        ProtectionHost(["b", "a"], ["a", "b"]).refuse_pinned_mismatch()
+
+    def test_an_empty_protection_leaves_the_pinned_list_alone(self):
+        ProtectionHost(["a"], []).refuse_pinned_mismatch()
+
+    def test_an_unreadable_protection_says_so_and_keeps_the_pinned_list(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ProtectionHost(["a"], None).refuse_pinned_mismatch()
+        self.assertIn("pinned", out.getvalue())
+
+    def test_protection_mode_reads_nothing_extra(self):
+        host = ProtectionHost("protection", ["x"])
+        host.gh = lambda *a, **k: self.fail("a gh read was made")
+        host.refuse_pinned_mismatch()
+
+@unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
+class SignalReleasesLock(Env):
+    """c189 part 3: a run stopped by SIGTERM or SIGINT releases the merge lock (#746 left one live for 2.7 h)."""
+    def stop_with(self, sig):
+        child = subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for line in child.stdout:  # merge's own lines come first
+                if line.strip() == "READY":
+                    break
+            else:
+                self.fail("the run never reached the wait: " + child.stderr.read())
+            self.assertTrue(self.lock_ref())
+            child.send_signal(sig)
+            child.wait(timeout=60)
+        finally:
+            if child.poll() is None:
+                child.kill(); child.wait()
+        err = child.stderr.read()
+        child.stdout.close(); child.stderr.close()
+        self.assertNotEqual(child.returncode, 0)
+        self.assertFalse(self.lock_ref(), err)
+
+    def test_sigterm_releases_the_lock(self):
+        self.stop_with(signal.SIGTERM)
+
+    def test_sigint_releases_the_lock(self):  # a control: Python's own KeyboardInterrupt already unwinds the finally; only SIGTERM needs the handler
+        self.stop_with(signal.SIGINT)
+
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
+        # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
+        class Sleep(FakeHost):
+            def wait_checks(self, n, sha, d, prior=None):
+                print("READY", flush=True)
+                time.sleep(60)
+                return True, ""
+        os.chdir(sys.argv[2])
+        sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
         class Die(FakeHost):

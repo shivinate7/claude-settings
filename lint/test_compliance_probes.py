@@ -7,6 +7,7 @@ Each group goes red on the gap it guards, and stays quiet on a repo that is fine
 folder, a vendored screenshot script, a generated token file, a cited cap and an owner-named cap.
 PROBES_UNDER_TEST names the script under test (default: the one beside this file).
 """
+import json
 import os
 import re
 import shutil
@@ -108,6 +109,29 @@ class Layout(unittest.TestCase):
         os.makedirs(os.path.join(repo.root, *rules.split("/")))
         code, out = repo.run("layout")
         self.assertIn("missing core kind rules: " + rules, out)
+
+    def test_this_repo_is_in_shape(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        done = subprocess.run([sys.executable, PROBES, "layout", root], capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, "layout: in shape"))
+
+    def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            text = handle.read()
+        kinds = json.loads(text)["kinds"]
+        files = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
+        for name, kind in kinds.items():
+            where = kind["path"].strip("/")
+            self.assertNotIn("*", where, name)
+            self.assertTrue(any(f.startswith(where + "/") for f in files), "%s: no tracked file under %s" % (name, where))
+        repo = Repo(self).core().write(EXTRAS, text)
+        for kind in kinds.values():
+            repo.write(kind["path"].strip("/") + "/a.x")
+        self.assertEqual(repo.run("layout")[1].strip(), "layout: in shape")
+        code, out = repo.write("undeclared/a.x").run("layout")
+        self.assertEqual(code, 1, out)
+        self.assertIn("folder undeclared/: neither", out)
 
     def test_not_a_git_repo_is_unknown(self):
         root = tempfile.mkdtemp(prefix="probes-")

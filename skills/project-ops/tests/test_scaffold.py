@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cases for skills/project-ops/scripts/scaffold.py. Standard library only.
+"""Cases for skills/project-ops/scripts/scaffold.py and protect.py. Standard library only.
 
     python3 skills/project-ops/tests/test_scaffold.py
 
@@ -171,6 +171,77 @@ class Scaffold(unittest.TestCase):
         self.assertEqual(run("--dest", self.dest, "--repo", "a/b", "--branch", "x y")[0], 2)
         self.assertEqual(run("--dest", os.path.join(self.dest, "none"), "--repo", "a/b")[0], 2)
         self.assertEqual(tree(self.dest), {})
+
+
+class Protect(unittest.TestCase):
+    """c189 part 4: adopting a repo sets branch protection with its required checks, so no repo starts with none. A fake `gh` records each call."""
+
+    def run_protect(self, *argv, existing=None, other_rules=False):
+        import protect
+        calls = []
+
+        def gh(args, body=None):
+            calls.append((list(args), body))
+            if "GET" in args:
+                if args[-1].endswith("/required_status_checks"):
+                    if existing is not None:
+                        return 0, '{"contexts": %s}' % __import__("json").dumps(existing)
+                    return 1, "HTTP 404: Required status checks not enabled" if other_rules else "HTTP 404: Branch not protected"
+                return (0, '{"required_pull_request_reviews": {"required_approving_review_count": 1},"enforce_admins": {"enabled": true}}') if other_rules else (1, "HTTP 404: Branch not protected")
+            return 0, "{}"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = protect.main(list(argv), gh=gh)
+        return code, out.getvalue(), calls
+
+    def test_preview_changes_nothing_and_names_the_call(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", "lint")
+        self.assertEqual(code, 0, out)
+        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
+        self.assertIn("checks", out)
+        self.assertIn("--confirm", out)
+
+    def test_an_unprotected_branch_gets_protection_with_the_checks(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", "lint", "--confirm")
+        self.assertEqual(code, 0, out)
+        puts = [c for c in calls if "PUT" in c[0]]
+        self.assertEqual(len(puts), 1, calls)
+        self.assertIn("repos/acme/widgets/branches/main/protection", puts[0][0])
+        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["checks", "lint"])
+
+    def test_a_protected_branch_gets_its_checks_set_in_place(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm", existing=["old"])
+        self.assertEqual(code, 0, out)
+        patches = [c for c in calls if "PATCH" in c[0]]
+        self.assertEqual(len(patches), 1, calls)
+        self.assertEqual(patches[0][1]["contexts"], ["checks"])
+        self.assertFalse([c for c in calls if "PUT" in c[0]], calls)
+
+    def test_checks_already_set_change_nothing(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "b", "--check", "a", "--confirm", existing=["a", "b"])
+        self.assertEqual(code, 0, out)
+        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
+
+    def test_no_checks_is_refused(self):
+        for checks in (["--check", ""], ["--check", "  "], []):
+            code, out, calls = self.run_protect("--repo", "acme/widgets", *checks, "--confirm")
+            self.assertEqual(code, 2, out)
+            self.assertEqual(calls, [])
+
+    def test_a_matrix_name_with_a_comma_stays_one_check(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "test (ubuntu, 3.11)", "--confirm")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([c for c in calls if "PUT" in c[0]][0][1]["required_status_checks"]["contexts"], ["test (ubuntu, 3.11)"])
+
+    def test_the_patch_leaves_strict_alone(self):
+        _, _, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm", existing=["old"])
+        self.assertNotIn("strict", [c for c in calls if "PATCH" in c[0]][0][1])
+
+    def test_a_branch_protected_without_a_check_rule_is_refused_not_replaced(self):  # a PUT would drop its review rule and restrictions
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm", other_rules=True)
+        self.assertEqual(code, 1, out)
+        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
+        self.assertIn("required_pull_request_reviews", out)
 
 
 if __name__ == "__main__":

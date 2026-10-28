@@ -2106,3 +2106,14 @@ test("a long unbroken receipt label wraps clear of Change at 320px", async (t) =
   const m = await card(page, it).locator(".receipt .line").evaluate((l) => ({ b: l.querySelector("b").getBoundingClientRect().right, c: l.querySelector(".changebtn").getBoundingClientRect().left }));
   assert.ok(m.b <= m.c + 1, "the label runs under Change: " + JSON.stringify(m));
 });
+
+test("a decision card with no differs mark shows no stray null or undefined text", async (t) => {
+  const page = await open(t); if (!page) return;
+  const stray = await page.evaluate((id) => {
+    const w = document.createTreeWalker(document.getElementById("item-" + id), NodeFilter.SHOW_TEXT);
+    const bad = [];
+    for (let n = w.nextNode(); n; n = w.nextNode()) { const s = n.textContent.trim(); if (s === "null" || s === "undefined") bad.push(s); }
+    return bad;
+  }, DECISION.id);
+  assert.deepEqual(stray, [], "stray text in the decision card");
+});

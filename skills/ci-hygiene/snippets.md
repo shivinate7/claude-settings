@@ -69,8 +69,8 @@ a path filter on the whole workflow, blocks the merge. Prefer `if:` on the job.
 Require a matrix through one fan-in job with `if: always()`. Its check name stays fixed when the
 matrix changes.
 
-Rename a required check in both places: `merge.requiredChecks` in `.github/stamp.json`, and the
-protection rule. A PUT needs an admin login. Push rights are not enough. A PUT replaces the whole
+Rename a required check in the protection rule. `merge.requiredChecks` in `.github/stamp.json` says
+`"protection"` and needs no edit; a repo that pins a list there edits it too. A PUT needs an admin login. Push rights are not enough. A PUT replaces the whole
 rule, so send every field from the read above, with the new names:
 
 ```sh

@@ -76,7 +76,7 @@ TARGETS = {
 # suite's own FAIL lines: `hooks/test_guard.py`'s FAIL line already prints `case["name"]` verbatim,
 # and `hooks/test_config_watch.py`'s does the same with `entry["name"]`, so no second file needed
 # a change to carry this. Each name was MEASURED against this file's own mutants, not guessed: a
-# label's prose is a claim about which rule breaks, and the required name is the proof that some
+# label's prose is a statement about which rule breaks, and the required name is the proof that some
 # case actually reads that break, not a different one nearby.
 MUTATIONS = [
     # THE TWO ROOTS. `--work-tree` names whose FILES a call discards, and `--git-dir` names whose

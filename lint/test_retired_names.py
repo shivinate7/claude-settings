@@ -46,6 +46,9 @@ RETIRED = {
     "verification-recovery-not-gated-on-own-state": "verification-recovery-independent-of-state",
     "roles-third-try-steps-up": "roles-third-round-steps-up",
     "merge_gate": "merge_check",
+    "outcomes-tests-are-claims": "outcomes-tests-are-statements",
+    "ux-claims-are-true": "ux-statements-are-true",
+    "measured-claims-no-home": "measured-statements-no-home",
 }
 
 

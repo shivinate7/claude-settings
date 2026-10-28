@@ -6,7 +6,7 @@ How does a session write down a fact its work leans on, so that a weak source is
 
 ## Ruling
 
-A premise is a claim, not a fact. It is one line: `- P<n> [<kind>] <claim>. Source: <where>. Checked <date or never>.` The kind says how far the source is trusted. The kinds, strongest first:
+A premise is a statement, not a fact. It is one line: `- P<n> [<kind>] <statement>. Source: <where>. Checked <date or never>.` The kind says how far the source is trusted. The kinds, strongest first:
 
 | Kind | Means | Strength |
 |---|---|---|
