@@ -23,15 +23,12 @@ After a compaction: re-read this note, the roadmap, then act.
 |---|---|---|
 | session_013NEJL1P54NSHPy9rhJ1ogU | Triage (9) | roadmap |
 | session_013NEJL2u86hPSv13Jrg8KjL | d4 design: waits on shiv (items 13-21) | roadmap designs/ |
-| session_013NEJL2gbHfRAmd2xZJb7ua | c158 stamp hang; merging main for batch 3 | c158-stamp-hang (#735) |
 | session_013NEJL3ViieU3SfFGLVAtHg | o13 lane A rename; own batch after batch 3 | o13-gate-try-rename |
-| session_013NEJKzCxa1AvvBqcazZNgY | c150 small merges skip full re-run (try 3) | c150-small-merge-rerun |
 | session_013NEJKzp9tnKWNvu73kHNzN | c156 one guard for writes outside the checkout | c156-outside-write-guard |
 | session_013NEJL3o8Tgq6rRbR1LbHK4 | c160 main-ref stale origin on git 2.43 | c160-main-ref-git243 |
 | session_013NEJL4SMaoDMq9MrZy2bay | c148 a port keeps behaviour | c148-port-keeps-behaviour |
 | session_013NEJL1Mdjts8EKVNhDB2u3 | c140 shared resource names its owner (part 1) | c140-shared-resource-owner |
 | session_013NEJKzm47fniebG3qSZwaB | o2 layout-extras waiting-page key | o2-layout-waiting-page |
-| session_013NEJL3wZULApnLiRyPqycj | o4 scorecard wrong-group debt | o4-scorecard-group |
 
 ## Held
 - c161 after c156 (both hooks/guard.py). c152 (branch deletes) needs a watched run. Waiting-page steps c122/c135/c136/c139/c145/c147: order asked of triage.
@@ -41,6 +38,6 @@ After a compaction: re-read this note, the roadmap, then act.
 - Waiting page items: d4 picks, c146 plan picks, c151 step 2, child-repo plan check.
 
 ## Next 3 actions
-1. #735 head with main: batch 3, lint, silent-undo, PR, ready, subscribe, 55-min check-in.
+1. #745 green: merge, archive c160 + c145, start c147; then #743 batch 5.
 2. Lanes report green heads: batch 4 (o13 alone first, then the rest).
 3. Start c161 once c156 merges; start the first waiting-page step in triage's order.
