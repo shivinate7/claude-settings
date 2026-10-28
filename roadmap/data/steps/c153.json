@@ -1,0 +1,9 @@
+{
+  "title": "Each GitHub app installed on claude-settings is kept only if it needs the repo",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.76,
+  "why": "Your GitHub audit, Oct 27 23:01 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh211VfMPE9qfHmdrFTC9vz7X): Cloudflare Workers and Pages, Render and Renovate are installed beside Claude, and the repo has no secrets, deploy keys or webhooks.",
+  "note": "Unknown: whether any of the three reads claude-settings (Renovate may open pin-bump PRs; Cloudflare and Render most likely serve other repos). The app's repo-access page needs your sign-in confirmation, so a session cannot read it. Next: you open each app's repository access and remove claude-settings where it is not used; a session then checks the repo's PR and check history for each app's last activity. Waits on: an owner test. Port: no. Placed ahead of c47 (triage, Oct 28): low risk, small cleanup.",
+  "updatedAt": "2026-10-28T04:05:00Z"
+}

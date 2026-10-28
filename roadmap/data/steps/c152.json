@@ -1,0 +1,9 @@
+{
+  "title": "Stale claude-settings branches are archived or deleted only after an unmerged-commit check",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.75,
+  "why": "Your GitHub audit, Oct 27 23:01 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh211VfMPE9qfHmdrFTC9vz7X): 70 branches, about 15 older than 14 days, including 4 claude/held-* branches, merge-ci-savings, and batch-oct27y and batch-oct27z whose PRs are closed.",
+  "note": "Debt: some may hold the only copy of work. Next cloud lane: list each branch older than 14 days with its commits not on main; a branch with none is deleted; a branch with some is pushed to archive/<branch> (rule shared-trees-archive-then-delete) and then deleted, and the list goes in the batch report. c44 already removes a lane's branch at merge; this is the backlog from before it, plus closed-PR branches c44 does not reach. Needs no answer. Port: no; claude-settings only. Due after: the usage freeze lifts (coordinator, Oct 27 13:31 CDT). Placed ahead of c47 (triage, Oct 28): after c44, its upkeep twin.",
+  "updatedAt": "2026-10-28T04:05:00Z"
+}
