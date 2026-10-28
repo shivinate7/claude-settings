@@ -385,11 +385,19 @@ def usage_line(inp, cc=0, cr=0):
                                              "output_tokens": 5}}})
 
 
-def nudge(c, size, active=False, lines=None, seed=None):
-    """Run --nudge once. `size` is split across the three input counters."""
+NUDGE_OVERHEAD = 1000  # the first-turn entry the helper prepends: messages = last - this
+
+
+def nudge(c, size, active=False, lines=None, seed=None, overhead=NUDGE_OVERHEAD):
+    """Run --nudge once. A first-turn entry of `overhead` tokens comes first, so the hook
+    reads messages = `size` (default: last entry = size + overhead, split across the three
+    input counters). With explicit `lines`, they follow the overhead entry. overhead=None
+    prepends nothing."""
     tp = os.path.join(c.root, "t.jsonl")
     if lines is None:
-        lines = [usage_line(size - 60000 - 30000, 30000, 60000)]
+        lines = [usage_line(size + (overhead or 0) - 60000 - 30000, 30000, 60000)]
+    if overhead is not None:
+        lines = [usage_line(overhead)] + lines
     write_transcript(tp, lines)
     if seed is not None:
         put(c.nudge_path(), json.dumps({"bucket": seed}))
@@ -494,7 +502,8 @@ def case_nudge_stop_hook_active():
 def case_nudge_failures_are_silent():
     c = Case("nudgef")
     try:
-        p = nudge(c, 0, lines=[transcript_line("assistant", [{"type": "text", "text": "x"}])])
+        p = nudge(c, 0, overhead=None,
+                  lines=[transcript_line("assistant", [{"type": "text", "text": "x"}])])
         check("nudge: no usage is silent, exit 0",
               p.returncode == 0 and not p.stdout.strip(), "rc=%r out=%r" % (p.returncode, p.stdout))
         p = c.run(["--nudge"], {"session_id": c.session_id,
@@ -568,6 +577,54 @@ def case_nudge_limit_checkpoints():
         p = nudge(c, 160000)
         check("limit 200k: 160k blocks", is_block(c, p), "out=%r" % p.stdout)
         check("limit 200k: 160k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+    finally:
+        c.cleanup()
+
+
+def case_nudge_reads_messages_not_total():
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    # limit 200k, overhead 160k: room 40k, checkpoints(40000) = [-10000] (degenerate)
+    c = Case("nmsg1")
+    try:
+        set_limit(c, 200000)
+        big = usage_line(160000)
+        p = nudge(c, 0, overhead=None, lines=[big])
+        check("messages: a 160k first turn alone is silent at limit 200k (messages 0)",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        p = nudge(c, 0, overhead=None, lines=[big, usage_line(160000)])
+        check("messages: a second entry equal to the first (messages 0) is silent",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        p = nudge(c, 0, overhead=None, lines=[big, usage_line(175000)])
+        check("messages: 15k messages after a 160k overhead blocks (room is short)",
+              is_block(c, p), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
+    # limit 500k, overhead 85k: first checkpoint at messages 200k = total 285k
+    c = Case("nmsg2")
+    try:
+        first = usage_line(85000)
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(284999)])
+        check("messages: total 284,999 (messages 199,999) is silent at 85k overhead",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(285000)])
+        check("messages: total 285,000 (messages 200,000) blocks at 85k overhead",
+              is_block(c, p), "out=%r" % p.stdout)
+        # checkpoints(415000) = 200k, 350k, then top 365k messages = total 450k
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(449999)])
+        check("messages: total 449,999 stays at bucket 1 (last checkpoint is total 450k)",
+              stored_bucket(c) == 1, "got %r" % stored_bucket(c))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(450000)])
+        check("messages: total 450,000 blocks at the last checkpoint (bucket 2)",
+              is_block(c, p) and stored_bucket(c) == 2,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        try:
+            reason = json.loads(p.stdout).get("reason", "")
+        except Exception:
+            reason = ""
+        check("messages: the text names the total and the messages",
+              "Context is about 450k tokens, messages about 365k." in reason,
+              "reason: %r" % reason)
     finally:
         c.cleanup()
 
@@ -1062,6 +1119,7 @@ def main() -> int:
     case_nudge_stop_hook_active()
     case_nudge_failures_are_silent()
     case_nudge_limit_checkpoints()
+    case_nudge_reads_messages_not_total()
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
     case_handoff_path_not_frozen()
