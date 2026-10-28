@@ -1,4 +1,4 @@
 # o13 lane A: the gate/try rename (redo of PR #639)
 
-- Status (Oct 28 13:10 UTC, step o13): PR #746 head 345b300a (pushed, draft) includes main 26a539ff (batch 8). A fresh review of the batch 8 merge passed (reviewer sonnet). The local checks are green, except the pipx cases (no pipx in this container) and the load-brake probe case. All of them fail on main too.
-- Next: the orchestrator takes #746 to shiv for the protection switch to checks* (waiting-page item 33) and marks it ready. If another batch lands first, merge main again.
+- Status (Oct 28 14:20 UTC, step o13): PR #746 head 9b1e59a7 (pushed, draft) includes main abf9259f (batch 10). A fresh review of that merge passed (reviewer sonnet). The local checks are green, except "Code check" (no pipx here), which is red on main too.
+- Next: when the orchestrator says #774 (step c181, batch 11) has merged, merge main again (merge commit), rename any new gate or try uses, re-run the checks, push, mark #746 ready so CI runs, then message the orchestrator. The merge also waits for shiv's protection switch (waiting-page item 33).
