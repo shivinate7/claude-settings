@@ -737,7 +737,7 @@ class Host:
         names = self.required_names()
         base = self.base  # the base read under the lock: the last pr() before the wait
         end = self.now() + deadline_minutes * 60
-        settled = False
+        settled, absent_seen = False, None
         if not listed:
             say("merge: required: " + ", ".join(names))
         said, said_at = None, self.now()  # the text last printed, and when (the wait's start before any line)
@@ -767,6 +767,15 @@ class Host:
             red, pending = self.settle(red, pending, *self.run_state(sha))
             if red:
                 return False, "a check is red: " + "; ".join(red)
+            absent = sorted(k for k in names if not got.get(k))
+            if absent and got and pending == absent:  # every reported check and run has ended; only a required name nobody reports is left
+                if absent_seen != absent:  # ponytail: a job that waits on another is created after it ends. One settle pause covers that; a job created later still stops the run, which is rerun.
+                    absent_seen = absent
+                    self.pause(SETTLE_SECONDS)
+                    continue
+                return False, ("no run reports the required check " + ", ".join(absent) + f" on this head, and every check that did report has ended. "
+                               f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names.")
+            absent_seen = None
             if not pending and not settled:
                 # ponytail: a workflow GitHub has not created yet still reads as green. The runs read and this settle read close most of the window. Ceiling: a workflow that appears after SETTLE_SECONDS.
                 if self.now() - said_at + SETTLE_SECONDS > 120:  # the settle pause would break the 120 s rhythm

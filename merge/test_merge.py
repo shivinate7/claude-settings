@@ -3861,11 +3861,11 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
         self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
 
-    def test_protection_names_come_from_the_api_and_the_deadline_stops_the_wait(self):
+    def test_protection_names_come_from_the_api_and_an_absent_one_stops_the_wait(self):  # c189: re-pointed from the deadline; the absent name ends the wait at once
         self.set(contexts=["gates", "needed"], checks_seq=[[("gates", "pass", "")]])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
-        self.assertIn("deadline of 5 minutes passed. Still pending: needed", out)
+        self.assertIn("no run reports the required check needed", out)
         self.assertTrue(self.reverted())
 
     def test_no_protection_and_no_list_stops_with_the_remedy(self):
@@ -6200,6 +6200,38 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assertTrue(lines and lines[0][0] < READ_SECONDS, f"no line before the first read; lines {lines}")
         self.assertIn("gates", lines[0][1])
+
+class AbsentRequiredCheck(unittest.TestCase):
+    """c189 part 2: a required check no run reports ends the wait at once, once every reported check has ended (#746: the pinned gates* names)."""
+    wait = WaitProgress.wait
+
+    def host(self, checks_at):
+        h = ClockedHost(checks_at)
+        h.required = ["gates", "needed"]
+        return h
+
+    def test_an_absent_required_check_stops_the_wait_before_the_deadline_naming_it(self):
+        host = self.host(lambda t: {"gates": [("pass", "")]})
+        ok, why, _, _, end = self.wait(host, 55)
+        self.assertFalse(ok)
+        self.assertIn("needed", why)
+        self.assertLess(end, 300, f"waited {end:.0f} s")
+
+    def test_an_absent_required_check_does_not_stop_the_wait_while_another_check_runs(self):
+        host = self.host(lambda t: {"gates": [("pending" if t < 400 else "pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_required_check_created_late_inside_the_settle_pause_is_waited_for(self):
+        host = self.host(lambda t: {"gates": [("pass", "")], **({"needed": [("pass", "")]} if t >= 20 else {})})
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_head_with_no_check_reported_yet_is_waited_on_to_the_deadline(self):  # GitHub lags a push
+        host = self.host(lambda t: {})
+        ok, why, _, _, end = self.wait(host, 5)
+        self.assertFalse(ok)
+        self.assertIn("deadline of 5 minutes", why)
 
 class SilentWait(Env):
     """Silence: merge printed only the launch line for minutes. A long step printed
