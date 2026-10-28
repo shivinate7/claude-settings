@@ -4,8 +4,9 @@
     python3 lint/test_check_glossary.py
 
 GLOSSARY.md holds one table under `## Terms`: term, meaning, home, not. The check fails when a
-row's home is not an existing file or a rule marker, and when a file the change adds has a path
-segment that a row lists under "not". It never reads prose.
+row's home is not an existing file or a rule marker, when a file the change adds has a path
+segment that a row lists under "not", and when a line the change adds holds a "not" name in an
+identifier, a rule anchor, a record slug or a hook message. It never reads prose.
 
 Each case builds a temp tree: a copy of the module, the rule-audit module it reads rule markers
 from, and the files it checks. The diff cases also make a temp git repo and set
@@ -31,7 +32,7 @@ ROWS = ("| handoff | A session's notes file. | `docs/handoff.md` | `handover` |\
         "| owner | The person who rules. | `rule:one-rule` | — |\n")
 
 
-class GlossaryTests(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_glossary.py")
         self.tree = tempfile.mkdtemp(prefix="gls_")
@@ -68,6 +69,8 @@ class GlossaryTests(unittest.TestCase):
         self.git("-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
         self.git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "change")
 
+
+class GlossaryTests(Fixture):
     # Homes
 
     def test_clean_tree_passes(self):
@@ -201,6 +204,172 @@ class GlossaryTests(unittest.TestCase):
     def test_unknown_option_fails(self):
         code, out = self.run_check("--files")
         self.assertEqual(code, 1, out)
+
+
+class CodeNameTests(Fixture):
+    """The widened check: identifiers, rule anchors, record slugs and hook messages on added lines."""
+    REFUSE = "| refuse | What a guard does. | `rule:one-rule` | `deny`, `block` |\n"
+
+    def setUp(self):
+        super().setUp()
+        self.put("GLOSSARY.md", HEAD + ROWS + self.REFUSE)
+
+    def change(self, rel, text):
+        self.base_repo()
+        self.put(rel, text)
+        self.commit()
+        return self.run_check()
+
+    def red(self, rel, text, *shown):
+        code, out = self.change(rel, text)
+        self.assertEqual(code, 1, out)
+        for s in shown:
+            self.assertIn(s, out)
+
+    def green(self, rel, text):
+        code, out = self.change(rel, text)
+        self.assertEqual(code, 0, out)
+
+    # Identifiers
+
+    def test_python_identifier_with_not_name_fails(self):
+        self.red("hooks/x.py", "def bundle_it():\n    pass\n", "hooks/x.py:1", "bundle")
+
+    def test_python_camel_and_attribute_and_argument_fail(self):
+        self.red("hooks/x.py", "def f(batchBranch):\n    pass\n", "batch branch")
+        self.red("hooks/y.py", "import os\nos.bundle = 1\n", "hooks/y.py:2")
+        self.red("hooks/z.py", "def f(*, bundle=1):\n    pass\n", "hooks/z.py:1")
+
+    def test_javascript_identifier_fails(self):
+        self.red("actions/x.mjs", "const handover = 1;\n", "actions/x.mjs:1")
+
+    def test_shell_and_yaml_identifier_fail(self):
+        self.red("bin/x.sh", "bundle=1\n", "bin/x.sh:1")
+        self.red(".github/workflows/x.yml", "jobs:\n  bundle:\n    runs-on: x\n", "x.yml:2")
+
+    def test_clean_identifier_passes(self):
+        self.green("hooks/x.py", "def handoff_note():\n    pass\n")
+
+    def test_not_name_inside_a_longer_identifier_word_passes(self):
+        self.green("hooks/x.py", "def bundled_up():\n    pass\n")
+
+    def test_comment_and_docstring_prose_pass(self):
+        self.green("hooks/x.py", '"""The handover is prose."""\n# the bundle of lanes\nx = 1  # a handover\n')
+        self.green("actions/x.mjs", "// a handover\n/* the bundle\n   of lanes */\nconst a = 1;\n")
+
+    def test_platform_names_pass_and_compounds_fail(self):
+        self.green("hooks/x.py", 'deny = "deny"\nblock = {"decision": "block"}\n')
+        self.red("hooks/y.py", "deny_reason = 1\n", "hooks/y.py:1")
+
+    def test_issues_key_passes_in_yaml_only(self):
+        self.put("GLOSSARY.md", HEAD + ROWS + "| finding | A report. | `rule:one-rule` | `issue` |\n")
+        self.green(".github/workflows/x.yml", "permissions:\n  issues: write\n")
+
+    def test_only_added_lines_are_read(self):
+        self.put("hooks/x.py", "def bundle_old():\n    pass\n")
+        self.base_repo()
+        self.put("hooks/x.py", "def bundle_old():\n    pass\n\n\ndef fine():\n    pass\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+
+    def test_a_changed_line_is_read(self):
+        self.put("hooks/x.py", "def bundle_old():\n    pass\n")
+        self.base_repo()
+        self.put("hooks/x.py", "def bundle_old(a):\n    pass\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+
+    def test_marked_line_passes(self):
+        self.green("hooks/x.py", "bundle = 1  # glossary-ok: the platform spells it so\n")
+
+    def test_given_file_is_read_whole(self):
+        self.put("hooks/x.py", "bundle = 1\n")
+        code, out = self.run_check("hooks/x.py")
+        self.assertEqual(code, 1, out)
+
+    def test_unparsable_python_is_unknown_and_red_in_ci(self):
+        self.put("hooks/x.py", "def (:\n")
+        code, out = self.run_check("hooks/x.py")
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out)
+        r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_glossary.py"), "hooks/x.py"],
+                           cwd=self.tree, capture_output=True, encoding="utf-8", env=dict(os.environ, CI="true"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    # Rule anchors and record slugs
+
+    def test_anchor_with_not_name_fails(self):
+        self.red("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:one-bundle-rule -->\n", "CLAUDE.md:4", "bundle")
+
+    def test_anchor_reference_in_code_comment_fails(self):
+        self.red("hooks/x.py", "x = 1  # rule:one-bundle-rule\n", "hooks/x.py:1")
+
+    def test_clean_anchor_passes(self):
+        self.green("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:two-lanes-merge -->\n")
+
+    def test_backticked_slug_in_markdown_fails(self):
+        self.red("docs/notes.md", "See `handover-notes-record` for why.\n", "docs/notes.md:1", "handover")
+
+    def test_slug_key_in_json_fails(self):
+        self.red("lint/x.json", '{"bundle-it-now": {"kind": "check"}}\n', "lint/x.json:1")
+
+    def test_unticked_hyphen_prose_passes(self):
+        self.green("docs/notes.md", "A bundle-of-lanes phrase, and a handover-style note.\n")
+
+    # Hook messages
+
+    def test_hook_message_with_not_name_fails(self):
+        self.red("hooks/guard.py", 'MSG = "Refused: this handover is stale."\n', "hooks/guard.py:1", "handover")
+
+    def test_hook_message_with_retired_platform_word_fails(self):
+        self.red("hooks/guard.py", 'MSG = "The guard will deny it."\n', "hooks/guard.py:1")
+
+    def test_hook_message_f_string_fails(self):
+        self.red("hooks/guard.py", 'def m(x):\n    return f"Refused {x}: a bundle."\n', "hooks/guard.py:2")
+
+    def test_clean_hook_message_passes(self):
+        self.green("hooks/guard.py", 'MSG = "Refused: this handoff is stale."\n')
+
+    def test_test_fixture_message_passes(self):
+        self.green("hooks/test_guard.py", 'MSG = "Refused: this handover is stale."\n')
+
+    def test_message_outside_hooks_passes(self):
+        self.green("lint/x.py", 'MSG = "a handover line"\n')
+
+    def test_hook_docstring_passes(self):
+        self.green("hooks/guard.py", 'def f():\n    """The handover case."""\n')
+
+    # Scanner traps (rule building-scanner-respects-strings)
+
+    def test_slashes_in_a_string_do_not_open_a_comment(self):
+        self.red("actions/x.mjs", 'const u = "http://x"; const bundle = 1;\n', "actions/x.mjs:1")
+
+    def test_block_comment_opener_in_a_string_does_not_open_a_comment(self):
+        self.red("actions/x.mjs", 'const a = "/*"; const bundle = 2; /* end */\n', "actions/x.mjs:1")
+
+    def test_hash_in_a_shell_string_does_not_open_a_comment(self):
+        self.red("bin/x.sh", 'echo "# x"; bundle=1\n', "bin/x.sh:1")
+
+    def test_python_hash_in_a_string_does_not_hide_the_line(self):
+        self.red("hooks/x.py", 'a = "# x"; bundle = 1\n', "hooks/x.py:1")
+
+    def test_template_literal_spans_lines(self):
+        text = "const t = `a // b\n a handover /* c\n`;\nconst bundle = 1;\n"
+        self.red("actions/x.mjs", text, "actions/x.mjs:4")
+        self.green("actions/y.mjs", "const t = `a // b\n a handover /* c\n`;\nconst fine = 1;\n")
+
+    def test_lone_quote_in_a_comment_does_not_swallow_the_next_line(self):
+        self.red("actions/x.mjs", "// don't use it\nconst bundle = 1;\n", "actions/x.mjs:2")
+        self.red("bin/x.sh", "# don't use it\nbundle=1\n", "bin/x.sh:2")
+        self.red("hooks/x.py", "# don't use it\nbundle = 1\n", "hooks/x.py:2")
+
+    def test_lone_quote_in_jsx_text_does_not_swallow_the_next_line(self):
+        self.red("actions/x.mjs", "const p = <p>Don't</p>;\nconst bundle = 1;\n", "actions/x.mjs:2")
+
+    def test_lone_quote_in_shell_text_does_not_swallow_the_next_line(self):
+        self.red("bin/x.sh", "echo don't\nbundle=1\n", "bin/x.sh:2")
 
 
 class RepoGlossaryTests(unittest.TestCase):
