@@ -58,6 +58,9 @@ Short and plain are one goal. Never trade one for the other.
   blockquote, and the report names it in one line. Where a screen tool can do it, offer to take
   over the screen.<!-- rule:output-never-hand-off-doable-step -->
 - For each option, say what the user gains and what the user loses if they pick it.<!-- rule:style-option-says-effect -->
+- An option that widens what a shared tool accepts, such as a second form, an allow-list entry or a
+  per-repo exception, carries "Goes against your uniform ruling (t18)". It is never the recommended
+  option. The repo changes to match the shared format.<!-- rule:style-option-widens-marked -->
 - A table that compares things carries a column for what good looks like: the gold standard or
   the target. Each row then shows its gap.<!-- rule:style-table-gold-column -->
 - Give times in US Central, 24-hour clock, with the zone named once, such as 21:40 CDT. Never
