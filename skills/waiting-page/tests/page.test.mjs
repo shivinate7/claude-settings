@@ -1551,3 +1551,115 @@ test("a failed receipt delete leaves no old receipt in the page state", async (t
   await page.waitForFunction((id) => !(id in state.answers), DECISION.id);
   assert.equal(await page.evaluate((id) => id in state.receipts, DECISION.id), false, "the old receipt is still in the page state");
 });
+
+// ---------------------------------------------------------------- c122: what differs, open this state, short titles
+
+const diffItem = (over = {}) => mk("diff-q", 70, { pick: "a", options: [
+  { key: "a", label: "Alpha", how: "same how", gain: "gain A", lose: "same lose", differs: ["gain"] },
+  { key: "b", label: "Beta", how: "same how", gain: "gain B", lose: "same lose" },
+], ...over });
+const SETS = "Sets this option apart: ";
+
+test("a named field gets a bar class, a not-equal sign and screen-reader words; an option with no differs shows none", async (t) => {
+  const it = diffItem();
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const a = card(page, it).locator('label.opt[for="o-diff-q-a"]'), b = card(page, it).locator('label.opt[for="o-diff-q-b"]');
+  const g = a.locator(".gain");
+  assert.equal(await g.evaluate((e) => e.classList.contains("dif")), true, "gain is not marked");
+  assert.equal(await g.locator(".ne").textContent(), "≠");
+  assert.equal(await g.locator(".ne").getAttribute("aria-hidden"), "true");
+  assert.equal(await g.locator(".sr").textContent(), SETS);
+  assert.equal(await a.locator(".how.dif, .lose.dif").count(), 0, "an unnamed field is marked");
+  assert.equal(await b.locator(".dif, .ne").count(), 0, "an option with no differs is marked");
+  assert.equal(await card(page, it).locator(".difkey").count(), 1, "the legend is not shown once");
+  assert.match(await card(page, it).locator(".difkey").innerText(), /≠\s*marks what sets an option apart\./);
+});
+
+test("the page drops a named text field whose text equals every other option's, and ignores an unknown name", async (t) => {
+  const it = diffItem({ options: [
+    { key: "a", label: "Alpha", how: "same how", gain: "gain A", lose: "same lose", differs: ["how", "gain", "colour"] },
+    { key: "b", label: "Beta", how: "same how", gain: "gain B", lose: "same lose" },
+    { key: "c", label: "Gamma", how: "same how", gain: "gain C", lose: "same lose" },
+  ] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const a = card(page, it).locator('label.opt[for="o-diff-q-a"]');
+  assert.equal(await a.locator(".how.dif").count(), 0, "how equals the others and is still marked");
+  assert.equal(await a.locator(".gain.dif").count(), 1);
+  assert.equal(await a.locator(".dif").count(), 1, "an unknown name marked something");
+});
+
+test("an item whose differs all drop, or that has none, shows no legend", async (t) => {
+  const it = diffItem({ options: [
+    { key: "a", label: "Alpha", how: "h", gain: "g", lose: "l", differs: ["how"] }, { key: "b", label: "Beta", how: "h", gain: "g", lose: "l" }] });
+  const page = await open(t, { items: [it, DECISION] }); if (!page) return;
+  assert.equal(await page.locator(".difkey, .ne").count(), 0);
+});
+
+test("a named picture marks the frame and the View bar and says so in its label; picture on an option with no picture is ignored", async (t) => {
+  const it = looks("diff-pic", 71, [{ slug: "o-a", label: "A" }, { slug: "o-b", label: "B" }]);
+  it.options[0].differs = ["picture"]; it.options[1].differs = ["picture"]; delete it.options[1].design;
+  const page = await open(t, { items: [it], designData: { "o-a": lateRow("one"), "o-b": lateRow("two") } }); if (!page) return;
+  const pa = card(page, it).locator('label.opt[for="o-diff-pic-a"] .opic');
+  assert.equal(await pa.evaluate((e) => e.classList.contains("dif")), true);
+  assert.equal(await pa.locator(".view .ne").textContent(), "≠");
+  assert.match(await pa.getAttribute("aria-label"), /^View Layout A full screen\. Its picture sets this option apart$/);
+  assert.equal(await card(page, it).locator('label.opt[for="o-diff-pic-b"] .dif').count(), 0, "a picture mark on an option with no picture");
+});
+
+const STATE_MOCK = '<!doctype html><body style="margin:0"><div data-state="default">d</div><div data-state="late-package" id="late-row">late</div></body>';
+const stateItem = (id, n, states, over = {}) => looks(id, n, [
+  { slug: "s-a", label: "A", ...(states[0] ? { state: states[0] } : {}) }, { slug: "s-b", label: "B", ...(states[1] ? { state: states[1] } : {}) }], over);
+const STATE_DATA = { "s-a": STATE_MOCK, "s-b": STATE_MOCK.replace(">late<", ">late two<") };
+const stateOpts = (it) => it.options.forEach((o, i) => { o.design = i ? "s-b" : "s-a"; });
+
+test("a design with a state opens its mockup at that state, in the card frame and in the viewer", async (t) => {
+  const it = stateItem("st-frame", 72, ["late-package", "late-package"]); stateOpts(it);
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  const fr = await (await page.locator(optFrame(it, "a")).elementHandle()).contentFrame();
+  await fr.waitForLoadState();
+  assert.equal(await fr.evaluate(() => location.hash), "#s=late-package");
+  const src = await page.locator(optFrame(it, "a")).getAttribute("srcdoc");
+  assert.ok(src.search(/<!doctype/i) < src.search(/location\.hash/), "the state script sits before the doctype and puts the frame in quirks mode");
+});
+
+test("the viewer names the state in its title and offers Open this state, which opens the blob at #s=<state>", async (t) => {
+  const it = stateItem("st-view", 73, ["late-package", null]); stateOpts(it);
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  await page.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
+  await card(page, it).locator('label.opt[for="o-st-view-a"] .opic').click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout A (Phone), late package");
+  assert.equal(await page.locator("#dCap").textContent(), "Layout A (Phone), late package");
+  assert.equal(await page.locator("#dFull .lg").textContent(), "Open this state");
+  assert.equal(await page.locator("#dFull").getAttribute("aria-label"), "Open the late package state of the full mockup in a new tab");
+  await page.click("#dFull");
+  const u = await page.evaluate(() => window.__opened);
+  assert.equal(u.length, 1); assert.match(u[0], /^blob:.*#s=late-package$/);
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout B (Phone)", "no state: no suffix");
+  assert.equal(await page.locator("#dFull .lg").textContent(), "Open full size");
+  assert.equal(await page.locator("#dFull").getAttribute("aria-label"), "Open full size");
+});
+
+test("a state the mockup does not draw blocks the item and names the option; a drawn state, or two states of one slug and focus, do not", async (t) => {
+  const bad = stateItem("st-bad", 74, [null, "no-such-state"]); stateOpts(bad);
+  let page = await open(t, { items: [bad], designData: STATE_DATA }); if (!page) return;
+  assert.equal(await ALERT(page, bad).count(), 1, "no alert");
+  assert.match(await ALERT(page, bad).textContent(), /option B names a state its mockup does not draw\. Ask the session to fix item 74\./);
+  await page.evaluate(() => { setDraft(byId("st-bad"), { choice: "a", auto: true }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is not refused");
+  const ok = stateItem("st-ok", 75, ["late-package", "default"]);
+  ok.designs = ok.designs.map((d) => ({ ...d, slug: "s-a" })); ok.options.forEach((o) => { o.design = "s-a"; });
+  page = await open(t, { items: [ok], designData: STATE_DATA }); if (!page) return;
+  assert.equal(await ALERT(page, ok).count(), 0, "two states of one slug count as one picture");
+});
+
+const shortChip = (page, it) => page.locator(`#c-${it.id}`);
+test("the wide rail chip shows the short title; no or an over-long short falls back to the title; the title stays in full on the chip", async (t) => {
+  const items = [mk("sh-a", 80, { title: "A very long question title for the rail", short: "Rail name" }), mk("sh-b", 81, { title: "Second long question title here" }), mk("sh-c", 82, { title: "Third long question title here", short: "x".repeat(25) })];
+  const page = await open(t, { items }); if (!page) return;
+  assert.equal(await shortChip(page, items[0]).locator(".nt").textContent(), "Rail name");
+  assert.equal(await shortChip(page, items[1]).locator(".nt").textContent(), "Second long question title here");
+  assert.equal(await shortChip(page, items[2]).locator(".nt").textContent(), "Third long question title here");
+  assert.equal(await shortChip(page, items[0]).getAttribute("title"), "A very long question title for the rail");
+  assert.match(await shortChip(page, items[0]).getAttribute("aria-label"), /^No\. 80, A very long question title for the rail, /);
+});
