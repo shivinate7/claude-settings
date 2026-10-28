@@ -6,6 +6,7 @@
     python3 lint/compliance_probes.py lanecap <child root>
     python3 lint/compliance_probes.py playwright <child root>
     python3 lint/compliance_probes.py ios <child root>
+    python3 lint/compliance_probes.py words <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
@@ -32,6 +33,11 @@ playwright: a Playwright install that also runs apt (`--with-deps`, `install-dep
 ios: drift from the iOS standard of skills/ios-apps, one item per line: the make targets, the ship
   path, the project file, the Kit package, Swift 6, the CI runner, the CI checks, slow tests on each
   pull request, and account IDs in the repo. A repo with no iOS app is n/a. Comments do not count.
+words: each retired word in a checked repo, one item per line: `  <word>: <file>:<line> <detail>`, with `-` for
+  the line of a path hit. The word list is read live from lint/check_glossary.py and the GLOSSARY.md beside
+  it: its path, identifier, rule anchor, record slug and hook message reads, run on the child's tracked
+  files. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
+  parse, makes the group unknown. It prints the claude-settings commit whose glossary it read.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
@@ -499,8 +505,61 @@ def scorecard(root):
     return finish("scorecard", [], "wrote %s (%d row(s), %d note(s))" % (rel, len(rows), len(notes)), 0)
 
 
+WORD_HIT = re.compile(r"\buses '([^']+)'")  # the word in a problem line of check_glossary
+
+
+def glossary_commit(root):
+    """Short sha of the claude-settings commit that holds the glossary read, or None."""
+    try:
+        done = _nowindow.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True)
+    except OSError:
+        return None
+    return done.stdout.decode().strip()[:7] if done.returncode == 0 and done.stdout.strip() else None
+
+
+def probe_words(root):
+    try:
+        import check_glossary  # the one home of the retired words and of how a name is read
+    except ImportError as err:
+        raise CannotRun("check_glossary: %s" % err)
+    text = check_glossary.read(check_glossary.GLOSSARY)
+    if text is None:
+        raise CannotRun("%s cannot be read beside lint/check_glossary.py" % check_glossary.GLOSSARY)
+    table = check_glossary.rows(text)
+    if not table:
+        raise CannotRun("%s has no rows under '%s'" % (check_glossary.GLOSSARY, check_glossary.SECTION))
+    found = []
+
+    def add(rel, line, problems):
+        for problem in problems:
+            word = WORD_HIT.search(problem)
+            item = (word.group(1) if word else problem, rel, line)
+            if item not in found:
+                found.append(item)
+
+    for rel in tracked(root):
+        add(rel, "-", check_glossary.path_problems(rel, table))
+        if rel.startswith(check_glossary.SKIP_CODE):
+            continue
+        body = read(root, rel)
+        if body is None:
+            continue
+        try:
+            problems = check_glossary.code_problems(rel, body, table, None)
+        except SyntaxError as err:
+            raise CannotRun("%s does not parse (%s)" % (rel, err.msg))
+        for problem in problems:  # "<rel>:<line>: <where> uses '<word>'; ..."
+            add(rel, problem[len(rel) + 1:].partition(":")[0], [problem])
+    sha = glossary_commit(check_glossary.ROOT)
+    lines = ["  %s: %s:%s uses a retired word; see GLOSSARY.md" % item for item in found]
+    lines.append("glossary read at %s of claude-settings" % (sha or "an unknown commit"))
+    if found:
+        return finish("words", lines, "out", 1)
+    return finish("words", lines, "in shape", 0)
+
+
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
-          "ios": probe_ios, "scorecard": scorecard}
+          "ios": probe_ios, "words": probe_words, "scorecard": scorecard}
 
 
 def main(argv):

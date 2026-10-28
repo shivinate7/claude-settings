@@ -104,6 +104,30 @@ Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
 
 The lowest iOS, the tokens and the test style are read by hand in a repo visit.
 
+## Words
+
+`$PY $P/lint/compliance_probes.py words .` lists each retired word in the child. A retired word is a
+"Not" name in a row of `GLOSSARY.md`. The probe reads the child's tracked files only, and never edits
+or pushes to the child.
+
+The probe holds no word list. On each run it reads `GLOSSARY.md` and `lint/check_glossary.py` from the
+parent clone, and calls the check's own readers: the path read, and the read of identifiers, rule
+anchors, record slugs and hook messages. A word the glossary brings back is gone from the next run. A
+`word (prose)` name is read in paths, anchors and slugs only, never in a code name. Prose is not read.
+
+Each hit is one item line, `  <word>: <file>:<line> <detail>`. A path hit has `-` for the line. One more
+line, `glossary read at <sha> of claude-settings`, names the parent commit whose glossary the run read.
+Name that commit in the report, so a later run on a moved list is read against it.
+
+| Exit | Group line |
+| --- | --- |
+| 0 | `words: in shape` |
+| 1 | `words: out`, one item line per hit |
+| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, or a Python file does not parse |
+
+A copy of the probe with no `GLOSSARY.md` beside it, such as an installed copy under `~/.claude/lint`,
+is `unknown`, never `in shape`.
+
 ## Copies
 
 The copy probe and its verdicts are in `copies.md`, beside this file.
