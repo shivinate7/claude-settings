@@ -13,7 +13,7 @@ Roadmap step c78 (one shared browser-test setup), 2026-10-26: one composite acti
 - Runs no apt for Chromium. WebKit and Firefox may opt in with the `system-deps` input, such as `system-deps: webkit`. Its default is empty, so the default path runs no apt.
 - With `system-deps` set, it runs `install-deps` for exactly those browsers, on Linux only. Chromium, any other name, or a blank value fails the job with one line. A blank value would install every browser's libraries.
 - That apt step has a 300 s cap. The slow mirror of 2026-10-26 ran past 11 min, so the cap ends that case in under half the time. The normal apt time is unmeasured. `timeout -k 30` kills a process that ignores SIGTERM 30 s after the cap.
-- Callers pin it by commit SHA. The `gates-shoot` job is its first caller.
+- Callers pin it by commit SHA. The `checks-shoot` job is its first caller.
 
 `python3 lint/compliance_probes.py playwright <child root>` flags a Playwright install that runs apt (`--with-deps` or `install-deps`) in a CI or build file. It reads workflows, actions, Makefiles, shell scripts, Dockerfiles, justfiles, Taskfiles, dev container files and package.json scripts. Comments do not count. A folded YAML command (`run: >`) counts as one line. A caller that passes `system-deps:` writes no `install-deps`, so the probe stays quiet on it.
 
@@ -21,7 +21,7 @@ Why, a named incident: on 2026-10-26 the apt step of `playwright install --with-
 
 Why WebKit and Firefox may opt in, a named incident: joyous PR 47, run 40653154924. WebKit could not launch on ubuntu-latest: "Host system is missing dependencies" (libgtk-4, libgraphene, libevent, libopus, gstreamer). 228 WebKit tests were cancelled.
 
-Protected by `lint/test_compliance_probes.py` (class `Playwright`), `actions/playwright-setup/test_action.py` in the `gates` job, and the `gates-shoot` job, which runs the action whenever its files change.
+Protected by `lint/test_compliance_probes.py` (class `Playwright`), `actions/playwright-setup/test_action.py` in the `checks` job, and the `checks-shoot` job, which runs the action whenever its files change.
 
 ## Limits
 

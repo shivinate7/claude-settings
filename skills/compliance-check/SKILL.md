@@ -22,7 +22,7 @@ parent. If the line or `<dir>/.git` is missing, stop and report the audit as unk
   headings of `CLAUDE.md`. The style file adds `style`.
 - Mechanism: `<parent>/lint/rule_mechanisms.json`, key `rules.<id>.mechanism.kind`.
 
-A `guard` or `gate` rule has a mechanism in the parent. Mark that rule `parent-covered`, and
+A `guard` or `check` rule has a mechanism in the parent. Mark that rule `parent-covered`, and
 do not probe it, only when both checks pass:
 
 - The live `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` has the same `hooks` block as

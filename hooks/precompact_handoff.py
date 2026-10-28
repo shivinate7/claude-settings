@@ -383,13 +383,13 @@ def inbox_note(session_id):
     item ids (ruling, task, standing) from <session_id>.inbox.md. "" when there is nothing to say.
     Never raises: the reorient message must still print."""
     try:
-        import feedback_gate
+        import feedback_guard
         import local_time
         paths = local_time.inbox_paths(session_id)
         if paths is None or not os.path.exists(paths[0]):
             return ""
         with open(paths[0], encoding="utf-8") as f:
-            ids = feedback_gate.open_ids(feedback_gate.parse(f.read()))
+            ids = feedback_guard.open_ids(feedback_guard.parse(f.read()))
     except Exception as e:
         sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
         return ""

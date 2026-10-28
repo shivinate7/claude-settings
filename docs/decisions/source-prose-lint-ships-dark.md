@@ -10,7 +10,7 @@ The comment-and-docstring mode of `ste_lint.py` stays off by default (`--source-
 - `actions/ste-lint/action.yml` has a `changed_paths` input, in the same style as `paths`. A caller can point the changed-scope diff at source files instead of Markdown. Its default, `*.md`, matches the old hardcoded value.
 - `check_source` also runs STE011 and STE013, and both read `error`.
 
-Turning the mode on needs a cleanup first, as a separate job from the gate. Mixing the two would bury the gate in noise on the day it ships. The count of real errors in comments and docstrings under today's rules is unmeasured.
+Turning the mode on needs a cleanup first, as a separate job from the check. Mixing the two would bury the check in noise on the day it ships. The count of real errors in comments and docstrings under today's rules is unmeasured.
 
 Kind: process
 Home: lint/ste_lint.py

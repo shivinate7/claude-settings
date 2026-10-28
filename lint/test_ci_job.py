@@ -3,7 +3,7 @@
 
 Red cases: a multi-line step whose last line fails, a missing tool (named, behind xargs, or exit 127),
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
-None of them may read PASS. The last class plans the real gates job: every step gets one line.
+None of them may read PASS. The last class plans the real checks job: every step gets one line.
 Run: python3 lint/test_ci_job.py
 """
 import os
@@ -16,7 +16,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
-GATES = os.path.join(HERE, "..", ".github", "workflows", "gates.yml")
+CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 ENV.pop("VERDICT_LOG", None)
@@ -240,7 +240,7 @@ class Usage(Job):
 
 
 class SteAction(Job):
-    """The gates STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
+    """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
 
     def branch_with(self, text):
         def git(*a):
@@ -327,13 +327,13 @@ class LintBase(Job):
         self.assertNotIn("default", out)
 
 
-class RealGates(unittest.TestCase):
-    def test_every_gates_step_gets_one_line(self):
+class RealChecks(unittest.TestCase):
+    def test_every_checks_step_gets_one_line(self):
         sys.path.insert(0, HERE)
         from workflow_steps import job_block, step_blocks
-        with open(GATES, encoding="utf-8") as f:
-            want = len(step_blocks(job_block(f.read(), "gates")))
-        done = subprocess.run([sys.executable, CI_JOB, "gates", "--plan", "--base", "origin/main"],
+        with open(CHECKS, encoding="utf-8") as f:
+            want = len(step_blocks(job_block(f.read(), "checks")))
+        done = subprocess.run([sys.executable, CI_JOB, "checks", "--plan", "--base", "origin/main"],
                               cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("would fetch")]  # a shallow clone adds one
         self.assertEqual(len(lines), want, done.stdout + done.stderr)
@@ -369,13 +369,13 @@ class LintMode(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
 
-    def test_lint_mode_lists_exactly_the_lint_steps_of_gates(self):
-        # An independent read: the gates job's single-line run: commands, matched by a pattern written here.
+    def test_lint_mode_lists_exactly_the_lint_steps_of_checks(self):
+        # An independent read: the checks job's single-line run: commands, matched by a pattern written here.
         want, name, inside = [], None, False
-        with open(GATES, encoding="utf-8") as f:
+        with open(CHECKS, encoding="utf-8") as f:
             for line in f:
                 if re.match(r"^  [\w-]+:\s*$", line):
-                    inside = line.strip() == "gates:"
+                    inside = line.strip() == "checks:"
                 if not inside:
                     continue
                 m = re.match(r"^      - name: (.*?)\s*$", line)
@@ -388,7 +388,7 @@ class LintMode(unittest.TestCase):
                 if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check)\s*$", line):
                     want.append(name)  # a known action: ci-job runs its one home's command in its place
         self.assertGreater(len(want), 20)
-        done = plan_job("gates", "--lint", "--plan", "--base", "origin/main", cwd=os.path.join(HERE, ".."))
+        done = plan_job("checks", "--lint", "--plan", "--base", "origin/main", cwd=os.path.join(HERE, ".."))
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("would fetch")]  # a shallow clone adds one
         self.assertEqual(len(lines), len(want), done.stdout + done.stderr)
         for expected in want:
@@ -474,12 +474,12 @@ class Shallow(Job):
         self.assertEqual((rc, self.verdicts(lines), self.shallow()), (0, ["PASS"], "true"), out)
 
 
-def gates_step(name):
-    """The gates job's step of this name, as text, so a pin is read from the workflow, never copied."""
+def checks_step(name):
+    """The checks job's step of this name, as text, so a pin is read from the workflow, never copied."""
     sys.path.insert(0, HERE)
     from workflow_steps import job_block, step_blocks, step_key
-    with open(GATES, encoding="utf-8") as f:
-        return next(st for st in step_blocks(job_block(f.read(), "gates")) if step_key(st, "name") == name) + "\n"
+    with open(CHECKS, encoding="utf-8") as f:
+        return next(st for st in step_blocks(job_block(f.read(), "checks")) if step_key(st, "name") == name) + "\n"
 
 
 NO_PIPX = {"PATH": os.pathsep.join(d for d in os.environ.get("PATH", "").split(os.pathsep)
@@ -488,7 +488,7 @@ ZIZMOR = "Workflow supply-chain audit (zizmor)"
 
 
 class LintTools(Job):
-    """--lint runs gates' Code check action (code_check.py, one home) and the pinned zizmor step. A planted bug
+    """--lint runs checks' Code check action (code_check.py, one home) and the pinned zizmor step. A planted bug
     fails them; a missing pipx makes them unknown; neither may vanish from the lint run."""
 
     CODE = step("Code check", uses="$/actions/code-check", **{"with": {"base": "${{ github.event.before }}"}})
@@ -543,20 +543,20 @@ class LintTools(Job):
         rc, lines, out = self.run_job(self.CODE)
         self.assertEqual(self.verdicts(lines), ["skipped"], out)
 
-    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the gates zizmor step runs through pipx")
+    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the checks zizmor step runs through pipx")
     def test_a_template_injection_fails_the_zizmor_step(self):
         self.lane({".github/workflows/bad.yml": self.INJECTION, "actions/a/action.yml": self.ACTION})
-        rc, lines, out = self.run_job(gates_step(ZIZMOR), args=("--lint", "--base", "origin/main"))
+        rc, lines, out = self.run_job(checks_step(ZIZMOR), args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
 
-    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the gates zizmor step runs through pipx")
+    @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: the checks zizmor step runs through pipx")
     def test_a_clean_workflow_passes_the_zizmor_step(self):
         self.lane({".github/workflows/ok.yml": self.CLEAN, "actions/a/action.yml": self.ACTION})
-        rc, lines, out = self.run_job(gates_step(ZIZMOR), args=("--lint", "--base", "origin/main"))
+        rc, lines, out = self.run_job(checks_step(ZIZMOR), args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_the_zizmor_step_with_no_pipx_is_unknown(self):
-        rc, lines, out = self.run_job(gates_step(ZIZMOR), args=("--lint", "--base", "origin/main"), env=NO_PIPX)
+        rc, lines, out = self.run_job(checks_step(ZIZMOR), args=("--lint", "--base", "origin/main"), env=NO_PIPX)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("tool missing: pipx", lines[0])
 

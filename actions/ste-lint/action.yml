@@ -1,7 +1,7 @@
 name: STE lint
 description: >
   Run lint/ste_lint.py against changed markdown (scope changed, default) or the whole
-  tree (scope all). Scope changed gates on the added or changed lines of the diff only;
+  tree (scope all). Scope changed fails only on the added or changed lines of the diff only;
   findings on untouched lines of a changed file are reported but never fail the build.
   The caller needs actions/checkout with fetch-depth 0 so the changed-files diff can
   reach the base branch.

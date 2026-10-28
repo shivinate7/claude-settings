@@ -1,7 +1,7 @@
 // Plain English is the master copy of what the code does, and a check keeps `docs/map/` in sync with it.
 //
 // Run `node <skill>/scripts/map-check.mjs` from a repository root to run the 8 MAP checks there.
-// The check bodies live here, in `mapChecks`. A host may register each one with its own gate.
+// The check bodies live here, in `mapChecks`. A host may register each one with its own check.
 //
 // `migrationTables` strips SQL `--` comments first (`stripSqlComments` below — `ctx.stripComments`
 // is a JS/TS scanner and does not know SQL's `--` syntax, so it is not reused here), so a migration
@@ -962,7 +962,7 @@ export const aiCallRows = (sources, cfg = repoMapConfig()) => {
   });
 };
 
-// ---- The 8 MAP checks. One home for each body: a host may register them with its own gate, and the command below runs them. ----
+// ---- The 8 MAP checks. One home for each body: a host may register them with its own check, and the command below runs them. ----
 const TRACE_PAGE_RE = /^docs\/map\/traces\/([^/]+)\.md$/;
 
 /** The files this repository tracks in `root`, from `git ls-files`. */

@@ -19,7 +19,7 @@ For a child that keeps records in `docs/`, run it from the child's root, as the 
 file arguments. For a child that keeps them at its root, run it from a scratch folder that holds a `docs` link to the child's root. Its git diff reads this repo's tree, so it cannot target a child.
 
 These lints read the parent tree only, and cannot target a child: `rule_audit.py`,
-`check_landed_dirs.py`, `check_unknown_reads_contract.py`. `report_gate.py`
+`check_landed_dirs.py`, `check_unknown_reads_contract.py`. `report_guard.py`
 is a hook: it already runs in the child's sessions. `ruling_census.py` reads
 session transcripts, not a repo.
 
@@ -50,7 +50,7 @@ session transcripts, not a repo.
 | Output | `ste_lint` totals on the child's `*.md` | 0 errors |
 | Output | none: known gap. CI's STE step reads Markdown only, so UI copy gets no sentence-length, bloat or double-negative check. The Design probe counts the UI files | report the gap with its count; do not build a UI linter |
 | Style | none: `output-styles/shiv-stylisms.md` governs replies, a session act | `n/a (session)` |
-| Reports | none: `report_gate.py` covers it | `parent-covered` |
+| Reports | none: `report_guard.py` covers it | `parent-covered` |
 
 Each probe prints its group line first, then its item lines, the order the scorecard step writes.
 

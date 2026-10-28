@@ -510,7 +510,7 @@ def case_child_cannot_retrigger_hook():
 
 # --------------------------------------------------------------------------- case 7
 # settings.json. The reply judge Stop entry is async, so a finding never holds the turn. The
-# report gate Stop entry is not async: it still blocks. Each entry is found by its script path.
+# report guard Stop entry is not async: it still blocks. Each entry is found by its script path.
 
 def stop_hooks_running(script):
     with open(SETTINGS_PATH, encoding="utf-8") as f:
@@ -523,19 +523,19 @@ def stop_hooks_running(script):
     return found
 
 
-def case_settings_reply_judge_is_async_and_report_gate_is_not():
+def case_settings_reply_judge_is_async_and_report_guard_is_not():
     try:
         judge = stop_hooks_running("hooks/reply_judge.py")
-        gate = stop_hooks_running("lint/report_gate.py")
+        guard = stop_hooks_running("lint/report_guard.py")
     except (OSError, ValueError) as exc:
         check("settings: settings.json reads as JSON", False, "%s: %s" % (type(exc).__name__, exc))
         return
     check("settings: exactly one reply_judge Stop hook", len(judge) == 1, judge)
     check("settings: reply_judge Stop hook has async true",
           len(judge) == 1 and judge[0].get("async") is True, judge)
-    check("settings: exactly one report_gate Stop hook", len(gate) == 1, gate)
-    check("settings: report_gate Stop hook is not async",
-          len(gate) == 1 and gate[0].get("async") is not True, gate)
+    check("settings: exactly one report_guard Stop hook", len(guard) == 1, guard)
+    check("settings: report_guard Stop hook is not async",
+          len(guard) == 1 and guard[0].get("async") is not True, guard)
 
 
 # --------------------------------------------------------------------------- cases 8-13
@@ -1280,7 +1280,7 @@ CASES = (
     case_limits_done_result_line_is_not_narration,
     case_limits_verdict_outside_done_is_not_narration,
     case_child_cannot_retrigger_hook,
-    case_settings_reply_judge_is_async_and_report_gate_is_not,
+    case_settings_reply_judge_is_async_and_report_guard_is_not,
     table_sampling,
     case_sessions_keep_separate_counters,
     case_damaged_counter_fails_open,

@@ -19,7 +19,7 @@ The contract of `bin/shoot`:
 
 Why: each repo had its own way to take screenshots, and banchi's script had a fixed viewport. One command gives one place to fix the sizes, the themes and the blank-page check.
 
-Protected by `lint/test_shoot.mjs` and the `gates-shoot` job of `.github/workflows/gates.yml`.
+Protected by `lint/test_shoot.mjs` and the `checks-shoot` job of `.github/workflows/checks.yml`.
 
 ## Limits
 

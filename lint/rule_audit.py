@@ -21,8 +21,8 @@ anchor, not something this script infers from prose.
 THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism is one of:
   - `guard`: a rule name string this session's hooks/guard.py actually passes as the third
     argument to `refuse(...)` or `record(...)`.
-  - `gate`: a file, named by its path from the repo root, that exists on disk, plus the proof
-    that the gate WORKS. A row carries `test`, `setting`, or both. `needle` (a substring
+  - `check`: a file, named by its path from the repo root, that exists on disk, plus the proof
+    that the check WORKS. A row carries `test`, `setting`, or both. `needle` (a substring
     that must appear in the file) is refused: a docstring or a label satisfies it while the
     code under it does nothing.
       - `test`: a test id, `path::name` or `path::Class.name`, resolved by `citation_problem`.
@@ -41,7 +41,7 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
       - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
-  - `ci`: a CI step name that appears in a `- name:` line of .github/workflows/gates.yml.
+  - `ci`: a CI step name that appears in a `- name:` line of .github/workflows/checks.yml.
   - `unmechanized`: the literal token, paired with a `reason` of real length. A rule a check
     could still cover needs a row saying so, and saying why.
   - `judgment`: the same shape and reason floor as `unmechanized`, with its own pin. A rule
@@ -90,7 +90,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Paths relative to the repo root, so a fixture test reads the same list under its own root.
 RULE_FILES = ["CLAUDE.md", os.path.join("output-styles", "shiv-stylisms.md")]
 MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")
-WORKFLOW = os.path.join(ROOT, ".github", "workflows", "gates.yml")
+WORKFLOW = os.path.join(ROOT, ".github", "workflows", "checks.yml")
 
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 # Where a rule id sits in each call that writes a guard.log line (0-based argument index).
@@ -107,7 +107,7 @@ UNMECHANIZED_EXPECTED = 66
 JUDGMENT_EXPECTED = 24
 REASON_MIN_WORDS = 8
 
-KINDS = {"guard", "gate", "ci", "unmechanized", "judgment"}
+KINDS = {"guard", "check", "ci", "unmechanized", "judgment"}
 # A case-registering call whose first argument is a literal case name.
 CASE_REGISTRARS = {"add", "sh", "check"}
 
@@ -260,7 +260,7 @@ def citation_problem(test_id: str, root: str = ROOT):
 def link_problem(test_id: str, ref: str, root: str = ROOT):
     """Return why the cited test's file never touches `ref`, or None when it does.
 
-    A test that proves some other file proves nothing about the row's gate. The test file must
+    A test that proves some other file proves nothing about the row's check. The test file must
     be `ref`, or import its module, or pass its file name to a call (a subprocess path).
     """
     path = test_id.partition("::")[0]
@@ -289,7 +289,7 @@ def link_problem(test_id: str, ref: str, root: str = ROOT):
                    for a in args):
                 return None
     return (f"`{path}` neither imports nor runs `{ref}`, so a test there proves nothing "
-            f"about that gate.")
+            f"about that check.")
 
 
 def _walk(value, parts):
@@ -500,10 +500,10 @@ def check(
                     f"row `{slug}` names guard rule `{ref}`, which is not a `refuse`/`record` "
                     f"rule name in hooks/guard*.py any more. Stale row."
                 )
-        elif kind == "gate":
+        elif kind == "check":
             path = os.path.join(ROOT, ref)
             if not os.path.exists(path):
-                problems.append(f"row `{slug}` names gate file `{ref}`, which does not exist.")
+                problems.append(f"row `{slug}` names check file `{ref}`, which does not exist.")
                 continue
             if "needle" in mech:
                 problems.append(
@@ -513,7 +513,7 @@ def check(
                 )
             if not mech.get("test") and not mech.get("setting"):
                 problems.append(
-                    f"row `{slug}` names gate file `{ref}` and proves nothing about it. "
+                    f"row `{slug}` names check file `{ref}` and proves nothing about it. "
                     f"Add a `test` id or a `setting`."
                 )
             if mech.get("test"):
@@ -532,7 +532,7 @@ def check(
             if ref not in ci_names:
                 problems.append(
                     f"row `{slug}` names CI step {ref!r}, which is not a step name in "
-                    f".github/workflows/gates.yml any more. Stale row."
+                    f".github/workflows/checks.yml any more. Stale row."
                 )
 
     if unmechanized_count != unmechanized_expected:

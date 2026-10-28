@@ -35,7 +35,7 @@ Risk: incident (2026-09-06). `other-checkout` landed 2026-10-28.
 
 ### Both parts
 
-- **Read and Grep** are always allowed, so a session can still report (`verification-recovery-not-gated-on-own-state`).
+- **Read and Grep** are always allowed, so a session can still report (`verification-recovery-independent-of-state`).
 - **The refusal** never names the target or the home (`git-remedy-never-names-target`). The matched detail goes to the log.
 - **Unreadable is not a hit.** No git, no common directory, an unreadable record, or a `cwd` in no checkout allows (`verification-report-unknown-reads`).
 - **The predicate is the act** (`predicate-is-the-act`). The rule reads `agent_id`, `cwd` and the write target.

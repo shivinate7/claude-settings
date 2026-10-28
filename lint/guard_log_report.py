@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Reads ~/.claude/guard.log: one tab-separated line per guard verdict, written by
 hooks/guard_core.py record(). Nobody read it, so a rule that never fires, or fires too often, went unseen.
-Prints per-rule deny/ask/noted counts (a `fixed` rewrite line, written by the removed STE gate, counts as noted; an `override`
+Prints per-rule deny/ask/noted counts (a `fixed` rewrite line, written by the removed STE guard, counts as noted; an `override`
 line, a refusal an owner override lifted, adds an override column), denies per day,
 other verdicts verbatim, bad-line count.
---days all reads the whole log. --all-rules lists every rule id the guard and the gates can emit
+--days all reads the whole log. --all-rules lists every rule id the guard and the other guards can emit
 (rule_audit.emitted_rule_ids, the one home), 0 counts included, with the date of each rule's
 first line in the whole log, whatever --days says, or "never". A line of any decision counts as
 fired; a combined STE line (`STE007,STE008`) credits each code; an id only the log holds keeps its row,
@@ -19,14 +19,14 @@ from collections import namedtuple
 from datetime import datetime, timedelta
 
 # One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
-# repo and under ~/.claude, so the hop holds in both places (lint/report_gate.py does the same).
+# repo and under ~/.claude, so the hop holds in both places (lint/report_guard.py does the same).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
 OVERRIDE = "override"  # a refusal an owner override lifted: counted, and a key only when present
 FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first line in the whole log, or "never"
-COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE gate wrote for several codes found at once
+COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session")
@@ -35,7 +35,7 @@ WHOLE_CODE = re.compile(r"STE\d{3}")  # a whole STE code: STE and three digits
 
 
 def codes(rule):
-    """The STE codes one combined rule id names, or [] for any other id. The gate's logger cuts a long
+    """The STE codes one combined rule id names, or [] for any other id. The guard's logger cuts a long
     id and ends it LOG_CUT_MARK; the last piece of a cut id may be a partial code, so it counts only
     when it is a whole code."""
     if not rule.endswith(LOG_CUT_MARK):
@@ -91,7 +91,7 @@ def summarize(lines, days, now, session=None):
         if session is not None and label != session:
             continue
         if decision == "fixed":
-            decision = "noted"  # an old STE gate rewrite line: counted as a note, its STE codes are its rule
+            decision = "noted"  # an old STE guard rewrite line: counted as a note, its STE codes are its rule
         if decision not in COUNTED + (OVERRIDE,):
             out["other"].append(row.line)
             continue
@@ -166,7 +166,7 @@ def main(argv):
     ap.add_argument("--log", default=os.path.join(home, "guard.log"))
     ap.add_argument("--days", type=days_arg, default=7, help="a number of days, or all for the whole log")
     ap.add_argument("--all-rules", action="store_true",
-                    help="list every rule id the guard and gates can emit, with its first-line date or never")
+                    help="list every rule id the guard and the other guards can emit, with its first-line date or never")
     ap.add_argument("--session", help="keep only this session's lines (exact id)")
     ap.add_argument("--by-session", action="store_true", help="add counts per session")
     args = ap.parse_args(argv)
