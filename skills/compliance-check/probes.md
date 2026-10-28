@@ -111,7 +111,7 @@ The lowest iOS, the tokens and the test style are read by hand in a repo visit.
 or pushes to the child.
 
 The probe holds no word list. On each run it reads `GLOSSARY.md` and `lint/check_glossary.py` from the
-parent clone, and calls the check's own readers: the path read, and the read of identifiers, rule
+parent clone. It calls the check's own readers: the path read, and the read of identifiers, rule
 anchors, record slugs and hook messages. A word the glossary brings back is gone from the next run. A
 `word (prose)` name is read in paths, anchors and slugs only, never in a code name. Prose is not read.
 
