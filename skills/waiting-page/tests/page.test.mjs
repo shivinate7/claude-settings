@@ -1211,6 +1211,16 @@ test("SKILL.md names the page's one writer and the rank field", async () => {
   assert.match(rule, /`rank`/);
 });
 
+// Decision questions-go-to-owner, "Answer on the page, not in a comment thread":
+// a rebuilt page drops its threads, so a session rewrites the item instead.
+test("SKILL.md answers a comment by rewriting the item, never in a comment thread", async () => {
+  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+  assert.doesNotMatch(skill, /action `reply`/);
+  assert.doesNotMatch(skill, /reply in the comment thread/i);
+  assert.match(skill, /never reply in a comment thread/i);
+  assert.match(skill, /rewrite that item/i);
+});
+
 // ---------------------------------------------------------------- round 2 looks
 
 const PANEL = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:45px;background:#a62"></div><div style="height:500px"></div></body>';
