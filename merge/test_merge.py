@@ -8573,6 +8573,45 @@ class RedMainBrake(Env):
         self.assertIn("run 901", line[0])
         self.assertIn("--confirm refuses it", line[0])
 
+class ProtectionHost(merge.Host):
+    """Host whose branch protection read answers `contexts` (a list) or fails (None); no gh."""
+    def __init__(self, required, contexts):
+        super().__init__(required=required, base="main", pause=lambda s: None)
+        self.contexts = contexts
+
+    def gh(self, args, cwd=None):
+        return (0, json.dumps(self.contexts)) if self.contexts is not None else (1, "HTTP 404: Not Found")
+
+class MergeChecksFromProtection(unittest.TestCase):
+    """c189 part 1: main's own stamp.json reads the required checks from branch protection, and a pinned list that disagrees with it is refused."""
+    def test_main_stamp_reads_required_checks_from_protection(self):
+        with open(os.path.join(HERE, "..", ".github", "stamp.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["merge"]["requiredChecks"], "protection")
+
+    def test_a_pinned_list_that_disagrees_with_protection_is_refused_naming_both_sets(self):  # #746: pinned gates*, protection held checks*
+        host = ProtectionHost(["gates", "gates-guard"], ["checks", "checks-guard"])
+        with self.assertRaises(merge.Stop) as cm:
+            host.refuse_pinned_mismatch()
+        for name in ("gates", "gates-guard", "checks", "checks-guard"):
+            self.assertIn(name, str(cm.exception))
+
+    def test_a_pinned_list_equal_to_protection_passes_in_any_order(self):
+        ProtectionHost(["b", "a"], ["a", "b"]).refuse_pinned_mismatch()
+
+    def test_an_empty_protection_leaves_the_pinned_list_alone(self):
+        ProtectionHost(["a"], []).refuse_pinned_mismatch()
+
+    def test_an_unreadable_protection_says_so_and_keeps_the_pinned_list(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ProtectionHost(["a"], None).refuse_pinned_mismatch()
+        self.assertIn("pinned", out.getvalue())
+
+    def test_protection_mode_reads_nothing_extra(self):
+        host = ProtectionHost("protection", ["x"])
+        host.gh = lambda *a, **k: self.fail("a gh read was made")
+        host.refuse_pinned_mismatch()
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--child":

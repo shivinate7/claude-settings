@@ -669,6 +669,22 @@ class Host:
                        "The tool never merges with nothing to wait for. Name the checks.")
         return names
 
+    def refuse_pinned_mismatch(self):
+        """A pinned merge.requiredChecks list must equal a non-empty branch protection list: a copy that drifted waits on checks no run reports (#746).
+        An empty or unreadable protection leaves the pinned list in force; an unreadable one says so."""
+        if not isinstance(self.required, list):
+            return
+        c, out = self.gh(["api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
+        try:
+            held = json.loads(out) if not c else None
+        except ValueError:
+            held = None
+        if held is None:
+            say(f"merge: cannot read the branch protection of {self.base}, so the pinned merge.requiredChecks list is not compared with it.")
+        elif held and set(held) != set(self.required):
+            raise Stop(f"merge.requiredChecks pins {', '.join(self.required)}, but the branch protection of {self.base} requires {', '.join(held)}. "
+                       'Set merge.requiredChecks to "protection" so the protection list is the one source.')
+
     # A check run's conclusion, and a commit status's state, to the bucket the tool judges. A run that is not completed is pending. Any other value is a fail.
     CONCLUSION_BUCKET = {"success": "pass", "neutral": "skipping", "skipped": "skipping", "cancelled": "cancel"}
     STATE_BUCKET = {"success": "pass", "pending": "pending"}
@@ -2198,6 +2214,7 @@ def main(argv, host=None, lock=None):
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
+            h.refuse_pinned_mismatch()
         return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard's gate.", file=sys.stderr)

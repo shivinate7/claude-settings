@@ -3,7 +3,7 @@
   "kinds": [],
   "merge": {
     "method": "merge",
-    "requiredChecks": ["scope", "gates", "gates-guard", "gates-windows", "gates-windows-guard", "gates-mutate-guard", "gates-windows-merge", "gates-windows-rest", "gates-windows-sweep", "gates-macos", "shell-macos", "pointer-windows", "gates-shoot"],
+    "requiredChecks": "protection",
     "deadlineMinutes": 55,
     "afterMerge": ["bash merge/install_from_main.sh"],
     "deleteBranch": true,
