@@ -36,8 +36,8 @@ const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, 
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
-  const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
+  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
   const subs = {}, docSubs = {};
   window.__log = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
@@ -51,6 +51,7 @@ function stubDb({ items, answers, failDelete, failDeleteIn, failSet, comments, m
     collection: (name) => ({
       onSnapshot: (cb) => { (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; },
       doc: (id) => ({
+        get: async () => dsnap(name, id),
         set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
         onSnapshot: (cb) => { (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
@@ -78,7 +79,7 @@ let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -89,16 +90,18 @@ async function open(t, { items = [DECISION, TASK], answers = {}, failDelete = fa
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
-  await page.addInitScript(stubDb, { items, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
+  await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
-  await page.waitForSelector(`#item-${items[0].id}`);
+  await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
   return page;
 }
 const card = (page, it) => page.locator(`#item-${it.id}`);
 const answers = (page) => page.evaluate(() => window.__answers());
-const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"]`).click();
+// A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
+const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
 const takePick = (page, it) => card(page, it).getByRole("button", { name: /Take my pick/ }).click();
 const addNote = async (page, it, text) => { await card(page, it).getByRole("button", { name: "Add a note" }).click(); await page.fill(`#n-${it.id}`, text); };
 const send = (page) => page.click("#send");
@@ -119,7 +122,9 @@ test("a rule question starts blank, my pick is starred in its card, and Take my 
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator(`input[name="g-${DECISION.id}"]:checked`).count(), 0, "an option is preselected");
   const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick`);
-  assert.match(await star.textContent(), /★.*Red is bold\./s);
+  assert.match(await star.textContent(), /Red is bold\./);
+  assert.equal(await star.locator("svg").count(), 1, "the pick box holds no inline sparkle icon");
+  assert.doesNotMatch(await star.textContent(), /[★⭐]/, "the pick box still holds a star character");
   assert.equal(await page.locator(`label[for="o-${DECISION.id}-b"] .pick`).count(), 0, "the star sits on a second option");
   assert.equal(await page.locator("#send").isDisabled(), true, "Send is open with nothing answered");
   await takePick(page, DECISION);
@@ -260,7 +265,7 @@ test("a card becomes a receipt in place, with Change", async (t) => {
 for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
   test(`nothing moves when an answer is picked or sent, at ${viewport.width} wide${withDesigns ? ", with option designs" : ""}`, async (t) => {
     const items = [
-      mk("first", 1, { context: LONG, holds: "A lane waits.", ...(withDesigns ? { options: [opt("a", "Red", "s1"), opt("b", "Blue", "s2")] } : {}) }), mk("second", 2, { context: LONG, stands: true }),
+      mk("first", 1, { context: LONG, holds: "A lane waits.", options: [opt("a", "Red", withDesigns ? "s1" : undefined), opt("b", "Blue with a long label that cannot fit on one line of the ready note at 390 wide", withDesigns ? "s2" : undefined)] }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
     ];
@@ -279,7 +284,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     await choose(page, items[0], "b"); await same("a pick");
     await choose(page, items[0], "a"); await same("a second pick");
     await takePick(page, items[3]); await same("Take my pick");
-    await card(page, items[3]).getByRole("button", { name: "Clear" }).click(); await same("Clear");
+    await choose(page, items[3], "a"); await same("a click on the selected pick");
     await card(page, items[4]).getByRole("button", { name: /Take my pick/ }).click();
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
@@ -428,6 +433,160 @@ test("a design shows in a sandboxed frame on its card, and the Designs tab pages
   assert.equal(await page.locator("#dsheet").isHidden(), true);
 });
 
+// An option names its picture with `design` (a slug of the item's `designs`). A look question whose options name a
+// design the item lacks shows a plain warning where the picture belongs.
+const LOOK_OPTS = ["a", "b", "c"].map((k) => ({ key: k, label: "Layout " + k, how: "h", gain: "g", lose: "l", design: "price-" + k }));
+const GITHUB_FOLDER = "Mockups: https://github.com/shivinate7/banchi/tree/main/docs/mockups/price-history";
+
+test("a look question with three options, a GitHub folder link and no designs shows a warning inside each option card", async (t) => {
+  const it = mk("price-history-where", 30, { context: GITHUB_FOLDER, look: true, options: LOOK_OPTS.map(({ design, ...o }) => o), pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).locator(".opt .dwarn").count(), 3, "no warning in an option card");
+  assert.equal(await card(page, it).locator(".dwarn").count(), 3, "a warning sits outside the option cards");
+  assert.match(await card(page, it).locator(".opt .dwarn").first().textContent(), /picture/i);
+  assert.equal(await card(page, it).locator("iframe.dframe").count(), 0);
+});
+
+const PICS = { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" };
+const picItem = (id, n) => mk(id, n, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })) });
+
+test("each option's picture is inside its own option card; a tap on it opens the viewer and a tap on the card picks", async (t) => {
+  const it = picItem("with-pictures", 31);
+  const page = await open(t, { items: [it], designData: PICS }); if (!page) return;
+  assert.equal(await card(page, it).locator(".dwarn").count(), 0, "a warning shows although every picture is there");
+  for (const o of LOOK_OPTS) assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-${o.key}"] .opic iframe.dframe`).count(), 1, "no picture in option " + o.key);
+  assert.equal(await card(page, it).locator(".dprev").count(), 0, "a picture named by an option also shows at the front");
+  const pic = card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`);
+  assert.ok((await pic.boundingBox()).height >= 40, "the picture is smaller than a thumb");
+  await pic.click();
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), false, "a tap on the picture picked the option");
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "the viewer did not open");
+  await page.click("#dClose");
+  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .lab`).click();
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the card did not pick the option");
+  await card(page, it).locator(`label.opt[for="o-${it.id}-c"] .how`).click();
+  assert.equal(await page.isChecked(`#o-${it.id}-c`), true, "a tap on the card's text did not pick the option");
+  assert.equal(await card(page, it).locator(".opt iframe.dframe").first().evaluate((f) => getComputedStyle(f).pointerEvents), "none", "the frame swallows the click");
+});
+
+const WIDE = [["a", "Layout A"], ["b", "Layout B"]];
+const viewerItem = () => mk("viewer-q", 50, {
+  pick: "a", options: WIDE.map(([k, l]) => ({ key: k, label: l, how: "h", gain: "g", lose: "l", design: "v-" + k })),
+  designs: [{ slug: "v-a", label: "A phone", width: "Phone" }, { slug: "v-a2", option: "a", label: "A wide", width: "Wide" },
+    { slug: "v-b", label: "B phone", width: "Phone" }, { slug: "v-b2", option: "b", label: "B wide", width: "Wide" }],
+});
+const VIEWER_DATA = { "v-a": "<p>a</p>", "v-a2": "<p>a2</p>", "v-b": "<p>b</p>", "v-b2": "<p>b2</p>" };
+
+test("the viewer counts options times widths, steps with Prev and Next, wraps at the ends, and offers full size", async (t) => {
+  const it = viewerItem();
+  const page = await open(t, { items: [it], designData: VIEWER_DATA }); if (!page) return;
+  await page.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout A (Phone)");
+  assert.equal(await page.locator("#dPos").textContent(), "1 of 4");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout A (Wide)");
+  await page.click("#dNext"); await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout B (Wide)");
+  assert.equal(await page.locator("#dPos").textContent(), "4 of 4");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dPos").textContent(), "1 of 4", "Next does not wrap");
+  await page.click("#dPrev");
+  assert.equal(await page.locator("#dPos").textContent(), "4 of 4", "Prev does not wrap");
+  await page.click("#dFull");
+  assert.equal(await page.evaluate(() => window.__opened.length), 1, "Open full size opened nothing");
+  await page.click("#dClose");
+  assert.equal(await page.locator("#dsheet").isHidden(), true);
+});
+
+for (const width of [390, 1440]) {
+  test(`a design's focus fills the card box whole, never cut, at ${width} wide`, async (t) => {
+    const mock = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>';
+    const it = mk("focus-q", 51, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "f-a" }], designs: [{ slug: "f-a", label: "A", focus: "#panel" }] });
+    const page = await open(t, { items: [it], designData: { "f-a": mock }, viewport: { width, height: 900 } }); if (!page) return;
+    const wrap = card(page, it).locator(".opic .dfitwrap");
+    await page.waitForFunction((id) => { const w = document.querySelector(`#item-${id} .opic .dfitwrap`); return w && w.getBoundingClientRect().height > 0 && w.getBoundingClientRect().height < 400 && getComputedStyle(w.querySelector("iframe")).transform !== "none" && w.querySelector("iframe").style.transform.includes("translate"); }, it.id);
+    const m = await wrap.evaluate((w) => {
+      const f = w.querySelector("iframe"), r = w.getBoundingClientRect(), fr = f.getBoundingClientRect();
+      const sc = fr.width / 390;
+      return { wrapTop: r.top, wrapH: r.height, wrapW: r.width, panelTop: fr.top + 700 * sc, panelH: 200 * sc, panelW: 300 * sc };
+    });
+    assert.ok(Math.abs(m.panelTop - m.wrapTop) < 4, `the focused element starts ${m.panelTop - m.wrapTop}px from the top of the box`);
+    assert.ok(m.panelH <= m.wrapH + 1, "the focused element is cut at the bottom");
+    assert.ok(m.panelW <= m.wrapW + 1, "the focused element is cut at the side");
+    assert.ok(m.wrapH < 260, `the box shows more than the focused element (${m.wrapH}px)`);
+  });
+}
+
+test("SKILL.md and the designer agent carry the mockup convention", async () => {
+  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+  const designer = fs.readFileSync(path.join(HERE, "..", "..", "..", "agents", "designer.md"), "utf8");
+  for (const [name, text] of [["SKILL.md", skill], ["designer.md", designer]]) {
+    assert.match(text, /"Sample" banner/, name + " has no Sample banner line");
+    assert.match(text, /"Today: <part>"/, name + " has no Today label");
+    assert.match(text, /"New: <part>"/, name + " has no New label");
+  }
+  assert.match(skill, /`focus`/);
+  assert.match(skill, /tap on (an option's|the) picture opens the viewer/i);
+});
+
+test("a design that names no option shows at the front of the item, before the options", async (t) => {
+  const it = mk("loose-design", 34, { designs: [{ slug: "s1", label: "Overview" }] });
+  const page = await open(t, { items: [it], designData: { s1: "<p>one</p>" } }); if (!page) return;
+  const first = await card(page, it).evaluate((c) => { const f = c.querySelector(".dprev"), o = c.querySelector(".opts"); return !!f && !!o && !!(f.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING); });
+  assert.equal(first, true);
+});
+
+test("an item with some designs but not every option's design warns in the option cards that lack one", async (t) => {
+  const it = mk("half-pictures", 32, { look: true, options: LOOK_OPTS, pick: "a", designs: [{ slug: "price-a", label: "Layout a" }] });
+  const page = await open(t, { items: [it], designData: { "price-a": "<p>a</p>" } }); if (!page) return;
+  assert.equal(await card(page, it).locator(".opt .dwarn").count(), 2);
+  assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dwarn`).count(), 0);
+});
+
+for (const width of [390, 1440]) {
+  test(`a tall mockup is never cropped, at ${width} wide`, async (t) => {
+    const it = picItem("tall", 35);
+    const tall = '<body style="margin:0"><div style="height:1200px;background:#2a6">tall</div></body>';
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": tall }, viewport: { width, height: 900 } }); if (!page) return;
+    const wrap = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dfitwrap`);
+    await page.waitForFunction((sel) => document.querySelector(sel).getBoundingClientRect().height > 300, `#item-${it.id} label.opt .dfitwrap`);
+    const m = await wrap.evaluate((w) => { const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect(); return { wrapW: r.width, wrapH: r.height, frameW: f.width, frameH: f.height }; });
+    const scale = m.frameW / 390;
+    assert.ok(Math.abs(m.frameH - 1200 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${1200 * scale}`);
+    assert.ok(m.wrapH >= m.frameH - 1, "the wrapper cuts the bottom of the mockup");
+    assert.ok(m.frameW <= m.wrapW + 1, "the mockup is wider than the card");
+  });
+
+  test(`a long option key stays on one line and never overlaps the title, at ${width} wide`, async (t) => {
+    const it = mk("long-key", 36, { options: [
+      { key: "feed-near", label: "Show the price history near the feed in a sheet", how: "h", gain: "g", lose: "l" },
+      { key: "feed-far-away-key", label: "Far", how: "h", gain: "g", lose: "l" }], pick: "feed-near" });
+    const page = await open(t, { items: [it], viewport: { width, height: 900 } }); if (!page) return;
+    for (const o of it.options) {
+      const m = await card(page, it).locator(`label.opt[for="o-${it.id}-${o.key}"]`).evaluate((l) => {
+        const k = l.querySelector(".key"), b = l.querySelector(".lab");
+        return { ws: getComputedStyle(k).whiteSpace, k: k.getBoundingClientRect().toJSON(), b: b.getBoundingClientRect().toJSON() };
+      });
+      assert.equal(m.ws, "nowrap", "the chip wraps");
+      assert.ok(m.k.right <= m.b.left + 1 || m.k.bottom <= m.b.top + 1, `the chip overlaps the title for ${o.key}`);
+    }
+  });
+}
+
+test("an item that is not a look question never warns about pictures, with or without a named design", async (t) => {
+  const plain = mk("not-a-look", 37, { options: LOOK_OPTS.map(({ design, ...o }) => o), pick: "a" });
+  const named = mk("names-a-design", 38, { options: LOOK_OPTS, pick: "a" });
+  const page = await open(t, { items: [plain, named] }); if (!page) return;
+  assert.equal(await page.locator(".dwarn").count(), 0);
+});
+
+test("a long link in the context never widens the page on a phone", async (t) => {
+  const it = mk("price-history-link", 33, { context: GITHUB_FOLDER, options: LOOK_OPTS, pick: "a" });
+  const page = await open(t, { items: [it], viewport: { width: 390, height: 900 } }); if (!page) return;
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+});
+
 test("a page with no designs has no Designs tab", async (t) => {
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator("#tabD").isHidden(), true);
@@ -439,7 +598,7 @@ test("a decision option with a design shows it in a sandboxed frame inside its o
   const f = page.locator(optFrame(it, "a"));
   assert.equal(await f.count(), 1, "no frame inside option a's card");
   assert.equal(await f.getAttribute("sandbox"), "allow-scripts");
-  assert.equal(await f.getAttribute("srcdoc"), "<p>one</p>");
+  assert.ok((await f.getAttribute("srcdoc")).startsWith("<p>one</p>"), "the srcdoc is not the design");
   assert.equal(await page.locator(optFrame(it, "b")).count(), 0, "option b has no design, so it has no frame");
 });
 
@@ -457,29 +616,12 @@ test("an option design counts on the Designs tab, and the sheet pages through th
   assert.equal(await page.locator("#dCount").textContent(), "2", "the count leaves out option designs");
   await page.click("#tabD");
   await page.locator("#dsheet").waitFor();
-  const shown = () => page.locator("#dStage iframe:not(.off)").getAttribute("srcdoc");
-  assert.equal(await shown(), "<p>one</p>");
+  const shown = () => page.locator("#dStage .dfitwrap:not(.off) iframe").getAttribute("srcdoc");
+  assert.ok((await shown()).startsWith("<p>one</p>"));
   await page.click("#dNext");
-  assert.equal(await shown(), "<p>two</p>", "Next did not page to the second option design");
+  assert.ok((await shown()).startsWith("<p>two</p>"), "Next did not page to the second option design");
   await page.click("#dClose");
   assert.equal(await page.locator("#dsheet").isHidden(), true);
-});
-
-test("a tap on an option's picture picks that option, and Open full size opens the sheet without moving the pick", async (t) => {
-  const it = mk("tap-design", 1, { options: [opt("a", "Red", "s1"), opt("b", "Blue", "s2")] });
-  const page = await open(t, { items: [it], designData: DESIGNS }); if (!page) return;
-  const f = page.locator(optFrame(it, "b"));
-  assert.equal(await f.count(), 1, "no frame inside option b's card");
-  await takePick(page, it);
-  assert.equal(await page.isChecked(`#o-${it.id}-a`), true);
-  await f.scrollIntoViewIfNeeded();
-  const box = await f.boundingBox();
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the picture did not pick option b");
-  await card(page, it).getByRole("button", { name: "Open full size" }).first().click();
-  await page.locator("#dsheet").waitFor();
-  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Open full size moved the pick");
-  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "Open full size moved the pick");
 });
 
 test("option rows line up across sibling cards when only one option has a design, at desktop width", async (t) => {
@@ -511,7 +653,7 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
-// ---------------------------------------------------------------- answers, notes and Clear
+// ---------------------------------------------------------------- answers, notes and withdrawing
 
 test("a decision offers None of these, and it needs a note before it sends", async (t) => {
   const page = await open(t); if (!page) return;
@@ -540,56 +682,95 @@ test("when the store refuses a write, the answer line can be copied", async (t) 
   assert.equal(await page.evaluate(() => window.__copied), "27 none of these (Green)");
 });
 
-test("Clear unselects a drafted pick that was never sent", async (t) => {
-  const page = await open(t); if (!page) return;
-  const c = card(page, DECISION);
-  await choose(page, DECISION, "a");
-  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), true);
-  await c.getByRole("button", { name: "Clear" }).click();
-  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false, "the pick is still selected after Clear");
-  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
-  assert.deepEqual(await page.evaluate(() => window.__log), [], "Clear on a draft wrote to the database");
+const clearCount = (page) => page.getByRole("button", { name: "Clear" }).count();
+
+test("no Clear button renders, on a fresh card, a drafted pick, a note, a task or a changed answer", async (t) => {
+  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
+  assert.equal(await clearCount(page), 0);
+  await choose(page, DECISION, "a"); await addNote(page, DECISION, "a thought");
+  assert.equal(await clearCount(page), 0);
+  await card(page, TASK).getByRole("button", { name: "Change" }).click();
+  assert.equal(await clearCount(page), 0);
+  assert.equal(await page.locator(".clearbtn").count(), 0);
 });
 
-test("Clear on a changed answer deletes the saved record, so the item reads as unanswered", async (t) => {
+test("a second click on the selected option unselects it, with no write", async (t) => {
+  const page = await open(t); if (!page) return;
+  await choose(page, DECISION, "a");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), true);
+  await choose(page, DECISION, "a");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false, "the pick is still selected after a second click");
+  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
+  assert.equal(await page.locator("#send").isDisabled(), true);
+  assert.deepEqual(await page.evaluate(() => window.__log), []);
+});
+
+test("a second click unselects a stood pick, and it stays unselected", async (t) => {
+  const it = mk("stand-solo", 7, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "the pick does not stand");
+  await choose(page, it, "a");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a stood pick cannot be unselected");
+  assert.equal(await page.locator("#send").isDisabled(), true, "an unselected stood pick still goes with Send");
+  await takePick(page, it);
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true);
+  await choose(page, it, "a");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a pick taken with Take my pick cannot be unselected");
+});
+
+test("emptying a note drops it", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "a thought");
+  await page.fill(`#n-${DECISION.id}`, "");
+  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
+  assert.equal(await page.locator("#send").isDisabled(), true);
+});
+
+test("a changed answer left empty makes Send withdraw it", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
-  await c.getByRole("button", { name: "Clear" }).click();
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "withdraw is offered with the draft in place");
+  await choose(page, DECISION, "a");
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  assert.equal(await page.locator("#send").isDisabled(), false);
+  await send(page);
   await page.waitForFunction((id) => !(id in window.__answers()), DECISION.id);
   assert.deepEqual(await page.evaluate(() => window.__log), [["delete", "answers", DECISION.id]]);
   assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false);
   assert.equal(await c.locator(".receipt").count(), 0);
 });
 
-test("Clear deletes a task's done mark too", async (t) => {
+test("a task's done mark is withdrawn the same way", async (t) => {
   const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } });
   if (!page) return;
   await card(page, TASK).getByRole("button", { name: "Change" }).click();
-  await card(page, TASK).getByRole("button", { name: "Clear" }).click();
+  await card(page, TASK).getByRole("button", { name: "Mark done" }).click();
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  await send(page);
   await page.waitForFunction((id) => !(id in window.__answers()), TASK.id);
   assert.equal(await card(page, TASK).getByRole("button", { name: "Mark done" }).count(), 1);
 });
 
-test("Clear shows as soon as the owner types a note, and drops it", async (t) => {
-  const page = await open(t); if (!page) return;
-  await addNote(page, DECISION, "a thought");
-  await card(page, DECISION).getByRole("button", { name: "Clear" }).click();
-  assert.equal(await page.evaluate(() => localStorage.getItem("waiting.draft")), "{}");
-  assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "the note box stayed");
-});
-
-test("a Clear the store refuses keeps the pick and says so", async (t) => {
+test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
-  await choose(page, DECISION, "b");
-  await c.getByRole("button", { name: "Clear" }).click();
-  await c.getByText("Not cleared (denied)", { exact: false }).waitFor();
-  const draft = JSON.parse(await page.evaluate(() => localStorage.getItem("waiting.draft")));
-  assert.equal(draft[DECISION.id] && draft[DECISION.id].choice, "b", "the draft went although the answer stayed");
-  assert.equal(await page.isChecked(`#o-${DECISION.id}-b`), true);
+  await choose(page, DECISION, "a");
+  await send(page);
+  await c.getByText("Not withdrawn (denied)", { exact: false }).waitFor();
   assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
+});
+
+test("a note with no option picked is an answer: choice none plus the note", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "Green please");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a note alone");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "none");
+  assert.equal(a.note, "Green please");
 });
 
 test("a saved none note does not ride along when the owner picks an option", async (t) => {
@@ -871,3 +1052,384 @@ test("a partial Undo names every item that stayed sent", async (t) => {
   });
   await page.locator("#barStatus", { hasText: "Too late to undo No. 1 and No. 2" }).waitFor();
 });
+
+// ---------------------------------------------------------------- option names, counts and the list
+
+const WORDY = [["value", "Value for the card, shown near the feed in a sheet"], ["watch", "Watch"], ["nothing", "Nothing"]]
+  .map(([key, label]) => ({ key, label, how: "h", gain: "g", lose: "l" }));
+
+test("an option chip shows its letter by position, never a raw key longer than one character", async (t) => {
+  const it = mk("long-keys", 40, { options: WORDY, pick: "watch", why: "Watch fits." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const chips = await card(page, it).locator(".opt .key").allTextContents();
+  assert.deepEqual(chips, ["A", "B", "C"]);
+});
+
+test("a pick is named by the option's title, shortened with an ellipsis, never by its raw key", async (t) => {
+  const it = mk("pick-names", 41, { options: WORDY, pick: "value", why: "Value fits." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const take = card(page, it).getByRole("button", { name: /Take my pick/ });
+  const name = await take.textContent();
+  assert.doesNotMatch(name, /VALUE|value\)/, "the button shows the raw key: " + name);
+  assert.match(name, /^Take my pick \(Value for the card.*…\)$/, name);
+  await take.click();
+  const ready = await card(page, it).locator(".ready").textContent();
+  assert.match(ready, /^Ready to send: Value for the card.*…, my pick\.$/, ready);
+  await choose(page, it, "watch");
+  assert.equal(await card(page, it).locator(".ready").textContent(), "Ready to send: Watch, your choice.");
+});
+
+test("the count digit matches the rest of its line", async (t) => {
+  const page = await open(t); if (!page) return;
+  const m = await page.evaluate(() => { const b = document.querySelector(".ov-prog .big b"), l = document.querySelector(".ov-prog .big"); return { b: getComputedStyle(b).fontSize, l: getComputedStyle(l).fontSize, v: getComputedStyle(b).fontVariantNumeric }; });
+  assert.equal(m.b, m.l, "the digit is a different size from its line");
+  assert.doesNotMatch(m.v, /slashed-zero/);
+});
+
+for (const width of [1440, 390]) {
+  test(`each list entry carries its item's title, at ${width} wide`, async (t) => {
+    const items = [mk("first-q", 1, { title: "Where does the price history show" }), { ...TASK, id: "second-q", n: 2, title: "Plug in the Mac" }];
+    const page = await open(t, { items, viewport: { width, height: 900 } }); if (!page) return;
+    for (const it of items) {
+      const chip = page.locator(`#c-${it.id}`);
+      assert.equal(await chip.getAttribute("title"), it.title);
+      assert.ok((await chip.getAttribute("aria-label")).includes(it.title));
+    }
+    const shown = await page.locator("#c-first-q .nt").evaluate((e) => getComputedStyle(e).display !== "none" && e.getBoundingClientRect().width > 0).catch(() => false);
+    assert.equal(shown, width > 960, width > 960 ? "no visible short title in the list" : "the short title crowds a narrow list");
+  });
+}
+
+// ---------------------------------------------------------------- withdraw, undo and notes on a stood pick
+
+test("a withdraw opens the 8-second Undo panel, and Undo puts the answer back", async (t) => {
+  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await send(page);
+  await page.locator("#sent .stamp").waitFor();
+  assert.match(await page.locator("#sent").textContent(), /withdrawn/i);
+  assert.equal(await page.locator("#undoBtn").count(), 1, "no Undo after a withdraw");
+  await page.click("#undoBtn");
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  assert.deepEqual((await answers(page))[DECISION.id], SAVED_A[DECISION.id]);
+  assert.equal(await page.evaluate(() => window.__sent.length), 0, "a withdraw or its undo told a session");
+});
+
+test("a withdraw leaves an answer that changed since the page read it", async (t) => {
+  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await page.evaluate((id) => { window.__answers()[id] = { item: id, n: 27, at: "2026-10-26T05:00:00Z", choice: "b", note: "" }; }, DECISION.id);
+  await send(page);
+  await c.getByText("changed", { exact: false }).waitFor();
+  assert.equal((await answers(page))[DECISION.id].choice, "b", "the newer answer was deleted");
+  assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete"), []);
+});
+
+test("a note typed on an item whose pick stands sends the stood pick plus the note", async (t) => {
+  const it = mk("stand-note", 7, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await addNote(page, it, "with a thought");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.equal(a.choice, "a");
+  assert.equal(a.note, "with a thought");
+});
+
+// ---------------------------------------------------------------- rank inside a tier
+
+const order = (page) => page.evaluate(() => [...document.querySelectorAll("section.tier")].map((sec) => [sec.id, [...sec.querySelectorAll("article.card")].map((c) => c.id.slice(5))]));
+const at = (day) => `2026-10-${String(day).padStart(2, "0")}T00:00:00Z`;
+
+test("inside a tier, rank overrides age, and an item with no rank sorts after the ranked ones by age", async (t) => {
+  const items = [
+    mk("old-rank2", 1, { added: at(1), rank: 2 }), mk("new-rank1", 2, { added: at(5), rank: 1 }),
+    mk("old-none", 3, { added: at(2) }), mk("new-none", 4, { added: at(6) }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  assert.deepEqual((await order(page)).find((x) => x[0] === "tier-calm")[1], ["new-rank1", "old-rank2", "old-none", "new-none"]);
+});
+
+test("a group stays together at its best member's rank", async (t) => {
+  const items = [
+    mk("solo-0", 1, { added: at(3), rank: 0 }), mk("grp-a", 2, { added: at(1), rank: 5, group: "g" }),
+    mk("grp-b", 3, { added: at(2), rank: 1, group: "g" }), mk("solo-3", 4, { added: at(1), rank: 3 }),
+  ];
+  const page = await open(t, { items }); if (!page) return;
+  const calm = (await order(page)).find((x) => x[0] === "tier-calm")[1];
+  assert.equal(calm[0], "solo-0");
+  assert.deepEqual(calm.slice(1, 3).sort(), ["grp-a", "grp-b"], "the group is split: " + calm);
+  assert.equal(calm[3], "solo-3");
+});
+
+test("rank never moves an item across tiers", async (t) => {
+  const items = [mk("calm-rank0", 1, { rank: 0 }), mk("hold-rank9", 2, { holds: "A lane waits.", rank: 9 }), mk("stand-rank0", 3, { stands: true, rank: 0 })];
+  const page = await open(t, { items }); if (!page) return;
+  const tiers = await order(page);
+  assert.deepEqual(tiers.map((x) => x[0]), ["tier-holds", "tier-calm", "tier-stands"]);
+  assert.deepEqual(tiers.map((x) => x[1]), [["hold-rank9"], ["calm-rank0"], ["stand-rank0"]]);
+});
+
+test("SKILL.md names the page's one writer and the rank field", async () => {
+  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+  assert.match(skill, /`writer`/);
+  assert.match(skill, /`rank`/);
+  assert.match(skill, /re-rank/i);
+  const rule = fs.readFileSync(path.join(HERE, "..", "..", "..", "docs", "decisions", "questions-go-to-owner.md"), "utf8");
+  assert.match(rule, /one writer/i);
+  assert.match(rule, /`rank`/);
+});
+
+// ---------------------------------------------------------------- round 2 looks
+
+const PANEL = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:45px;background:#a62"></div><div style="height:500px"></div></body>';
+const FULLW = '<body style="margin:0;background:#2a6"><div style="width:390px;height:300px;background:#26a">x</div></body>';
+
+for (const width of [390, 1440]) {
+  test(`the View control sits under the picture and never covers it, at ${width} wide`, async (t) => {
+    const it = mk("pill-q", 52, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "p-a" }], designs: [{ slug: "p-a", label: "A", focus: "#panel" }] });
+    const page = await open(t, { items: [it], designData: { "p-a": PANEL }, viewport: { width, height: 900 } }); if (!page) return;
+    await page.waitForFunction((id) => document.querySelector(`#item-${id} .dfitwrap`).getBoundingClientRect().height > 0, it.id);
+    const m = await card(page, it).locator(".opic").evaluate((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), v = o.querySelector(".view").getBoundingClientRect(); return { wrapBottom: w.bottom, wrapTop: w.top, viewTop: v.top, viewH: v.height }; });
+    assert.ok(m.viewTop >= m.wrapBottom - 1, "the View control covers the picture");
+    assert.ok(m.viewH >= 40, "the View control is under 40px high: " + m.viewH);
+  });
+
+  test(`the viewer head is one row, and the mockup is whole and centered, at ${width} wide`, async (t) => {
+    const it = viewerItem();
+    const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 } }); if (!page) return;
+    // Stand-in for CI's wider fallback font: the one-row head is then wider than a phone.
+    await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
+    await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+    await page.waitForFunction(() => { const f = document.querySelector("#dStage .dframe:not(.off)"); return f && f.getBoundingClientRect().height > 60; });
+    const m = await page.evaluate(() => { const f = document.querySelector("#dStage iframe").getBoundingClientRect(), h = document.querySelector(".dsh-head").getBoundingClientRect(); return { left: f.left, right: f.right, headH: h.height, close: document.querySelector("#dClose").getBoundingClientRect().right, sheetW: document.querySelector("#dsheet").scrollWidth, vw: innerWidth }; });
+    assert.ok(m.headH < 70, "the viewer head is " + m.headH + "px high");
+    assert.ok(m.close <= m.vw + 0.5, "Close is cut off: its right edge is " + m.close);
+    assert.ok(m.sheetW <= m.vw, "the viewer scrolls sideways: " + m.sheetW + " in " + m.vw);
+    assert.ok(m.right <= m.vw + 0.5 && m.left >= -0.5, "the mockup is cut: " + m.left + " to " + m.right);
+    if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "the mockup is not centered");
+    for (const id of ["dPrev", "dNext", "dFull", "dClose"]) assert.ok((await page.locator("#" + id).boundingBox()).height >= 40, id + " is under 40px");
+  });
+}
+
+const WIDE_DESIGN = '<body style="margin:0;display:flex;width:1200px"><div style="width:400px;height:200px;background:#a62">1</div><div style="width:400px;height:200px;background:#26a">2</div><div id="last" style="width:400px;height:200px;background:#2a6">3</div></body>';
+for (const width of [390, 1440]) {
+  test(`a design drawn 1200 wide is whole in the viewer, at ${width} wide`, async (t) => {
+    const it = mk("wide-q", 55, { pick: "a", options: [{ key: "a", label: "Wide", how: "h", gain: "g", lose: "l", design: "w-a" }], designs: [{ slug: "w-a", label: "Wide", drawn: 1200 }] });
+    const page = await open(t, { items: [it], designData: { "w-a": WIDE_DESIGN }, viewport: { width, height: 900 } }); if (!page) return;
+    await card(page, it).locator(".opic").click();
+    await page.waitForFunction(() => { const f = document.querySelector("#dStage .dfitwrap:not(.off) iframe"); return f && FIT["w-a|"]; });
+    const m = await page.evaluate(() => {
+      const f = document.querySelector("#dStage .dfitwrap:not(.off) iframe"), r = f.getBoundingClientRect();
+      return { right: r.right, left: r.left, vw: innerWidth, w: f.style.width };
+    });
+    const tile = await page.frameLocator("#dStage .dfitwrap:not(.off) iframe").locator("#last").boundingBox();
+    const f = await page.locator("#dStage .dfitwrap:not(.off)").boundingBox();
+    const sc = (await page.locator("#dStage .dfitwrap:not(.off) iframe").evaluate((e) => new DOMMatrix(getComputedStyle(e).transform).a));
+    assert.equal(m.w, "1200px", "the frame is not drawn at the design's width");
+    assert.ok(Math.abs(tile.x + tile.width - (f.x + f.width)) <= 2 && tile.x + tile.width <= m.vw + 0.5, `the right-most tile is cut: ends at ${tile.x + tile.width}, viewer ends at ${f.x + f.width}`);
+    assert.ok(sc < 1, "the design is not scaled down");
+  });
+}
+
+test("a viewer whose head cuts the title names the design in a one-line caption above it", async (t) => {
+  const it = viewerItem();
+  const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  // Stand-in for CI's wider fallback font, so the head cuts "Layout A (Phone)" at 390.
+  await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  const cap = page.locator("#dCap");
+  assert.equal(await cap.isVisible(), true, "no caption in the viewer");
+  assert.equal(await cap.textContent(), await page.evaluate(() => dList[dAt].label));
+  const m = await page.evaluate(() => { const c = document.querySelector("#dCap").getBoundingClientRect(), f = document.querySelector("#dStage .dfitwrap:not(.off)").getBoundingClientRect(); return { capBottom: c.bottom, frameTop: f.top, capH: c.height, vw: innerWidth, right: f.right }; });
+  assert.ok(m.capBottom <= m.frameTop + 0.5, "the caption sits over the mockup");
+  assert.ok(m.capH < 30, "the caption is more than one line: " + m.capH);
+  assert.ok(m.right <= m.vw + 0.5, "the mockup is cut");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The resize observer hides the caption a frame after the resize.
+  await page.waitForFunction(() => { const c = document.querySelector("#dCap"); return getComputedStyle(c).display === "none"; }, null, { timeout: 2000 }).catch(() => {});
+  assert.equal(await cap.isVisible(), false, "the caption shows on a wide screen, where the title fits");
+});
+
+// The caption names the design whenever the head cuts the title, and only then (design review round 2).
+const TALL_DESIGN = `<body style="margin:0">${Array.from({ length: 25 }, (_, i) => `<div style="height:80px;background:hsl(${i * 14},60%,55%)">${i + 1}</div>`).join("")}</body>`;
+const capItem = (labels) => mk("cap-q", 56, { pick: "a", options: labels.map((l, i) => ({ key: "abc"[i], label: l, how: "h", gain: "g", lose: "l", design: "c-" + "abc"[i] })),
+  designs: labels.map((l, i) => ({ slug: "c-" + "abc"[i], label: l, width: "Phone" })) });
+const capState = (page) => page.evaluate(() => { const c = document.querySelector("#dCap"), t = document.querySelector("#dTitle"), r = c.getBoundingClientRect();
+  return { shown: getComputedStyle(c).display !== "none" && r.height > 0, h: r.height, text: c.textContent, cut: c.scrollWidth > c.clientWidth, label: dList[dAt].label, titleCut: t.scrollWidth > t.clientWidth }; });
+async function openCap(t, labels, width, design) {
+  const it = capItem(labels);
+  const page = await open(t, { items: [it], designData: { "c-a": design, "c-b": "<p>b</p>" }, viewport: { width, height: 900 } }); if (!page) return null;
+  // Stand-in for CI's wider fallback font.
+  await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  await page.waitForFunction(() => FIT["c-a|"] && document.querySelector("#dStage .dfitwrap:not(.off)").getBoundingClientRect().height > 60);
+  return page;
+}
+
+test("a tall design with a long label is named in a caption with height, at 390 wide", async (t) => {
+  const page = await openCap(t, ["Tall A layout with bands", "B"], 390, TALL_DESIGN); if (!page) return;
+  const c = await capState(page);
+  assert.ok(c.titleCut, "the stand-in label fits the head; the test needs a longer one");
+  assert.ok(c.shown && c.h >= 14, "the caption is " + c.h + "px high, so nothing names the design");
+  assert.equal(c.text, c.label); assert.ok(!c.cut, "the caption cuts the label");
+});
+
+test("at 768 wide a title the head cuts shows in the caption, and Prev to a short title hides it", async (t) => {
+  const page = await openCap(t, ["Layout A in a sheet under the feed card", "B"], 768, "<p>a</p>"); if (!page) return;
+  let c = await capState(page);
+  assert.ok(c.titleCut, "the stand-in label fits the head; the test needs a longer one");
+  assert.ok(c.shown, "the head cuts the title and no caption names the design");
+  assert.equal(c.text, c.label); assert.ok(!c.cut, "the caption cuts the label");
+  await page.click("#dPrev");
+  c = await capState(page);
+  assert.ok(!c.titleCut, "the short title is cut");
+  assert.ok(!c.shown, "the caption repeats a title that fits");
+});
+
+test("a title that fits the head gets no caption, at 390 wide", async (t) => {
+  const page = await openCap(t, ["A", "B"], 390, "<p>a</p>"); if (!page) return;
+  const c = await capState(page);
+  assert.ok(!c.titleCut, "the short title is cut");
+  assert.ok(!c.shown, "the caption repeats a title that fits");
+});
+
+test("a picture's height is reserved from its declared size before it loads", async (t) => {
+  const it = mk("reserve-q", 53, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "r-a" }], designs: [{ slug: "r-a", label: "A", focus: "#panel", size: { w: 600, h: 400 } }] });
+  const mockup = '<body style="margin:0;width:700px"><div style="height:700px"></div><div id="panel" style="width:600px;height:400px;background:#a62"></div></body>';
+  const page = await open(t, { items: [it], designData: { "r-a": mockup }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await page.waitForFunction((id) => document.querySelector(`#item-${id} iframe`).style.transform.includes("translate"), it.id);
+  const first = await page.evaluate(() => window.__firstFit);
+  const last = await page.evaluate((id) => document.querySelector(`#item-${id} .dfitwrap`).getBoundingClientRect().height, it.id);
+  assert.ok(first && Math.abs(first - last) <= 3, `first paint ${first}, loaded ${last}`);
+});
+
+test("two designs of one slug with different focus keep their own size, and the viewer opens on the tapped option", async (t) => {
+  const two = '<body style="margin:0"><div id="p1" style="width:300px;height:200px;background:#a62"></div><div id="p2" style="width:300px;height:100px;background:#26a"></div></body>';
+  const it = mk("shared-q", 54, { pick: "a", options: [{ key: "a", label: "Layout A", how: "h", gain: "g", lose: "l" }, { key: "b", label: "Layout B", how: "h", gain: "g", lose: "l" }],
+    designs: [{ slug: "shared", option: "a", label: "A", focus: "#p1" }, { slug: "shared", option: "b", label: "B", focus: "#p2" }] });
+  const page = await open(t, { items: [it], designData: { shared: two }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await page.waitForFunction((id) => [...document.querySelectorAll(`#item-${id} .dfitwrap`)].every((w) => w.querySelector("iframe").style.transform.includes("translate")), it.id);
+  const hs = await card(page, it).locator(".dfitwrap").evaluateAll((ws) => ws.map((w) => w.getBoundingClientRect().height));
+  assert.ok(hs[0] > hs[1] * 1.6, "the second picture took the first one's size: " + hs);
+  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
+  assert.match(await page.locator("#dTitle").textContent(), /^Layout B/);
+});
+
+// ---------------------------------------------------------------- the database key is the item's key
+
+const { id: _noId, ...DECISION_NO_ID } = DECISION;
+const warn = (page, key) => card(page, { id: key }).locator(".status.broken");
+
+test("an item stored with no id field is answered under its database key", async (t) => {
+  const page = await open(t, { items: [], rawItems: { k29: { ...DECISION_NO_ID, n: 29 } } }); if (!page) return;
+  await choose(page, { id: "k29" }, "b");
+  await send(page);
+  await written(page);
+  const log = await page.evaluate(() => window.__log.filter((l) => l[0] === "set"));
+  assert.equal(log.length, 1);
+  assert.equal(log[0][2], "k29", "the answer key");
+  assert.equal(log[0][3].item, "k29");
+  assert.equal(log[0][3].choice, "b");
+  assert.match(await warn(page, "k29").textContent(), /no id field.*fix item 29/s);
+});
+
+test("an item whose id field differs from its key warns and is answered under the key", async (t) => {
+  const page = await open(t, { items: [], rawItems: { k30: { ...DECISION, id: "other-id", n: 30 } } }); if (!page) return;
+  assert.match(await warn(page, "k30").textContent(), /id field that differs.*fix item 30/s);
+  await choose(page, { id: "k30" }, "a");
+  await send(page);
+  await written(page);
+  const log = await page.evaluate(() => window.__log.filter((l) => l[0] === "set"));
+  assert.deepEqual([log.length, log[0][2], log[0][3].item], [1, "k30", "k30"]);
+});
+
+test("a decision with a duplicate option key, no options, or a none key warns and Send skips it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 31, options: [opt("a"), opt("a")], pick: "a" },
+    "no-opts": { ...DECISION, id: "no-opts", n: 32, options: [], pick: "a" },
+    "none-key": { ...DECISION, id: "none-key", n: 33, options: [opt("none"), opt("b")], pick: "b" },
+    "good": { ...DECISION, id: "good", n: 34 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  for (const k of ["dup-keys", "no-opts", "none-key"]) {
+    assert.equal(await warn(page, k).count(), 1, k + " shows no warning");
+    assert.match(await warn(page, k).textContent(), /cannot be answered.*fix item/s);
+  }
+  assert.equal(await warn(page, "good").count(), 0, "a sound item warns");
+  // A staged draft on a broken item must still not go out; Send carries only the sound one.
+  await page.evaluate(() => { for (const k of ["dup-keys", "none-key"]) setDraft(byId(k), { choice: "a", auto: true }); render(); });
+  await takePick(page, { id: "good" });
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer");
+  await send(page);
+  await written(page);
+  const log = await page.evaluate(() => window.__log.filter((l) => l[0] === "set").map((l) => l[2]));
+  assert.deepEqual(log, ["good"]);
+});
+
+test("a bad number or kind warns and Send skips it", async (t) => {
+  const rawItems = {
+    "bad-n": { ...DECISION, id: "bad-n", n: "7" },
+    "bad-kind": { ...TASK, id: "bad-kind", n: 8, kind: "chore" },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "bad-n").textContent(), /no number/);
+  assert.match(await warn(page, "bad-kind").textContent(), /neither a decision nor a task/);
+  await page.evaluate(() => { setDraft(byId("bad-kind"), { done: true }); setDraft(byId("bad-n"), { choice: "a" }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true);
+});
+
+test("a blocked card says it cannot be sent, disables its controls, and Copy answers skips it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 41, options: [opt("a"), opt("a")], pick: "a" },
+    "odd-opts": { ...DECISION, id: "odd-opts", n: 42, options: "a, b" },
+    "good": { ...DECISION, id: "good", n: 43 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "odd-opts").textContent(), /not a list/);
+  await page.evaluate(() => { setDraft(byId("dup-keys"), { choice: "a", auto: true }); render(); });
+  const c = card(page, { id: "dup-keys" });
+  assert.equal(await c.locator(".ready").textContent(), "This item cannot be sent.");
+  assert.equal(await c.locator(".takepick").isDisabled(), true);
+  assert.equal(await c.locator(".nonebtn").isDisabled(), true);
+  assert.equal(await c.locator(".opts input").first().isDisabled(), true);
+  await takePick(page, { id: "good" });
+  assert.equal(await page.evaluate(() => answerLine()), "43 a");
+});
+
+test("an item with no id field and a duplicate option key is blocked from Send and Copy, and names the key", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "k50": { ...DECISION_NO_ID, n: 50, options: [opt("x"), opt("x")], pick: "x" },
+    "good": { ...DECISION, id: "good", n: 51 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.match(await warn(page, "k50").textContent(), /share the key x/);
+  await page.evaluate(() => { setDraft(byId("k50"), { choice: "x" }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open for a blocked item");
+  assert.equal(await page.evaluate(() => answerLine()), "");
+});
+
+for (const width of [390, 1440]) {
+  test(`the viewer is fitted the moment it opens, not after a later resize callback, at ${width} wide`, async (t) => {
+    const it = viewerItem();
+    const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 } }); if (!page) return;
+    // Stand-in for CI's wider fallback font: the one-row head is then wider than a phone.
+    await page.addStyleTag({ content: ".dsh-head { letter-spacing: 1.2px }" });
+    const m = await page.evaluate((id) => {
+      document.querySelector(`#item-${id} label.opt .opic`).click();
+      const f = document.querySelector("#dStage iframe").getBoundingClientRect();
+      return { left: f.left, right: f.right, close: document.querySelector("#dClose").getBoundingClientRect().right, sheetW: document.querySelector("#dsheet").scrollWidth, vw: innerWidth };
+    }, it.id);
+    assert.ok(m.close <= m.vw + 0.5, "Close is cut off on open: its right edge is " + m.close);
+    assert.ok(m.sheetW <= m.vw, "the viewer scrolls sideways on open: " + m.sheetW + " in " + m.vw);
+    assert.ok(m.right <= m.vw + 0.5 && m.left >= -0.5, `cut on open: ${m.left} to ${m.right}`);
+    if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "not centered on open");
+  });
+}
