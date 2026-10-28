@@ -46,6 +46,9 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
 .hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
 .mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+/* The repo's own icon sits on a tile chosen so most of its drawn pixels stand out (applyIcon). */
+.mark.icon { background: var(--tile, var(--on-hdr)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-hdr) 28%, transparent); }
+.mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
 .who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .who .sub { font-size: 13.5px; opacity: .88; white-space: nowrap; }
@@ -357,6 +360,36 @@ const FACES = {
 };
 const REPO_VARS = ["--r-hdr-l", "--r-on-hdr-l", "--r-hdr-d", "--r-on-hdr-d", "--r-ink-l", "--r-ink-d", "--r-ground-l", "--r-ground-d", "--r-soft-l", "--r-soft-d", "--r-holds-l", "--r-holds-d", "--r-on-holds-l", "--r-on-holds-d", "--r-due-l", "--r-due-d", "--r-good-l", "--r-good-d"];
 const brandHex = (v) => { const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(v || "").trim()); if (!m) return null; const x = m[1].toLowerCase(); return "#" + (x.length === 3 ? x.replace(/./g, "$&$&") : x); };
+// Only an inline SVG or base64 PNG, never a URL: the page loads no outside images. lint/repo_colour.py reads ICON_MAX from here.
+const ICON_RE = /^data:image\/(?:svg\+xml(?:;[\w=.-]+)*|png;base64),/i, ICON_MAX = 16384;
+const iconOk = (v) => typeof v === "string" && v.length <= ICON_MAX && ICON_RE.test(v);
+// White or dark tile, whichever more of the icon's opaque pixels reach 3:1 against; null when the canvas cannot be read.
+function tileFor(img) {
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 32; const x = c.getContext("2d");
+    x.drawImage(img, 0, 0, 32, 32); const d = x.getImageData(0, 0, 32, 32).data;
+    let w = 0, k = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 128) continue;
+      const hex = "#" + [d[i], d[i + 1], d[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+      if (ratio(hex, "#ffffff") >= 3) w++;
+      if (ratio(hex, DARKTXT) >= 3) k++;
+    }
+    return w >= k ? "#ffffff" : DARKTXT;
+  } catch (e) { return null; }
+}
+// Each applyIdentity takes a new token, so a decode that ends after a newer identity changes nothing.
+let iconSeq = 0;
+function applyIcon(src) {
+  const seq = ++iconSeq, m = $("mark");
+  if (!iconOk(src)) return;
+  const img = new Image(); img.alt = ""; img.src = src;
+  img.decode().then(() => {
+    if (seq !== iconSeq || !img.naturalWidth) return;
+    const t = tileFor(img); if (t) m.style.setProperty("--tile", t);
+    m.textContent = ""; m.append(img); m.classList.add("icon"); m.hidden = false;
+  }, () => {});
+}
 // With no valid brand the neutral defaults in the style block stay, so no colour is drawn here.
 function applyIdentity() {
   const id = (state.meta && state.meta.identity) || {}, st = document.documentElement.style;
@@ -368,8 +401,15 @@ function applyIdentity() {
   }
   const f = FACES[id.face] || FACES.sans, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
   st.setProperty("--wm", f[0]); st.setProperty("--wmw", f[1]); st.setProperty("--wmls", f[2]);
-  $("mark").textContent = (typeof id.mark === "string" && id.mark.trim() ? id.mark.trim() : name).slice(0, 1).toUpperCase();
-  $("mark").hidden = !$("mark").textContent;
+  // A meta write that keeps the icon shown leaves it in place, so the letter never flashes; the new token drops any older decode.
+  const shown = $("mark").classList.contains("icon") && $("mark").querySelector("img");
+  if (shown && iconOk(id.icon) && shown.getAttribute("src") === id.icon) iconSeq++;
+  else {
+    $("mark").textContent = (typeof id.mark === "string" && id.mark.trim() ? id.mark.trim() : name).slice(0, 1).toUpperCase();
+    $("mark").hidden = !$("mark").textContent;
+    $("mark").classList.remove("icon"); $("mark").style.removeProperty("--tile");
+    applyIcon(id.icon);
+  }
   $("repoName").textContent = name || "Waiting on you";
   $("repoSub").hidden = !name;
   document.title = name ? name + ": waiting on you" : "Waiting on you";
