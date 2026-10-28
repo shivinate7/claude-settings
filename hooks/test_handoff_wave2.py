@@ -332,13 +332,16 @@ class Case(object):
         put(self.handoff(sid), "HANDOFF %s\n" % sid)
 
     def nudge(self, sid, cwd=None, size=1000):
-        """A --nudge run for one session, with one assistant usage line of `size` input tokens."""
+        """A --nudge run for one session. A 1000-token first-turn line comes first, then a
+        line of `size` + 1000 input tokens, so the hook reads `size` message tokens."""
         tp = os.path.join(self.root, "nudge-%s.jsonl" % sid)
-        usage = {"input_tokens": size, "cache_creation_input_tokens": 0,
-                 "cache_read_input_tokens": 0}
-        line = json.dumps({"type": "assistant", "message": {
-            "model": "claude-test", "content": [], "usage": usage}})
-        write_transcript(tp, [line])
+
+        def line(n):
+            usage = {"input_tokens": n, "cache_creation_input_tokens": 0,
+                     "cache_read_input_tokens": 0}
+            return json.dumps({"type": "assistant", "message": {
+                "model": "claude-test", "content": [], "usage": usage}})
+        write_transcript(tp, [line(1000), line(size + 1000)])
         return self.run(PRECOMPACT, "--nudge", {
             "session_id": sid, "hook_event_name": "Stop", "stop_hook_active": False,
             "transcript_path": tp, "cwd": cwd or self.proj})

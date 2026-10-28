@@ -55,6 +55,8 @@ For each screen the brief names, write two files in the design folder:
   option first, and let the owner cull. Give each option a control in the mockup that hides it, so
   one press removes one option.
 
+On a port or redesign, the existing app's behaviour is the default (`building-port-keeps-behaviour`). Cite file and symbol for each choice. Ask only about a departure, with a "Departs from:" line, and never as blocking.
+
 You never build the screen. You never review your own mockup. A design reviewer judges the built
 screen against your mockup later.
 

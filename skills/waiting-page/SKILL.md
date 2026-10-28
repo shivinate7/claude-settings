@@ -41,6 +41,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
     ranked items, oldest first. A group sits together at its best member's `rank`.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
+  - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
+    whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
+    "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
+    (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
@@ -64,7 +68,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   records that Send wrote, or puts back the answer they replaced.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
-  them as the delivery trail on the answered card. Without a record the trail shows only "Saved".
+  them on the answered card. With no record, the card says "Answered, filing pending" and the save
+  time. With `filed`, it says "Answered, filed in <home>" (the item's `home`) and the filed time. With only `read`, it
+  also says "Read by <owner>" and the time.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
   `{ref, note}`) and `identity` (`{name, mark, brand, face}`).
@@ -76,7 +82,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - `face` is `sans` (the default), `serif`, `display` or `classic`. It sets the face of the name.
 
 The page hides an item with status `closed`. It shows an item as answered, in place, when
-`answers/<id>` exists. It stays on the page until the owning session closes the item.
+`answers/<id>` exists: a green edge and the badge "Answered, filing pending" or "Answered, filed
+in <home>", never "waited". It stays on the page until the owning session closes the item.
 
 ## The writer
 
@@ -104,7 +111,10 @@ into `meta/page`.
    items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
    unique key, and no key `none`. If a check fails, fix the item at once. The page refuses to send an
    answer to a broken item.
-   - Fill `holds` whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
+   - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
+     and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
+     Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
+   - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
@@ -159,7 +169,9 @@ relays an answer. An answer typed in the chat counts the same.
 ## Route and close
 
 Sort the answer first. A `none` answer takes step 3 only. Any other answer that is not clear takes
-step 4 only. A clear answer takes steps 1 and 2.
+step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
+turn it is filed. An answer whose lane is busy is filed at
+once as a note on its step (the item's home), never held for the lane.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
