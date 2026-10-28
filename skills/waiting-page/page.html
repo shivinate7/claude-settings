@@ -668,7 +668,7 @@ function buildCard(it) {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
     const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
-    card.append(opts, (it.options || []).some((o) => marks(it, o).length) ? h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart.")) : null, ready,
+    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), ready,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
