@@ -185,8 +185,8 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
 3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` from
    `colour_for(repo)` in `docs/design/repo-colours.json` when that file exists. Leave `brand` out
    when the repo has no colour. Never invent a colour.
-4. Put the URL in the repo's extras file: `"waiting-page": "<url>"`. The extras file also marks the
-   repo as rolled out, so add the key only in that roll-out.
+4. Put the URL in the repo's extras file: `"waiting-page": "<url>"`. The file alone does not mark the
+   repo as rolled out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
 5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.
 
 A local session can write to the database (measured on the Mac, Oct 26). A Windows session is

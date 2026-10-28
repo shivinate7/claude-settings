@@ -23,7 +23,10 @@ The layout:
 - Repos with screens add: `docs/design/` (`DESIGN.md`, `mockups/`, `reference/`); `tokens/tokens.json`;
   `shots/`, ignored by git.
 - A repo names its own extra kinds (home's `records/`) in its extras file, `.claude/layout-extras.json`.
-  An extra kind never replaces a core or screen kind. The extras file also marks the repo as rolled out.
+  An extra kind never replaces a core or screen kind. The extras file marks the repo as rolled out only with
+  its own key, `"rolled-out": true`. An extras file with no mark leaves the repo at its legacy folders. Its keys
+  that are not about folder placement (`waiting-page`, `kind`, `caution`, `visibility`, `devices`, `roadmap`)
+  read whenever the file exists.
 
 A repo that has not rolled out is read at its legacy folders, the ones each tool read before the
 layout. So no tool changes its verdict on a repo before that repo moves its own files. A kind that one
@@ -37,6 +40,8 @@ file may repeat a path that map keeps for the kind, never name another. The last
   design ideas.
 - Owner ruling, 2026-10-26 (o15 answer a): the layout gets a core `todo` kind at `docs/todo.md`, with a
   legacy entry for each repo that keeps its tasks elsewhere.
+- Owner ruling, Oct 27, shiv, waiting page item 29 (a): the rolled-out mark is its own key in the extras file,
+  not the file's existence, so a repo holding the file only for a `waiting-page` key is not read as rolled out.
 - A move keeps each file name. No record is renumbered or renamed (one-shared-record-stamp).
 
 Reason: the tools disagreed on where records live. `lint/ste_lint.py` read `docs/decisions` by default,

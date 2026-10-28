@@ -2,9 +2,12 @@
 
 lint/layout.json holds the kinds. A repo adds its own kinds in its extras file (the layout's
 "extras" path, read from the repo root): {"kinds": {"<name>": {"path": "<folder>", ...}}}. An
-extra kind may not replace a layout kind. The extras file may hold no kinds: it is also the mark
-that the repo has rolled out to the layout. Its "waiting-page" key holds the URL of the repo's
-waiting page (`waiting_page()`, skill waiting-page).
+extra kind may not replace a layout kind. The mark that the repo has rolled out to the layout is
+its own key in that file, "rolled-out": true (ROLLED_OUT; owner, Oct 27, waiting page item 29 (a)). An
+extras file with no mark does not roll a repo out. Its keys that are not about folder placement
+("waiting-page", "kind", "caution", "visibility", "devices", "roadmap") read whenever the file
+exists (`has_extras()`). The "waiting-page" key holds the URL of the repo's waiting page
+(`waiting_page()`, skill waiting-page).
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
 layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. A kind
@@ -50,9 +53,18 @@ def _extras(root):
     return os.path.join(root, *layout().get("extras", "").split("/"))
 
 
-def rolled_out(root):
-    """True when `root` holds its extras file, so it keeps every kind at its layout path."""
+ROLLED_OUT = "rolled-out"  # the extras key that marks a repo as rolled out to the layout
+
+
+def has_extras(root):
+    """True when `root` holds its extras file. The keys that are not about folder placement read from it."""
     return bool(layout().get("extras")) and os.path.isfile(_extras(root))
+
+
+def rolled_out(root):
+    """True when `root` holds its extras file and the file's "rolled-out" key is true, so it keeps
+    every kind at its layout path."""
+    return has_extras(root) and _read(_extras(root)).get(ROLLED_OUT) is True
 
 
 def kinds(root=None):
@@ -182,9 +194,9 @@ ARTIFACT_LINK = ("https://claude.ai/artifact/", "https://claude.ai/code/artifact
 
 
 def waiting_page(root):
-    """The URL of the waiting page of `root` (skill waiting-page), from its extras file. "unknown"
-    when the repo has no extras file or no key: a repo with no page is not an error."""
-    if not rolled_out(root):
+    """The URL of the waiting page of `root` (skill waiting-page), from its extras file, mark or not.
+    "unknown" when the repo has no extras file or no key: a repo with no page is not an error."""
+    if not has_extras(root):
         return "unknown"
     found = _read(_extras(root)).get(WAITING_PAGE)
     if found is None:
@@ -208,7 +220,7 @@ def live_pages(roots):
 
 def _repo_keys(root):
     """The extras file of `root` as a dict, or {} when the repo has none."""
-    return _read(_extras(root)) if rolled_out(root) else {}
+    return _read(_extras(root)) if has_extras(root) else {}
 
 
 def _named(root, key, table):
