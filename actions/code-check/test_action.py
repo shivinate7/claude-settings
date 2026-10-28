@@ -1,7 +1,7 @@
 """Tests the code-check runner on throwaway repos. `python3 actions/code-check/test_action.py`.
 Asserts: a tracked language with no row is red (by extension and by shebang), a planted mypy error in
 a listed module is red, a shrunk mypy list is red against the base ref, a missing listed module is red,
-an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
+Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason).
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
@@ -77,6 +77,18 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config([]), "bin/tool": "#!/bin/sh\ncd /x\nrm -rf $y/z\n"})
         self.assertNotEqual(rc, 0, out)
         self.assertIn("shellcheck", out)
+
+    def test_apple_app_files_have_rows_and_zsh_skips_shellcheck(self):
+        # An Apple app repo's own files: Swift, an entitlements plist, zsh scripts by shebang and by extension.
+        zsh = "#!/bin/zsh\nparts=(${(s:,:)1})\nprint -P \"%F{green}${#parts}%f\"\n"
+        rc, out = check({".code-check.json": config([]), "App/App.swift": "import SwiftUI\n",
+                         "App/App.entitlements": "<?xml version=\"1.0\"?>\n<plist version=\"1.0\"><dict/></plist>\n",
+                         "bin/build": zsh, "scripts/env.zsh": zsh})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("no row", out)
+        self.assertIn("swift lint: skipped", out)
+        self.assertIn("zsh lint: skipped", out)
+        self.assertNotIn("shellcheck", out)
 
     def test_excluded_folder_is_not_scanned(self):
         rc, out = check({".code-check.json": config([], ["vendor/"]), "vendor/x.rs": "fn main() {}\n"})
