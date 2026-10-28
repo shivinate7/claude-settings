@@ -8,7 +8,8 @@ stays with the design reviewer. Standard library only.
     python3 lint/check_ios_mockup.py <mockup.html> [<mockup.html> ...]
 
 Faults, one of each code at most per page:
-- system-font: no CSS font-family whose first family is -apple-system or system-ui.
+- system-font: no CSS font-family or font shorthand whose first family is -apple-system or system-ui
+  (or a WebKit Dynamic Type keyword such as -apple-system-body). One level of var() is resolved.
 - safe-area: no CSS env(safe-area-inset-...) call.
 - duo-frames: no element with data-device="iphone-duo-folded" and one with data-device="iphone-duo-unfolded",
   folded first in document order.
@@ -29,6 +30,8 @@ FOLDED, UNFOLDED = "iphone-duo-folded", "iphone-duo-unfolded"  # device ids in l
 SYSTEM_FONTS = ("-apple-system", "system-ui")
 FONT_FAMILY = re.compile(r"(?<![\w-])font-family\s*:\s*([^;{}]*)", re.I)
 FONT_SHORTHAND = re.compile(r"(?<![\w-])font\s*:\s*([^;{}]*)", re.I)
+CUSTOM = re.compile(r"(?<![\w-])(--[\w-]+)\s*:\s*([^;{}]*)")
+VAR = re.compile(r"var\(\s*(--[\w-]+)\s*(?:,([^()]*))?\)")
 SAFE_AREA = re.compile(r"(?<![\w-])env\(\s*safe-area-inset-(?:top|right|bottom|left)\b", re.I)
 
 
@@ -90,9 +93,24 @@ def _first_family(value):
 
 
 def _shorthand_family(value):
-    """The first family of a `font:` shorthand: the text after the size, as in `16px/1.4 -apple-system`."""
-    m = re.search(r"\d(?:[\w.%]*)(?:\s*/\s*[\w.%]+)?\s+(.+)$", value.strip())
-    return _first_family(m.group(1)) if m else ""
+    """The first family of a `font:` shorthand: the last word before the first comma, as in
+    `600 17px/1.3 -apple-system, sans-serif`, or a quoted name there. A keyword alone, such as
+    `-apple-system-body`, is its own family."""
+    head = value.split(",", 1)[0].strip()
+    quoted = re.search(r"([\"'])(.*?)\1", head)
+    if quoted:
+        return quoted.group(2).strip().lower()
+    return head.split()[-1].lower() if head.split() else ""
+
+
+def _is_system(family):
+    """True for -apple-system, system-ui, and a WebKit Dynamic Type keyword such as -apple-system-body."""
+    return family in SYSTEM_FONTS or family.startswith("-apple-system-")
+
+
+def _resolve(value, custom):
+    """`value` with each var(--name, fallback) replaced by the custom property's value, one level deep."""
+    return VAR.sub(lambda m: custom.get(m.group(1), m.group(2) or ""), value)
 
 
 def faults(text):
@@ -102,9 +120,10 @@ def faults(text):
     page.close()
     css = strip_css_comments("\n".join(page.css))
     found = []
-    families = [_first_family(v) for v in FONT_FAMILY.findall(css)]
-    families += [_shorthand_family(v) for v in FONT_SHORTHAND.findall(css)]
-    if not any(f in SYSTEM_FONTS for f in families):
+    custom = {name: value.strip() for name, value in CUSTOM.findall(css)}
+    families = [_first_family(_resolve(v, custom)) for v in FONT_FAMILY.findall(css)]
+    families += [_shorthand_family(_resolve(v, custom)) for v in FONT_SHORTHAND.findall(css)]
+    if not any(_is_system(f) for f in families):
         found.append(("system-font", "no font-family starts with -apple-system or system-ui"))
     if not SAFE_AREA.search(css):
         found.append(("safe-area", "no env(safe-area-inset-...) in the CSS"))

@@ -69,6 +69,10 @@ and type no number that a page you read does not give. If a page does not load, 
 the read is unknown, and use no number from it. In your notes, cite each page you used, with the date you
 read it.
 
+Each page below is a script shell with no text. Its text is at the same path under
+`https://developer.apple.com/tutorials/data/`, with `.json` added, in the field `primaryContentSections`.
+For example, `https://developer.apple.com/tutorials/data/design/human-interface-guidelines/buttons.json`.
+
 Pages read 2026-10-28 (each answered 200):
 
 | Page | What it gives a mockup |
@@ -88,7 +92,7 @@ Draw with native controls and native proportions:
 - Controls. Draw what SwiftUI gives: a navigation stack with a large title, lists, sheets, and a tab bar
   for the sections. Draw no control that iOS does not have, such as a hover state, a web page footer or
   a row of web buttons.
-- Type. The first family in each font-family is `-apple-system` or `system-ui`. Take each size from a
+- Type. The app chrome's font-family starts with `-apple-system` or `system-ui`. Take each size from a
   Dynamic Type text style on the typography page, at the default size.
 - Safe areas. Pad each frame with `env(safe-area-inset-top)` and the other insets, and keep content and
   controls out of the status bar and the home indicator areas.
