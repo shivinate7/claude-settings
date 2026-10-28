@@ -131,8 +131,7 @@ figcaption a{color:var(--accent-text)}
 .tick.on span svg{opacity:1}
 .done .pname,.done .pmeta,.done .pplace{color:var(--text-2)}
 .hint{display:flex;gap:var(--space-2);align-items:center;font-size:15px;padding:var(--space-2) var(--space-3);background:var(--surface-2);border-radius:var(--radius)}
-.hint .tick{width:28px;height:28px}
-.hint .tick span{width:22px;height:22px}
+.glyph{width:22px;height:22px;flex:none;border-radius:50%;border:2px solid var(--edge);display:inline-block}
 
 /* states */
 .empty{flex:1;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:var(--space-4);padding:var(--space-4) 0}
@@ -212,15 +211,20 @@ figcaption a{color:var(--accent-text)}
 
 /* D3 shelf */
 .shelf{display:flex;flex-direction:column;gap:var(--space-1)}
+.shelves{display:flex;flex-direction:column;gap:var(--space-2)}
+.err-c{padding:var(--space-3);gap:var(--space-2)}
+.legend i.hatch{background:repeating-linear-gradient(135deg,var(--surface) 0 3px,var(--edge) 3px 5px);border:1px solid var(--edge)}
+.env-head{font-size:15px;font-weight:600;color:var(--text-2)}
 .shelf-lab{font-size:14px;font-weight:600;color:var(--text-2)}
 .tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-2)}
-.tile{position:relative;height:60px;border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0}
-.tile b{font-size:20px;line-height:1.1}
+.tile{position:relative;height:44px;border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0}
+.tile b{font-size:18px;line-height:1.1}
 .tile small{font-size:12px;color:var(--text-2);font-weight:600}
 .tile.lit{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .tile.lit small{color:var(--on-accent)}
 .tile.wait{border:2px dashed var(--edge)}
-.tile.unk{border-style:dashed;color:var(--text-2)}
+.tile.unk{background:repeating-linear-gradient(135deg,var(--surface) 0 5px,var(--surface-3) 5px 9px);color:var(--text)}
+.tile.unk b,.tile.unk small{background:var(--surface);padding:0 3px;border-radius:3px;color:var(--text)}
 .tile .badge{position:absolute;top:-7px;right:-5px;background:var(--surface);color:var(--accent-text);border:2px solid var(--accent)}
 .tile.sk{background:var(--surface-3);border:0}
 .tile.ghost{border:1px dashed var(--line);background:transparent}
@@ -235,9 +239,9 @@ figcaption a{color:var(--accent-text)}
 .cand svg{width:20px;height:20px;flex:none;color:var(--text-2)}
 
 /* box drawing */
-.boxdraw{display:flex;flex-direction:column;border:2px solid var(--edge);border-radius:10px;overflow:hidden}
+.boxdraw{flex:none;display:flex;flex-direction:column;border:2px solid var(--edge);border-radius:10px;overflow:hidden}
 .boxdraw .front{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-2);text-align:center;padding:2px;background:var(--surface-3)}
-.sec{position:relative;border-top:1px solid var(--edge);background:var(--surface-2)}
+.sec{flex:none;position:relative;border-top:1px solid var(--edge);background:var(--surface-2)}
 .sec .dv{position:absolute;left:var(--space-2);top:4px;font-size:13px;font-weight:600;color:var(--text-2)}
 .mark{position:absolute;z-index:2;left:0;right:0;height:0;border-top:3px solid var(--accent)}
 .mark span{position:absolute;right:var(--space-2);top:-11px;max-width:60%;overflow:hidden;text-overflow:ellipsis;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:700;padding:1px 6px;border-radius:10px;white-space:nowrap}
@@ -298,7 +302,7 @@ const BOXES=BOXDEF.map((b,i)=>{
   let left=count;const secs=b[3].map((nm,j)=>{const n=j===b[3].length-1?left:Math.round(count*w[j]/tw);left-=n;return{name:nm,n}});
   return{i,no:i+1,game:b[0],code:b[1],name:b[2],count,secs,shelf:SHELVES[Math.floor(i/10)],pos:(i%10)+1};
 });
-BOXES[14].count=300;BOXES[14].secs=[{name:"Rares",n:38},{name:"Foils",n:46},{name:"Uncommons",n:72},{name:"Commons A–H",n:50},{name:"Commons I–P",n:48},{name:"Commons Q–Z",n:46}];
+BOXES[14].count=212;BOXES[14].secs=[{name:"Rares",n:38},{name:"Foils",n:46},{name:"Uncommons",n:72},{name:"Commons A–H",n:50},{name:"Commons I–P",n:6}];
 const where=(box,place)=>{let acc=0;for(const s of box.secs){if(place<=acc+s.n)return{sec:s.name,k:place-acc};acc+=s.n}return{sec:box.secs.at(-1).name,k:1}};
 const posText=b=>`${b.shelf}, ${ord(b.pos)} from the left`;
 const CONDS=["Near Mint","Near Mint","Near Mint","Near Mint","Lightly Played","Lightly Played","Moderately Played"];
@@ -327,12 +331,13 @@ const BOX_PULLS=b=>TOPULL.filter(c=>c.box===b);
 const NOW={date:"Wed 28 Oct",time:"9:41",stale:"8:05"};
 // sitting into box 15 (Bloomburrow)
 const SIT=BOXES[14];
-const SIT_DONE=212, SIT_UNSURE=9;
+const SIT_DONE=212, SIT_UNSURE=17, SIT_PLAN=300;
 const SENDN={ready:236,sum:"$517.84",under:47,floor:"$0.49",wait:17,named:283,read:"9:30"};
 const UNSURE={name:"Mabel’s Mettle",set:"BLB",num:"021",place:118,cands:[
   {name:"Mabel’s Mettle",set:"BLB 021",print:"Nonfoil",price:"$0.31"},
   {name:"Mabel’s Mettle",set:"BLB 021",print:"Foil",price:"$1.12"},
   {name:"Mabel’s Mettle",set:"BLB 302",print:"Showcase, Nonfoil",price:"$0.88"}]};
+const UNSURE_AT=[9,22,37,51,61,77,88,104,118,131,140,153,166,177,190,203,210];
 const SERVER="GET /orders?status=Ready → 503 Service Unavailable (api.tcgplayer.com, 09:41:07)";
 
 /* ============ small parts ============ */
@@ -364,21 +369,20 @@ const tabs=(cur,badges=true)=>`<nav class="tabs" aria-label="Main">
  ${[["Pull","box",badges?TOPULL.length:0],["Shoot","camera",0],["Check","ask",badges?SENDN.wait:0],["Send","send",0]].map(([n,i,b])=>`<button class="tab" ${cur===n?'aria-current="page"':""}>${ic(i)}<span>${n}</span>${b?`<span class="badge" aria-label="${b} waiting">${b}</span>`:""}</button>`).join("")}
 </nav>`;
 function d1Pull(s){
-  const sub={list:`${TOPULL.length} cards in ${PULL_BOXES.length} boxes, for ${PULL_ORDERS.length} orders`,loading:"",empty:"",error:`Last list at ${NOW.stale}`}[s];
+  const sub={list:`${TOPULL.length} cards in ${PULL_BOXES.length} boxes, for ${PULL_ORDERS.length} orders`,loading:"",empty:"",error:""}[s];
   let body="";
   if(s==="list"){
     const groups=[...new Set(PULL.map(c=>c.box))];
-    body=`<p class="hint">${tick(false,"Example circle")}<span>Tap the circle when the card is in your hand.</span></p>`+
+    body=`<p class="hint"><span class="glyph" aria-hidden="true"></span><span>Tap the circle when the card is in your hand.</span></p>`+
     groups.map(b=>`<section class="group" aria-label="Box ${b.no}"><div class="ghead"><b class="ell">Box ${b.no} · ${esc(b.name)}</b><span class="small muted" style="flex:none">${b.shelf.replace(" shelf","")}, ${ord(b.pos)}</span></div>
-      ${PULL.filter(c=>c.box===b).map(c=>`<div class="prow${c.pulled?" done":""}">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pmeta ell">${cardMeta(c)}</div><div class="pplace">${placeLine(c)}</div></div>${tick(c.pulled,`${c.name}, card ${c.place} in box ${b.no}: pulled`)}</div>`).join("")}</section>`).join("");
+      ${PULL.filter(c=>c.box===b).map(c=>`<div class="prow${c.pulled?" done":""}">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pmeta ell">${cardMeta(c)}</div><div class="pplace">${placeLine(c)}</div></div>${tick(c.pulled,`${c.name}, card ${c.place} in box ${b.no}: pulled`)}</div>`).join("")}</section>`).join("")+`<section class="group"><div class="ghead"><b>Envelopes</b></div><p class="small muted">${PACK.length} orders have all their cards.</p></section>`;
   }else if(s==="empty"){
     body=`<div class="empty"><p>No cards to pull. When a card sells, it shows here.</p><button class="btn btn-p">Check for sales now</button></div>`;
   }else if(s==="loading"){
     body=`${loadNote("Getting today’s sales from TCGplayer…")}<div class="group"><div class="sk" style="height:18px;width:60%"></div>${skRows(3)}</div><div class="group"><div class="sk" style="height:18px;width:50%"></div>${skRows(3)}</div>`;
   }else{
     body=errBox("Banchi could not get today’s sales from TCGplayer. Cards that sold after 8:05 may be missing.")+
-    `<p class="small muted">Cards from the list at ${NOW.stale}:</p>`+
-    PULL.slice(0,3).map(c=>`<div class="prow${c.pulled?" done":""}">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pplace ell">Box ${c.box.no} · ${placeLine(c)}</div></div>${tick(c.pulled,`${c.name}: pulled`)}</div>`).join("");
+    PULL.slice(0,3).map(c=>`<div class="prow${c.pulled?" done":""}">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pplace">Box ${c.box.no} · ${placeLine(c)}</div></div>${tick(c.pulled,`${c.name}: pulled`)}</div>`).join("");
   }
   return `${status()}<header class="hd"><div class="hd-row"><h1>Pull</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div>${sub?`<p class="sub">${sub}</p>`:""}</header><div class="body">${body}</div>${tabs("Pull",s==="list"||s==="error")}`;
 }
@@ -399,8 +403,15 @@ function d1BoxRight(s){
   if(s==="loading")return `${status()}<header class="hd"><div class="sk" style="height:28px;width:60%"></div><div class="sk" style="height:16px;width:40%"></div></header><div class="body"><div class="sk" style="height:300px"></div>${skRows(2)}</div>`;
   const b=PULL_BOXES[0];const cs=BOX_PULLS(b);
   return `${status()}<header class="hd"><div class="hd-row"><h1>Box ${b.no}</h1></div><p class="sub">${esc(b.name)} · ${posText(b)}</p></header>
-  <div class="body">${s==="error"?`<p class="stale">From the list at ${NOW.stale}.</p>`:""}${boxDrawing(b,cs,s==="error"?250:300)}
+  <div class="body">${boxDrawing(b,cs,300)}
   ${cs.map(c=>`<div class="prow">${photo(c,56,true)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pmeta ell">${cardMeta(c)}</div><div class="pplace">${placeLine(c)}</div></div></div>`).join("")}</div>`;
+}
+function d1Pack(){
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Pull</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div><p class="sub">${TOPULL.length} cards in ${PULL_BOXES.length} boxes, for ${PULL_ORDERS.length} orders</p></header>
+  <div class="body"><section class="group" aria-label="Envelopes"><div class="ghead"><b>Envelopes</b><span class="small muted">at the end of the list</span></div>
+  <p class="hint"><span class="glyph" aria-hidden="true"></span><span>These orders have all their cards. Write the name on an envelope, put the cards in, seal it, then tap its circle.</span></p>
+  ${[...PACK,...ORDERS.filter(o=>o.state==="packed").slice(0,3)].map(o=>{const done=o.state==="packed";return `<div class="prow${done?" done":""}"><span class="icon-btn" style="border:0" aria-hidden="true">${ic("env")}</span><div class="pmain"><div class="pname ell">${esc(o.buyer)}</div><div class="pmeta ell">${o.cards.length} ${o.cards.length===1?"card":"cards"}: ${o.cards.map(c=>esc(c.name)).join(", ")}</div></div>${tick(done,`Envelope for ${o.buyer}: packed`)}</div>`}).join("")}
+  </section></div>${tabs("Pull")}`;
 }
 function d1Shoot(){
   const last=[205,206,207,208,209,210,211,212].slice(-5).map((p,i)=>({p,c:makeCard(SIT,p),u:i===2}));
@@ -432,7 +443,7 @@ function d1Send(){
 const D1={name:"Four tabs",idea:"A plain tab bar: Pull, Shoot, Check, Send. One tab per act. The first tab is Pull, so the helper opens the app where the helper works.",
  fold:s=>d1Pull(s),
  unf:s=>[d1Pull(s),d1BoxRight(s)],
- views:{shoot:d1Shoot,check:d1Check,send:d1Send}};
+ views:{pack:d1Pack,shoot:d1Shoot,check:d1Check,send:d1Send}};
 
 /* ============ D2 · Today ============ */
 function d2Today(s){
@@ -444,7 +455,7 @@ function d2Today(s){
   if(s==="list")body=pullJob+rest;
   else if(s==="empty")body=`<div class="empty"><p>Your shelf is empty. Photograph your first box to fill it.</p><button class="btn btn-p btn-big">${ic("camera")}Photograph a box</button></div>`;
   else if(s==="loading")body=`<section class="job" style="height:172px">${loadNote("Getting today’s sales…")}<div class="sk" style="height:16px;width:80%"></div><div class="sk" style="height:56px"></div></section>`+[1,2].map(()=>`<section class="job" style="height:150px"><div class="sk" style="height:20px;width:60%"></div><div class="sk" style="height:16px;width:85%"></div><div class="sk" style="height:48px"></div></section>`).join("");
-  else body=`<section class="job"><h2>${ic("box")}Pull sold cards</h2>${errBox("Banchi could not get today’s sales from TCGplayer. You can still pull the cards from the 8:05 list.")}<button class="btn btn-w">Pull from the 8:05 list</button></section>`+rest;
+  else body=`<section class="job"><h2>${ic("box")}Pull sold cards</h2>${errBox("Banchi could not get today’s sales from TCGplayer. Sales after 8:05 may be missing.")}<button class="btn btn-w">Pull from the last list</button></section>`+rest;
   return `${status()}<header class="hd"><div class="hd-row"><h1>Today</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div><p class="sub">${NOW.date}</p></header><div class="body">${body}</div>`;
 }
 function d2Step(variant="b",stale=false){
@@ -505,7 +516,7 @@ function d2Send(heldAll=false){
 function d2Right(s){
   if(s==="empty")return `${status()}<div class="body">${explainer("How Banchi works")}</div>`;
   if(s==="loading")return `${status()}<div class="body" style="padding-top:16px"><div class="sk" style="height:140px"></div><div class="sk" style="height:28px;width:70%"></div><div class="sk" style="height:134px;width:96px"></div></div>`;
-  return d2Step("b",s==="error");
+  return d2Step("b");
 }
 function d2Helper(){
   return `${status()}<header class="hd"><div class="hd-row"><h1>Sold cards</h1></div><p class="sub">${NOW.date}</p></header>
@@ -520,50 +531,63 @@ const D2={name:"Today",idea:"No tabs. One home that lists today’s jobs as plai
 
 /* ============ D3 · Shelf (bold) ============ */
 function tiles(s){
-  return SHELVES.map((sh,si)=>`<div class="shelf"><span class="shelf-lab">${sh}</span><div class="tiles">${BOXES.slice(si*10,si*10+10).map(b=>{
-    if(s==="loading")return `<div class="tile sk" style="border:0"></div>`;
+  return `<div class="shelves">`+SHELVES.map((sh,si)=>`<div class="shelf"><span class="shelf-lab">${sh}</span><div class="tiles">${BOXES.slice(si*10,si*10+10).map(b=>{
+    if(s==="loading")return `<div class="tile sk"></div>`;
     const n=BOX_PULLS(b).length;const w=b===SIT;
-    if(s==="error")return `<button class="tile unk" aria-label="Box ${b.no}, sales not known"><b>${b.no}</b><small>${b.code}</small></button>`;
-    return `<button class="tile${n?" lit":""}${w&&!n?" wait":""}" aria-label="Box ${b.no}, ${esc(b.name)}${n?`, ${n} to pull`:""}${w?`, ${SENDN.wait} wait for you`:""}"><b>${b.no}</b><small>${b.code}</small>${n?`<span class="badge" aria-hidden="true">${n}</span>`:""}</button>`}).join("")}</div></div>`).join("");
+    if(s==="error")return `<button class="tile unk${w?" wait":""}" aria-label="Box ${b.no}, sales not known${w?`, ${SENDN.wait} wait for you`:""}"><b>${b.no}</b><small>${b.code}</small></button>`;
+    return `<button class="tile${n?" lit":""}${w&&!n?" wait":""}" aria-label="Box ${b.no}, ${esc(b.name)}${n?`, ${n} to pull`:""}${w?`, ${SENDN.wait} wait for you`:""}"><b>${b.no}</b><small>${b.code}</small>${n?`<span class="badge" aria-hidden="true">${n}</span>`:""}</button>`}).join("")}</div></div>`).join("")+`</div>`;
 }
+const tableTile=()=>`<button class="table-tile">${ic("env")}<span class="pmain"><b>Packing table</b><span class="small muted">${PACK.length} ready to seal · ${PULL_ORDERS.length} filling</span></span>${ic("chev")}</button>`;
 function d3Shelf(s){
   let body="",foot="";
   if(s==="empty"){
     body=`<div class="shelf"><span class="shelf-lab">${SHELVES[0]}</span><div class="tiles">${Array.from({length:5},()=>`<div class="tile ghost"></div>`).join("")}</div></div><div class="empty" style="justify-content:flex-start"><p>Your shelf has no boxes yet. Add your first box, then photograph its cards.</p><button class="btn btn-p btn-big">${ic("box")}Add a box</button></div>`;
   }else{
-    const lead={list:`<p class="hint" style="background:var(--accent-weak)">Blue boxes hold sold cards. Tap one to open it.</p>`,loading:loadNote("Getting today’s sales…"),error:errBox("Banchi could not get today’s sales, so it cannot light the boxes.")}[s];
-    body=lead+(s==="error"?"":tiles(s))+(s==="error"?`<div class="legend"><span>Boxes below: sales not known</span></div>`+tiles(s):"")+
-      (s==="list"?`<div class="legend"><span><i style="background:var(--accent)"></i>sold cards inside</span><span><i style="border:2px dashed var(--edge)"></i>cards wait for you</span></div>`:"")+
-      (s==="loading"?"":`<button class="table-tile">${ic("env")}<span class="pmain"><b>Packing table</b><span class="small muted">${PACK.length} envelopes ready to seal · ${PULL_ORDERS.length} filling</span></span>${ic("chev")}</button>`);
+    const lead={
+      list:`<div class="legend"><span><i style="background:var(--accent)"></i>Blue: sold cards inside. Tap to open.</span><span><i style="border:2px dashed var(--edge)"></i>Dashed: cards wait for you</span></div>`,
+      loading:loadNote("Getting today’s sales…"),
+      error:`<div class="err err-c" role="alert"><p class="err-t">${ic("alert")}<span>Banchi could not get sales. Striped boxes may hold sold cards.</span></p><div class="cluster"><button class="btn btn-p">Try again</button>${why()}</div></div>`}[s];
+    body=lead+tiles(s)+(s==="loading"?"":tableTile());
     foot=`<div class="foot"><div class="act3"><button class="btn">${ic("camera")}Photograph</button><button class="btn">${ic("ask")}Check ${SENDN.wait}</button><button class="btn">${ic("send")}Send ${SENDN.ready}</button></div></div>`;
   }
-  return `${status()}<header class="hd"><div class="hd-row"><h1>Shelf</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div>${s==="empty"?"":`<p class="sub">30 boxes · 9,214 cards</p>`}</header><div class="body">${body}</div>${foot}`;
+  return `${status()}<header class="hd"><div class="hd-row"><h1>Shelf</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div></header><div class="body">${body}</div>${foot}`;
 }
 function d3Box(b,opts={}){
   b=b||PULL_BOXES[0];const cs=BOX_PULLS(b);
   return `${status()}<header class="hd"><div class="hd-row"><button class="back">${ic("back")}Shelf</button><span class="muted small">${b.count} cards</span></div><h1>Box ${b.no} · ${esc(b.name)}</h1><p class="sub">${posText(b)}</p></header>
   <div class="body">${opts.stale?`<p class="stale">From the list at ${NOW.stale}.</p>`:""}${boxDrawing(b,cs,250,opts.unsure||[])}
-   ${opts.unsure?"":`<p class="hint">${tick(false,"Example circle")}<span>Take out each blue card. Tap its circle.</span></p>`+cs.map(c=>`<div class="prow">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pplace">${placeLine(c)}</div></div>${tick(false,`${c.name}, card ${c.place}: pulled`)}</div>`).join("")}
+   ${opts.unsure?"":`<p class="hint"><span class="glyph" aria-hidden="true"></span><span>Take out each blue card. Tap its circle.</span></p>`+cs.map(c=>`<div class="prow">${photo(c,40)}<div class="pmain"><div class="pname ell">${esc(c.name)}</div><div class="pplace">${placeLine(c)}</div></div>${tick(false,`${c.name}, card ${c.place}: pulled`)}</div>`).join("")}
   </div>${opts.foot===false?"":`<div class="foot"><button class="btn btn-w">${ic("camera")}Photograph more cards into this box</button></div>`}`;
 }
 function d3Shoot(){
   return `${status()}<header class="hd"><div class="hd-row"><button class="back">${ic("back")}Shelf</button><span class="chip on">Auto</span></div><h1>Filling Box 15</h1></header>
   <div class="body"><div class="vf" style="height:300px"><div class="guide" style="width:150px;height:210px"><i></i><i></i><i></i><i></i>${photo(makeCard(SIT,213),126)}</div><div class="ov bot"><span class="pill">Card 213</span></div></div>
-  <div class="fillbar" role="img" aria-label="${SIT_DONE} cards in box 15 so far"><i style="width:${SIT_DONE/300*100}%"></i><span>${SIT_DONE} cards in Box 15 so far</span></div>
+  <div class="fillbar" role="img" aria-label="${SIT_DONE} cards in box 15 so far"><i style="width:${SIT_DONE/SIT_PLAN*100}%"></i><span>${SIT_DONE} of about ${SIT_PLAN} cards in Box 15</span></div>
   <p class="small muted">Section now: Commons I–P. ${SIT_UNSURE} cards wait for you; they keep their place.</p>
   <div class="shoot-row"><button class="btn">${ic("stop")}End sitting</button><button class="shutter" aria-label="Take photograph of card 213"><span></span></button><span></span></div></div>`;
 }
 function d3Check(){
-  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${d3Box(SIT,{unsure:[37,61,118,140,177,203],foot:false})}</div>
+  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${d3Box(SIT,{unsure:UNSURE_AT,foot:false})}</div>
   <div class="scrim"></div><div class="sheet" role="dialog" aria-label="Card 118"><div class="grab"></div>
   <div class="cardrow">${photo({name:UNSURE.name,a:"200deg"},72,true)}<div class="stack" style="gap:2px;min-width:0"><b>Card 118 · ${UNSURE.name}</b><span class="small muted">Which printing is it? 1 of ${SENDN.wait}</span></div></div>
   <div class="stack" style="gap:8px">${candList()}</div><button class="btn btn-w">Not one of these: hold it back</button></div>`;
 }
-function d3Pack(){
-  const os=ORDERS.filter(o=>o.state!=="packed").slice(0,10);
-  return `${status()}<header class="hd"><div class="hd-row"><button class="back">${ic("back")}Shelf</button></div><h1>Packing table</h1><p class="sub">One envelope per order. Dots are its cards.</p></header>
-  <div class="body"><div class="env-grid">${os.map(o=>{const n=o.cards.length,inn=o.cards.filter(c=>c.pulled).length;const ready=inn===n;
-   return `<button class="envt${ready?" sealed":""}" aria-label="${esc(o.buyer)}, ${inn} of ${n} cards in"><b class="ell">${esc(o.buyer)}</b><span class="dots">${o.cards.map(c=>`<i class="${c.pulled?"in":""}"></i>`).join("")}</span><span class="small ${ready?"":"muted"}">${ready?"Seal it":`${n-inn} to pull`}</span></button>`}).join("")}</div></div>`;
+function envTile(o){const n=o.cards.length,inn=o.cards.filter(c=>c.pulled).length;
+  return `<button class="envt${inn===n?" sealed":""}" aria-label="${esc(o.buyer)}, ${inn} of ${n} cards in"><b class="ell">${esc(o.buyer)}</b><span class="dots" aria-hidden="true">${o.cards.map(c=>`<i class="${c.pulled?"in":""}"></i>`).join("")}</span></button>`}
+function d3Pack(stale=false){
+  const fill=PULL_ORDERS.slice(0,8);
+  return `${status()}<header class="hd"><div class="hd-row"><button class="back">${ic("back")}Shelf</button></div><h1>Packing table</h1><p class="sub">One envelope per order. A filled dot is a card in it.</p></header>
+  <div class="body">${stale?`<p class="stale">From the list at ${NOW.stale}.</p>`:""}<p class="env-head">Ready to seal</p><div class="env-grid">${PACK.map(envTile).join("")}</div>
+  <p class="env-head">Still filling</p><div class="env-grid">${fill.map(envTile).join("")}</div></div>`;
+}
+function d3Seal(){
+  const o=PACK[0];const n=o.cards.length;
+  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${d3Pack()}</div><div class="scrim"></div>
+  <div class="sheet" role="dialog" aria-label="Envelope for ${esc(o.buyer)}"><div class="grab"></div>
+  <h2 style="font-size:20px">Envelope for ${esc(o.buyer)}</h2>
+  <ol class="stack" style="margin:0;padding-left:20px;gap:6px"><li>Write “${esc(o.buyer)}” on an envelope.</li><li>Put ${n===1?"the card":`all ${n} cards`} in it.</li><li>Seal it, then tap the button.</li></ol>
+  <div class="stack" style="gap:6px">${o.cards.map(c=>`<div class="cardrow" style="align-items:center">${photo(c,36)}<span class="pmain"><span class="pname ell">${esc(c.name)}</span><span class="pmeta ell">${c.set} ${c.num} · ${c.print}</span></span></div>`).join("")}</div>
+  <button class="btn btn-p btn-big btn-w">${ic("env")}Mark packed</button><button class="btn btn-q">Not yet</button></div>`;
 }
 function d3Send(){
   return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${d3Shelf("list")}</div><div class="scrim"></div>
@@ -575,13 +599,13 @@ function d3Send(){
 function d3Right(s){
   if(s==="empty")return `${status()}<div class="body">${explainer("How the shelf works")}</div>`;
   if(s==="loading")return `${status()}<header class="hd"><div class="sk" style="height:28px;width:60%"></div></header><div class="body"><div class="sk" style="height:280px"></div>${skRows(2)}</div>`;
-  if(s==="error")return d3Pack();
+  if(s==="error")return d3Pack(true);
   return d3Box(PULL_BOXES[0]);
 }
 const D3={name:"Shelf (bold)",idea:"The app is a drawing of the real shelf. No tabs and no order list. Thirty box tiles sit where the boxes sit. Sold cards light their box; you zoom in from shelf to box to card. The packing table is one more place on the shelf.",
  fold:s=>d3Shelf(s),
  unf:s=>[d3Shelf(s),d3Right(s)],
- views:{box:()=>d3Box(PULL_BOXES[0]),shoot:d3Shoot,check:d3Check,pack:d3Pack,send:d3Send}};
+ views:{box:()=>d3Box(PULL_BOXES[0]),shoot:d3Shoot,check:d3Check,pack:()=>d3Pack(),seal:d3Seal,send:d3Send}};
 
 const DIRS=[D1,D2,D3];
 const STATES=["empty","loading","list","error"];

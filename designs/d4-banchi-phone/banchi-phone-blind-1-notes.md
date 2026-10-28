@@ -6,12 +6,12 @@ Lane kind: blind. Lane: banchi-phone-blind-1. Mockup: `banchi-phone-blind-1.html
 PNGs: `png/`. All cards, orders and buyers are made up.
 
 Deep links: `#d=<1..3>&s=<empty|loading|list|error>&size=<folded|unfolded>&t=<light|dark>` shows one frame.
-More screens: `#d=<n>&v=<view>&t=light` (D1: shoot, check, send. D2: pull, pack, shoot, check, send.
-D3: box, shoot, check, pack, send). Pick pictures: `#pick=<2a..4b>&t=light`. Overview: `#d=<n>&ov=1&t=light`.
+More screens: `#d=<n>&v=<view>&t=light` (D1: pack, shoot, check, send. D2: pull, pack, shoot, check, send.
+D3: box, shoot, check, pack, seal, send). Pick pictures: `#pick=<2a..4b>&t=light`. Overview: `#d=<n>&ov=1&t=light`.
 
 Data in every list state: 18 orders today (5 packed, 2 ready to seal, 11 with 16 cards to pull in
-10 boxes), 30 boxes on 3 shelves (9,214 cards), a Bloomburrow sitting of 300 cards (212 shot,
-17 wait for the seller), a send of 236 cards at $517.84, with 47 under the $0.49 floor held back.
+10 boxes), 30 boxes on 3 shelves, a Bloomburrow sitting into Box 15 of about 300 cards (212 shot so
+far, so Box 15 holds 212; 17 of them wait for the seller, everywhere the count shows), a send of 236 cards at $517.84, with 47 under the $0.49 floor held back.
 
 Colour: Banchi blue #3d5af1 is the only hue. Everything else is neutral grey. Status shows by shape
 (filled, outlined, dashed), not by a second hue. In dark theme, blue text uses a light tint of the
@@ -26,6 +26,9 @@ same blue (#a3afff) for 4.5:1; blue fills keep #3d5af1 with white text (4.9:1).
   card at a time, the candidates as rows, Hold back or Skip), then Send (one summary, one button).
 - Helper: opens on Pull. Each row says box, card number, the count after a divider, and the buyer.
   Tap the circle when the card is in hand. Unfolded: the right page draws the box with the cards to pull.
+  Packing: an "Envelopes" section at the end of the Pull list (view `pack`) lists each order whose cards
+  are all pulled, with its cards by name. The helper writes the name on an envelope, puts the cards in,
+  seals it and taps its circle; the row stays in place, marked packed.
 - Gain: familiar; every act one tap away; easy to build. Loss: the helper sees seller tabs and
   badges they never use; the list asks the helper to read many rows; Pack is only a section of Pull.
 
@@ -55,10 +58,13 @@ same blue (#a3afff) for 4.5:1; blue fills keep #3d5af1 with white text (4.9:1).
   cards show as dashed marks at their place in the box. Send is a sheet over the shelf.
 - Helper: "Blue boxes hold sold cards. Tap one." The box view draws the box from above, front at
   the top, dividers as bands, each sold card as a blue line at its place. The Packing table shows one
-  envelope per order with a dot per card.
+  envelope per order with a dot per card, split into "Ready to seal" and "Still filling". Tapping a
+  ready envelope opens a sheet (view `seal`): write the name, put the cards in, seal, then "Mark packed".
+  When sales cannot be read, all box tiles turn striped ("sales not known"); dashed keeps one meaning,
+  "cards wait for you". The first screen fits 780 tall with the Packing table visible.
 - Gain: matches what the helper sees at the shelf; place in the box is a picture, not a number;
-  the seller sees the whole store at a glance. Loss: 30 tiles is the limit before the grid needs to
-  scroll or shrink; tiles need a number label on each real box; no common app works like this, so
+  the seller sees the whole store at a glance. Loss: 30 tiles (44 px tall) is the limit before the
+  first screen needs to scroll; tiles need a number label on each real box; no common app works like this, so
   a first-time user needs the one-line hint.
 
 ## Design choices
@@ -78,7 +84,8 @@ same blue (#a3afff) for 4.5:1; blue fills keep #3d5af1 with white text (4.9:1).
 6. **"Auto" shoots when a still card fills the guide.** Gain: zero attention per card. Loss: needs the
    camera code to detect a still card; if it cannot, the claim is false (ux-claims-are-true).
    Pick: show it, confirm it can be built. Owner grant: yes.
-7. **A failed sales read keeps the last list, labelled with its time ("From the list at 8:05").**
+7. **A failed sales read keeps the last list, and the time of that list shows once per screen** (in the
+   error sentence, or on the D3 Packing table page that the error opens next to).
    Gain: the helper can still work; unknown is not shown as empty. Loss: a card that sold after 8:05
    is missing until Try again works. Pick: keep the labelled list.
 8. **Server text hides behind "What the server said".** Gain: plain words first (ux-machine-text-hidden).
@@ -94,7 +101,7 @@ same blue (#a3afff) for 4.5:1; blue fills keep #3d5af1 with white text (4.9:1).
 12. **Unfolded uses the right page for the next level (box or walk step), not a wider list.** Gain:
     the two pages read as list and detail; nothing sits under the hinge. Loss: a laptop pose puts the
     detail on the upright half only. Pick: list left, detail right.
-13. **Only one hue.** Status by shape (filled, outlined, dashed). Gain: follows the palette rule;
+13. **Only one hue.** Status by shape (filled, outlined, dashed, striped), one meaning per shape. Gain: follows the palette rule;
     works for colour-blind users. Loss: the error box has no red. Pick: one hue.
 
 ## Picks for shiv
