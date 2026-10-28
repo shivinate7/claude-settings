@@ -16689,6 +16689,24 @@ if os.name != "nt":
 else:
     skip_case("simulator: the boot and hold rules, every case of the family", NO_SIMULATOR)
 
+
+
+def sim_test_cap_check():
+    """bin/sim-test keeps its own CAP, as bash cannot import SIM_BOOT_CAP. The two must be equal."""
+    with open(os.path.join(HERE, "..", "bin", "sim-test"), encoding="utf-8") as f:
+        caps = re.findall(r"^CAP=(\d+)\b", f.read(), re.M)
+    want = _load_guard_module().SIM_BOOT_CAP
+    if caps != [str(want)]:
+        return False, "bin/sim-test CAP lines %s, want one equal to SIM_BOOT_CAP %d" % (caps, want)
+    return True, "bin/sim-test CAP=%d equals SIM_BOOT_CAP" % want
+
+
+# LOG_CHECKS_EXTRA has already joined LOG_CHECKS above, so this check joins LOG_CHECKS itself.
+SIM_TEST_CAP_LABEL = "simulator: bin/sim-test's cap equals SIM_BOOT_CAP"
+LOG_CHECKS = LOG_CHECKS + ((SIM_TEST_CAP_LABEL, sim_test_cap_check),)
+LOG_FAMILY[SIM_TEST_CAP_LABEL] = FAMILY
+FIXTURELESS_CHECKS.add(sim_test_cap_check)
+
 # The SKIP rows join last, so a skip_case anywhere above, the simulator one too, prints its row.
 LOG_CHECKS = LOG_CHECKS + tuple(SKIP_ROWS)
 
