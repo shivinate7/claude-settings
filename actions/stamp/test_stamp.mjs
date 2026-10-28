@@ -5,8 +5,8 @@
 // repository's own tree and never share state with each other.
 
 import assert from "node:assert/strict";
-import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
-import { execFileSync, spawnSync } from "node:child_process";
+import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync, openSync, closeSync } from "node:fs";
+import { execFileSync, spawnSync, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +23,42 @@ delete process.env.GITHUB_ACTIONS;
 // A fixture repo has no remote. The off-branch question reads the local default branch instead.
 const LOCAL = { base: "main" };
 
-const HERE = dirname(fileURLToPath(import.meta.url));
+const SELF = fileURLToPath(import.meta.url);
+const HERE = dirname(SELF);
+
+// A fixture git must never wait on a person or start work that outlives its command: no prompt,
+// no editor, no auto gc or maintenance, no fsmonitor daemon. stamp.mjs inherits this env too.
+Object.assign(process.env, { GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GCM_INTERACTIVE: "never" });
+for (const [key, value] of [["gc.auto", "0"], ["maintenance.auto", "false"], ["core.fsmonitor", "false"]]) {
+  const n = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+  process.env[`GIT_CONFIG_KEY_${n}`] = key;
+  process.env[`GIT_CONFIG_VALUE_${n}`] = value;
+  process.env.GIT_CONFIG_COUNT = String(n + 1);
+}
+
+// Every command this suite runs goes through sh() or shSync(). A hung command then reads red at
+// its own test, named, instead of hanging the suite. stdin is closed so nothing can wait on it.
+const CALL_TIMEOUT_MS = 60_000;
+const callOpts = (opts) => ({ timeout: CALL_TIMEOUT_MS, killSignal: "SIGKILL", windowsHide: true,
+  stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"], ...opts });
+const timedOut = (cmd, args, opts) =>
+  new Error(`timed out after ${(opts.timeout ?? CALL_TIMEOUT_MS) / 1000} s: ${cmd} ${args.join(" ")}`);
+
+function sh(cmd, args, opts = {}) {
+  try {
+    return execFileSync(cmd, args, callOpts(opts));
+  } catch (e) {
+    if (e.code === "ETIMEDOUT") throw timedOut(cmd, args, opts);
+    throw e;
+  }
+}
+
+function shSync(cmd, args, opts = {}) {
+  const r = spawnSync(cmd, args, callOpts(opts));
+  if (r.error?.code === "ETIMEDOUT") throw timedOut(cmd, args, opts);
+  if (r.error) throw r.error;
+  return r;
+}
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -48,7 +83,7 @@ function read(root, rel) {
 }
 
 function git(root, ...args) {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  return sh("git", args, { cwd: root, encoding: "utf8" });
 }
 
 function initRepo(root) {
@@ -68,7 +103,7 @@ function runCheck(root, configPath, actions, extra = []) {
   const env = { ...process.env };
   delete env.GITHUB_ACTIONS;
   if (actions !== undefined) env.GITHUB_ACTIONS = actions;
-  return spawnSync("node", [join(HERE, "stamp.mjs"), "--check", ...extra, "--config", configPath], { cwd: root, encoding: "utf8", env });
+  return shSync("node", [join(HERE, "stamp.mjs"), "--check", ...extra, "--config", configPath], { cwd: root, encoding: "utf8", env });
 }
 
 function withEnv(name, value, fn) {
@@ -1252,7 +1287,7 @@ test("--check reports a shallow history as the full history, not the tree", () =
     deletedTopRepo(src);
     claimCommit(src);
     const shallow = join(root, "shallow");
-    execFileSync("git", ["clone", "-q", "--depth", "3", "--no-local", "--branch", "wt/lane", `file://${src}`, shallow]);
+    sh("git", ["clone", "-q", "--depth", "3", "--no-local", "--branch", "wt/lane", `file://${src}`, shallow]);
     git(shallow, "fetch", "-q", "--depth", "1", "origin", "main:refs/remotes/origin/main");
     const problems = check(shallow, frontmatterConfig(), { base: "origin/main" });
     assert.match(problems.unknown ?? "", /cannot read the full history.*fetch-depth: 0/s);
@@ -1266,7 +1301,7 @@ test("claim: a shallow clone is refused with the remedy, and nothing is written"
     deletedTopRepo(src);
     git(src, "checkout", "-q", "main");
     const shallow = join(root, "shallow");
-    execFileSync("git", ["clone", "-q", "--depth", "1", "--no-local", `file://${src}`, shallow]);
+    sh("git", ["clone", "-q", "--depth", "1", "--no-local", `file://${src}`, shallow]);
     write(shallow, "docs/decisions/p.md", pendingRec("p"));
     assert.throws(() => claim(shallow, frontmatterConfig(), "origin/main"), /shallow.*fetch-depth: 0/s);
     assert.equal(read(shallow, "docs/decisions/p.md").includes("id: pending"), true);
@@ -1316,7 +1351,7 @@ test("claim CLI: needs --base, prints the trailer line, and exits 1 on an unread
   withTempDir((root) => {
     claimRepo(root);
     const cfg = join(HERE, "examples/frontmatter.stamp.json");
-    const run = (...a) => spawnSync("node", [join(HERE, "stamp.mjs"), "--claim", ...a, "--config", cfg], { cwd: root, encoding: "utf8" });
+    const run = (...a) => shSync("node", [join(HERE, "stamp.mjs"), "--claim", ...a, "--config", cfg], { cwd: root, encoding: "utf8" });
     assert.equal(run().status, 2);
     const bad = run("--base", "no-such-ref");
     assert.equal(bad.status, 1);
@@ -1444,7 +1479,7 @@ test("the CLI runs, and never exits 0 silent, when reached through a symlinked d
     initRepo(root);
     write(root, "docs/decisions/a.md", rec(1, "a"));
     commit(root, "main");
-    const r = spawnSync("node", [join(link, "stamp.mjs"), "--check", "--config", join(HERE, "examples/frontmatter.stamp.json")], { cwd: root, encoding: "utf8" });
+    const r = shSync("node", [join(link, "stamp.mjs"), "--check", "--config", join(HERE, "examples/frontmatter.stamp.json")], { cwd: root, encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /every pending record is in order/);
   }));
@@ -1463,7 +1498,7 @@ function emptyKindsRepo(root, kinds) {
   writeFileSync(cfg, JSON.stringify(kinds === undefined ? {} : { kinds }));
   return cfg;
 }
-const runStamp = (root, cfg, mode) => spawnSync("node", [join(HERE, "stamp.mjs"), `--${mode}`, "--base", "main", "--config", cfg, "--root", root], { cwd: root, encoding: "utf8" });
+const runStamp = (root, cfg, mode) => shSync("node", [join(HERE, "stamp.mjs"), `--${mode}`, "--base", "main", "--config", cfg, "--root", root], { cwd: root, encoding: "utf8" });
 
 test("--claim with kinds: [] exits 0, prints no Record-claim line and changes no file", () =>
   withTempDir((tmp) => {
@@ -1735,19 +1770,162 @@ test("scanner: a near-miss after a fence that holds a multi-line template litera
   assert.equal(flaggedWith(problems, "D`one`", "D‹one›"), true, problems.join("\n"));
 });
 
+// ---------------------------------------------------------------- watchdog
+// The suite is synchronous, so a timer inside it never fires while a command hangs. Run normally,
+// this file re-runs itself as a child with piped stdio, so no process under it holds the runner's
+// output pipe, and keeps the timer here. On expiry it names the running test, prints the live
+// process tree, kills that tree and exits 1. STAMP_SUITE_CAP_S sets the cap, inside the step's own.
+const CHILD = "STAMP_SUITE_CHILD";
+const HANG = "STAMP_SUITE_HANG_FIXTURE"; // a pid file: the child runs only hangFixture
+const START = "STAMP-START ";
+const POSIX = process.platform !== "win32";
+
+// A command that never ends, whose own child holds the pipe too. Both write their pids first.
+const hangFixture = {
+  name: "hang fixture: a command and its child sleep forever",
+  fn: () => {
+    const forever = "setInterval(() => {}, 1e9)";
+    const code = `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(forever)}], { stdio: "inherit" });
+require("fs").writeFileSync(process.env.${HANG}, process.pid + " " + c.pid); ${forever}`;
+    shSync(process.execPath, ["-e", code]);
+  },
+};
+
+const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// A zombie still answers signal 0, so on Linux its state counts too.
+function alive(pid) {
+  try { process.kill(pid, 0); } catch { return false; }
+  try { return !/^\d+ \(.*\) Z/s.test(readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return true; }
+}
+
+test("watchdog: a hung command reads red within the cap, names its test, and leaves no process", () =>
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "3", [HANG]: pidFile };
+    delete env[CHILD];
+    // A file, not a pipe: without a watchdog the fixture would hold a pipe, and this test, forever.
+    const outFile = join(dir, "out.txt");
+    const fd = openSync(outFile, "w");
+    const t0 = Date.now();
+    let r, pids = [], left = [];
+    try {
+      r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 20_000 });
+    } finally {
+      closeSync(fd);
+      if (existsSync(pidFile)) pids = readFileSync(pidFile, "utf8").trim().split(" ").map(Number);
+      for (let i = 0; i < 30 && pids.some(alive); i++) sleepMs(100);
+      left = pids.filter(alive);
+      for (const pid of left) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    }
+    const secs = (Date.now() - t0) / 1000;
+    const out = readFileSync(outFile, "utf8");
+    assert.equal(r.status, 1, out);
+    assert.ok(secs < 15, `took ${secs} s\n${out}`);
+    assert.match(out, /FAIL - hang fixture: a command and its child sleep forever/, out);
+    assert.equal(pids.length, 2, out);
+    assert.deepEqual(left, [], `still running: ${left}\n${out}`);
+  }));
+
+// Each live process under root, one line per process with its command line.
+function processTree(root) {
+  try {
+    if (POSIX) {
+      // The child leads its own process group, so the group holds even an orphaned grandchild.
+      const ps = shSync("ps", ["-eo", "pid=,ppid=,pgid=,args="], { encoding: "utf8", timeout: 15_000 });
+      return ps.stdout.split("\n").filter((l) => l.trim().split(/\s+/)[2] === String(root));
+    }
+    const walk = `$all = @(Get-CimInstance Win32_Process); $ids = @(${root});
+for ($i = 0; $i -lt $ids.Count; $i++) { foreach ($p in $all) {
+  if ($p.ParentProcessId -eq $ids[$i] -and $ids -notcontains $p.ProcessId) {
+    $ids += $p.ProcessId; '{0} {1} {2}' -f $p.ProcessId, $p.ParentProcessId, $p.CommandLine } } }`;
+    const ps = shSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], { encoding: "utf8", timeout: 15_000 });
+    return ps.stdout.split(/\r?\n/).filter((l) => l.trim());
+  } catch (e) {
+    return [`(process tree unreadable: ${e.message})`];
+  }
+}
+
+// Windows: taskkill /T follows parent links from root, and each listed pid covers a process whose
+// parent already exited.
+function killTree(root, lines) {
+  if (POSIX) {
+    try { process.kill(-root, "SIGKILL"); } catch {}
+    return;
+  }
+  const pids = [root, ...lines.map((l) => l.split(" ")[0]).filter((p) => /^\d+$/.test(p))];
+  try { shSync("taskkill", ["/T", "/F", ...pids.flatMap((p) => ["/PID", String(p)])], { timeout: 15_000 }); } catch {}
+}
+
+function watchdog() {
+  const capS = Number(process.env.STAMP_SUITE_CAP_S) || 240;
+  const child = spawn(process.execPath, [SELF], {
+    env: { ...process.env, [CHILD]: "1" }, stdio: ["ignore", "pipe", "pipe"], detached: POSIX, windowsHide: true,
+  });
+  let current = null, pending = "", over = false;
+  const forward = (line) => {
+    const bare = line.replace(/\r$/, "");
+    if (bare.startsWith(START)) current = bare.slice(START.length);
+    else process.stdout.write(line + "\n");
+  };
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (d) => {
+    const lines = (pending + d).split("\n");
+    pending = lines.pop();
+    lines.forEach(forward);
+  });
+  child.stderr.on("data", (d) => process.stderr.write(d));
+
+  // Ends without process.exit, so the output still queued on a Windows pipe drains first.
+  const finish = (code) => {
+    if (over) return;
+    over = true;
+    clearTimeout(timer);
+    if (pending) forward(pending);
+    child.stdout.destroy();
+    child.stderr.destroy();
+    child.unref();
+    process.exitCode = code;
+  };
+  const stopTree = (why) => {
+    if (over) return;
+    if (pending) { forward(pending); pending = ""; }
+    console.error(why);
+    const lines = processTree(child.pid);
+    console.error(lines.length ? lines.join("\n") : "(none)");
+    killTree(child.pid, lines);
+    finish(1);
+  };
+  const timer = setTimeout(() => stopTree(
+    `FAIL - ${current ?? "(before the first test)"}\nThe suite ran past its ${capS} s cap (STAMP_SUITE_CAP_S). Processes still running under it:`,
+  ), capS * 1000);
+  child.on("close", (code) => finish(code ?? 1));
+  // An exit with no close means a process the suite started still holds its output.
+  child.on("exit", (code) => {
+    clearTimeout(timer);
+    setTimeout(() => stopTree(`FAIL - the suite exited ${code}, but a process it started still holds its output:`), 5000).unref();
+  });
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => stopTree(`Stopped by ${sig}. Processes under the suite:`));
+}
+
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
 if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }
-let failed = 0;
-for (const { name, fn } of tests) {
-  try {
-    fn();
-    console.log(`ok - ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.error(`FAIL - ${name}`);
-    console.error(err.stack ?? err);
+if (process.env[CHILD] !== "1") watchdog();
+else {
+  const run = process.env[HANG] ? [hangFixture] : tests;
+  let failed = 0;
+  for (const { name, fn } of run) {
+    console.log(START + name); // the watchdog reads this to name a hung test
+    try {
+      fn();
+      console.log(`ok - ${name}`);
+    } catch (err) {
+      failed += 1;
+      console.error(`FAIL - ${name}`);
+      console.error(err.stack ?? err);
+    }
   }
+  console.log(`${run.length - failed} of ${run.length} passed.`);
+  if (failed) process.exitCode = 1;
 }
-console.log(`${tests.length - failed} of ${tests.length} passed.`);
-if (failed) process.exit(1);
