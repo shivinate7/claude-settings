@@ -163,6 +163,17 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .tr .s { font: 600 15px/1.4 var(--mono); }
 .opt .tr .gain .s { color: var(--good); }
 .opt .tr .lose .s { color: var(--holds); }
+/* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { border-left: 0; margin-left: 0; padding: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .dfitwrap { border-left: 3px solid var(--acc); }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
 .opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
 .opt .nopick { align-self: end; }
@@ -475,16 +486,17 @@ function pictureProblem(it) {
   const withPic = (it.options || []).map((o) => ({ o, ds: optionDesigns(it, o) })).filter((x) => x.ds.length);
   for (let i = 0; i < withPic.length; i++) for (let j = i + 1; j < withPic.length; j++) {
     const a = withPic[i].ds[0], b = withPic[j].ds[0], ha = DESIGN_HTML[a.slug], hb = DESIGN_HTML[b.slug];
-    if ((a.focus || "") === (b.focus || "") && (a.slug === b.slug || (ha != null && ha === hb)))
+    if ((a.focus || "") === (b.focus || "") && stateOf(a) === stateOf(b) && (a.slug === b.slug || (ha != null && ha === hb)))
       return "Options " + letterOf(it, withPic[i].o.key) + " and " + letterOf(it, withPic[j].o.key) + " share one picture, so neither shows its own difference.";
   }
+  const finds = (html, sel) => { try { return !!new DOMParser().parseFromString(html, "text/html").querySelector(sel); } catch (e) { return false; } };
+  const drawsState = (d) => finds(DESIGN_HTML[d.slug], '[data-state="' + stateOf(d).replace(/["\\]/g, "\\$&") + '"]');
   for (const { o, ds } of withPic) for (const d of ds) {
-    const html = DESIGN_HTML[d.slug];
-    if (!d.focus || html == null) continue;
-    let hit = false;
-    try { hit = !!new DOMParser().parseFromString(html, "text/html").querySelector(d.focus); } catch (e) {}
-    if (!hit) return "The picture of option " + letterOf(it, o.key) + " shows nothing the focus names.";
+    if (DESIGN_HTML[d.slug] == null) continue;
+    if (d.focus && !finds(DESIGN_HTML[d.slug], d.focus)) return "The picture of option " + letterOf(it, o.key) + " shows nothing the focus names.";
+    if (stateOf(d) && !drawsState(d)) return "The picture of option " + letterOf(it, o.key) + " names a state its mockup does not draw.";
   }
+  for (const d of looseDesigns(it)) if (stateOf(d) && DESIGN_HTML[d.slug] != null && !drawsState(d)) return "The design " + d.label + " names a state its mockup does not draw.";
   return null;
 }
 // What is wrong with an item, as { text, blocks }, or null. One home for every check.
@@ -559,26 +571,37 @@ const hasPics = (it) => !!it.look || (it.options || []).some((o) => o.design) ||
 // A question about how something looks sets `look`: an option card with no picture then shows a warning.
 // An item's designs. An older item has no `designs` and names `design` on its options only: each of those counts as one design. An item that lists `designs` is read as written, so an option naming a design it lacks warns.
 const designsOf = (it) => (it.designs && it.designs.length) ? it.designs : (it.options || []).filter((o) => o.design).map((o) => ({ slug: o.design, label: o.label }));
-const optionDesigns = (it, o) => { const all = designsOf(it), first = all.filter((d) => d.slug === o.design), more = all.filter((d) => d.option === o.key && d.slug !== o.design); return [...first, ...more]; };
-function optPic(it, o) {
+// A design that names an `option` belongs to that option only, so two options may share one slug and differ by `state`.
+const optionDesigns = (it, o) => { const all = designsOf(it), first = all.filter((d) => d.slug === o.design && (!d.option || d.option === o.key)), more = all.filter((d) => d.option === o.key && !first.includes(d)); return [...first, ...more]; };
+// The writer names what sets an option apart in `differs` (picture, how, gain, lose). The page drops a name whose text is the same in every other option, a picture on an option with no picture, and any other name.
+const FIELDS = ["picture", "how", "gain", "lose"];
+function marks(it, o) {
+  const others = (it.options || []).filter((x) => x !== o);
+  const val = (x, f) => { if (f !== "picture") return String(x[f] || "").trim(); const d = optionDesigns(it, x)[0]; return d ? d.slug + "|" + (d.state || "") + "|" + (d.focus || "") : ""; };
+  return (Array.isArray(o.differs) ? o.differs : []).filter((f, i, a) => FIELDS.includes(f) && a.indexOf(f) === i && (f !== "picture" || optionDesigns(it, o).length) && others.some((x) => val(x, f) !== val(o, f)));
+}
+const sr = () => h("span", { class: "sr" }, "Sets this option apart: ");
+const ne = () => h("span", { class: "ne", "aria-hidden": "true" }, "≠");
+function optPic(it, o, dif) {
   const mine = optionDesigns(it, o), has = mine.length > 0;
   if (!has && !it.look) return h("span", { class: "opic" });
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
-  return h("span", { class: "opic", role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen", onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
-    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn), h("span", { class: "view", "aria-hidden": "true" }, "View"));
+  return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
+    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0])), h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
 }
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
 function optCard(it, o, chosen) {
-  const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key;
+  const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key, m = marks(it, o), on = (f) => m.includes(f);
+  const mark = (f) => on(f) ? [sr()] : [], tail = (f) => on(f) ? [ne()] : [];
   return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
-    hasPics(it) ? optPic(it, o) : null,
+    hasPics(it) ? optPic(it, o, on("picture")) : null,
     h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": "h-" + sfx + " t-" + sfx + (o.key === it.pick ? " p-" + sfx : ""), checked: chosen === o.key, onchange: () => choose(it, o.key),
       onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
     h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab", id: "l-" + sfx }, o.label)),
-    h("p", { class: "how", id: "h-" + sfx }, o.how),
-    h("div", { class: "tr", id: "t-" + sfx }, h("div", { class: "gain" }, h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain)), h("div", { class: "lose" }, h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose))),
+    h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
+    h("div", { class: "tr", id: "t-" + sfx }, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
     o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
@@ -611,8 +634,8 @@ function designPreview(it) {
         h("button", { class: "btn quiet", type: "button", "aria-label": "Previous design", onclick: () => { i = (i + list.length - 1) % list.length; draw(); } }, "Prev"),
         h("button", { class: "btn quiet", type: "button", "aria-label": "Next design", onclick: () => { i = (i + 1) % list.length; draw(); } }, "Next"));
     }
-    bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", onclick: () => openDesign(d.slug) }, "Open full size"));
-    box.replaceChildren(bar, fitFrame(d.slug, d.label, false));
+    bar.append(h("span", { class: "sp" }), h("button", { class: "btn quiet", type: "button", "aria-label": stateOf(d) ? "Open the " + stateWords(stateOf(d)) + " state in the viewer" : null, onclick: () => openShown(it, d) }, stateOf(d) ? "Open this state" : "Open full size"));
+    box.replaceChildren(bar, fitFrame(d.slug, designTitle(d), false, "", 1, null, 0, null, stateOf(d)));
   };
   draw(); return box;
 }
@@ -643,9 +666,9 @@ function buildCard(it) {
   const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   if (it.kind === "decision") {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
-    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "")).join("+")).join() : null });
+    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
-    card.append(opts, ready,
+    card.append(opts, (it.options || []).some((o) => marks(it, o).length) ? h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart.")) : null, ready,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
@@ -717,7 +740,7 @@ function syncOpts(old, nu) {
   copyAttrs(old, nu);
   [...old.children].forEach((ol, i) => {
     const nl = nu.children[i];
-    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic")]], nl);
+    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic"), (o, n) => { copyAttrs(o, n); const v = o.querySelector(".view"), nv = n.querySelector(".view"); if (v && nv) v.replaceWith(nv); }]], nl);
   });
 }
 function patch(old, nu) {
@@ -798,6 +821,8 @@ function renderList() {
 
 /* ---------- Overview ---------- */
 function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+// The wide rail chip shows `short` when it is a text of 24 characters or fewer, else the title (cut with an ellipsis by the chip).
+const shortOf = (it) => typeof it.short === "string" && it.short.trim() && it.short.trim().length <= 24 ? it.short.trim() : it.title;
 function renderRail() {
   const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
   const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().length;
@@ -806,7 +831,7 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, it.title));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
     const open = list.filter((i) => !isSaved(i)).length, row = h("div", { class: "chips-n" }), seen = new Set();
@@ -845,6 +870,8 @@ const NOT_TOLD = "No session was told; reply in the thread to wake one.";
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
+// "No. 1", "No. 1 and No. 2", "No. 1, No. 2 and No. 3".
+const nList = (ns) => { const a = ns.slice().sort((x, y) => x - y).map((n) => "No. " + n); return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; };
 function noticeText(entries, head, tail) {
   const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
   const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : "")); }).join(", ");
@@ -941,7 +968,7 @@ function renderSent() {
 async function undoSend() {
   const p = state.sentPanel; if (!p || p.busy || undoLeft(p) <= 0) return;
   p.busy = true;
-  const undone = [], late = [];
+  const undone = [], late = [], failed = [];
   // Deletes come first and each one checks the clock, so none runs after the window a session waits out.
   const todo = p.wrote.slice().reverse();
   for (let i = 0; i < todo.length; i++) {
@@ -950,14 +977,14 @@ async function undoSend() {
     try {
       const ref = state.db.collection("answers").doc(w.it.id);
       if (w.prior) await ref.set(w.prior); else await ref.delete();
-    } catch (e) { state.barNote = "Undo failed (" + (e && e.code || "error") + ") at No. " + w.it.n + "."; break; }
+    } catch (e) { todo.slice(i).forEach((x) => failed.push(x.it.n)); state.barNote = "Undo failed (" + (e && e.code || "error") + "). Not undone: " + nList(failed) + "."; break; }
     if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
     if (w.draft) state.draft[w.it.id] = w.draft; if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
-    // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else.
-    if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); delete state.receipts[w.it.id]; } catch (e) {} }
+    // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else, and the old receipt leaves the page state either way.
+    if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); } catch (e) {} delete state.receipts[w.it.id]; }
   }
-  if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + late.map((n) => "No. " + n).join(" and ") + "."; }
+  if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + nList(late) + "."; }
   saveDraft(); closeSent(); render();
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
   if (told.length) {
@@ -988,6 +1015,18 @@ $("send").addEventListener("click", sendAll);
 /* ---------- Designs: each mockup is stored whole in this page and shown in a sandboxed frame ---------- */
 let DESIGN_HTML = {};
 try { DESIGN_HTML = JSON.parse($("designData").textContent) || {}; } catch (e) {}
+// A design may carry `state`: the mockup draws that state (an element with data-state) when its hash reads #s=<state>.
+const stateOf = (d) => (d && typeof d.state === "string" ? d.state : "");
+const stateWords = (s) => s.replace(/-/g, " ");
+// One home for a design's name with its state: the viewer title, the caption and each frame's title.
+const designTitle = (d) => d.label + (stateOf(d) ? ", " + stateWords(stateOf(d)) : "");
+const stateHash = (s) => "s=" + encodeURIComponent(s);
+// The script goes after the doctype, never before it, so the mockup keeps standards mode.
+function withState(html, state) {
+  if (!state) return html;
+  const sc = "<script>try{location.hash=" + JSON.stringify(stateHash(state)) +"}catch(e){}<\/script>", m = /^\s*<!doctype[^>]*>/i.exec(html);
+  return m ? m[0] + sc + html.slice(m[0].length) : sc + html;
+}
 const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
 // A mockup is drawn 390 wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const FIT_W = 390;
@@ -1001,10 +1040,10 @@ const fitScript = (focus) => '<script>(function(){var F=' + JSON.stringify(focus
 // `size` ({w, h}) is the declared size of what the card shows: the focused element, else the whole mockup. It holds the height until the mockup reports its own.
 // `drawn` is the width in mockup pixels the design is laid out at (default FIT_W). The frame has that width, and the scale is the width it has divided by it.
 // `head` (the viewer's) runs before each fit, and the same observer watches the viewer title, so a caption shown or hidden is fitted around.
-function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head) {
-  const DW = drawn > 0 ? drawn : FIT_W, key = slug + "|" + (focus || "");
+function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state) {
+  const DW = drawn > 0 ? drawn : FIT_W, key = slug + "|" + (focus || "") + (state ? "|" + state : "");
   const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
-  f.srcdoc = (DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>") + fitScript(focus);
+  f.srcdoc = withState(DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>", state) + fitScript(focus);
   f.style.width = DW + "px";
   const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
   const fit = () => {
@@ -1038,14 +1077,18 @@ let dList = [], dAt = 0, dFrom = null, dY = 0;
 const STAGE = {};
 // The caption repeats the title only while the head cuts it.
 function capFit() { const t = $("dTitle"); $("dCap").classList.toggle("on", t.scrollWidth > t.clientWidth); }
-function stageFrame(d) { if (!STAGE[d.slug]) { STAGE[d.slug] = fitFrame(d.slug, d.label, false, "", 2, null, d.drawn, capFit); $("dStage").append(STAGE[d.slug]); } return STAGE[d.slug]; }
+const openStateLabel = (d) => "Open the " + stateWords(stateOf(d)) + " state of the full mockup in a new tab";
+function stageFrame(d) { const k = d.slug + "|" + stateOf(d) + "|" + d.label; if (!STAGE[k]) { STAGE[k] = fitFrame(d.slug, designTitle(d), false, "", 2, null, d.drawn, capFit, stateOf(d)); $("dStage").append(STAGE[k]); } return STAGE[k]; }
 function showDesign(i) {
   dAt = (i + dList.length) % dList.length; const d = dList[dAt];
   // The head fields come first: they set the head's width, and the fit reads the stage's width.
-  $("dTitle").textContent = d.label; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
-  $("dCap").textContent = d.label;
+  const vl = designTitle(d);
+  $("dTitle").textContent = vl; $("dPos").textContent = (dAt + 1) + (window.matchMedia("(max-width: 520px)").matches ? "/" : " of ") + dList.length;
+  $("dCap").textContent = vl;
   $("dPrev").hidden = $("dNext").hidden = dList.length < 2;
   $("dBack").textContent = "Answer No. " + d.it.n;
+  const st = stateOf(d);
+  $("dFull").querySelector(".lg").textContent = st ? "Open this state" : "Open full size"; $("dFull").setAttribute("aria-label", st ? openStateLabel(d) : "Open full size");
   Object.values(STAGE).forEach((f) => f.classList.add("off")); stageFrame(d).classList.remove("off"); FITS.forEach((x) => x.fit()); // a frame fitted while hidden has no width; fit now, not at a later resize callback
 }
 // The viewer of one item: every option's design at every width the item carries, in option order.
@@ -1056,8 +1099,15 @@ function openViewer(it, o) {
 }
 $("dFull").onclick = () => {
   const d = dList[dAt]; if (!d) return;
-  try { window.open(URL.createObjectURL(new Blob([DESIGN_HTML[d.slug] || ""], { type: "text/html" })), "_blank", "noopener"); } catch (e) {}
+  try { window.open(URL.createObjectURL(new Blob([DESIGN_HTML[d.slug] || ""], { type: "text/html" })) + (stateOf(d) ? "#" + stateHash(stateOf(d)) : ""), "_blank", "noopener"); } catch (e) {}
 };
+// A card keeps its click closures while its content is unchanged, but the items are rebuilt as new objects, so match by id, never by object.
+// No exact match: open by slug and state. No match at all: open nothing, never a wrong design.
+function openShown(it, d) {
+  const all = allDesigns(), same = (x) => x.it.id === it.id && x.slug === d.slug && stateOf(x) === stateOf(d);
+  let at = all.findIndex((x) => same(x) && x.label === d.label); if (at < 0) at = all.findIndex(same);
+  if (at >= 0) openDesign(null, all, at);
+}
 function openDesign(slug, list, at) {
   dList = list || allDesigns(); if (!dList.length) return;
   dFrom = document.activeElement; dY = scrollY; document.body.classList.add("sheet-open"); $("dsheet").hidden = false;
