@@ -192,10 +192,13 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .receipt .line { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 15.5px; }
 .receipt .line b { color: var(--good); }
 .receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
-.trail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.trail li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 13px; background: var(--chip); color: var(--faint); }
-.trail li.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
-.trail li .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px; border-radius: 999px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
 
 .checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
 .parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
@@ -524,12 +527,11 @@ function receipt(it) {
   if (it.kind === "task") what = "Marked done";
   else if (sv.choice === NONE) what = "None of these";
   else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
-  const steps = [["Saved " + fmt(sv.at, false), true], ["Read by " + it.owner + (rc.read ? " " + fmt(rc.read, false) : ""), !!rc.read], ["Filed in " + it.home + (rc.filed ? " " + fmt(rc.filed, false) : ""), !!rc.filed]];
   return h("div", { class: "receipt" },
-    h("div", { class: "line" }, glyph("done"), h("b", {}, what + "."), h("span", {}, fmt(sv.at)),
+    h("div", { class: "line" }, glyph("done"), h("b", {}, what + "."),
+      rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
       h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
-    sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null,
-    h("ol", { class: "trail", "aria-label": "Where the answer is" }, steps.map(([s, on]) => h("li", { class: on ? "on" : "" }, h("span", { class: "dot" }), s))));
+    sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
 }
 function designPreview(it) {
   const list = looseDesigns(it), box = h("div", { class: "dprev" }); let i = 0;
@@ -547,10 +549,11 @@ function designPreview(it) {
   draw(); return box;
 }
 function buildCard(it) {
-  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {};
+  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = state.receipts[it.id] || {};
   const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
-  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n), h("span", {}, waited(it.added)));
-  if (it.minutes) top.append(h("span", {}, minutesText(it.minutes)));
+  const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
+    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " + fmt(rc.filed) : "Answered, filing pending " + fmt(state.answers[it.id].at)) : h("span", {}, waited(it.added)));
+  if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
   const bad = problem(it);
@@ -735,7 +738,7 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ", sent" : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, it.title));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + ((state.receipts[it.id] || {}).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? ((state.receipts[it.id] || {}).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => jump("item-" + it.id) }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, it.title));
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
     const open = list.filter((i) => !isSaved(i)).length, row = h("div", { class: "chips-n" }), seen = new Set();
