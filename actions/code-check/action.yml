@@ -1,9 +1,10 @@
 name: Code check
 description: >
   One type check and one bug lint per language, from the table in standard.json beside this file.
-  Fails on a tracked language with no row, on a bug a pinned tool finds, and on a shrunk mypy list.
+  Fails on a tracked language with no row, on a bug a pinned tool finds, and on a mypy list that shrank
+  since the base ref or the default branch on origin, a listed module renamed off the list included.
   The repo's mypy module list and excluded folders live in .code-check.json at its root. The caller
-  needs actions/checkout with fetch-depth 0 (the shrink check reads the base ref) and setup-python.
+  needs actions/checkout with fetch-depth 0 (the shrink check reads the base ref and origin's default branch) and setup-python.
   Pinned tools run through pipx or npx (tsc, and astro-check for .astro), so the runner needs Node.
   Formatter layers wait for o2 and do not run.
 inputs:
@@ -18,6 +19,7 @@ runs:
       shell: bash
       env:
         BASE: ${{ inputs.base }}
+        MAIN: origin/${{ github.event.repository.default_branch }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
-        python3 "$ACTION_PATH/code_check.py" --base "$BASE"
+        python3 "$ACTION_PATH/code_check.py" --base "$BASE" --main "$MAIN"
