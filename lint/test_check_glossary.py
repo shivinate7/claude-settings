@@ -221,7 +221,9 @@ class CodeNameTests(Fixture):
     """The widened check: identifiers, rule anchors, record slugs and hook messages on added lines."""
     EXTRA = ("| refuse | What a guard does. | `rule:one-rule` | `deny (this sense)`, `block (this sense)` |\n"
              "| agent | Anything the Agent tool starts. | `rule:one-rule` | `subagent` |\n"
-             "| safety hole | A guard that lets an act through. | `rule:one-rule` | `hole` |\n")
+             "| safety hole | A guard that lets an act through. | `rule:one-rule` | `hole` |\n"
+             "| helper | A worker that runs one task. | `rule:one-rule` | `worker (this sense)` |\n"
+             "| record | One entry in a records folder. | `rule:one-rule` | `entry (this sense)` |\n")
 
     def setUp(self):
         super().setUp()
@@ -283,31 +285,33 @@ class CodeNameTests(Fixture):
         self.green("hooks/x.py", 'deny = 1\nblock_it = 2\nMSG = "The guard will deny it."\n')
         self.green("actions/x.mjs", "const renderBlock = 1;\n")
 
-    def test_this_sense_word_is_left_out_of_paths_anchors_and_slugs(self):
-        """A "(this sense)" name is read nowhere, so a path, anchor or slug that uses its word passes."""
-        self.green("hooks/deny.py", "x = 1\n")
-        self.green("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:two-deny-rule -->\n")
-        self.green("docs/notes.md", "See `stop-blocks-live-tasks`.\n")
-
-    def test_this_sense_name_passes_in_a_path_an_anchor_and_a_slug(self):
-        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA
-                 + "| finding | A report. | `rule:one-rule` | `issue (this sense)` |\n")
-        self.base_repo()
-        self.put("docs/github-issue-notes.md", "Sync: `github-issue-sync-log` <!-- rule:github-issue-sync -->\n")
-        self.commit()
-        code, out = self.run_check()
-        self.assertEqual(code, 0, out)
+    def test_this_sense_word_fails_in_a_path_and_passes_in_code_beside_it(self):
+        """One added file holds a "(this sense)" word in its path, an identifier, a string and a hook message.
+        Only the path fails. A path, anchor or slug is a name a reader copies, so the check reads it there.
+        Code can use the word in its other sense, so the check leaves the identifier, string and message to a reviewer."""
+        code, out = self.change("hooks/worker_slot.py",
+                                'worker_slot = 1\nKEY = "worker_slot"\nMSG = "The worker slot is free."\n')
+        self.assertEqual(code, 1, out)
+        self.assertIn("hooks/worker_slot.py", out)
+        for line in (1, 2, 3):
+            self.assertNotIn("hooks/worker_slot.py:%d" % line, out)
 
     def test_this_sense_words_are_never_read_as_the_name(self):
         """The tag's own words, "this sense", are never read: not in a path, anchor, slug, identifier or message."""
         self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA
                  + "| finding | A report. | `rule:one-rule` | `issue (this sense)` |\n")
         self.base_repo()
-        self.put("docs/issue-this-sense.md", "Sync: `issue-this-sense-log` <!-- rule:issue-this-sense -->\n")
-        self.put("hooks/x.py", 'issue_this_sense = 1\nMSG = "Refused: an issue this sense."\n')
+        self.put("docs/this-sense-notes.md", "Sync: `this-sense-log` <!-- rule:this-sense-rule -->\n")
+        self.put("hooks/x.py", 'issue_this_sense = 1\nthis_sense = 2\nMSG = "Refused: an issue this sense."\n')
         self.commit()
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
+
+    def test_this_sense_name_fails_in_a_path_an_anchor_and_a_slug(self):
+        """A "(this sense)" name is read where a reader copies a name: a new path, a rule anchor and a backticked slug."""
+        self.red("hooks/worker_slot.py", "x = 1\n", "hooks/worker_slot.py")
+        self.red("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:roles-worker-slot -->\n", "CLAUDE.md:4")
+        self.red("docs/notes.md", "See `write-the-entry-slug-now`.\n", "docs/notes.md:1")
 
     def test_issues_key_passes_in_yaml_only(self):
         self.put("GLOSSARY.md", HEAD + ROWS + "| finding | A report. | `rule:one-rule` | `issue` |\n")
