@@ -1,4 +1,4 @@
-# Hook inputs carry no token counts; the transcript carries total context only
+# PreCompact and Stop inputs carry no token counts; statusLine and the transcript carry total context only
 
 ## The question
 
