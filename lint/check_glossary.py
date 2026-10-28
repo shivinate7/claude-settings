@@ -57,19 +57,32 @@ TICKED_SLUG = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+){2,})`")
 IDENT = re.compile(r"[A-Za-z_$][\w$]*")
 REGEX_LIKE = re.compile(r"\\|\(\?")  # a pattern, not a message
 NAME_LIKE = re.compile(r"[\w.$/-]+")  # a string with no space is a name, not a sentence
-# Per extension: line comment, block comment open, block comment close.
+# Per language of a non-Python file, how its text is cut: line comment, block comment open and close,
+# whether a backtick opens a template literal, whether `/` can open a regex literal, whether `#` is a
+# comment only at a word start, whether `<<WORD` opens a here-document, and the string escape.
+JS = {"line": "//", "open": "/*", "close": "*/", "template": True, "regex": True, "esc": "\\"}
+SH = {"line": "#", "wordstart": True, "heredoc": True, "esc": "\\"}
+PS = {"line": "#", "open": "<#", "close": "#>", "esc": "`", "tick": True}
+HASH = {"line": "#", "esc": "\\"}
+PLAIN = {"esc": "\\"}
 SCRIPT = {
-    ".js": ("//", "/*", "*/"), ".mjs": ("//", "/*", "*/"), ".cjs": ("//", "/*", "*/"),
-    ".sh": ("#", None, None), ".yml": ("#", None, None), ".yaml": ("#", None, None),
-    ".ps1": ("#", "<#", "#>"), ".json": (None, None, None),
+    ".js": JS, ".mjs": JS, ".cjs": JS, ".ts": JS, ".tsx": JS, ".jsx": JS,
+    ".sh": SH, ".bash": SH, ".ps1": PS, ".toml": HASH, ".json": PLAIN, ".cmd": PLAIN, ".bat": PLAIN,
+    ".yml": None, ".yaml": None,  # YAML has its own reader
 }
+REGEX_AFTER = set("(,=:[!&|?{};+-*%<>~^")
+REGEX_WORDS = ("return", "typeof", "case", "in", "of", "delete", "void", "throw", "else")
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_]\w*)\1")
+YAML_KEY = re.compile(r"^(\s*)(?:-\s+)*([A-Za-z_$][\w.$-]*)\s*:(?:\s+(.*?))?\s*$")
+YAML_ITEM = re.compile(r"^(\s*)-\s+(.*?)\s*$")
+YAML_BLOCK = re.compile(r"[|>][+-]?\d?\s*(?:#.*)?$")
 
 
 def read(rel):
     try:
         with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8-sig") as f:
             return f.read()
-    except OSError:
+    except (OSError, ValueError):  # unreadable, or not text
         return None
 
 
@@ -134,14 +147,22 @@ def name_problems(where, text, table, plain=False):
     # Read with and without case steps: HandOver may mean handover or hand over.
     forms = [words(text), words(text, camel=True)]
     for term, _homes, names in table:
+        spelled = words(term)  # a "not" word inside its own term, such as `hole` in `safety hole`, is the term
         for name in names:
             if plain and name.endswith(PROSE_TAG):
                 continue
             name = name[:-len(PROSE_TAG)] if name.endswith(PROSE_TAG) else name
             n = words(name)
-            if n and any(same(w[i:i + len(n)], n) for w in forms for i in range(len(w) - len(n) + 1)):
+            if n and any(same(w[i:i + len(n)], n) and not inside(w, i, len(n), spelled)
+                         for w in forms for i in range(len(w) - len(n) + 1)):
                 out.append("%s uses '%s'; the glossary name is '%s'" % (where, name, term))
     return out
+
+
+def inside(w, i, count, term):
+    """True when words w[i:i + count] lie within one spelling of the term's words in w."""
+    return any(w[j:j + len(term)] == term and j <= i and i + count <= j + len(term)
+               for j in range(len(w) - len(term) + 1))
 
 
 def path_problems(path, table):
@@ -149,64 +170,157 @@ def path_problems(path, table):
 
 
 def scan_python(text):
-    """(identifiers, strings) of a Python file as (line, text) pairs, docstrings left out.
+    """(identifiers, strings) of a Python file, docstrings left out. An identifier is (line, name),
+    a string is (first line, last line, text). An f-string is one string, its fields as `{}`.
 
     Raises SyntaxError when the file does not parse."""
     tree = ast.parse(text)
-    idents, strings, docs = [], [], set()
+    idents, strings, skip = [], [], set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
             first = node.body[0]
             if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
-                docs.add(id(first.value))
+                skip.add(id(first.value))
         line = getattr(node, "lineno", 0)
-        for field in ("id", "attr", "name", "arg", "asname"):
+        for field in ("id", "attr", "name", "arg", "asname", "module"):
             v = getattr(node, field, None)
             if isinstance(v, str) and line:
                 idents.append((line, v))
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             idents += [(line, v) for v in node.names]
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
-            strings.append((line, node.value))
+        if isinstance(node, ast.JoinedStr) and id(node) not in skip:
+            parts = [c.value if isinstance(c, ast.Constant) else "{}" for c in node.values]
+            strings.append((line, node.end_lineno, "".join(str(p) for p in parts)))
+            skip.update(id(c) for c in ast.walk(node))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip:
+            strings.append((line, node.end_lineno, node.value))
     return idents, strings
 
 
-def scan_script(text, syntax):
-    """(identifiers, strings) of a JS, shell, PowerShell, YAML or JSON file, comments left out.
+def regex_starts(text, i):
+    """True when the `/` at text[i] opens a regex literal: what comes before it expects a value."""
+    j = i - 1
+    while j >= 0 and text[j] in " \t":
+        j -= 1
+    if j < 0 or text[j] == "\n" or text[j] in REGEX_AFTER:
+        return True
+    k = j
+    while k >= 0 and (text[k].isalnum() or text[k] in "_$"):
+        k -= 1
+    return text[k + 1:j + 1] in REGEX_WORDS
+
+
+def regex_end(text, i):
+    """The index after the regex literal that starts at text[i], or -1 when the line holds none."""
+    j, n, in_class = i + 1, len(text), False
+    while j < n and text[j] != "\n":
+        c = text[j]
+        if c == "\\":
+            j += 1
+        elif c == "[":
+            in_class = True
+        elif c == "]":
+            in_class = False
+        elif c == "/" and not in_class:
+            j += 1
+            while j < n and text[j].isalpha():
+                j += 1
+            return j
+        j += 1
+    return -1
+
+
+def scan_script(text, lang):
+    """(identifiers, strings) of a JS, shell, PowerShell, TOML or JSON file, comments left out.
 
     One pass, so a comment opener inside a string is text, and a lone quote inside a comment opens
     nothing. A ' or " string ends at its line end, so a lone quote in plain text swallows no later
-    line. A template literal (`) spans lines."""
-    line_c, open_c, close_c = syntax
+    line. A template literal (`) spans lines, a regex literal is skipped whole, and the body of a
+    here-document is prose."""
     idents, strings = [], []
-    i, line, n = 0, 1, len(text)
+    i, line, n, doc = 0, 1, len(text), None
+    line_c, open_c, esc = lang.get("line"), lang.get("open"), lang["esc"]
     while i < n:
         ch = text[i]
-        if line_c and text.startswith(line_c, i):
+        if line_c and text.startswith(line_c, i) and (
+                not lang.get("wordstart") or i == 0 or text[i - 1] in " \t\n;|&("):
             while i < n and text[i] != "\n":
                 i += 1
         elif open_c and text.startswith(open_c, i):
-            end = text.find(close_c, i + len(open_c))
-            end = n if end < 0 else end + len(close_c)
+            end = text.find(lang["close"], i + len(open_c))
+            end = n if end < 0 else end + len(lang["close"])
             line += text.count("\n", i, end)
             i = end
-        elif ch in "'\"`":
+        elif ch in "'\"" or (ch == "`" and lang.get("template")):
             start, j = line, i + 1
+            quote_esc = esc if not (lang.get("tick") and ch == "'") else None
             while j < n and text[j] != ch and (ch == "`" or text[j] != "\n"):
-                if text[j] == "\\":
+                if quote_esc and text[j] == quote_esc:
                     j += 1
                 if j < n and text[j] == "\n":
                     line += 1
                 j += 1
-            strings.append((start, text[i + 1:min(j, n)]))
+            strings.append((start, line, text[i + 1:min(j, n)]))
             i = j + 1 if j < n and text[j] == ch else j
+        elif ch == "`" and lang.get("tick"):  # PowerShell: escape, or a line continuation
+            line += 1 if text[i + 1:i + 2] == "\n" else 0
+            i += 2
+        elif ch == "/" and lang.get("regex") and regex_starts(text, i) and regex_end(text, i) > 0:
+            i = regex_end(text, i)
+        elif ch == "<" and lang.get("heredoc") and text.startswith("<<", i) and not text.startswith("<<<", i) \
+                and HEREDOC.match(text, i):
+            doc = HEREDOC.match(text, i).group(2)
+            i = HEREDOC.match(text, i).end()
         else:
             m = IDENT.match(text, i)
             if m:
                 idents.append((line, m.group(0)))
             if ch == "\n":
                 line += 1
+                if doc:  # skip the body, up to the line that holds only the delimiter
+                    i += 1
+                    while i < n:
+                        eol = text.find("\n", i)
+                        eol = n if eol < 0 else eol
+                        done = text[i:eol].strip() == doc
+                        line += 1 if eol < n else 0
+                        i = eol + 1
+                        if done:
+                            break
+                    doc = None
+                    continue
             i = m.end() if m else i + 1
+    return idents, strings
+
+
+def scan_yaml(text):
+    """(identifiers, strings) of a YAML file: each key, and each value that is one bare name.
+
+    A value with a space is prose or a command and is left to a reviewer, as are the lines under a
+    `|` or `>` block."""
+    idents, strings, block = [], [], None
+    for number, row in enumerate(text.split("\n"), 1):
+        indent = len(row) - len(row.lstrip())
+        if block is not None and (not row.strip() or indent > block):
+            continue
+        block = None
+        if not row.strip() or row.lstrip().startswith("#"):
+            continue
+        key, item = YAML_KEY.match(row), YAML_ITEM.match(row)
+        value = None
+        if key:
+            idents.append((number, key.group(2)))
+            value = key.group(3)
+        elif item:
+            value = item.group(2)
+        if value and YAML_BLOCK.match(value):
+            block = indent
+            continue
+        value = re.sub(r"\s+#.*$", "", value or "").strip().strip("'\"")
+        if value.startswith(("[", "{")):
+            idents += [(number, w) for w in IDENT.findall(value)]
+        elif NAME_LIKE.fullmatch(value):
+            strings.append((number, number, value))
     return idents, strings
 
 
@@ -218,12 +332,18 @@ def code_problems(rel, text, table, lines=None):
     rows = text.split("\n")
     out = []
 
-    def hit(line, message):
-        if (lines is None or line in lines) and OPT_OUT not in rows[line - 1]:
+    def hit(line, message, last=None):
+        span = range(line, (last or line) + 1)
+        if (lines is None or any(n in lines for n in span)) and not any(OPT_OUT in rows[n - 1] for n in span):
             out.extend("%s:%d: %s" % (rel, line, p) for p in message)
 
     if ext == ".py" or ext in SCRIPT:
-        idents, strings = scan_python(text) if ext == ".py" else scan_script(text, SCRIPT[ext])
+        if ext == ".py":
+            idents, strings = scan_python(text)
+        elif SCRIPT[ext] is None:
+            idents, strings = scan_yaml(text)
+        else:
+            idents, strings = scan_script(text, SCRIPT[ext])
         base = os.path.basename(rel)
         # A test's and a mutation test's strings are cases and code text, not product text.
         fixture = base.startswith(("test_", "mutate_")) or ".test." in base
@@ -234,12 +354,12 @@ def code_problems(rel, text, table, lines=None):
         for line, name in idents:
             if not platform(name) and not (name in YAML_ONLY and ext in (".yml", ".yaml")):
                 hit(line, name_problems("name " + name, name, table, plain=True))
-        for line, s in ([] if fixture else strings):
+        for line, last, s in ([] if fixture else strings):
             if NAME_LIKE.fullmatch(s):
                 if not platform(s):
-                    hit(line, name_problems("name " + s, s, table, plain=True))
-            elif in_hooks and " " in s.strip() and not REGEX_LIKE.search(s):
-                hit(line, name_problems("message '%s'" % s.strip()[:50], s, table, plain=True))
+                    hit(line, name_problems("name " + s, s, table, plain=True), last)
+            elif in_hooks and s.strip() and not REGEX_LIKE.search(s):
+                hit(line, name_problems("message '%s'" % s.strip()[:50], s, table, plain=True), last)
     for number, row in enumerate(rows, 1):
         for anchor in ANCHOR_REF.findall(row):
             hit(number, name_problems("anchor " + anchor, anchor, table))
@@ -261,13 +381,24 @@ def added():
     return git_diff("--name-only", "--no-renames", "--diff-filter=A").split("\n")
 
 
+def diff_path(header):
+    """The path of a `+++ b/<path>` header, unquoted when the diff quoted it; None for no path."""
+    if header.startswith('"'):
+        try:
+            header = ast.literal_eval(header).encode("latin-1").decode("utf-8")
+        except (SyntaxError, ValueError, UnicodeError):
+            return None
+    return header[2:] if header.startswith("b/") else None
+
+
 def added_lines():
     """{path: set of added line numbers} for each file the change adds or edits, renames followed."""
     out, path = {}, None
     for row in git_diff("-U0", "-M", "--diff-filter=AMR").split("\n"):
         if row.startswith("+++ "):
-            path = row[6:] if row.startswith("+++ b/") else None
-            out.setdefault(path, set())
+            path = diff_path(row[4:])
+            if path:
+                out.setdefault(path, set())
         elif row.startswith("@@") and path:
             m = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", row)
             if m:

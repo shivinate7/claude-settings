@@ -37,10 +37,10 @@ one name for each thing, and a list of names to avoid.
 | defect | Wrong behaviour in code or a check. | `rule:outcomes-tests-are-statements` | `bug` |
 | round | One review and the fix after it. A change gets at most three. A builder's round N is the build or fix that review round N reads; its brief says `Round N of 3`. | `rule:roles-review-cap-three`, `rule:roles-third-round-steps-up` | `try (prose)` |
 | safety hole | A guard or check that lets through an act that main refuses or asks about. Always both words. | `rule:roles-review-cap-three`, `docs/decisions/hold-unsafe-after-round-3.md` | `hole` |
-| refuse | What a guard does when it stops an act. The code wraps Claude Code's own `deny` and `block` values in `refuse()`. | `hooks/guard_core.py`, `docs/decisions/guard-guards-mistakes-only.md` | `block (prose)`, `deny (prose)` |
+| refuse | What a guard does when it stops an act. The code wraps Claude Code's own `deny` and `block` values in `refuse()`. | `hooks/guard_core.py`, `docs/decisions/guard-guards-mistakes-only.md` | `block (prose)`, `deny` |
 | owner | The person who owns these repos. Only the owner makes a ruling or a grant. `CLAUDE.md` speaks as the owner. | `rule:outcomes-grant-covers-named-act` | — |
 | override | A prompt from the owner that starts with `override`, or `opus` and a length. The guard then lets a refusal or an ask through, once or for a set time. An Opus override lifts only the Opus spawn ask. | `docs/decisions/owner-override.md` | `override pass` |
-| grant | The owner's leave to do one act, once or standing. It covers the act it names, never a variant. A merge grant is one kind. Claude Code's own approve button is the platform's word, not a grant. | `rule:outcomes-grant-covers-named-act` | `owner word`, `approval (prose)` |
+| grant | The owner's leave to do one act, once or standing. It covers the act it names, never a variant. A merge grant is one kind. Claude Code's own approve button is the platform's word, not a grant. | `rule:outcomes-grant-covers-named-act` | `owner word`, `approval` |
 | orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | — |
 | builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
 | reviewer | An agent that judges the work of a builder against its brief and the governing decisions. A reviewer never edits. | `agents/reviewer.md` | — |
