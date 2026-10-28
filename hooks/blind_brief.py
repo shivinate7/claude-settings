@@ -225,24 +225,31 @@ def _words(text):
 def duo_faults(device, poses):
     """Faults of a Device section in a repo that draws both Duo poses: `duo-unfolded` when it never names the
     unfolded pose, `duo-order` when it names the unfolded pose before the folded one. Order is read from the
-    pose phrases, the device name's words side by side with "iphone" dropped ("duo folded", "duo unfolded"),
-    and only when both phrases appear. So "unfolded, drawn after the folded pose" is no order fault."""
+    pose words, the words in one device name and not in the other ("folded", "unfolded"), and only when both
+    appear. So "Duo unfolded, then folded" is an order fault."""
     folded, unfolded = poses
     if not names_device(device, unfolded):
         return [("duo-unfolded", "Device", unfolded)]
-    at_folded, at_unfolded = _phrase_at(device, folded), _phrase_at(device, unfolded)
+    at_folded, at_unfolded = _pose_rank(device, folded, unfolded), _pose_rank(device, unfolded, folded)
     if at_folded is not None and at_unfolded is not None and at_unfolded < at_folded:
         return [("duo-order", "Device", "%s before %s" % (unfolded, folded))]
     return []
 
 
-def _phrase_at(text, name):
-    """The word index of the first place `text` holds the words of device `name` side by side, with "iphone"
-    dropped while other words remain, or None."""
-    words, need = _words(text), _words(name)
-    need = [w for w in need if w != "iphone"] or need
-    for index in range(len(words) - len(need) + 1):
-        if words[index:index + len(need)] == need:
+ORDER_WORDS = {"after": -1, "before": 1}  # "drawn after the folded pose": folded goes first
+
+
+def _pose_rank(text, name, other):
+    """The draw rank of the first pose word of device `name` in `text`, or None. A pose word is a word of
+    `name` that is not in device `other`. The rank is the word index. A pose word with "after" or "before" in
+    the two words before it ranks first or last, so "unfolded, drawn after the folded pose" puts folded
+    first."""
+    words, pose = _words(text), set(_words(name)) - set(_words(other))
+    for index, word in enumerate(words):
+        if word in pose:
+            for near in words[max(0, index - 2):index]:
+                if near in ORDER_WORDS:
+                    return ORDER_WORDS[near] * len(words)
             return index
     return None
 
