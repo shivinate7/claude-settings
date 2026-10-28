@@ -97,7 +97,8 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ov-tier, .chips-n, .pairchips { min-width: 0; }
 .nchip { min-width: 0; overflow: hidden; }
 @media (min-width: 961px) {
-  .chips-n, .pairchips { flex-direction: column; align-items: stretch; }
+  .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .pairchips { display: flex; max-width: 100%; }
   .nchip, .pairchips .nchip { width: 100%; height: 30px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
   .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
 }
@@ -719,6 +720,14 @@ async function withdrawAll() {
 
 /* ---------- Painting: a card is rebuilt only when what it shows changed, and a live design preview is never detached ---------- */
 const cards = {}, heights = {};
+// Once a held receipt is wholly off screen it drops its height, and the scroll moves by what that shifted, so nothing in view moves.
+const heldWatch = new IntersectionObserver((entries) => entries.forEach((e) => {
+  const el = e.target;
+  if (e.isIntersecting || !el.style.minHeight) { if (!el.style.minHeight) heldWatch.unobserve(el); return; }
+  const mark = [...document.querySelectorAll("article.card")].find((c) => c !== el && c.getBoundingClientRect().bottom > 0), was = mark ? mark.getBoundingClientRect().top : 0;
+  el.style.minHeight = ""; heldWatch.unobserve(el);
+  if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - was);
+}));
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
@@ -751,12 +760,13 @@ function patch(old, nu) {
     if (k && n && (!same || same(k, n))) keeps.push([k, n, sync]);
   }
   const wasReceipt = !!old.querySelector(":scope > .receipt"), isReceipt = !!nu.querySelector(":scope > .receipt");
-  // A card that turns into a receipt keeps its height, so nothing below it moves.
+  // A card that turns into a receipt keeps its height while it is in view, so nothing below it moves.
   if (!wasReceipt) heights[old.id] = old.getBoundingClientRect().height;
   const minH = !isReceipt ? "" : wasReceipt ? old.style.minHeight : heights[old.id] ? heights[old.id] + "px" : "";
   copyAttrs(old, nu);
   if (keeps.length) graft(old, keeps, nu); else old.replaceChildren(...nu.childNodes);
   old.style.minHeight = minH;
+  if (minH && !wasReceipt) heldWatch.observe(old);
   if (focusId) { const f = $(focusId); if (f && !f.disabled) f.focus({ preventScroll: true }); }
 }
 function cardFor(it) {
