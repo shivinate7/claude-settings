@@ -5331,9 +5331,11 @@ class LockHolder(Env):
     def old_message(self, expires):
         return f"merge lock\nexpires: {int(expires)}\nowner: abc123"
 
-    def new_message(self, host, pid, expires=None, platform=None):
+    def new_message(self, host, pid, expires=None, platform=None, boot=None):
+        boot = merge.boot_stamp() if boot is None else boot  # "" writes no boot line, as a lock from before c189 has none
         return (f"merge lock\nexpires: {int(expires or self.now + 600)}\nowner: abc123\n"
-                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000\nplatform: {platform or sys.platform}")
+                f"pr: 445\nbranch: b\nhost: {host}\npid: {pid}\nstarted: 1790000000\nplatform: {platform or sys.platform}"
+                + (f"\nboot: {boot}" if boot else ""))
 
     def held(self, message):
         self.push_lock(message)
@@ -5373,6 +5375,19 @@ class LockHolder(Env):
             self.assertIn(want, said[0])
         self.assertFalse(self.lock_ref())
         self.assertNotIn("merge --unlock", out)
+
+    def test_a_pid_missing_on_a_machine_that_booted_apart_stays_refused(self):  # cloud VMs share a hostname: a pid absent here proves nothing about the holder's VM
+        out = self.held(self.new_message(socket.gethostname(), dead_pid(), boot="some-other-boot"))
+        self.assertNotIn("took over", out)
+        self.assertIn("Cannot tell if the holder is alive", out)
+
+    def test_a_lock_with_no_boot_line_stays_refused(self):
+        out = self.held(self.new_message(socket.gethostname(), dead_pid(), boot=""))
+        self.assertNotIn("took over", out)
+        self.assertIn("Cannot tell if the holder is alive", out)
+
+    def test_the_lock_records_the_boot(self):
+        self.assertIn(f"boot: {merge.boot_stamp()}", self.peek()[0].splitlines())
 
     def test_a_dead_holder_on_another_host_stays_refused(self):
         out = self.held(self.new_message("some-other-host-xyz", dead_pid()))
@@ -6235,6 +6250,17 @@ class AbsentRequiredCheck(unittest.TestCase):
 
     def test_an_absent_required_check_does_not_stop_the_wait_while_another_check_runs(self):
         host = self.host(lambda t: {"gates": [("pending" if t < 400 else "pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_required_status_posted_45_seconds_after_the_last_job_ended_is_waited_for(self):  # an external status can lag the jobs by a minute
+        host = self.host(lambda t: {"gates": [("pass", "")], **({"needed": [("pass", "")]} if t >= 45 else {})})
+        ok, why, *_ = self.wait(host, 55)
+        self.assertTrue(ok, why)
+
+    def test_a_pending_workflow_run_keeps_the_wait_going(self):
+        host = self.host(lambda t: {"gates": [("pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
+        host.runs = lambda sha: [{"name": "ci", "status": "in_progress" if host.clock[0] < 400 else "completed", "conclusion": None if host.clock[0] < 400 else "success"}]
         ok, why, *_ = self.wait(host, 55)
         self.assertTrue(ok, why)
 

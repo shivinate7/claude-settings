@@ -274,12 +274,40 @@ def refuse_old_lock(b, old, now):
     if old and old[1] > now:
         raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53.")
 
+def boot_stamp():
+    """One text per boot of this machine, or "" when it cannot be read. Cloud VMs share a hostname and each has its own pid numbers, so a pid
+    absent here proves a holder dead only on the machine that booted when the lock was taken. Linux: the boot id. macOS: kern.boottime
+    seconds. Windows: boot time from the tick count (seconds; same_boot allows the drift)."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
+                return f.read().strip()
+        if sys.platform == "darwin":
+            m = re.search(r"sec = (\d+)", sh(["sysctl", "-n", "kern.boottime"], timeout=10)[1])
+            return m.group(1) if m else ""
+        if os.name == "nt":
+            import ctypes
+            return str(int(time.time() - ctypes.WinDLL("kernel32").GetTickCount64() / 1000))
+    except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+        pass
+    return ""
+
+def same_boot(a, b):
+    """Both stamps read, and equal. Number stamps (macOS, Windows) may differ by two minutes of clock drift."""
+    if not a or not b:
+        return False
+    if a.isdigit() and b.isdigit():
+        return abs(int(a) - int(b)) <= 120
+    return a == b
+
 def lock_message(ttl, now, holder=None):
     """`holder` holds pr, branch, session. The session is untrusted text: one line, capped, so it cannot add an `expires:` or `owner:` line."""
     lines = [f"merge lock\nexpires: {int(now + ttl)}\nowner: {uuid.uuid4().hex}"]
     if holder:
         lines += [f"pr: {holder['pr']}", "branch: " + " ".join(str(holder["branch"]).split()), f"host: {socket.gethostname()}", f"platform: {sys.platform}",
                   f"pid: {os.getpid()}", f"started: {int(now)}"]
+        if boot_stamp():
+            lines.append("boot: " + boot_stamp())
         session = " ".join(holder.get("session", "").split())[:SESSION_MAX]  # fold first, then test: a blank one writes no line
         if session:
             lines.append("session: " + session)
@@ -331,12 +359,15 @@ def holder_text(b, held, now):
     return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
 
 def holder_state(held):
-    """-> "alive", "dead" or "unknown" for the holder of a lock `held` (read()'s (sha, expiry, message)). Dead only for a pid on this host and platform."""
+    """-> "alive", "dead" or "unknown" for the holder of a lock `held` (read()'s (sha, expiry, message)). Dead only for a pid on this host, platform and boot:
+    a lock with no boot line, or one from another boot, reads unknown."""
     f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
     started_ok = re.fullmatch(r"[0-9]{1,10}", f.get("started", ""))  # a garbled field means a forged lock: trust none of it
     pid = int(f["pid"]) if re.fullmatch(r"[0-9]{1,10}", f.get("pid", "")) else 0
     if f.get("host") == socket.gethostname() and f.get("platform") == sys.platform and started_ok and 0 < pid < 2 ** 31:  # a pid from another OS reads nothing
-        return "alive" if pid_alive(pid) else "dead"
+        if pid_alive(pid):
+            return "alive"
+        return "dead" if same_boot(f.get("boot", ""), boot_stamp()) else "unknown"
     return "unknown"
 
 def refuse_or_take_over(b, held, now):
@@ -527,7 +558,7 @@ class GhLock(Lock):
         cur = self.read(b)
         if cur and cur[1] > self.now():
             refuse_or_take_over(b, cur, self.now())
-        if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
+        if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock (or of a live lock whose holder is dead) to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
             if c and not self.gone(out):
                 raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock: " + out)
@@ -805,9 +836,9 @@ class Host:
                 return False, "a check is red: " + "; ".join(red)
             absent = sorted(k for k in names if not got.get(k))
             if absent and got and pending == absent:  # every reported check and run has ended; only a required name nobody reports is left
-                if absent_seen != absent:  # ponytail: a job that waits on another is created after it ends. One settle pause covers that; a job created later still stops the run, which is rerun.
+                if absent_seen != absent:  # ponytail: a job that waits on another, or a status from outside Actions, can appear after the last check ends. One minute covers that; one later still stops the run, which is rerun.
                     absent_seen = absent
-                    self.pause(SETTLE_SECONDS)
+                    self.pause(self.minute)  # a status from outside Actions can post a minute after the last job ends
                     continue
                 return False, ("no run reports the required check " + ", ".join(absent) + f" on this head, and every check that did report has ended. "
                                f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names.")
