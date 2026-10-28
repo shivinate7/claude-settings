@@ -447,13 +447,27 @@ def head(out):
     return out.partition("\n")[0]
 
 
-# An item line of the words group: `  <word>: <file>:<line> <detail>`, with the line `-` for a path hit.
-ITEM = re.compile(r"^\s+(?:- )?([^\s:]+): (\S+?):(\d+|-)(?=\s|$)")
+# An item line of the words group: `  <word>: <file>:<line> <detail>`. The word may hold spaces; the line is `-` for a path hit.
+ITEM = re.compile(r"^\s+(?:- )?([^:]+?): (\S+?):(\d+|-)(?=\s|$)")
+SPARE = {"claim", "try", "gap"}  # names another lane is restoring: no case plants one
 
 
 def hits(out):
     """(word, file, line) of each item line."""
     return [m.groups() for m in map(ITEM.match, out.splitlines()[1:]) if m]
+
+
+def planted(prose=False):
+    """The first "not" name of the live glossary, read on each run, so no case writes one. `prose`
+    takes an everyday name, tagged (prose), in place of a retired one."""
+    table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+    for _, _, names in table:
+        for name in names:
+            tagged = name.endswith(check_glossary.PROSE_TAG)
+            word = name[:-len(check_glossary.PROSE_TAG)] if tagged else name
+            if tagged == prose and word not in SPARE:
+                return word
+    raise AssertionError("the glossary holds no such name")
 
 
 def dropping(word):
@@ -469,35 +483,42 @@ class Words(unittest.TestCase):
     """The words group reads the glossary's "not" names on each run, and reports each hit in a checked repo."""
 
     def test_retired_word_in_a_path_is_red(self):
-        code, out = Repo(self).write("docs/subagent_notes.md").run("words")
+        word = planted()
+        path = "docs/%s_notes.md" % word.replace(" ", "_")
+        code, out = Repo(self).write(path).run("words")
         self.assertEqual(code, 1, out)
         self.assertTrue(head(out).startswith("words: out"), out)
-        self.assertEqual(hits(out), [("subagent", "docs/subagent_notes.md", "-")], out)
+        self.assertEqual(hits(out), [(word, path, "-")], out)
 
     def test_retired_word_in_a_rule_anchor_is_red(self):
-        repo = Repo(self).write("src/cap.py", "VALUE = 1\n# Keep to rule:subagent-cap.\n")  # glossary-ok: a planted anchor
+        word = planted()
+        repo = Repo(self).write("src/cap.py", "VALUE = 1\n# Keep to rule:%s-cap.\n" % word.replace(" ", "-"))
         code, out = repo.run("words")
         self.assertEqual(code, 1, out)
-        self.assertEqual(hits(out), [("subagent", "src/cap.py", "2")], out)
+        self.assertEqual(hits(out), [(word, "src/cap.py", "2")], out)
 
     def test_retired_word_in_a_backticked_slug_is_red(self):
-        text = "Intro line.\nSee `subagent-cap-rule` for the cap.\nNot `subagent-cap` here.\n"
+        word = planted()
+        hyphen = word.replace(" ", "-")
+        text = "Intro line.\nSee `%s-cap-rule` for the cap.\nNot `%s` here.\n" % (hyphen, hyphen)
         code, out = Repo(self).write("docs/guide.md", text).run("words")
         self.assertEqual(code, 1, out)
-        self.assertEqual(hits(out), [("subagent", "docs/guide.md", "2")], out)
+        self.assertEqual(hits(out), [(word, "docs/guide.md", "2")], out)
 
     def test_everyday_word_as_an_identifier_is_not_read(self):
-        # `worker (prose)` is an everyday word: a path, an anchor or a slug reads it, a code name does not.
-        code, out = Repo(self).write("src/pool.py", "worker = 3\n\n\ndef run(worker):\n    return worker\n").run("words")
+        # An everyday name is read in a path, an anchor or a slug, never in a code name.
+        word = planted(prose=True)
+        code_text = "%s = 3\n\n\ndef run(%s):\n    return %s\n" % (word, word, word)
+        code, out = Repo(self).write("src/pool.py", code_text).run("words")
         self.assertEqual((code, head(out)), (0, "words: in shape"), out)
-        repo = Repo(self).write("src/pool.py", "worker = 3\n\n\ndef run(worker):\n    return worker\n")
-        repo.write("docs/guide.md", "See rule:worker-limit.\n")  # glossary-ok: a planted anchor, the control
+        repo = Repo(self).write("src/pool.py", code_text)
+        repo.write("docs/guide.md", "See rule:%s-limit.\n" % word)
         code, out = repo.run("words")
-        self.assertEqual(hits(out), [("worker", "docs/guide.md", "1")], out)
+        self.assertEqual(hits(out), [(word, "docs/guide.md", "1")], out)
 
     def test_clean_repo_is_in_shape_and_names_the_glossary_commit(self):
         repo = Repo(self).write("src/app.py", "def main():\n    return 1\n")
-        repo.write("docs/guide.md", "A bug or a handover is not a gate in prose.\n")
+        repo.write("docs/guide.md", "A %s in prose is fine.\n" % planted())
         code, out = repo.run("words")
         self.assertEqual((code, head(out)), (0, "words: in shape"), out)
         self.assertEqual(hits(out), [], out)
@@ -506,23 +527,26 @@ class Words(unittest.TestCase):
         self.assertIn(glossary_commit[:7], out)
 
     def test_the_word_list_is_read_from_the_glossary_not_copied(self):
-        repo = Repo(self).write("docs/subagent_notes.md")
+        word = planted()
+        path = "docs/%s_notes.md" % word.replace(" ", "_")
+        repo = Repo(self).write(path)
         code, out = in_process(repo.root)
         self.assertEqual(code, 1, out)
-        self.assertEqual(hits(out), [("subagent", "docs/subagent_notes.md", "-")], out)
-        with mock.patch.object(check_glossary, "rows", dropping("subagent")):
+        self.assertEqual(hits(out), [(word, path, "-")], out)
+        with mock.patch.object(check_glossary, "rows", dropping(word)):
             code, out = in_process(repo.root)
         self.assertEqual((code, head(out)), (0, "words: in shape"), out)
         self.assertEqual(hits(out), [], out)
 
     def test_probe_output_is_a_scorecard_group(self):
-        out = Repo(self).write("docs/subagent_notes.md").run("words")[1]
+        word = planted()
+        out = Repo(self).write("docs/%s_notes.md" % word.replace(" ", "_")).run("words")[1]
         group = load_probes().GROUP_LINE.match(head(out))
         self.assertIsNotNone(group, out)
         self.assertEqual(group.group(1, 2), ("words", "out"), out)
         _, body = Scorecard.run_card(self, Repo(self), out)  # the scorecard step, from its one home
         self.assertIn("| words | out |", body)
-        self.assertIn("| words: subagent | finding |", body)
+        self.assertIn("| words: %s | finding |" % word, body)
 
     def test_unreadable_or_empty_glossary_and_unparsable_python_are_unknown(self):
         root = Repo(self).write("docs/guide.md").root
@@ -536,16 +560,18 @@ class Words(unittest.TestCase):
         self.assertTrue(head(out).startswith("words: unknown"), out)
 
     def test_scanners_respect_strings_comments_and_lone_quotes(self):
+        word = planted()
+        under = word.replace(" ", "_")
         cases = (
-            ("src/app.js", 'const open = "/*";\nconst url = "https://x // y";\nconst subagent_count = 2;\n'
-                           "// the subagent note\n", "3"),
-            ("src/tpl.js", "const text = `\n/* a block\n`;\nconst subagent_total = 3;\n", "4"),
-            ("src/view.tsx", "const note = <p>Don't stop</p>;\nconst subagent_view = 1;\n", "2"),
+            ("src/app.js", 'const open = "/*";\nconst url = "https://x // y";\nconst %s_count = 2;\n' % under
+             + "// the %s note\n" % word, "3"),
+            ("src/tpl.js", "const text = `\n/* a block\n`;\nconst %s_total = 3;\n" % under, "4"),
+            ("src/view.tsx", "const note = <p>Don't stop</p>;\nconst %s_view = 1;\n" % under, "2"),
         )
         for rel, text, line in cases:
             with self.subTest(rel=rel):
                 code, out = Repo(self).write(rel, text).run("words")
-                self.assertEqual(hits(out), [("subagent", rel, line)], out)
+                self.assertEqual(hits(out), [(word, rel, line)], out)
 
     def test_registered_in_groups(self):
         probes = load_probes()
