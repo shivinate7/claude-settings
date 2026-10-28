@@ -209,7 +209,8 @@ class GlossaryTests(Fixture):
 class CodeNameTests(Fixture):
     """The widened check: identifiers, rule anchors, record slugs and hook messages on added lines."""
     EXTRA = ("| refuse | What a guard does. | `rule:one-rule` | `deny (prose)`, `block (prose)` |\n"
-             "| agent | Anything the Agent tool starts. | `rule:one-rule` | `subagent` |\n")
+             "| agent | Anything the Agent tool starts. | `rule:one-rule` | `subagent` |\n"
+             "| safety hole | A guard that lets an act through. | `rule:one-rule` | `hole` |\n")
 
     def setUp(self):
         super().setUp()
@@ -388,6 +389,70 @@ class CodeNameTests(Fixture):
 
     def test_lone_quote_in_shell_text_does_not_swallow_the_next_line(self):
         self.red("bin/x.sh", "echo don't\nbundle=1\n", "bin/x.sh:2")
+
+
+    # Reviewer round 1: false alarms and misses of the first scanner
+
+    def test_a_term_that_holds_a_not_word_passes(self):
+        self.green("hooks/x.py", "safety_hole = 1\nclass SafetyHole:\n    pass\nM = 'This is a safety hole.'\n")
+        self.green("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:roles-safety-hole-check -->\n")
+        self.green("docs/notes.md", "See `no-safety-hole-opened`.\n")
+
+    def test_the_bare_not_word_still_fails_beside_a_term(self):
+        self.red("hooks/x.py", "hole = 1\nsafety_hole = 2\n", "hooks/x.py:1")
+
+    def test_a_regex_literal_with_a_backtick_does_not_flip_the_string_parity(self):
+        self.red("actions/x.mjs", "const a = s.replace(/[()`]/g, '');\nconst b = `t`;\nconst bundle = 1;\n", "actions/x.mjs:3")
+
+    def test_a_regex_literal_with_a_quote_does_not_hide_the_line(self):
+        self.red("actions/x.mjs", 'const a = s.replace(/"/g, ""); const bundle = 1;\n', "actions/x.mjs:1")
+
+    def test_a_division_is_not_a_regex(self):
+        self.red("actions/x.mjs", "const a = b / c; const bundle = d / e;\n", "actions/x.mjs:1")
+
+    def test_powershell_backtick_is_an_escape_not_a_string(self):
+        self.red("bin/x.ps1", 'Write-Host "a`"b"; $bundle = 1\nWrite-Host `\n$bundle2 = 2\n', "bin/x.ps1:1")
+
+    def test_shell_hash_inside_a_word_is_not_a_comment(self):
+        self.red("bin/x.sh", 'n=${#x}; bundle=1\n', "bin/x.sh:1")
+        self.red("bin/y.sh", 'echo $#; bundle=1\n', "bin/y.sh:1")
+
+    def test_shell_heredoc_body_is_prose(self):
+        self.green("bin/x.sh", "cat <<EOF\nthe handover note\nEOF\nfine=1\n")
+        self.red("bin/y.sh", "cat <<'EOF'\nthe note\nEOF\nbundle=1\n", "bin/y.sh:4")
+
+    def test_unquoted_yaml_prose_passes_and_keys_and_names_fail(self):
+        self.green("actions/x.yml", "description: Fails on a bundle in the lane.\nruns:\n  using: composite\n")
+        self.red("actions/y.yml", "needs: bundle\n", "actions/y.yml:1")
+        self.red("actions/z.yml", "steps:\n  - bundle\n", "actions/z.yml:2")
+        self.green("actions/w.yml", "steps:\n  - run: |\n      echo a handover here\n      echo b\n")
+
+    def test_an_f_string_message_is_read_whole(self):
+        self.red("hooks/guard.py", 'def m(a, n):\n    return f"{a} handover {n}"\n', "hooks/guard.py:2")
+
+    def test_a_message_with_one_word_and_punctuation_fails(self):
+        self.red("hooks/guard.py", 'A = "handover:"\nB = "(handover)"\n', "hooks/guard.py:1")
+
+    def test_a_multi_line_message_is_read_when_any_of_its_lines_is_added(self):
+        self.red("hooks/guard.py", 'M = ("first line "\n     "then a handover line")\n', "hooks/guard.py")
+        self.red("hooks/y.py", 'M = """first\nthe handover\n"""\n', "hooks/y.py")
+
+    def test_more_extensions_are_read(self):
+        for ext in (".ts", ".tsx", ".jsx", ".bash", ".toml"):
+            self.red("src/x" + ext, "bundle = 1\n", "src/x" + ext)
+
+    def test_a_from_import_module_is_read(self):
+        self.red("hooks/x.py", "from handover import f\n", "hooks/x.py:1")
+
+    def test_a_non_utf8_or_odd_named_file_is_no_traceback(self):
+        self.base_repo()
+        with open(os.path.join(self.tree, "hooks", "bad.py"), "wb") as f:
+            f.write(b"x = '\xff'\n")
+        self.put("docs/\u00e4.md", "fine\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
 
 
 class RepoGlossaryTests(unittest.TestCase):
