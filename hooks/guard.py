@@ -2567,9 +2567,33 @@ def _git_root_of(cwd):
         here = parent
 
 
-def data_tool_hit(tool_input, cwd="") -> str:
-    if not isinstance(tool_input, dict):
+# ------------------------------------------------------------------ a pick never widens a shared tool
+#
+# docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
+# (incident in the record): a repo that differs from a shared format changes to match, so an
+# option marked `widens: true` is never the item's `pick`. Read at the same ArtifactData call.
+WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
+                 "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
+                 "match the shared format, or leave pick out.")
+
+
+def widens_pick_hit(data) -> str:
+    """The matched text when this write's `pick` names an option it marks `widens: true`. An update
+    that carries `pick` without `options` cannot see the stored options and passes."""
+    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
+    options, pick = data.get("options"), data.get("pick")
+    if not isinstance(options, list) or not isinstance(pick, str):
+        return ""
+    if any(isinstance(o, dict) and o.get("key") == pick and o.get("widens") is True for o in options):
+        return "pick names a widening option"
+    return ""
+
+
+def data_tool_hit(tool_input, cwd=""):
+    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
+    if not isinstance(tool_input, dict):
+        return "", ""
     if tool_input.get("action") == "batch":
         entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
     else:
@@ -2577,12 +2601,16 @@ def data_tool_hit(tool_input, cwd="") -> str:
     writes = [(op, e) for op, e in entries
               if op in ("set", "update") and e.get("collection") == WAITING_ITEMS]
     if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
-        return ""
+        return "", ""
     for op, entry in writes:
-        hit = port_item_hit(op, _write_data(entry))
+        data = _write_data(entry)
+        hit = port_item_hit(op, data)
         if hit:
-            return hit
-    return ""
+            return "port-question", hit
+        hit = widens_pick_hit(data)
+        if hit:
+            return "uniform-pick", hit
+    return "", ""
 
 
 # ------------------------------------------------------------------ impeccable is review-only
@@ -2929,9 +2957,11 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
-        matched = data_tool_hit(tool_input, cwd)
-        if matched:
+        rule, matched = data_tool_hit(tool_input, cwd)
+        if rule == "port-question":
             refuse(tool, "deny", "port-question", PORT_REASON, matched)
+        if rule == "uniform-pick":
+            refuse(tool, "deny", "uniform-pick", WIDENS_REASON, matched)
         return
 
     if tool in SHELL_TOOLS:

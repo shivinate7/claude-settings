@@ -3,7 +3,7 @@
   "layers": ["typecheck", "lint", "format"],
   "not_code": {
     "reason": "prose, data and markup: nothing to type check or lint",
-    "extensions": [".md", ".json", ".yml", ".yaml", ".toml", ".txt", ".tmpl", ".html", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".csv", ".webmanifest", ".gitignore", ".gitattributes", ".ste-lint-exclude", ".entitlements", ".worktreeinclude", ".example"]
+    "extensions": [".md", ".json", ".yml", ".yaml", ".toml", ".txt", ".tmpl", ".html", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".csv", ".webmanifest", ".gitignore", ".gitattributes", ".ste-lint-exclude", ".entitlements", ".worktreeinclude", ".example", ".gz", ".xlsx", ".onnx", ".npz", ".nvmrc", ".npmrc"]
   },
   "languages": {
     "python": {
