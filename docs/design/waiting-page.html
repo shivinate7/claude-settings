@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waiting page c122 mockup</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No item, number, name or time on this page is real.</div>
+<header class="tool">
+  <h1>Waiting page: what differs, open this state, page-review fixes (step c122)</h1>
+  <div class="row" id="rowS"><span>State</span>
+    <button data-s="main" id="s-main">1A authored edge (pick)</button>
+    <button data-s="computed" id="s-computed">1B computed edge</button>
+    <button data-s="viewer">2 Viewer: open this state</button>
+    <button data-s="refused">2 State missing: refused</button>
+    <button class="hide" data-hide="main">Hide 1A</button>
+    <button class="hide" data-hide="computed">Hide 1B</button>
+  </div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button data-lab="1" id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=main|computed|viewer|refused</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>. The page header is drawn as on main: another lane owns its colour and icon.</p>
+</header>
+<main id="stage"></main>
+
+<script type="text/plain" id="pagecss">
+/* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
+   repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
+:root {
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .sub { font-size: 13.5px; opacity: .88; white-space: nowrap; }
+@media (max-width: 420px) { .who .sub { display: none; } }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.stands { border-radius: 50%; background: var(--gold-ink); }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
+.pairchips { display: inline-flex; gap: 3px; padding: 2px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 10px; }
+.pairchips .nchip { height: 28px; width: 44px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; align-items: stretch; }
+  .nchip, .pairchips .nchip { width: 100%; height: 30px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: block; position: relative; cursor: zoom-in; min-height: 40px; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 40px; margin-top: 6px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+.ready.on::before { content: "\2713  "; }
+/* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.alts .sp { flex: 1 1 0; }
+.alts .gone { visibility: hidden; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 10px; }
+.receipt .line { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 15.5px; }
+.receipt .line b { color: var(--good); }
+.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
+.parked ul { margin: 6px 0 0; padding-left: 20px; }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 14px; display: grid; gap: 10px; font-size: 15px; }
+.sent-head { display: flex; gap: 14px; align-items: center; }
+.stamp { flex: none; transform: rotate(-6deg); border: 3px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 9px 3px; font: 700 18px/1 var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 11px/1.3 var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp .42s cubic-bezier(.3,1.6,.5,1) both; } }
+@keyframes stamp { from { transform: rotate(-6deg) scale(2); opacity: 0; } to { transform: rotate(-6deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 22vh; overflow: auto; }
+.sent-list li { display: inline-flex; gap: 8px; align-items: center; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.dstate { padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+
+/* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
+.dprev { display: grid; gap: 8px; }
+.dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dprev .dbar .sp { flex: 1; }
+.dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
+.dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap.inert .dframe { pointer-events: none; }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+.dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
+body.sheet-open { overflow: hidden; }
+</script>
+<script type="text/plain" id="newcss">
+/* ---- New for c122 ---- */
+/* 1. What differs: a bar on the row and a "not equal" sign. Shape and sign carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { padding-right: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+/* 3. An empty tier keeps its heading and one line; an empty tier in the overview keeps its heading with 0. */
+.tier > .empty { padding: 12px 16px; font-size: 15px; }
+.ov-tier.zero .ov-head { color: var(--muted); }
+/* Sample picture inside an option card: a stand-in for a real mockup frame. */
+.mini { font: 13px/1.3 system-ui, sans-serif; color: #161b22; display: grid; }
+.mini .mh { padding: 6px 10px; font-weight: 700; background: #f3f4f6; border-bottom: 1px solid #d9dee5; }
+.mini .mr { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid #e6e9ee; }
+.mini .mr small { margin-left: auto; color: #565f6b; }
+.mini .tag { padding: 0 6px; border-radius: 4px; background: #fbefd9; color: #6b3f00; font-weight: 700; font-size: 12px; border: 1px solid #8a5300; }
+.mini .mg { padding: 4px 10px; font-weight: 700; font-size: 12px; background: #fff4f2; color: #8c1d18; }
+.mini .mr.red { background: #b3261e; color: #fff; }
+.mini .mr.red small { color: #fff; }
+.mini .call { margin-left: auto; padding: 2px 8px; border-radius: 6px; background: #fff; color: #b3261e; font-weight: 700; font-size: 12px; }
+/* Sample labels: dashed "Today:" for what exists, "New:" for what this step adds. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+
+<script>
+// The option mockup the viewer opens. It follows the mockup contract: it reads #s=<state> on load and on hashchange,
+// and each state is an element with data-state="<state>".
+const SAMPLE_MOCK = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<style>body{margin:0;font:15px/1.4 system-ui,sans-serif;color:#161b22;background:#fff}.b{background:#5b21b6;color:#fff;font-weight:700;padding:6px 12px;text-align:center}
+h1{font-size:18px;margin:0;padding:12px 16px;border-bottom:1px solid #d9dee5}.r{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #e6e9ee}.r small{margin-left:auto;color:#565f6b}
+.r.red{background:#b3261e;color:#fff}.r.red small{color:#fff}.c{margin-left:auto;min-height:44px;padding:0 12px;border-radius:8px;border:0;background:#fff;color:#b3261e;font:700 14px system-ui}
+.new{outline:2px dashed #6d28d9;outline-offset:-2px}.st{font:12px ui-monospace,monospace;color:#565f6b;padding:8px 16px}[data-state]{display:none}[data-state].on{display:block}</style>
+<div class="b">Sample. No parcel, time or name is real.</div><h1>Deliveries today</h1>
+<div data-state="default"><div class="r">Parcel 1182<small>Due 14:00</small></div><div class="r">Parcel 1190<small>Due 15:30</small></div><div class="r">Parcel 1204<small>Due 16:00</small></div><p class="st">State: default</p></div>
+<div data-state="late-package"><div class="r">Parcel 1182<small>Due 14:00</small></div><div class="r red new" id="late-row">Parcel 1190 is late<button class="c">Call courier</button></div><div class="r">Parcel 1204<small>Due 16:00</small></div><p class="st">State: late-package</p></div>
+<script>function sh(){var m=/(?:^#|&)s=([^&]+)/.exec(location.hash),s=m?decodeURIComponent(m[1]):"default",hit=document.querySelector('[data-state="'+s+'"]')||document.querySelector('[data-state="default"]');document.querySelectorAll("[data-state]").forEach(function(e){e.classList.toggle("on",e===hit)})}sh();addEventListener("hashchange",sh)<\/script>`;
+// What the page prepends to a design's srcdoc when the design names `state`. It runs before the mockup's own script.
+const stateScript = (s) => '<script>try{location.hash="s="+' + JSON.stringify(encodeURIComponent(s)) + '}catch(e){}<\/script>';
+
+const SPARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
+const LINK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>';
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+
+// Sample items, in the item JSON shape. `differs` and `short` and a design's `state` are the new fields.
+const ITEMS = [
+  { id: "late-package-look", n: 4, kind: "decision", tier: "due", short: "Late package look", look: true, waited: "waited 2 days",
+    title: "How should a late package show on the delivery list?", by: "Answer by Nov 3, 17:00 CDT, 6 days from now.",
+    context: "Couriers miss late packages today. Each option changes only the late row.", ref: "c210, the delivery list's late state",
+    designs: [{ slug: "late-amber", label: "Amber tag on the row" }, { slug: "late-top", label: "Late rows move to the top" }, { slug: "late-red", label: "Red row with a Call button", state: "late-package", focus: "#late-row" }],
+    options: [
+      { key: "amber", label: "Amber tag on the row", how: "The row keeps its place and gains a Late tag.", gain: "Nothing moves on the list.", lose: "Easy to miss in a long list.", design: "late-amber", differs: ["picture"] },
+      { key: "top", label: "Late rows move to the top", how: "Late rows jump to a Late group at the top.", gain: "Seen first.", lose: "The order changes under the thumb.", design: "late-top", differs: ["picture", "lose"] },
+      { key: "red", label: "Red row with a Call button", how: "The row turns red and shows Call courier.", gain: "One tap to act.", lose: "Adds a button to each late row.", design: "late-red", differs: ["picture", "gain"] },
+    ], pick: "red", why: "One tap fixes the most common late case.", choice: null, home: "c210", added: "Oct 26, 09:12 CDT" },
+  { id: "export-folder", n: 7, kind: "decision", tier: "calm", short: "Export folder", waited: "waited 5 hours",
+    title: "Where should a finished export land?", context: "Exports save to Downloads today, mixed with every other file.", ref: "c215, export target",
+    options: [
+      { key: "downloads", label: "Downloads, as today", how: "Saves to Downloads.", gain: "Nothing new to learn.", lose: "Files mix with other downloads.", differs: [] },
+      { key: "exports", label: "A folder per project", how: "Saves to Downloads/Exports/<project>.", gain: "Nothing new to learn.", lose: "One more folder to find.", differs: ["how", "lose"] },
+    ], pick: "exports", why: "Keeps exports apart at no cost.", choice: "exports", home: "c215", added: "Oct 28, 04:40 CDT" },
+  { id: "plug-in-build-mac", n: 8, kind: "task", tier: "calm", short: "Plug in Mac", waited: "waited 1 day",
+    title: "Plug the build Mac into power before the overnight run", context: "The overnight build stops when the battery runs out.", ref: "c220, overnight builds",
+    steps: ["Find the white cable at the desk", "Plug it into the Mac"], minutes: 2, home: "c220", added: "Oct 27, 18:02 CDT" },
+];
+const TIERS = [{ k: "holds", name: "Blocking", empty: "Nothing is blocking work." }, { k: "due", name: "Upcoming", empty: "Nothing has a deadline." }, { k: "calm", name: "Whenever", empty: "Nothing else is waiting." }, { k: "stands", name: "Pick stands", empty: "No pick stands." }];
+const FIELDS = ["picture", "how", "gain", "lose"];
+const letter = (i) => String.fromCharCode(65 + i);
+const optByKey = (it, k) => it.options.find((o) => o.key === k);
+
+// 1A: the writer names the fields; the page drops a named text field whose text is the same in every other option.
+// 1B: the page marks each field whose text differs from at least one other option.
+function marks(it, o, mode) {
+  const others = it.options.filter((x) => x !== o), val = (x, f) => (f === "picture" ? x.design || "" : (x[f] || "").trim());
+  const differsFromSome = (f) => others.some((x) => val(x, f) !== val(o, f));
+  if (mode === "computed") return FIELDS.filter((f) => (f !== "picture" || o.design) && differsFromSome(f));
+  return (o.differs || []).filter((f) => FIELDS.includes(f) && (f !== "picture" || o.design) && differsFromSome(f));
+}
+const SR = '<span class="sr">Sets this option apart: </span>';
+const NE = '<span class="ne" aria-hidden="true">≠</span>';
+function mini(slug) {
+  if (slug === "late-amber") return '<div class="mini"><div class="mh">Deliveries today</div><div class="mr">Parcel 1182<small>Due 14:00</small></div><div class="mr">Parcel 1190 <span class="tag">Late</span><small>Due 13:00</small></div><div class="mr">Parcel 1204<small>Due 16:00</small></div></div>';
+  if (slug === "late-top") return '<div class="mini"><div class="mh">Deliveries today</div><div class="mg">Late (1)</div><div class="mr">Parcel 1190<small>Due 13:00</small></div><div class="mr">Parcel 1182<small>Due 14:00</small></div><div class="mr">Parcel 1204<small>Due 16:00</small></div></div>';
+  return '<div class="mini"><div class="mh">Deliveries today</div><div class="mr">Parcel 1182<small>Due 14:00</small></div><div class="mr red">Parcel 1190 is late<span class="call">Call courier</span></div><div class="mr">Parcel 1204<small>Due 16:00</small></div></div>';
+}
+function optCard(it, o, i, mode, firstLabelled) {
+  const m = marks(it, o, mode), on = (f) => m.includes(f), sel = it.choice === o.key;
+  const pic = o.design ? `<span class="opic${on("picture") ? " dif" : ""}" role="button" tabindex="0" aria-label="View ${esc(o.label)} full screen${on("picture") ? ". Its picture sets this option apart" : ""}"><div class="dfitwrap inert" style="height:150px">${mini(o.design)}</div><span class="view" aria-hidden="true">${on("picture") ? NE : ""}View</span></span>` : "";
+  const row = (f, cls, inner) => `<div class="${cls}${on(f) ? " dif" : ""}">${on(f) ? SR : ""}${inner}${on(f) ? NE : ""}</div>`;
+  return `<label class="opt${sel ? " sel" : ""}">${pic}<input type="radio" name="g-${it.id}"${sel ? " checked" : ""}>
+    <span class="head"${i === 0 && firstLabelled ? ' data-today="chip on one line"' : ""}><span class="key">${letter(i)}</span><span class="lab">${esc(o.label)}</span></span>
+    <p class="how${on("how") ? " dif" : ""}">${on("how") ? SR : ""}${esc(o.how)}${on("how") ? NE : ""}</p>
+    <div class="tr">${row("gain", "gain", `<span class="s" aria-label="You gain">+</span><span>${esc(o.gain)}</span>`)}${row("lose", "lose", `<span class="s" aria-label="You lose">−</span><span>${esc(o.lose)}</span>`)}</div>
+    ${o.key === it.pick ? `<div class="pick"${firstLabelled ? ' data-today="AI sparkle"' : ""}><b class="spark" aria-label="My pick" title="My pick">${SPARK}</b>${esc(it.why)}</div>` : '<span class="nopick"></span>'}</label>`;
+}
+function card(it, mode, refused) {
+  const top = `<div class="top"><span class="num">No. ${it.n}</span><span>${it.waited}</span>${it.minutes ? `<span>about ${it.minutes} min</span>` : ""}</div><h3 class="title">${esc(it.title)}</h3>`;
+  let body = "";
+  if (refused && it.n === 4) body += '<p class="status broken" role="alert" data-new="refusal">The picture of option C names a state its mockup does not draw. Ask the session to fix item 4.</p>';
+  if (it.by) body += `<p class="stake due"><span class="g due" aria-hidden="true"></span><span>${it.by}</span></p>`;
+  body += `<p class="ctx">${esc(it.context)}</p><p class="about">${esc(it.ref)}</p>`;
+  if (it.kind === "decision") {
+    const lab = it.n === 4;
+    const any = it.options.some((o) => marks(it, o, mode).length);
+    body += `<div class="opts${it.look ? " pics" : ""}" role="radiogroup" aria-label="Options for No. ${it.n}"${lab ? ` data-new="${mode === "computed" ? "computed edge (1B)" : "differs edge (1A)"}"` : ""}>${it.options.map((o, i) => optCard(it, o, i, mode, lab)).join("")}</div>`;
+    if (any) body += `<p class="difkey"${lab ? ' data-new="legend"' : ""}><span class="ne" aria-hidden="true">≠</span><span>marks what sets an option apart.</span></p>`;
+    const c = it.choice && optByKey(it, it.choice);
+    body += `<p class="ready${c ? " on" : ""}" aria-live="polite">${c ? "Ready to send: " + esc(c.label) + ", your choice." : ""}</p>`;
+    const pk = optByKey(it, it.pick);
+    body += `<div class="alts"><button class="btn dash" type="button" aria-pressed="false"${refused && lab ? " disabled" : ""}>None of these</button><button class="btn quiet" type="button">Add a note</button><button class="btn alt${it.choice === it.pick ? " gone" : ""}" type="button"${lab ? ' data-today="names the title"' : ""}${refused && lab ? " disabled" : ""}>Take my pick (${esc(pk.label)})</button></div>`;
+  } else {
+    body += `<ol class="steps">${it.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol><p class="ready" aria-live="polite"></p><div class="alts"><button class="btn dash" type="button" aria-pressed="false">Mark done</button><button class="btn quiet" type="button">Add a note</button></div>`;
+  }
+  body += `<p class="dest">Lands in ${it.home}. Added ${it.added}.</p>`;
+  return `<article class="card ${it.tier}" id="item-${it.id}" aria-labelledby="t-${it.id}">${top.replace('<h3 class="title">', `<h3 class="title" id="t-${it.id}">`)}${body}</article>`;
+}
+function rail() {
+  const ready = ITEMS.filter((i) => i.choice).length;
+  let out = `<div class="ov-prog"><div class="big" data-today="digit matches its line"><b>0</b>of ${ITEMS.length} sent</div><div class="sub"><i class="sw"></i>${ready} ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:0%"></i><i class="r" style="width:${(ready / ITEMS.length) * 100}%"></i></div></div>`;
+  TIERS.forEach((T) => {
+    const list = ITEMS.filter((i) => i.tier === T.k);
+    const chips = list.map((it) => `<button type="button" class="nchip${it.choice ? " ready" : ""}" aria-label="No. ${it.n}, ${esc(it.title)}${it.choice ? ", ready to send" : ", open"}" title="${esc(it.title)}"><span class="no">${it.n}</span><span class="nt">${esc(it.short || it.title)}</span></button>`).join("");
+    out += `<div class="ov-tier${list.length ? "" : " zero"}"${list.length ? "" : ` data-new="empty tier keeps its line"`}><a class="ov-head" href="#tier-${T.k}" aria-label="${list.length} open, ${T.name}"><span class="g ${T.k}" aria-hidden="true"></span>${T.name}<span class="ct">${list.length}</span></a>${list.length ? `<div class="chips-n"${T.k === "calm" ? ' data-new="short titles"' : ""}>${chips}</div>` : ""}</div>`;
+  });
+  return `<nav class="rail" id="rail" aria-label="Overview">${out}</nav>`;
+}
+function list(mode, refused) {
+  return `<div class="list" id="list">${TIERS.map((T) => {
+    const items = ITEMS.filter((i) => i.tier === T.k);
+    return `<section class="tier" id="tier-${T.k}" aria-labelledby="th-${T.k}"><header><h2 id="th-${T.k}"><span class="g ${T.k}" aria-hidden="true"></span>${T.name}<span class="ct">${items.length}</span></h2></header>${items.length ? items.map((it) => card(it, mode, refused)).join("") : `<p class="empty"${T.k === "holds" ? ' data-new="empty tier line"' : ""}>${T.empty}</p>`}</section>`;
+  }).join("")}<p class="checked">Checked against main at a64166ae</p></div>`;
+}
+function sheet() {
+  const it = ITEMS[0], o = it.options[2], d = it.designs[2], words = d.state.replace(/-/g, " ");
+  const title = `${o.label} (Phone), ${words}`;
+  return `<div class="dsheet" id="dsheet" role="dialog" aria-modal="true" aria-labelledby="dTitle"><div class="dsh-head"><div class="in">
+    <h2 id="dTitle" data-new="state in the title">${esc(title)}</h2><span id="dPos">3 of 3</span>
+    <button class="btn quiet" type="button" aria-label="Previous design"><span class="lg">Prev</span><span class="sm" aria-hidden="true">&#8249;</span></button><button class="btn quiet" type="button" aria-label="Next design"><span class="lg">Next</span><span class="sm" aria-hidden="true">&#8250;</span></button>
+    <button class="btn quiet" type="button" id="dBack">Answer No. ${it.n}</button>
+    <button class="btn quiet" type="button" id="dFull" data-new="open this state" aria-label="Open the ${words} state of the full mockup in a new tab"><span class="lg">Open this state</span><span class="sm" aria-hidden="true">&#10530;</span></button>
+    <button class="btn" type="button" id="dClose" aria-label="Close"><span class="lg">Close</span><span class="sm" aria-hidden="true">&#10005;</span></button>
+  </div></div><div class="dsh-body" id="dStage"><p class="dcap" id="dCap">${esc(title)}</p><div class="dfitwrap" id="vwrap" style="width:min(100%,390px);height:330px"></div></div></div>`;
+}
+function screen(s, theme, lab) {
+  const mode = s === "computed" ? "computed" : "authored";
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body${s === "viewer" ? ' class="sheet-open"' : ""}>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1><span class="sub">waiting on you</span></div></div></header>
+<nav class="in tabs" aria-label="Page"><a href="#" aria-current="page">Questions</a><a href="#" role="button">Designs <span class="cnt">3</span></a></nav>
+<div class="in main">${rail()}${list(mode, s === "refused")}</div>
+<div class="bar"><div class="in"><span class="st"><b>1</b> ready. <b>2</b> stay open.</span><button class="btn send" type="button">Send 1 answer</button></div></div>
+${s === "viewer" ? sheet() : ""}</body></html>`;
+}
+
+/* ---------- Harness ---------- */
+const P = { s: "main", w: "all", t: "", lab: "on", hide: [] };
+function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; }); }
+function writeHash() { const q = new URLSearchParams({ s: P.s, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(",")); history.replaceState(null, "", "#" + q); }
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function frame(w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : w === 800 ? "Mid" : "Wide") + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "Waiting page at " + w + " wide"; f.style.width = w + "px";
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = P.s === "viewer" ? 760 : 900;
+    try { if (P.s !== "viewer") hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { wire(f.contentDocument); fit(); setTimeout(fit, 200); });
+  f.srcdoc = screen(P.s, theme(), P.lab !== "off");
+  addEventListener("resize", fit);
+}
+// The viewer: the option's mockup with the state script in front, and "Open this state" opens the same state in a new tab.
+function wire(doc) {
+  const wrap = doc.getElementById("vwrap"); if (!wrap) return;
+  const d = ITEMS[0].designs[2], f = doc.createElement("iframe");
+  f.className = "dframe"; f.title = d.label; f.setAttribute("sandbox", "allow-scripts"); f.style.cssText = "width:100%;height:100%;border:0";
+  f.srcdoc = stateScript(d.state) + SAMPLE_MOCK; wrap.append(f);
+  doc.getElementById("dFull").onclick = () => { try { window.open(URL.createObjectURL(new Blob([SAMPLE_MOCK], { type: "text/html" })) + "#s=" + encodeURIComponent(d.state), "_blank", "noopener"); } catch (e) {} };
+  const t = doc.getElementById("dTitle"); doc.getElementById("dCap").classList.toggle("on", t.scrollWidth > t.clientWidth);
+}
+function render() {
+  if (P.hide.includes(P.s)) P.s = ["main", "computed", "viewer", "refused"].find((s) => !P.hide.includes(s));
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { b.textContent = (P.hide.includes(b.dataset.hide) ? "Show " : "Hide ") + (b.dataset.hide === "main" ? "1A" : "1B"); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  document.getElementById("labBtn").textContent = P.lab === "off" ? "Labels off" : "Labels on";
+  document.getElementById("labBtn").setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  (P.w === "all" ? [390, 800, 1280] : [Number(P.w) || 390]).forEach(frame);
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.dataset.lab) P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const k = b.dataset.hide; P.hide = P.hide.includes(k) ? P.hide.filter((x) => x !== k) : [...P.hide, k]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+readHash(); render();
+</script>
+</body>
+</html>

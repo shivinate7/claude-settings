@@ -3,7 +3,7 @@
   "layers": ["typecheck", "lint", "format"],
   "not_code": {
     "reason": "prose, data and markup: nothing to type check or lint",
-    "extensions": [".md", ".json", ".yml", ".yaml", ".toml", ".txt", ".tmpl", ".html", ".css", ".svg", ".png", ".gitignore", ".gitattributes", ".ste-lint-exclude"]
+    "extensions": [".md", ".json", ".yml", ".yaml", ".toml", ".txt", ".tmpl", ".html", ".css", ".svg", ".png", ".gitignore", ".gitattributes", ".ste-lint-exclude", ".entitlements"]
   },
   "languages": {
     "python": {
@@ -21,6 +21,14 @@
       "typecheck": {"skip": "shell has no type system"},
       "lint": {"run": "shellcheck"},
       "format": {"skip": "after o2"}
+    },
+    "zsh": {
+      "extensions": [".zsh"],
+      "shebangs": ["zsh"],
+      "gold": {"typecheck": "none exists", "lint": "none exists; zsh -n checks syntax only", "format": "none exists"},
+      "typecheck": {"skip": "zsh has no type system"},
+      "lint": {"skip": "ShellCheck does not parse zsh; zsh -n not adopted"},
+      "format": {"skip": "no zsh formatter exists"}
     },
     "typescript": {
       "extensions": [".ts", ".tsx", ".mts", ".cts"],
@@ -69,6 +77,14 @@
       "typecheck": {"skip": "SQL has no type system outside a database"},
       "lint": {"skip": "sqlfluff is excluded by owner ruling"},
       "format": {"skip": "sqlfluff is excluded by owner ruling"}
+    },
+    "swift": {
+      "extensions": [".swift"],
+      "shebangs": [],
+      "gold": {"typecheck": "swiftc via xcodebuild on macOS", "lint": "SwiftLint, bug rules", "format": "swift-format"},
+      "typecheck": {"skip": "app code imports Apple SDKs, which the Linux toolchain lacks"},
+      "lint": {"skip": "SwiftLint not adopted; no bug-rule set chosen yet"},
+      "format": {"skip": "after o2"}
     }
   }
 }

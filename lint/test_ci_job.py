@@ -344,13 +344,22 @@ class RealChecks(unittest.TestCase):
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
 
 
+# Runs ci-job with tool lookup stubbed to find every command, so a plan reads the same with or without pipx installed.
+FIND_EVERY_TOOL = ("import runpy, shutil, sys; shutil.which = lambda cmd, *a, **k: '/stub/' + cmd; "
+                   "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+
+
+def plan_job(*args, cwd):
+    return subprocess.run([sys.executable, "-c", FIND_EVERY_TOOL, CI_JOB, *args], cwd=cwd,
+                          capture_output=True, text=True, env=ENV, timeout=60)
+
+
 def plan_lint(root, wf_text, extra=()):
     """Lines of `ci-job lane --lint --plan` over a workflow text."""
     path = os.path.join(root, "wf.yml")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(wf_text)
-    done = subprocess.run([sys.executable, CI_JOB, "lane", "--lint", "--plan", "--workflow", path, *extra], cwd=root,
-                          capture_output=True, text=True, env=ENV, timeout=60)
+    done = plan_job("lane", "--lint", "--plan", "--workflow", path, *extra, cwd=root)
     return done.returncode, done.stdout.splitlines(), done.stdout + done.stderr
 
 
@@ -379,8 +388,7 @@ class LintMode(unittest.TestCase):
                 if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check)\s*$", line):
                     want.append(name)  # a known action: ci-job runs its one home's command in its place
         self.assertGreater(len(want), 20)
-        done = subprocess.run([sys.executable, CI_JOB, "checks", "--lint", "--plan", "--base", "origin/main"],
-                              cwd=os.path.join(HERE, ".."), capture_output=True, text=True, env=ENV)
+        done = plan_job("checks", "--lint", "--plan", "--base", "origin/main", cwd=os.path.join(HERE, ".."))
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("would fetch")]  # a shallow clone adds one
         self.assertEqual(len(lines), len(want), done.stdout + done.stderr)
         for expected in want:

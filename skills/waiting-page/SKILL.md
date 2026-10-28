@@ -30,7 +30,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   string. The page keys on the database key, and warns on an item whose `id` field is missing or
   different. Fields: `id`, `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
-  with its plain name), `title`, `owner` (the session that reads the answer at its wake), `home` (the step, PR or
+  with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
   record the answer goes to), `context` (plain text, line breaks kept).
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
@@ -49,9 +49,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
-  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question), `pick` (the key you
+  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs`), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
     with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
     (a number, or text such as `3 min`).
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
@@ -73,13 +74,17 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   also says "Read by <owner>" and the time.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
-  `{ref, note}`) and `identity` (`{name, mark, brand, face}`).
+  `{ref, note}`) and `identity` (`{name, mark, brand, face, icon}`).
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
   - `brand` is one hex colour, such as `#f47820`. The page derives every colour from it and
     checks each text colour for 4.5:1 contrast. With no valid `brand`, the page keeps its neutral
     colours.
   - `face` is `sans` (the default), `serif`, `display` or `classic`. It sets the face of the name.
+  - `icon` is the repo's own icon as an inline `data:image/svg+xml` or `data:image/png;base64` URI,
+    at most 16384 characters (the page's `ICON_MAX`). It replaces the letter on a white or dark tile,
+    whichever more of its pixels stand out on. A square icon reads best: a wide one shrinks to fit
+    the 22px slot. The page never fetches a URL; any other value keeps the letter.
 
 The page hides an item with status `closed`. It shows an item as answered, in place, when
 `answers/<id>` exists: a green edge and the badge "Answered, filing pending" or "Answered, filed
@@ -200,9 +205,11 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
    `db` and `comments` (the full form, `{comments: {}}`). Change nothing in the page. A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
-3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` from
-   `colour_for(repo)` in `docs/design/repo-colours.json` when that file exists. Leave `brand` out
-   when the repo has no colour. Never invent a colour.
+3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
+   `python3 ~/.claude/lint/repo_colour.py identity <repo root>`. It reads the repo's own extras keys
+   `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
+   then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
+   invent a colour. The page still checks each text colour for 4.5:1 contrast.
 4. Put the URL in the repo's extras file: `"waiting-page": "<url>"`. The file alone does not mark the
    repo as rolled out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
 5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.
@@ -245,6 +252,7 @@ The page refuses an item where they do, or where a `focus` finds nothing.
    - A design may carry `option` (an option's `key`) and `width` (a name such as `Wide`). Each extra
      width of an option is one more design with that `option`. The first design of an option is its
      picture on the card.
+   - A design may carry `state`, a slug such as `late-package`: the state of the mockup this picture shows. The mockup side of the contract: the mockup reads `#s=<state>` from its URL hash on load and on `hashchange`, and draws each state as an element with `data-state="<state>"`. The page opens the picture at that state, in the card frame and the viewer, and adds the state to the viewer title. The viewer's "Open this state" opens the mockup at that state in a new tab. The button on a front preview opens the viewer at that design. A `state` that no `data-state` element in its mockup carries blocks the item, with a line that names the option. Two options may share one mockup and differ by `state`: give each such design its `option` key.
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.

@@ -434,6 +434,93 @@ test("a page with no brand uses neutral defaults and draws no colour of its own"
   assert.equal(await page2.evaluate(() => document.documentElement.style.getPropertyValue("--r-hdr-l")), "", "a brand that is no hex was used");
 });
 
+// ---------------------------------------------------------------- the repo's icon (roadmap step c132)
+
+const svgIcon = (fill, extra = "") => "data:image/svg+xml;base64," + Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" fill="${fill}"/>${extra}</svg>`).toString("base64");
+const markState = (page) => page.evaluate(() => {
+  const m = document.getElementById("mark"), img = m.querySelector("img");
+  return { icon: m.classList.contains("icon"), img: img ? img.getAttribute("src") : null, alt: img ? img.getAttribute("alt") : null, text: m.textContent, hidden: m.hidden, tile: m.style.getPropertyValue("--tile"), aria: m.getAttribute("aria-hidden") };
+});
+const named = (page, name) => page.waitForFunction((n) => document.getElementById("repoName").textContent === n, name);
+
+test("a dark icon shows on a white tile in place of the letter, alt empty and aria-hidden kept", async (t) => {
+  const icon = svgIcon("#11151b");
+  const page = await open(t, { meta: { identity: { name: "Compass", brand: "#f47820", icon } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  const m = await markState(page);
+  assert.deepEqual(m, { icon: true, img: icon, alt: "", text: "", hidden: false, tile: "#ffffff", aria: "true" });
+  const box = await page.evaluate(() => { const r = document.querySelector("#mark img").getBoundingClientRect(), b = document.getElementById("mark").getBoundingClientRect(); return [r.width, r.height, b.width, b.height]; });
+  assert.deepEqual(box, [22, 22, 28, 28]);
+});
+
+test("a white icon gets the dark tile", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass", brand: "#f47820", icon: svgIcon("#ffffff") } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  assert.equal((await markState(page)).tile, "#11151b");
+});
+
+test("an icon that is not an inline svg or png data URI, or is too long, leaves the letter", async (t) => {
+  const long = "data:image/svg+xml;base64," + "A".repeat(16385 - 26);
+  assert.equal(long.length, 16385);
+  for (const icon of ["data:image/png;base64,AAAA", "https://example.com/icon.svg", long, "data:image/jpeg;base64,/9j/4AAQ", 42]) {
+    const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
+    await named(page, "Compass");
+    await page.waitForTimeout(150);
+    const m = await markState(page);
+    assert.deepEqual([m.icon, m.img, m.text, m.hidden], [false, null, "C", false], String(icon).slice(0, 40));
+    await page.close();
+  }
+});
+
+test("an icon leaves the header height as it was", async (t) => {
+  const height = async (identity) => {
+    const page = await open(t, { meta: { identity } }); if (!page) return null;
+    await named(page, "Compass");
+    if (identity.icon) await page.waitForSelector("#mark.icon img");
+    const h = await page.evaluate(() => document.querySelector("header.hdr").getBoundingClientRect().height);
+    await page.close();
+    return h;
+  };
+  const plain = await height({ name: "Compass" }); if (plain === null) return;
+  assert.equal(await height({ name: "Compass", icon: svgIcon("#11151b") }), plain);
+});
+
+test("an icon with no name or mark still shows", async (t) => {
+  const page = await open(t, { meta: { identity: { icon: svgIcon("#11151b") } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  assert.equal((await markState(page)).hidden, false);
+});
+
+test("a meta write with the same icon keeps it shown, with no flash of the letter", async (t) => {
+  const icon = svgIcon("#11151b");
+  const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  const flashed = await page.evaluate(async (icon) => {
+    const m = document.getElementById("mark"); let lost = false;
+    new MutationObserver(() => { if (!m.classList.contains("icon") || !m.querySelector("img")) lost = true; }).observe(m, { attributes: true, childList: true });
+    state.meta = { identity: { name: "Compass", brand: "#f47820", icon } }; applyIdentity();
+    await new Promise((r) => setTimeout(r, 200));
+    return lost;
+  }, icon);
+  assert.equal(flashed, false);
+  assert.equal((await markState(page)).img, icon);
+});
+
+test("a decode that finishes after a newer identity is ignored", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
+  await named(page, "Compass");
+  const slow = svgIcon("#11151b", "<!--slow-->");
+  await page.evaluate((slow) => {
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && new Promise((r) => setTimeout(r, 400))); };
+    state.meta = { identity: { name: "Compass", icon: slow } }; applyIdentity();
+    state.meta = { identity: { name: "Compass" } }; applyIdentity();
+  }, slow);
+  await page.waitForTimeout(700);
+  const m = await markState(page);
+  assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""]);
+});
+
 // ---------------------------------------------------------------- designs
 
 test("a design shows in a sandboxed frame on its card, and the Designs tab pages through a sheet", async (t) => {
@@ -1510,3 +1597,232 @@ for (const width of [390, 1440]) {
     if (width > 900) assert.ok(Math.abs((m.left + m.right) / 2 - m.vw / 2) < 3, "not centered on open");
   });
 }
+
+// ---------------------------------------------------------------- c100 review defects
+
+// Each helper wraps db.doc().delete so the test controls what a delete does inside Undo.
+const hookDelete = (fn) => (page) => page.evaluate(`(() => {
+  const col = state.db.collection;
+  state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const del = y.delete; y.delete = (${fn})(n, del); return y; }; return x; };
+  document.getElementById("undoBtn").click();
+})()`);
+
+test("a partial Undo lists late items with commas and one final and", async (t) => {
+  const items = [mk("d-one", 1), mk("d-two", 2), mk("d-three", 3), mk("d-four", 4)];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await hookDelete(`(n, del) => async () => { await del(); const real = Date.now; Date.now = () => real() + 9000; }`)(page);
+  await page.locator("#barStatus", { hasText: "Too late to undo" }).waitFor();
+  const text = await page.locator("#barStatus").innerText();
+  assert.match(text, /Too late to undo No\. 1, No\. 2,? and No\. 3\./, text);
+});
+
+test("a failed Undo names every item it could not undo", async (t) => {
+  const items = [mk("d-one", 1), mk("d-two", 2), mk("d-three", 3)];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await hookDelete(`(n, del) => async () => { if (n === "answers") throw { code: "denied" }; return del(); }`)(page);
+  await page.locator("#barStatus", { hasText: "Undo failed" }).waitFor();
+  const text = await page.locator("#barStatus").innerText();
+  for (const n of [1, 2, 3]) assert.match(text, new RegExp("No\\. " + n + "\\b"), "the bar does not name No. " + n + ": " + text);
+});
+
+test("a failed receipt delete leaves no old receipt in the page state", async (t) => {
+  const page = await open(t, { receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } }, failDeleteIn: "receipts" }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction((id) => !(id in state.answers), DECISION.id);
+  assert.equal(await page.evaluate((id) => id in state.receipts, DECISION.id), false, "the old receipt is still in the page state");
+});
+
+// ---------------------------------------------------------------- c122: what differs, open this state, short titles
+
+const diffItem = (over = {}) => mk("diff-q", 70, { pick: "a", options: [
+  { key: "a", label: "Alpha", how: "same how", gain: "gain A", lose: "same lose", differs: ["gain"] },
+  { key: "b", label: "Beta", how: "same how", gain: "gain B", lose: "same lose" },
+], ...over });
+const SETS = "Sets this option apart: ";
+
+test("a named field gets a bar class, a not-equal sign and screen-reader words; an option with no differs shows none", async (t) => {
+  const it = diffItem();
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const a = card(page, it).locator('label.opt[for="o-diff-q-a"]'), b = card(page, it).locator('label.opt[for="o-diff-q-b"]');
+  const g = a.locator(".gain");
+  assert.equal(await g.evaluate((e) => e.classList.contains("dif")), true, "gain is not marked");
+  assert.equal(await g.locator(".ne").textContent(), "≠");
+  assert.equal(await g.locator(".ne").getAttribute("aria-hidden"), "true");
+  assert.equal(await g.locator(".sr").textContent(), SETS);
+  assert.equal(await a.locator(".how.dif, .lose.dif").count(), 0, "an unnamed field is marked");
+  assert.equal(await b.locator(".dif, .ne").count(), 0, "an option with no differs is marked");
+  assert.equal(await card(page, it).locator(".difkey").count(), 1, "the legend is not shown once");
+  assert.match(await card(page, it).locator(".difkey").innerText(), /≠\s*marks what sets an option apart\./);
+});
+
+test("the page drops a named text field whose text equals every other option's, and ignores an unknown name", async (t) => {
+  const it = diffItem({ options: [
+    { key: "a", label: "Alpha", how: "same how", gain: "gain A", lose: "same lose", differs: ["how", "gain", "colour"] },
+    { key: "b", label: "Beta", how: "same how", gain: "gain B", lose: "same lose" },
+    { key: "c", label: "Gamma", how: "same how", gain: "gain C", lose: "same lose" },
+  ] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const a = card(page, it).locator('label.opt[for="o-diff-q-a"]');
+  assert.equal(await a.locator(".how.dif").count(), 0, "how equals the others and is still marked");
+  assert.equal(await a.locator(".gain.dif").count(), 1);
+  assert.equal(await a.locator(".dif").count(), 1, "an unknown name marked something");
+});
+
+test("an item whose differs all drop, or that has none, shows no legend", async (t) => {
+  const it = diffItem({ options: [
+    { key: "a", label: "Alpha", how: "h", gain: "g", lose: "l", differs: ["how"] }, { key: "b", label: "Beta", how: "h", gain: "g", lose: "l" }] });
+  const page = await open(t, { items: [it, DECISION] }); if (!page) return;
+  assert.equal(await page.locator(".difkey, .ne").count(), 0);
+});
+
+test("a named picture marks the frame and the View bar and says so in its label; picture on an option with no picture is ignored", async (t) => {
+  const it = looks("diff-pic", 71, [{ slug: "o-a", label: "A" }, { slug: "o-b", label: "B" }]);
+  it.options[0].differs = ["picture"]; it.options[1].differs = ["picture"]; delete it.options[1].design;
+  const page = await open(t, { items: [it], designData: { "o-a": lateRow("one"), "o-b": lateRow("two") } }); if (!page) return;
+  const pa = card(page, it).locator('label.opt[for="o-diff-pic-a"] .opic');
+  assert.equal(await pa.evaluate((e) => e.classList.contains("dif")), true);
+  assert.equal(await pa.locator(".view .ne").textContent(), "≠");
+  assert.match(await pa.getAttribute("aria-label"), /^View Layout A full screen\. Its picture sets this option apart$/);
+  assert.equal(await card(page, it).locator('label.opt[for="o-diff-pic-b"] .dif').count(), 0, "a picture mark on an option with no picture");
+});
+
+const STATE_MOCK = '<!doctype html><body style="margin:0"><div data-state="default">d</div><div data-state="late-package" id="late-row">late</div></body>';
+const stateItem = (id, n, states, over = {}) => looks(id, n, [
+  { slug: "s-a", label: "A", ...(states[0] ? { state: states[0] } : {}) }, { slug: "s-b", label: "B", ...(states[1] ? { state: states[1] } : {}) }], over);
+const STATE_DATA = { "s-a": STATE_MOCK, "s-b": STATE_MOCK.replace(">late<", ">late two<") };
+const stateOpts = (it) => it.options.forEach((o, i) => { o.design = i ? "s-b" : "s-a"; });
+
+test("a design with a state opens its mockup at that state, in the card frame and in the viewer", async (t) => {
+  const it = stateItem("st-frame", 72, ["late-package", "late-package"]); stateOpts(it);
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  const fr = await (await page.locator(optFrame(it, "a")).elementHandle()).contentFrame();
+  await fr.waitForLoadState();
+  assert.equal(await fr.evaluate(() => location.hash), "#s=late-package");
+  const src = await page.locator(optFrame(it, "a")).getAttribute("srcdoc");
+  assert.ok(src.search(/<!doctype/i) < src.search(/location\.hash/), "the state script must come after the doctype, or the mockup renders in quirks mode");
+});
+
+test("the viewer names the state in its title and offers Open this state, which opens the blob at #s=<state>", async (t) => {
+  const it = stateItem("st-view", 73, ["late-package", null]); stateOpts(it);
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  await page.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
+  await card(page, it).locator('label.opt[for="o-st-view-a"] .opic').click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout A (Phone), late package");
+  assert.equal(await page.locator("#dCap").textContent(), "Layout A (Phone), late package");
+  assert.equal(await page.locator("#dFull .lg").textContent(), "Open this state");
+  assert.equal(await page.locator("#dFull").getAttribute("aria-label"), "Open the late package state of the full mockup in a new tab");
+  await page.click("#dFull");
+  const u = await page.evaluate(() => window.__opened);
+  assert.equal(u.length, 1); assert.match(u[0], /^blob:.*#s=late-package$/);
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Layout B (Phone)", "no state: no suffix");
+  assert.equal(await page.locator("#dFull .lg").textContent(), "Open full size");
+  assert.equal(await page.locator("#dFull").getAttribute("aria-label"), "Open full size");
+});
+
+test("a state the mockup does not draw blocks the item and names the option; a drawn state, or two states of one slug and focus, do not", async (t) => {
+  const bad = stateItem("st-bad", 74, [null, "no-such-state"]); stateOpts(bad);
+  let page = await open(t, { items: [bad], designData: STATE_DATA }); if (!page) return;
+  assert.equal(await ALERT(page, bad).count(), 1, "no alert");
+  assert.match(await ALERT(page, bad).textContent(), /option B names a state its mockup does not draw\. Ask the session to fix item 74\./);
+  await page.evaluate(() => { setDraft(byId("st-bad"), { choice: "a", auto: true }); render(); });
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is not refused");
+  const ok = stateItem("st-ok", 75, ["late-package", "default"]);
+  ok.designs = ok.designs.map((d, i) => ({ ...d, slug: "s-a", option: "ab"[i] })); ok.options.forEach((o) => { o.design = "s-a"; });
+  page = await open(t, { items: [ok], designData: STATE_DATA }); if (!page) return;
+  assert.equal(await ALERT(page, ok).count(), 0, "two states of one slug are refused as one picture");
+  const same = stateItem("st-same", 76, ["late-package", "late-package"]);
+  same.designs = same.designs.map((d, i) => ({ ...d, slug: "s-a", option: "ab"[i] })); same.options.forEach((o) => { o.design = "s-a"; });
+  page = await open(t, { items: [same], designData: STATE_DATA }); if (!page) return;
+  assert.match(await ALERT(page, same).textContent(), /A and B.*share one picture/s);
+});
+
+const shortChip = (page, it) => page.locator(`#c-${it.id}`);
+test("the wide rail chip shows the short title; no or an over-long short falls back to the title; the title stays in full on the chip", async (t) => {
+  const items = [mk("sh-a", 80, { title: "A very long question title for the rail", short: "Rail name" }), mk("sh-b", 81, { title: "Second long question title here" }), mk("sh-c", 82, { title: "Third long question title here", short: "x".repeat(25) })];
+  const page = await open(t, { items }); if (!page) return;
+  assert.equal(await shortChip(page, items[0]).locator(".nt").textContent(), "Rail name");
+  assert.equal(await shortChip(page, items[1]).locator(".nt").textContent(), "Second long question title here");
+  assert.equal(await shortChip(page, items[2]).locator(".nt").textContent(), "Third long question title here");
+  assert.equal(await shortChip(page, items[0]).getAttribute("title"), "A very long question title for the rail");
+  assert.match(await shortChip(page, items[0]).getAttribute("aria-label"), /^No\. 80, A very long question title for the rail, /);
+});
+
+const looseItem = () => mk("st-loose", 77, { designs: [{ slug: "s-a", label: "Early", state: "default" }, { slug: "s-a", label: "Late", state: "late-package" }] });
+
+test("a front preview's Open this state opens the viewer at the design shown, even when two designs share a slug", async (t) => {
+  const it = looseItem();
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  const btn = card(page, it).locator(".dprev .dbar button").last();
+  assert.equal(await btn.textContent(), "Open this state");
+  assert.equal(await btn.getAttribute("aria-label"), "Open the default state in the viewer");
+  await card(page, it).locator('.dprev button[aria-label="Next design"]').click();
+  assert.equal(await btn.getAttribute("aria-label"), "Open the late package state in the viewer");
+  await btn.click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Late, late package");
+  assert.equal(await page.locator("#dFull").getAttribute("aria-label"), "Open the late package state of the full mockup in a new tab");
+});
+
+test("a front preview's Open this state still opens the design shown after the items are rebuilt as new objects", async (t) => {
+  const other = mk("st-first", 70, { designs: [{ slug: "s-b", label: "First item design" }] });
+  const it = looseItem();
+  const page = await open(t, { items: [other, it], designData: STATE_DATA }); if (!page) return;
+  await page.evaluate(() => { state.items = state.items.map((x) => ({ ...x })); render(); });
+  await card(page, it).locator('.dprev button[aria-label="Next design"]').click();
+  await card(page, it).locator(".dprev .dbar button").last().click();
+  assert.equal(await page.locator("#dTitle").textContent(), "Late, late package");
+});
+
+test("each design frame's title names its state, in the viewer stage and in the front preview", async (t) => {
+  const it = looseItem();
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  assert.equal(await card(page, it).locator(".dprev iframe").getAttribute("title"), "Early, default");
+  await page.click("#tabD");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dStage > .dfitwrap:not(.off) iframe").getAttribute("title"), "Late, late package");
+});
+
+test("the Designs tab viewer also names each design's state in its title", async (t) => {
+  const it = looseItem();
+  const page = await open(t, { items: [it], designData: STATE_DATA }); if (!page) return;
+  await page.click("#tabD");
+  assert.equal(await page.locator("#dTitle").textContent(), "Early, default");
+  await page.click("#dNext");
+  assert.equal(await page.locator("#dTitle").textContent(), "Late, late package");
+  assert.equal(await page.locator("#dCap").textContent(), "Late, late package");
+});
+
+test("an Undo where one delete works and a later one fails names only the items still sent", async (t) => {
+  const items = [mk("d-one", 1), mk("d-two", 2), mk("d-three", 3)];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await page.evaluate(`(() => {
+    const col = state.db.collection;
+    state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const del = y.delete; y.delete = async () => { if (n === "answers" && id === "d-two") throw { code: "denied" }; return del(); }; return y; }; return x; };
+    document.getElementById("undoBtn").click();
+  })()`);
+  await page.locator("#barStatus", { hasText: "Undo failed" }).waitFor();
+  const text = await page.locator("#barStatus").innerText();
+  assert.match(text, /Not undone: No\. 1 and No\. 2\./, text);
+  assert.doesNotMatch(text, /No\. 3/, "No. 3 was undone and must not be named: " + text);
+});
+
+test("a named picture's not-equal sign sits inside its View bar", async (t) => {
+  const it = looks("diff-ne", 78, [{ slug: "o-a", label: "A" }, { slug: "o-b", label: "B" }]);
+  it.options[0].differs = ["picture"];
+  const page = await open(t, { items: [it], designData: { "o-a": lateRow("one"), "o-b": lateRow("two") } }); if (!page) return;
+  const m = await page.evaluate((id) => {
+    const o = document.querySelector(`#item-${id} label.opt .opic.dif`), v = o.querySelector(".view").getBoundingClientRect(), n = o.querySelector(".ne").getBoundingClientRect();
+    return { v: [v.left, v.top, v.right, v.bottom], n: [n.left, n.top, n.right, n.bottom] };
+  }, it.id);
+  assert.ok(m.n[0] >= m.v[0] - 0.5 && m.n[2] <= m.v[2] + 0.5 && m.n[1] >= m.v[1] - 0.5 && m.n[3] <= m.v[3] + 0.5, "the sign is outside the View bar: " + JSON.stringify(m));
+});
