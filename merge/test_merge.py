@@ -1068,6 +1068,37 @@ class SmallBaseMove(Env):
         with self.assertRaises(SyntaxError):
             hit("def (:\n")
 
+    def test_a_root_read_in_any_form_is_a_hit(self):
+        hit = lambda src, path="docs/decisions/x.md": merge.python_suite_hits(src, "hooks/test_x.py", [path])
+        here = "import os, pathlib\nHERE = os.path.dirname(os.path.abspath(__file__))\nROOT = os.path.dirname(HERE)\n"
+        for form in ('open(f"{ROOT}/docs/decisions/a.md")', 'open(ROOT + "/docs/decisions/a.md")',
+                     'open("{}/docs/decisions/a.md".format(ROOT))', 'open("%s/docs/decisions/a.md" % ROOT)',
+                     'D = pathlib.Path(__file__).resolve().parents[1] / "docs" / "decisions"'):
+            with self.subTest(form=form):
+                self.assertTrue(hit(here + form + "\n"))
+
+    def test_a_root_at_the_repo_top_is_a_hit(self):
+        hit = lambda src, path="docs/decisions/x.md": merge.python_suite_hits(src, "hooks/test_x.py", [path])
+        here = "import os, pathlib\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+        self.assertTrue(hit(here + 'DOCS = os.path.join(os.path.dirname(HERE), "docs")\nos.listdir(DOCS)\n'))
+        self.assertTrue(hit(here + 'DOCS = os.path.join(os.path.dirname(HERE), "docs")\nfor x in os.walk(DOCS): pass\n'))
+        self.assertTrue(hit('import pathlib\nD = pathlib.Path(__file__).resolve().parent.parent / "docs"\nlist(D.rglob("*.md"))\n'))
+        self.assertTrue(hit(here + 'for x in os.walk(os.path.dirname(HERE)): pass\n', "notes/any.md"))  # the whole repo: every path
+
+    def test_a_read_through_a_local_module_is_a_hit(self):
+        files = {"skills/s/tests/test_s.py": "import os, sys\nsys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scripts'))\nimport helper\n",
+                 "skills/s/scripts/helper.py": "import os\nT = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates')\nos.listdir(T)\n",
+                 "hooks/test_y.py": "import sibling\n", "hooks/sibling.py": "open('docs/decisions/y.md')\n"}
+        read = files.get
+        self.assertTrue(merge.python_suite_hits(files["skills/s/tests/test_s.py"], "skills/s/tests/test_s.py", ["skills/s/templates/new.md"], read))
+        self.assertTrue(merge.python_suite_hits(files["hooks/test_y.py"], "hooks/test_y.py", ["docs/decisions/z.md"], read))
+        self.assertFalse(merge.python_suite_hits("import nowhere\n", "hooks/test_z.py", ["docs/decisions/z.md"], read))
+
+    def test_a_gates_line_of_no_suite_form_that_names_main_s_path_is_refused(self):
+        self.scoped(workflow=GATES_YML + "      - name: Other runner\n        run: sh -c 'grep -q x docs/guide.md || true'\n")
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        self.assertIn("docs/guide.md", self.refused())
+
     def test_a_records_only_main_move_keeps_the_green_run(self):
         """A new record and the page rebuilt on main; a gates suite names the record folder only in its temp tree."""
         self.scoped(workflow=GATES_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
