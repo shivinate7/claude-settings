@@ -296,6 +296,11 @@ class NoteCapHook(unittest.TestCase):
         self.git("add", "-A")
         self.assert_refused(self.commit(), "c3 (300 words)")
 
+    def test_step_file_named_dot_json_counts(self):
+        self.step("", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), ".json (300 words)")
+
     def path_with(self, *tools):
         bin_ = pathlib.Path(self.tmp.name) / ("bin-" + "-".join(tools))
         bin_.mkdir()

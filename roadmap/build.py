@@ -154,7 +154,7 @@ def staged_notes_over_cap(repo):
     steps, refused = {}, []
     for mode, blob, path in entries:
         p = pathlib.PurePosixPath(path)
-        if str(p.parent) != STEPS_PATH or p.suffix != ".json":
+        if str(p.parent) != STEPS_PATH or not p.name.endswith(".json"):
             continue
         if mode == "120000":
             refused.append(f"{shown(path)} is a symlink; build.py would follow it. Commit the file itself.")
