@@ -34,7 +34,7 @@ the mold". Roadmap step c109 (a blind design brief cannot carry today's screen) 
   pages first, draw native controls and proportions, and draw the Duo folded, then unfolded, each as its
   own layout. `lint/check_ios_mockup.py` checks one mockup for the system font, a safe-area inset and
   both Duo frames, folded first. The designer and skill `design-explore` run it on each mockup in an iOS
-  repo. It is not a CI gate over a design folder, because older mockups would go red. The design
+  repo. It is not a CI check over a design folder, because older mockups would go red. The design
   reviewer gives each iOS screen one line, `native` or `web-like`.
 
 Why: the session that drew the Duo mockups ran no blind lane. Its one brief said "Duo layouts must keep

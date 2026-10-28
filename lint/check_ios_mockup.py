@@ -19,7 +19,7 @@ stripped with strings respected, so a comment opener inside a CSS string is not 
 holds no frame.
 
 Prints one `<file>: <code>: <detail>` line per fault. Exits 0 when clean, 1 with faults, and 2 when a file
-cannot be read. It is not a CI gate over a repo's design folder: the designer and skills design-explore and
+cannot be read. It is not a CI check over a repo's design folder: the designer and skills design-explore and
 ios-apps run it on a new mockup. Cost: one python start per run; it writes no file.
 """
 import html.parser
