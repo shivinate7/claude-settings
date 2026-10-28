@@ -12,8 +12,9 @@ repo owned its load budget, and fixes deadlocked across repos.
 - Every user repo's session runs the preflight before a deploy, a restart or a bulk import, and reads
   the holds.
 - A repo declares each shared machine in `.claude/layout-extras.json` under `shared-resources`:
-  `{"name", "owner", "preflight", "holds"}`. `owner` is `<gh-owner>/<repo>`. `preflight` and `holds`
-  are paths inside the owner repo. The owner repo must hold its preflight file.
+  `{"name", "owner", "preflight", "holds"}`. `name` is unique in the file. `owner` is
+  `<gh-owner>/<repo>`, with no `.git`. `preflight` and `holds` are paths inside the owner repo, with no
+  whitespace around them. The owner repo must hold its preflight file.
 - `python3 lint/layout.py shared-resources <root>` prints the declaration. `lint/layout.py` is the only
   reader. `lint/check_shared_resources.py` goes red on a bad declaration.
 - Rolling this out to other repos is a later step (roadmap step c141).
@@ -23,9 +24,9 @@ One owner per machine ends the deadlock. A hand-off keeps the owner's guard whol
 
 Risk kind: incident, per `building-guard-needs-incident`: the 3 crashes in 8 days above, landed 2026-10-28.
 
-Cost: CI only. One python start per gate run. No file is written.
+Cost: CI only: two gate steps, about 23 Python starts per run (one per test case, one for the suite, one for the check), no file written.
 
-Protected by `lint/test_check_shared_resources.py` and `lint/test_layout.py`.
+Protected by `lint/test_check_shared_resources.py`.
 
 Kind: process
 Home: lint/layout.py

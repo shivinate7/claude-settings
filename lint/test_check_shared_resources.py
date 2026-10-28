@@ -107,6 +107,32 @@ class SharedResourcesTests(unittest.TestCase):
         self.repo(self.entry(), origin="me/degen")
         self.assertEqual(self.run_check(), (0, ""))
 
+    def test_owner_with_dot_git_is_red(self):
+        self.repo(self.entry(owner="me/home.git"), origin="Me/Home")
+        self.assertRed("ha-green", "owner")
+
+    def test_no_name_is_red(self):
+        self.repo(self.entry(name=None))
+        self.assertRed("layout-extras.json", "entry 1", "name")
+
+    def test_empty_name_is_red(self):
+        self.repo(self.entry(name=" "))
+        self.assertRed("name")
+
+    def test_duplicate_name_is_red(self):
+        extras = self.entry()
+        extras["shared-resources"].append(dict(GOOD, holds="other"))
+        self.repo(extras)
+        self.assertRed("ha-green", "twice")
+
+    def test_preflight_with_whitespace_is_red(self):
+        self.repo(self.entry(preflight="scripts/preflight.sh "))
+        self.assertRed("ha-green", "whitespace")
+
+    def test_holds_with_leading_whitespace_is_red(self):
+        self.repo(self.entry(holds=" holds"))
+        self.assertRed("ha-green", "whitespace")
+
     def test_unreadable_extras_is_red(self):
         self.repo("{not json")
         self.assertRed("cannot read")

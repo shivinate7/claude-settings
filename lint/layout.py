@@ -286,17 +286,23 @@ def shared_resources(root):
     where = _extras(root)
     if not isinstance(found, list):
         raise LayoutError("%s: %s is not a list" % (where, SHARED_RESOURCES))
+    names = set()
     for number, item in enumerate(found, 1):
         label = "%s entry %d (%s)" % (SHARED_RESOURCES, number, item.get("name") if isinstance(item, dict) else item)
         if not isinstance(item, dict):
             raise LayoutError("%s: %s is not an object" % (where, label))
-        for field in ("owner", "preflight") + (("holds",) if "holds" in item else ()):
+        for field in ("name", "owner", "preflight") + (("holds",) if "holds" in item else ()):
             if not isinstance(item.get(field), str) or not item[field].strip("/ "):
                 raise LayoutError("%s: %s has no %s" % (where, label, field))
-        if not re.fullmatch(r"[^/\s]+/[^/\s]+", item["owner"]):
+        if item["name"] in names:
+            raise LayoutError("%s: %s name appears twice" % (where, label))
+        names.add(item["name"])
+        if not re.fullmatch(r"[^/\s]+/[^/\s]+", item["owner"]) or item["owner"].endswith(".git"):
             raise LayoutError("%s: %s owner %r is not <owner>/<repo>" % (where, label, item["owner"]))
         for field in ("preflight", "holds"):
             if field in item:
+                if item[field] != item[field].strip():
+                    raise LayoutError("%s: %s %s has whitespace around it" % (where, label, field))
                 _safe(item[field], "%s: %s %s" % (where, label, field))
         if repo_name(root) == item["owner"].lower() and not os.path.isfile(os.path.join(root, *item["preflight"].split("/"))):
             raise LayoutError("%s: %s preflight %s is missing in the owner repo" % (where, label, item["preflight"]))
