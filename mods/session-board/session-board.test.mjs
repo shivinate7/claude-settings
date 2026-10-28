@@ -1406,6 +1406,33 @@ await test('question box: the sweep clears a dead session\'s start record and ke
   same(['started:' + OTHER, 'started:' + sid(3), 'started:' + sid(4), 'started:' + ID].map(k => h.store.has(k)), [false, true, true, true], 'dead old gone; young, live and own kept')
 })
 
+await test('question box: a session start under a new id drops the count; under the same id it keeps it', async () => {
+  const h = await start({ liveAgents: [] })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', STARTED)
+  await settle()
+  await fire(h, 'session.start', {}) // the same module, the same id
+  await settle()
+  same((await askBox(h)).decision, 'deny', 'same id keeps the count')
+  await fire(h, 'session.end', { sessionId: ID, reason: 'other' })
+  h.sid = NEW_ID
+  await fire(h, 'session.start', {}) // the same module serves another session
+  await settle()
+  same((await askBox(h)).decision, 'allow', 'a new id starts at its own count')
+  await tickBeat(h)
+  same(h.store.has('started:' + NEW_ID), false, "no count written under the new id")
+})
+
+await test('question box: a day-old start record beside a fresh board entry keeps all three records', async () => {
+  const h = await start({
+    agents: [],
+    seed: [['sess:' + OTHER, raw()], ['detail:' + OTHER, { v: 1, at: NOW }], ['started:' + OTHER, { n: 1, at: NOW - 86_400_001 }]],
+  })
+  await fire(h, 'session.start', {})
+  await settle()
+  same(['sess:', 'detail:', 'started:'].map(k => h.store.has(k + OTHER)), [true, true, true], 'records kept')
+})
+
 await test("question box: an in-process resume drops the old count and loads the resumed session's own", async () => {
   const h = await start({ liveAgents: [], seed: [['started:' + NEW_ID, { n: 3, at: NOW }]] })
   await fire(h, 'session.start', {})

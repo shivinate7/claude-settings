@@ -27,7 +27,8 @@ let view = { id: null, detail: null } // id null: all-sessions view
 const bgTasks = new Set() // background command and workflow task ids seen to start and not yet seen to end
 let started = 0 // sessions this one started; kept in its start record (started:<id>) across a reload or restart
 let startedFor = '' // the id whose start record holds the count now; '' makes the next write store it
-let startedLoad = true // the bound id's start record is not read yet: true at load and after a resume
+let startedLoad = true // the bound id's start record is not read yet: true at each session start and after a resume
+let startedOwner = '' // the id the count belongs to; '' while none is bound
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -53,6 +54,7 @@ export function register(on) {
         // A /clear goes on with the same work: the count carries to the new id.
         if (e.reason === 'resume') { started = 0; startedLoad = true }
         startedFor = ''
+        startedOwner = ''
         lastDetail = ''
         tracker.reset()
         await setRepo($)
@@ -209,6 +211,7 @@ async function startUp($) {
   staleId = ''
   ended = false
   retired.clear()
+  startedLoad = true // bindStarted keeps the count for the same id and drops it for another
   lastDetail = ''
   await $.command.register({ name: 'board', description: 'Show every session on this machine: state, update-ready, agents', argumentHint: '[text]' })
   await $.command.register({ name: 'safe-stop', description: 'Reach a stopping point and write this session\'s handoff', argumentHint: '[plan]' })
@@ -230,6 +233,8 @@ async function bindStarted($, bound) {
     const n = startedCount(await bounded($, $.store.get('started:' + id)))
     if (!startedLoad) return // another read landed first
     startedLoad = false
+    if (startedOwner && startedOwner !== id) { started = 0; startedFor = '' } // the module now serves another session
+    startedOwner = id
     if (n > started) { started = n; startedFor = id }
   } catch (err) { note($, 'start count read failed: ' + (err && err.message)) }
 }
@@ -309,7 +314,7 @@ async function flush($, withDetail) {
     const now = await $.clock.now()
     if (ended) return
     await $.store.set('sess:' + id, tracker.entry(now))
-    if (started && startedFor !== id) { await $.store.set('started:' + id, { n: started, at: now }); startedFor = id }
+    if (started && startedFor !== id) { await $.store.set('started:' + id, { n: started, at: now }); startedFor = id; startedOwner = id }
     if (withDetail && !gone(id)) {
       const detail = tracker.detail(now)
       const key = id + JSON.stringify({ ...detail, at: 0 })
@@ -376,23 +381,26 @@ async function readEntries($) {
       else entries.set(k.slice(5), e)
     } catch { /* one bad key hides one row */ }
   }))
-  // A start record outlives its session's end, so a restart reads it back. One a day past its
-  // last write goes to the sweep too; the sweep keeps it for a live session.
-  const starts = all.filter(k => typeof k === 'string' && k.startsWith('started:')).slice(-MAX_KEYS)
+  // A start record outlives its session's end, so a restart reads it back. Once its board entry is
+  // gone, a record a day past its last write goes to the sweep alone. A session with a board entry
+  // keeps it: that entry's own age decides, and its sweep takes all three records.
+  const boards = new Set(keys.map(k => k.slice(5)))
+  const starts = all.filter(k => typeof k === 'string' && k.startsWith('started:') && !boards.has(k.slice(8))).slice(-MAX_KEYS)
+  const oldStarts = []
   await Promise.all(starts.map(async k => {
     try {
       const r = await $.store.get(k)
       const at = r && typeof r === 'object' ? num(r.at, 0, 8.64e15) : null
-      if (at === null || now - at > GC_MS) old.push(k.slice(8))
+      if (at === null || now - at > GC_MS) oldStarts.push(k.slice(8))
     } catch { /* one bad key waits for the next sweep */ }
   }))
-  return { entries, old, total: keys.length, read: newest.length }
+  return { entries, old, oldStarts, total: keys.length, read: newest.length }
 }
 
 // Removes the records of sessions a day past their last beat, except a session that
 // `claude agents` lists as live. live: a Set of ids, or null when that list is unknown: then
 // nothing is removed. Removing this session's own detail makes the next beat write it again.
-async function sweep($, old, live) {
+async function sweep($, old, live, oldStarts = []) {
   if (!live) return
   for (const id of old) {
     if (live.has(id)) continue
@@ -403,12 +411,16 @@ async function sweep($, old, live) {
       else if (sid) await $.store.delete('started:' + id) // this session's own count stays while it lives; an unknown own id deletes none
     } catch { /* the next sweep tries again */ }
   }
+  for (const id of oldStarts) {
+    if (live.has(id) || !sid || id === sid) continue
+    try { await $.store.delete('started:' + id) } catch { /* the next sweep tries again */ }
+  }
 }
 
 async function sweepAll($) {
   // The own id first: the sweep keeps this session's start record and must know which one it is.
   const [agents, store] = await Promise.all([readAgents($), readEntries($), ident($)])
-  await sweep($, store.old, agents.ok ? new Set(agents.rows.map(r => r.id)) : null)
+  await sweep($, store.old, agents.ok ? new Set(agents.rows.map(r => r.id)) : null, store.oldStarts)
 }
 
 // One process call to `claude agents --json`. Never fatal: the note says what is missing.
@@ -431,7 +443,7 @@ async function loadBoard($) {
   const [agents, store, now] = await Promise.all([readAgents($), readEntries($), $.clock.now()])
   const rows = mergeRows(agents.rows, store.entries, now)
   board = { rows, band: bandText(rows), note: agents.note, now, hidden: store.total - store.read }
-  await sweep($, store.old, agents.ok ? new Set(agents.rows.map(r => r.id)) : null)
+  await sweep($, store.old, agents.ok ? new Set(agents.rows.map(r => r.id)) : null, store.oldStarts)
   if (view.id) await loadDetail($, view.id, rows)
 }
 
