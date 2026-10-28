@@ -1,7 +1,7 @@
 """Tests the code-check runner on throwaway repos. `python3 actions/code-check/test_action.py`.
 Asserts: a tracked language with no row is red (by extension and by shebang), a planted mypy error in
 a listed module is red, a shrunk mypy list is red against the base ref, a missing listed module is red,
-Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
+Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason).
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
@@ -67,6 +67,14 @@ class CodeCheck(unittest.TestCase):
         self.assertNotEqual(rc, 0, out)
         self.assertIn("no row", out)
         self.assertIn("main.rs", out)
+
+    def test_web_app_data_and_image_files_have_rows(self):
+        # A web app repo's own non-code files: env template, worktree list, web manifest, CSV fixture, images.
+        rc, out = check({".code-check.json": config([]), ".env.example": "KEY=\n", ".worktreeinclude": ".env\n",
+                         "app/public/manifest.webmanifest": "{}\n", "tests/fixtures/rows.csv": "a,b\n1,2\n",
+                         "img/a.jpg": "x", "img/b.jpeg": "x", "img/c.webp": "x", "img/d.png": "x"})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("no row", out)
 
     def test_unknown_shebang_with_no_row_is_red(self):
         rc, out = check({".code-check.json": config([]), "bin/tool": "#!/usr/bin/env ruby\nputs 1\n"})
