@@ -3,7 +3,8 @@
     python3 code_check.py [--root DIR] [--base REF]
 Fails when a tracked file has a language with no row, when a row is malformed, when a tool finds a bug, or when the
 repo's mypy list (.code-check.json, "mypy_modules") lost a module since --base (the exclude list likewise only shrinks). Tools are pinned in standard.json and
-run through pipx or npx. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests, a dev machine).
+run through pipx or npx. Astro projects are checked by astro-check, the @astrojs/check CLI that `astro check`
+calls. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests, a dev machine).
 Formatter layers are skipped until o2 (one layout) lands; their rows say so."""
 import argparse, json, os, re, subprocess, sys
 
@@ -109,9 +110,11 @@ def list_problems(old, cfg, files):
 def tool(std, name):
     version = std["tools"][name]
     if os.environ.get("CODE_CHECK_TOOLS") == "path":
-        return {"shellcheck-py": ["shellcheck"], "typescript": ["tsc"]}.get(name, [name])
+        return {"shellcheck-py": ["shellcheck"], "typescript": ["tsc"], "@astrojs/check": ["astro-check"]}.get(name, [name])
     if name == "typescript":
         return ["npx", "--yes", "-p", "typescript@" + version, "tsc"]
+    if name == "@astrojs/check":
+        return ["npx", "--yes", "-p", "@astrojs/check@" + version, "-p", "typescript@" + std["tools"]["typescript"], "astro-check"]
     if name == "shellcheck-py":
         return ["pipx", "run", "--spec", "shellcheck-py==" + version, "shellcheck"]
     return ["pipx", "run", "%s==%s" % (name, version)]
@@ -142,7 +145,22 @@ def run_tsc(ctx):
     return ("tsc", cmds) if cmds else None
 
 
-RUNNERS = {"ruff": run_ruff, "mypy": run_mypy, "shellcheck": run_shellcheck, "tsc": run_tsc}
+ASTRO_CONFIG = re.compile(r"astro\.config\.(mjs|js|ts|mts|cjs|cts)$")
+
+
+def run_astro_check(ctx):
+    # astro-check, not `astro check`: the latter loads @astrojs/check from the project's node_modules, which CI
+    # does not install, and exits 0 at its install prompt. Roots: each tracked astro.config.* folder, plus the
+    # common folder of .astro files under no config (a re-check of a project inside it is harmless).
+    roots = sorted({os.path.dirname(n) or "." for n in ctx["files"] if ASTRO_CONFIG.match(os.path.basename(n))})
+    orphans = [n for n in ctx["found"].get("astro", []) if not any(r == "." or n.startswith(r + "/") for r in roots)]
+    if orphans:
+        roots.append(os.path.commonpath([os.path.dirname(n) or "." for n in orphans]) or ".")
+    cmds = [tool(ctx["std"], "@astrojs/check") + ["--root", r] for r in roots]
+    return ("astro-check", cmds) if cmds else None
+
+
+RUNNERS = {"ruff": run_ruff, "mypy": run_mypy, "shellcheck": run_shellcheck, "tsc": run_tsc, "astro-check": run_astro_check}
 
 
 def execute(name, cmd, root):
@@ -163,10 +181,15 @@ def main(argv):
     ap.add_argument("--root", default=".")
     ap.add_argument("--base", default="")
     ap.add_argument("--pins", action="store_true", help="print the pip specs of the tools the tests install, then exit")
+    ap.add_argument("--npm-pins", action="store_true", help="print the npm specs of the tools the tests install, then exit")
     args = ap.parse_args(argv)
     if args.pins:
         tools = load_standard()["tools"]
         print(" ".join("%s==%s" % (k, tools[k]) for k in ("ruff", "mypy", "shellcheck-py")))
+        return 0
+    if args.npm_pins:
+        tools = load_standard()["tools"]
+        print(" ".join("%s@%s" % (k, tools[k]) for k in ("@astrojs/check", "typescript")))
         return 0
     root = os.path.abspath(args.root)
     std = load_standard()
