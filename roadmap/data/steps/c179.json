@@ -1,0 +1,9 @@
+{
+ "title": "Cloud containers have pipx, and ci-job's tests do not depend on it",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.255,
+ "why": "Batch 8's local gates, Oct 28 (orchestrator): in a cloud container with no pipx, lint/test_ci_job.py test_an_unpinned_or_chained_pipx_run_is_not_a_lint_step reads \"unknown pinned: tool missing: pipx\" instead of \"pinned\", and c175's Code check reads unknown; `pip install --user pipx` clears both. c175's lane met it too.",
+ "note": "Debt: every cloud lane meets it. Next cloud lane, two parts. (1) The classification tests in lint/test_ci_job.py stub tool lookup (shutil.which), so a test of what counts as a lint step gives one answer on every machine; never skip it. (2) install.sh --cloud installs pipx when it is missing, so cloud lanes can run CI's pinned tools; the setup script on waiting page item 36 needs no change, since it runs install.sh --cloud. Red first: the test on a PATH with no pipx. Touches lint/test_ci_job.py and install.sh. Needs no answer. Port: no; claude-settings only. Placed ahead of c95, after c175 (triage 10, Oct 28): it reds a local gate on clean main in every cloud container.",
+ "updatedAt": "2026-10-28T11:54:49Z"
+}
