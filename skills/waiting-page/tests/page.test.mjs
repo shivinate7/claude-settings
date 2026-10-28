@@ -265,7 +265,7 @@ test("a card becomes a receipt in place, with Change", async (t) => {
 for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
   test(`nothing moves when an answer is picked or sent, at ${viewport.width} wide${withDesigns ? ", with option designs" : ""}`, async (t) => {
     const items = [
-      mk("first", 1, { context: LONG, holds: "A lane waits.", ...(withDesigns ? { options: [opt("a", "Red", "s1"), opt("b", "Blue", "s2")] } : {}) }), mk("second", 2, { context: LONG, stands: true }),
+      mk("first", 1, { context: LONG, holds: "A lane waits.", options: [opt("a", "Red", withDesigns ? "s1" : undefined), opt("b", "Blue with a long label that cannot fit on one line of the ready note at 390 wide", withDesigns ? "s2" : undefined)] }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
     ];
@@ -464,6 +464,8 @@ test("each option's picture is inside its own option card; a tap on it opens the
   await page.click("#dClose");
   await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .lab`).click();
   assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "a tap on the card did not pick the option");
+  await card(page, it).locator(`label.opt[for="o-${it.id}-c"] .how`).click();
+  assert.equal(await page.isChecked(`#o-${it.id}-c`), true, "a tap on the card's text did not pick the option");
   assert.equal(await card(page, it).locator(".opt iframe.dframe").first().evaluate((f) => getComputedStyle(f).pointerEvents), "none", "the frame swallows the click");
 });
 
@@ -1213,6 +1215,41 @@ for (const width of [390, 1440]) {
     for (const id of ["dPrev", "dNext", "dFull", "dClose"]) assert.ok((await page.locator("#" + id).boundingBox()).height >= 40, id + " is under 40px");
   });
 }
+
+const WIDE_DESIGN = '<body style="margin:0;display:flex;width:1200px"><div style="width:400px;height:200px;background:#a62">1</div><div style="width:400px;height:200px;background:#26a">2</div><div id="last" style="width:400px;height:200px;background:#2a6">3</div></body>';
+for (const width of [390, 1440]) {
+  test(`a design drawn 1200 wide is whole in the viewer, at ${width} wide`, async (t) => {
+    const it = mk("wide-q", 55, { pick: "a", options: [{ key: "a", label: "Wide", how: "h", gain: "g", lose: "l", design: "w-a" }], designs: [{ slug: "w-a", label: "Wide", drawn: 1200 }] });
+    const page = await open(t, { items: [it], designData: { "w-a": WIDE_DESIGN }, viewport: { width, height: 900 } }); if (!page) return;
+    await card(page, it).locator(".opic").click();
+    await page.waitForFunction(() => { const f = document.querySelector("#dStage .dfitwrap:not(.off) iframe"); return f && FIT["w-a|"]; });
+    const m = await page.evaluate(() => {
+      const f = document.querySelector("#dStage .dfitwrap:not(.off) iframe"), r = f.getBoundingClientRect();
+      return { right: r.right, left: r.left, vw: innerWidth, w: f.style.width };
+    });
+    const tile = await page.frameLocator("#dStage .dfitwrap:not(.off) iframe").locator("#last").boundingBox();
+    const f = await page.locator("#dStage .dfitwrap:not(.off)").boundingBox();
+    const sc = (await page.locator("#dStage .dfitwrap:not(.off) iframe").evaluate((e) => new DOMMatrix(getComputedStyle(e).transform).a));
+    assert.equal(m.w, "1200px", "the frame is not drawn at the design's width");
+    assert.ok(Math.abs(tile.x + tile.width - (f.x + f.width)) <= 2 && tile.x + tile.width <= m.vw + 0.5, `the right-most tile is cut: ends at ${tile.x + tile.width}, viewer ends at ${f.x + f.width}`);
+    assert.ok(sc < 1, "the design is not scaled down");
+  });
+}
+
+test("a viewer at 520 wide or less names the design in a one-line caption above it", async (t) => {
+  const it = viewerItem();
+  const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  const cap = page.locator("#dCap");
+  assert.equal(await cap.isVisible(), true, "no caption in the viewer");
+  assert.equal(await cap.textContent(), await page.evaluate(() => dList[dAt].label));
+  const m = await page.evaluate(() => { const c = document.querySelector("#dCap").getBoundingClientRect(), f = document.querySelector("#dStage .dfitwrap:not(.off)").getBoundingClientRect(); return { capBottom: c.bottom, frameTop: f.top, capH: c.height, vw: innerWidth, right: f.right }; });
+  assert.ok(m.capBottom <= m.frameTop + 0.5, "the caption sits over the mockup");
+  assert.ok(m.capH < 30, "the caption is more than one line: " + m.capH);
+  assert.ok(m.right <= m.vw + 0.5, "the mockup is cut");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.equal(await cap.isVisible(), false, "the caption shows on a wide screen");
+});
 
 test("a picture's height is reserved from its declared size before it loads", async (t) => {
   const it = mk("reserve-q", 53, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "r-a" }], designs: [{ slug: "r-a", label: "A", focus: "#panel", size: { w: 600, h: 400 } }] });
