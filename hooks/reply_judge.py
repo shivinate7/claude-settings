@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against seven rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on" or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against eight rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on" or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -57,12 +57,12 @@ BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
-                "style-limits-kept-silently")
+                "style-limits-kept-silently", "style-option-widens-marked")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 INSTRUCTIONS = (
-    "Judge the final reply below against seven rules. "
+    "Judge the final reply below against eight rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -103,6 +103,11 @@ INSTRUCTIONS = (
     "A result or verdict the reply reports, anywhere in the reply, such as \"tests pass\" in Done, \"CI green\", "
     "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
     "Flag only a limit or rule named as a note on the session's own conduct. "
+    "style-option-widens-marked: flag a reply whose recommended option widens what a shared tool accepts, "
+    "such as a second accepted form, an allow-list entry or a per-repo exception. "
+    "Also flag an option that widens a shared tool offered without the words \"Goes against your uniform ruling (t18)\". "
+    "Never flag an option where the repo changes to match the shared format. "
+    "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )

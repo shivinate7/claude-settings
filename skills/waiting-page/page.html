@@ -606,6 +606,7 @@ function optPic(it, o, dif) {
 }
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
+// An option that widens what a shared tool accepts (`widens`) breaks the owner's uniform ruling, topic t18; its card says so.
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key, m = marks(it, o), on = (f) => m.includes(f);
   const mark = (f) => on(f) ? [sr()] : [], tail = (f) => on(f) ? [ne()] : [];
@@ -615,7 +616,7 @@ function optCard(it, o, chosen) {
       onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
     h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab", id: "l-" + sfx }, o.label)),
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
-    h("div", { class: "tr", id: "t-" + sfx }, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
+    h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your uniform ruling (t18)")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
     o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
