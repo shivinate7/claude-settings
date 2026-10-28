@@ -1,0 +1,9 @@
+{
+ "title": "home moves to the shared layout and carries the rolled-out mark",
+ "phase": "rollout",
+ "status": "doing",
+ "order": 299,
+ "why": "Orchestrator, Oct 28 02:34 CDT: home's roll-out visit goes first, before o2's #742, so that home carries the \"rolled-out\": true mark (waiting page items 3 and 32) when #742 merges.",
+ "note": "No r-step was per repo: r1 (compliance-check), r5 (drop copies), r6 (project-ops) and o3 each name a part of every visit. This step is home's layout part only. Scope, from plans/o2-one-layout-plan.md (written Oct 22 at home 3fbb3d1, before home took in home-app; the lane re-measures on home's main first): plan files (docs/plan-*.md and plans/) to docs/plans/, deleting shipped ones; SPEC.md to docs/specs/; mockups to docs/design/mockups/; records/ and the todo kind declared as extras in .claude/layout-extras.json, which also gains \"rolled-out\": true; AGENTS.md as a symlink to CLAUDE.md. Proof: on claude-settings main and on #742's head, python3 lint/layout.py reads home as rolled out and resolves debts, decisions and plans to the new folders, and lint/check_layout.py finds no stray folder; red first on today's home. home's other open work stays untouched (shiv's caution, item 2). Lane: the home session, started Oct 28 CDT. Then #742 merges. Needs no answer. Port: this is the port. Placed ahead of r5 (triage, Oct 28): #742 and every later visit wait on it.",
+ "updatedAt": "2026-10-28T08:30:00Z"
+}
