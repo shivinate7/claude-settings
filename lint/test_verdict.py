@@ -330,15 +330,15 @@ class T(unittest.TestCase):
         self.assertIn("caf", out)
         self.assertNotIn("Traceback", err)
 
-    # These run bin/verdict.cmd. Only the gates-windows-rest CI job proves them.
-    @unittest.skipUnless(os.name == "nt", "bin/verdict.cmd is the Windows launcher: it runs on Windows only (gates-windows-rest)")
+    # These run bin/verdict.cmd. Only the checks-windows-rest CI job proves them.
+    @unittest.skipUnless(os.name == "nt", "bin/verdict.cmd is the Windows launcher: it runs on Windows only (checks-windows-rest)")
     def test_cmd_launcher_pass(self):
         r = run("print('noisy')", launcher=CMD, timeout=60)
         self.assertEqual(r.returncode, 0, (r.stdout[:300], r.stderr[-300:]))
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
         self.assertNotIn("noisy", r.stdout)
 
-    @unittest.skipUnless(os.name == "nt", "bin/verdict.cmd is the Windows launcher: it runs on Windows only (gates-windows-rest)")
+    @unittest.skipUnless(os.name == "nt", "bin/verdict.cmd is the Windows launcher: it runs on Windows only (checks-windows-rest)")
     def test_cmd_launcher_fail_keeps_rc_and_log(self):
         with tempfile.TemporaryDirectory() as d:
             log = os.path.join(d, "v.log")

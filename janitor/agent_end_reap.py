@@ -29,7 +29,7 @@ deletes the trash, and leftover trash names go with it. The hook never waits for
 with a process cwd inside, a link, or any unreadable read stays. A tree the stage deadline does not
 reach keeps its folders. A tree the stage removes whole needs no pass.
 
-Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the gates above hold for the whole worktree,
+Worktrees (docs/decisions/when-a-worktree-may-be-removed.md): when the checks above hold for the whole worktree,
 the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REASON; a later agent end
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
@@ -261,7 +261,7 @@ trash_name, is_trash_name = sweep.trash_name, sweep.is_trash_name  # one home: s
 def reap_build_dirs(target: str, cwds, stop_at=None):
     """Rename each proven build folder in TARGET to a trash name, then start one detached child
     that deletes those and every leftover trash name. Returns the folders renamed. The caller has
-    proven the worktree gates; this proves the folder gates: no link, no process cwd inside. The
+    proven the worktree checks; this proves the folder checks: no link, no process cwd inside. The
     scan stops at BUILD_SCAN_SECONDS or at STOP_AT (a `time.monotonic` time), whichever is first."""
     root = os.path.dirname(os.path.dirname(os.path.dirname(target)))
     names = sweep.build_dir_names(sweep.read_optout(root))
@@ -398,7 +398,7 @@ def edit_idle(path: str, deadline: float):
 
 def build_keep(entry: dict, idle, deadline: float):
     """`(reason, cwds)`: why the other agent tree ENTRY keeps its build folders (None when every
-    gate gives a confirmed yes), and every process cwd read for the pass. IDLE is the tree's
+    check gives a confirmed yes), and every process cwd read for the pass. IDLE is the tree's
     admin-file idle read, taken before any `git status`. The cwds are read last, after the edit
     walk, so a build started during the hook keeps. The reap stops no process in this tree, so any
     process with a cwd anywhere in it keeps every folder: a build runs from the worktree root."""

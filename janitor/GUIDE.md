@@ -283,9 +283,9 @@ the trash. The folders are `native/build`,
 one path under the worktree root. A bare name matches at any depth. `buildDirs`
 adds names and never removes a default.
 
-A folder that fails a gate is kept. A `buildDirs` value that is not a list of
+A folder that fails a check is kept. A `buildDirs` value that is not a list of
 strings refuses all build-folder deletes, defaults included. A later reap and
-the daily sweep delete trash names a child left. The gates are in decision
+the daily sweep delete trash names a child left. The checks are in decision
 `build-dirs-reaped-at-agent-end` (build folders are reaped at agent end).
 
 ## How you opt out

@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The Stop hooks read the transcript through one module, `lint/_transcript.py`. It holds `read_transcript`, `is_last_human`, `tool_uses`, `records_after_last_human` and `last_reply`. `lint/report_gate.py` imports it. So does the config report section of `hooks/decision_watch.py`.
+The Stop hooks read the transcript through one module, `lint/_transcript.py`. It holds `read_transcript`, `is_last_human`, `tool_uses`, `records_after_last_human` and `last_reply`. `lint/report_guard.py` imports it. So does the config report section of `hooks/decision_watch.py`.
 
 - The cheap Stop reads live there too. `last_human_epoch` and `read_turn` read only the tail of the transcript since the last human message. `hooks/decision_watch.py` (with its config report section) and `hooks/ruling_home.py` call the tail readers.
 - `hooks/config_watch.py` calls neither, because its expiry rule fires with no file change, so no such exit is safe there.
@@ -12,7 +12,7 @@ Why: four hooks carried copies of the same readers, and the claim that each Stop
 
 Protection of the old outcome (one bad edit must mute one reporter, never all four):
 
-- `lint/test_gates.py` runs each gate as a subprocess, so an import error in `lint/_transcript.py` fails the gate suite in CI.
+- `lint/test_report_guard.py` runs each guard as a subprocess, so an import error in `lint/_transcript.py` fails the guard suite in CI.
 - A break in the shared module is loud. The import sits at the top of each hook file, above `main`, so the fail-open `try` and `except` in `main` never sees it. The hook exits 1 and prints a traceback.
 - The fail-open path still catches a bad transcript, a missing file or a parse error inside a running hook. Such a hook exits 0 and prints nothing.
 

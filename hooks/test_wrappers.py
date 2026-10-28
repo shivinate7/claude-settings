@@ -5,13 +5,13 @@ Run it from the repository root:
 
     python hooks/test_wrappers.py
 
-Contract, from decision gate-hooks-fail-closed:
-- The two gate entries (PreToolUse guard; PermissionRequest rm_prompt_answer) carry no `onFailure`:
+Contract, from decision guard-hooks-fail-closed:
+- The two guard entries (PreToolUse guard; PermissionRequest rm_prompt_answer) carry no `onFailure`:
   a timeout under load must not refuse every call.
-- A gate whose script is missing exits 2 and prints a remedy line naming install.sh and install.ps1.
-- A gate whose script exists but has no python on PATH exits 2. Its remedy line names "Python"
+- A guard whose script is missing exits 2 and prints a remedy line naming install.sh and install.ps1.
+- A guard whose script exists but has no python on PATH exits 2. Its remedy line names "Python"
   and both installers, so the reader installs Python 3 before running either one.
-- A gate whose script exists runs it: stdin reaches the script, its stdout comes back, and its
+- A guard whose script exists runs it: stdin reaches the script, its stdout comes back, and its
   exit code is the script's own. Checked for exit 0 and exit 3.
 - stall_watch and sim_boot_record are advisory: every entry that runs them carries no `onFailure`
   and exits 0 when the script is missing.
@@ -23,11 +23,11 @@ Contract, from decision gate-hooks-fail-closed:
 - Python launcher: every command hook that runs a script through a `g="..."` assignment never
   execs a python candidate whose `command -v` path contains `/WindowsApps/`. The Microsoft Store
   alias there hangs the guard for 30 s. A stub alias ahead of a real python must be
-  skipped, so every wrapper runs the real one. With only the alias on PATH, a gate exits 2 with
+  skipped, so every wrapper runs the real one. With only the alias on PATH, a guard exits 2 with
   the no-python remedy and an advisory hook exits 0.
 - The guard split: a copied guard.py takes split_segments from its
   own guard_core.py sibling, never the real one. With the sibling missing, a Bash call is refused with
-  the reinstall step named (decision gate-hooks-fail-closed), and one fallback line naming
+  the reinstall step named (decision guard-hooks-fail-closed), and one fallback line naming
   guard_core goes to guard.log. Every name other
   files reach through `guard` still resolves.
 - The install stamp (decision install-hooks-whole): guard.py and each guard_*.py in hooks/ hold exactly one
@@ -37,7 +37,7 @@ Contract, from decision gate-hooks-fail-closed:
   Linux and Darwin, and install.ps1 under a MINGW, MSYS or CYGWIN uname, so install.sh never runs there.
 
 Each command string runs through `sh -c` (Git Bash on Windows). The no-python case runs with
-PATH set to one empty folder. The gate commands use only shell builtins, so no python can be found.
+PATH set to one empty folder. The guard commands use only shell builtins, so no python can be found.
 The shell is started by absolute path, so it still runs.
 
 Override the settings file with the env var WRAPPERS_SETTINGS_UNDER_TEST, and the refresh helper with
@@ -58,8 +58,8 @@ SETTINGS = os.environ.get("WRAPPERS_SETTINGS_UNDER_TEST") or os.path.join(HERE, 
 HELPER = os.environ.get("REFRESH_HELPER_UNDER_TEST") or os.path.join(HERE, "..", "merge", "install_from_main.sh")
 SH = shutil.which("sh")
 
-# gate script -> the event whose entry must run it
-GATES = {
+# guard script -> the event whose entry must run it
+GUARDS = {
     "hooks/guard.py": "PreToolUse",
     "hooks/rm_prompt_answer.py": "PermissionRequest",
 }
@@ -68,8 +68,8 @@ MOVED = ("hooks/stall_watch.py", "hooks/sim_boot_record.py")
 ADVISORY_EVENTS = ("SessionStart", "Stop", "PreCompact", "SessionEnd", "PostToolUse", "SubagentStop")
 REMEDY = ("install.sh", "install.ps1")
 PAYLOAD = '{"probe": "d1-7f3a"}'
-# a stand-in gate: echoes its stdin with a marker, then exits with the code the case picks
-FAKE_GATE = "import sys\nprint('stdin=' + sys.stdin.read())\nsys.exit(%d)\n"
+# a stand-in guard: echoes its stdin with a marker, then exits with the code the case picks
+FAKE_GUARD = "import sys\nprint('stdin=' + sys.stdin.read())\nsys.exit(%d)\n"
 
 
 def load():
@@ -89,10 +89,10 @@ def command_of(h):
     return h.get("command") or ""
 
 
-def gate_entry(settings, script):
-    """The one entry in the gate's event whose command runs the script, or None."""
+def guard_entry(settings, script):
+    """The one entry in the guard's event whose command runs the script, or None."""
     needle = "/%s\"" % script  # the commands read "$g" = "${CLAUDE_CONFIG_DIR...}/hooks/guard.py"
-    hits = [h for ev, h in hook_entries(settings) if ev == GATES[script] and needle in command_of(h)]
+    hits = [h for ev, h in hook_entries(settings) if ev == GUARDS[script] and needle in command_of(h)]
     return hits[0] if len(hits) == 1 else None
 
 
@@ -119,9 +119,9 @@ def remedy_ok(r, reason):
 
 def case_on_failure(script):
     def check():
-        h = gate_entry(load(), script)
+        h = guard_entry(load(), script)
         if h is None:
-            return False, "no single %s entry for %s" % (GATES[script], script)
+            return False, "no single %s entry for %s" % (GUARDS[script], script)
         got = h.get("onFailure")
         return got is None, "onFailure is %r" % got
     return check
@@ -129,7 +129,7 @@ def case_on_failure(script):
 
 def case_missing_script(script):
     def check():
-        h = gate_entry(load(), script)
+        h = guard_entry(load(), script)
         if h is None:
             return False, "no single entry for %s" % script
         with tempfile.TemporaryDirectory() as cfg:
@@ -140,11 +140,11 @@ def case_missing_script(script):
 
 def case_no_python(script):
     def check():
-        h = gate_entry(load(), script)
+        h = guard_entry(load(), script)
         if h is None:
             return False, "no single entry for %s" % script
         with tempfile.TemporaryDirectory() as cfg, tempfile.TemporaryDirectory() as empty:
-            for s in GATES:  # every gate script exists, so the only failure left is python
+            for s in GUARDS:  # every guard script exists, so the only failure left is python
                 path = os.path.join(cfg, s)
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 open(path, "w").close()
@@ -155,14 +155,14 @@ def case_no_python(script):
 
 def case_exec_runs_script(script, code):
     def check():
-        h = gate_entry(load(), script)
+        h = guard_entry(load(), script)
         if h is None:
-            return False, "no single %s entry for %s" % (GATES[script], script)
+            return False, "no single %s entry for %s" % (GUARDS[script], script)
         with tempfile.TemporaryDirectory() as cfg:
             path = os.path.join(cfg, script)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
-                f.write(FAKE_GATE % code)
+                f.write(FAKE_GUARD % code)
             # PATH holds only the folder of the interpreter running this suite. The wrapper tries
             # python3 first, and on Windows that name can be an App Execution Alias that hangs on
             # piped stdin. That folder has no python3, so the wrapper falls through to python.
@@ -286,21 +286,21 @@ def case_launcher(h, script, alias_first):
 
 def check_launcher_selection():
     scripts = {s for _id, s, _h in launcher_wrappers()}
-    missing = sorted(set(GATES) - scripts)
-    return not missing and len(scripts) > 0, "wrapper scripts found: %d; gates missing: %s" % (len(scripts), missing)
+    missing = sorted(set(GUARDS) - scripts)
+    return not missing and len(scripts) > 0, "wrapper scripts found: %d; guards missing: %s" % (len(scripts), missing)
 
 
-def check_alias_only_gates():
-    gates = [(i, s, h) for i, s, h in launcher_wrappers() if "exit 2" in command_of(h)]
+def check_alias_only_guards():
+    guards = [(i, s, h) for i, s, h in launcher_wrappers() if "exit 2" in command_of(h)]
     bad = []
-    for i, s, h in gates:
+    for i, s, h in guards:
         with tempfile.TemporaryDirectory() as stubs:
             alias_dir, _real = make_stubs(stubs)
             r = run_launcher(h, s, alias_dir)
         ok, note = remedy_ok(r, "Python")
         if not ok or "ALIAS" in r.stdout:
             bad.append("%s: %s, stdout %r" % (i, note, r.stdout.strip()[:40]))
-    return (not bad and len(gates) == len(GATES)), "gates checked %d; wrong: %s" % (len(gates), bad)
+    return (not bad and len(guards) == len(GUARDS)), "guards checked %d; wrong: %s" % (len(guards), bad)
 
 
 def check_alias_only_advisory():
@@ -327,7 +327,7 @@ SPLIT_MUTANT = (
     "    return [cmd]\n"
 )
 # Every name a file outside guard.py reaches through `guard`, grepped from hooks/, janitor/ and lint/:
-# config_watch, decision_watch, rm_prompt_answer, report_gate,
+# config_watch, decision_watch, rm_prompt_answer, report_guard,
 # check_agent_models, test_precompact_handoff, janitor/*, the sweep mutants, and test_guard.py.
 # `re` is listed because config_watch calls guard.re.sub. The four test_guard.py names are
 # POWERSHELL_CALL, judge, mask_script and session_is_live.
@@ -416,7 +416,7 @@ def split_control_case():
 
 
 def missing_sibling_case():
-    """Decision gate-hooks-fail-closed: a copied guard.py with
+    """Decision guard-hooks-fail-closed: a copied guard.py with
     no guard_core.py beside it refuses the call. Stdout carries a deny whose reason names the
     reinstall step and no file, the exit is 0 as for any other deny, and one fallback line naming
     guard_core goes to guard.log. The payload is a command the guard refuses when it can judge."""
@@ -587,15 +587,15 @@ def refresh_case(uname_value, runs):
 def build_cases():
     settings = load()
     cases = []
-    for s in GATES:
-        cases.append(("gate %s carries no onFailure" % s, case_on_failure(s)))
-    for s in GATES:
-        cases.append(("gate %s exits 2 when script missing" % s, case_missing_script(s)))
-    for s in GATES:
-        cases.append(("gate %s exits 2 when no python" % s, case_no_python(s)))
-    for s in GATES:
+    for s in GUARDS:
+        cases.append(("guard %s carries no onFailure" % s, case_on_failure(s)))
+    for s in GUARDS:
+        cases.append(("guard %s exits 2 when script missing" % s, case_missing_script(s)))
+    for s in GUARDS:
+        cases.append(("guard %s exits 2 when no python" % s, case_no_python(s)))
+    for s in GUARDS:
         for code in (0, 3):
-            cases.append(("gate %s runs present script, exit %d, stdin and stdout pass" % (s, code),
+            cases.append(("guard %s runs present script, exit %d, stdin and stdout pass" % (s, code),
                           case_exec_runs_script(s, code)))
     for s in MOVED:
         cases.append(("moved %s is advisory: no onFailure, exit 0 when script missing" % s,
@@ -604,12 +604,12 @@ def build_cases():
         if ev in ADVISORY_EVENTS and command_of(h):
             cases.append(("advisory %s exits 0 when script missing: %s" % (ev, command_of(h)[:60]),
                           case_advisory_exit0(h)))
-    cases.append(("launcher selection: python wrappers found, includes every GATE", check_launcher_selection))
+    cases.append(("launcher selection: python wrappers found, includes every GUARD", check_launcher_selection))
     for i, s, h in launcher_wrappers():
         cases.append(("launcher control %s: real python alone runs REAL" % i, case_launcher(h, s, False)))
     for i, s, h in launcher_wrappers():
         cases.append(("launcher %s: WindowsApps python3 skipped, REAL runs" % i, case_launcher(h, s, True)))
-    cases.append(("launcher alias-only gates: exit 2 with no-python remedy, no ALIAS", check_alias_only_gates))
+    cases.append(("launcher alias-only guards: exit 2 with no-python remedy, no ALIAS", check_alias_only_guards))
     cases.append(("launcher alias-only advisory: exit 0, no ALIAS", check_alias_only_advisory))
     cases.append(("no advisory entry carries onFailure", check_advisory_no_onfailure))
     cases.append(("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL equals CLAUDE_CODE_SUBAGENT_MODEL",

@@ -1,6 +1,6 @@
 """Shared transcript readers for the hooks fired off a Stop event.
 
-`lint/report_gate.py` and `hooks/decision_watch.py` import this module, so the readers have one
+`lint/report_guard.py` and `hooks/decision_watch.py` import this module, so the readers have one
 copy.
 
 read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript

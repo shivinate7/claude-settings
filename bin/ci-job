@@ -14,9 +14,9 @@
 # unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
-# line names each pull-request step it skips. A lane runs `bin/ci-job gates --lint --base origin/main` before it
-# joins a batch. Use it with a job such as gates.
-# Workflow: .github/workflows/gates.yml at the git top level of the current folder, unless --workflow names one.
+# line names each pull-request step it skips. A lane runs `bin/ci-job checks --lint --base origin/main` before it
+# joins a batch. Use it with a job such as checks.
+# Workflow: .github/workflows/checks.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
 # GH_TOKEN and GITHUB_TOKEN are unset unless the step's env: sets them, as on the runner (a session token would
@@ -243,7 +243,7 @@ def main(argv):
         return 2
     job = args[0]
     top = git("rev-parse", "--show-toplevel") or os.getcwd()
-    workflow = opts["--workflow"] or os.path.join(top, ".github", "workflows", "gates.yml")
+    workflow = opts["--workflow"] or os.path.join(top, ".github", "workflows", "checks.yml")
     try:
         with open(workflow, encoding="utf-8") as f:
             block = job_block(f.read(), job)

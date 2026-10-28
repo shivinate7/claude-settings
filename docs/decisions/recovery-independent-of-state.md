@@ -1,9 +1,9 @@
-# A recovery control must not gate on the state it recovers
+# A recovery control must not depend on the state it recovers
 
 ## The ruling
 
-A recovery control exists for the moment its own precondition is false. Gate it on that same state, and
-the gate refuses it exactly when it is needed. CLAUDE.md states the rule. Two behaviors in this repo
+A recovery control exists for the moment its own precondition is false. Make it depend on that same state, and
+the guard refuses it exactly when it is needed. CLAUDE.md states the rule. Two behaviors in this repo
 already follow it:
 
 - **Rule 1b, pointer-head.** The rule refuses a command that moves HEAD off `main` in the pointer
@@ -17,8 +17,8 @@ already follow it:
   fixed at its source and reinstalled. `bash merge/install_from_main.sh` and `python3 bin/merge N --confirm`
   stay allowed, from the clone and from the pin (`hooks/guard_frozen.py`, "THE CLONE ITSELF IS NOT FROZEN").
 
-Reason: a gate on the recovered state is silent on the day of loss. The principle comes from mailaudit,
+Reason: a guard on the recovered state is silent on the day of loss. The principle comes from mailaudit,
 which recorded three incidents of it. This repo has no such defect.
 
 Kind: process
-Home: rule:verification-recovery-not-gated-on-own-state
+Home: rule:verification-recovery-independent-of-state

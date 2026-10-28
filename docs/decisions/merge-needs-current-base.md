@@ -9,11 +9,11 @@ Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only a
   - The paths main changed since the merge base share no path with the batch's paths. The records page is the one exception, because the generator proves it on the merge.
   - The head and the base tip merge cleanly.
   - `.github/scripts/ci-scope.sh`, run on that merge, turns on no job and no suite for main's paths. A repo without the script gets no exception.
-  - On that merge, `bin/ci-job gates --lint --base <base>` passes.
-  - On that merge, each other `gates` suite that may read one of main's paths passes. The suites come from the workflow, not a list. All of them share a 1200 s budget. The records page is not matched: the records are.
+  - On that merge, `bin/ci-job checks --lint --base <base>` passes.
+  - On that merge, each other `checks` suite that may read one of main's paths passes. The suites come from the workflow, not a list. All of them share a 1200 s budget. The records page is not matched: the records are.
     - A Python suite, read with `ast`, is hit when its source names the exact path or file name anywhere. A root is a name bound from an expression that holds `__file__` or a root. A folder below the top or a stem is a hit in any string of an expression that holds a root, in any form: join, `/`, `+`, f-string, format or `%`. It is also a hit as a string given bare to a file reader such as `open` or `os.listdir`. A root that a call takes whole, as a walk does, hits every path under its folder; a root at the top hits every path. A path builder is not a read. It is a known path or string call, or a function in the same file that calls only those. Each local module the suite imports, from its own folder or a folder it puts on `sys.path`, is read the same way, one level deep. A folder named only under a temp dir is no hit. A suite `ast` cannot parse refuses.
     - A node or bash suite is hit when its source names any of those words.
-    - A `gates` line of no suite form that names one of main's paths, its file name or one of its folders refuses.
+    - A `checks` line of no suite form that names one of main's paths, its file name or one of its folders refuses.
 - It reads the head two times, with the same check. The first read is before the claim, so nothing is claimed. The second read is after the check wait, on the base tip fetched then. A base that moved during the wait, and is not a small move, reverts the claim.
 - A heal merge commit holds the base tip, so it passes. Its own checks wait before the merge.
 - The preview prints a `base:` line that says whether the head holds the base tip, is a small move, or is BEHIND.
