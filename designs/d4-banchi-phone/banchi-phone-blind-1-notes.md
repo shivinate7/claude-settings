@@ -60,7 +60,7 @@ same blue (#a3afff) for 4.5:1; blue fills keep #3d5af1 with white text (4.9:1).
   the top, dividers as bands, each sold card as a blue line at its place. The Packing table shows one
   envelope per order with a dot per card, split into "Ready to seal" and "Still filling". Tapping a
   ready envelope opens a sheet (view `seal`): write the name, put the cards in, seal, then "Mark packed".
-  When sales cannot be read, all box tiles turn striped ("sales not known"); dashed keeps one meaning,
+  When sales cannot be read, all box tiles and the Packing table tile turn striped ("sales not known"; the Packing table reads "As of 8:05: 2 ready · 11 filling"); dashed keeps one meaning,
   "cards wait for you". The first screen fits 780 tall with the Packing table visible.
 - Gain: matches what the helper sees at the shelf; place in the box is a picture, not a number;
   the seller sees the whole store at a glance. Loss: 30 tiles (44 px tall) is the limit before the

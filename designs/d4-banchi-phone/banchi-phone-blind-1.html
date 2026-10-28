@@ -229,6 +229,8 @@ figcaption a{color:var(--accent-text)}
 .tile.sk{background:var(--surface-3);border:0}
 .tile.ghost{border:1px dashed var(--line);background:transparent}
 .table-tile{display:flex;align-items:center;gap:var(--space-3);min-height:56px;padding:0 var(--space-3);border-radius:var(--radius);border:1px solid var(--edge);background:var(--surface-2);text-align:left;width:100%}
+.table-tile.unk{background:repeating-linear-gradient(135deg,var(--surface) 0 5px,var(--surface-3) 5px 9px)}
+.table-tile.unk .pmain{background:var(--surface);padding:2px 6px;border-radius:4px}
 .table-tile svg{width:24px;height:24px;flex:none}
 .legend{display:flex;flex-wrap:wrap;gap:var(--space-3);font-size:14px;color:var(--text-2)}
 .legend span{display:inline-flex;gap:var(--space-1);align-items:center}
@@ -537,7 +539,7 @@ function tiles(s){
     if(s==="error")return `<button class="tile unk${w?" wait":""}" aria-label="Box ${b.no}, sales not known${w?`, ${SENDN.wait} wait for you`:""}"><b>${b.no}</b><small>${b.code}</small></button>`;
     return `<button class="tile${n?" lit":""}${w&&!n?" wait":""}" aria-label="Box ${b.no}, ${esc(b.name)}${n?`, ${n} to pull`:""}${w?`, ${SENDN.wait} wait for you`:""}"><b>${b.no}</b><small>${b.code}</small>${n?`<span class="badge" aria-hidden="true">${n}</span>`:""}</button>`}).join("")}</div></div>`).join("")+`</div>`;
 }
-const tableTile=()=>`<button class="table-tile">${ic("env")}<span class="pmain"><b>Packing table</b><span class="small muted">${PACK.length} ready to seal · ${PULL_ORDERS.length} filling</span></span>${ic("chev")}</button>`;
+const tableTile=(st=false)=>`<button class="table-tile${st?" unk":""}">${ic("env")}<span class="pmain"><b>Packing table</b><span class="small muted">${st?`As of ${NOW.stale}: ${PACK.length} ready · ${PULL_ORDERS.length} filling`:`${PACK.length} ready to seal · ${PULL_ORDERS.length} filling`}</span></span>${ic("chev")}</button>`;
 function d3Shelf(s){
   let body="",foot="";
   if(s==="empty"){
@@ -547,7 +549,7 @@ function d3Shelf(s){
       list:`<div class="legend"><span><i style="background:var(--accent)"></i>Blue: sold cards inside. Tap to open.</span><span><i style="border:2px dashed var(--edge)"></i>Dashed: cards wait for you</span></div>`,
       loading:loadNote("Getting today’s sales…"),
       error:`<div class="err err-c" role="alert"><p class="err-t">${ic("alert")}<span>Banchi could not get sales. Striped boxes may hold sold cards.</span></p><div class="cluster"><button class="btn btn-p">Try again</button>${why()}</div></div>`}[s];
-    body=lead+tiles(s)+(s==="loading"?"":tableTile());
+    body=lead+tiles(s)+(s==="loading"?"":tableTile(s==="error"));
     foot=`<div class="foot"><div class="act3"><button class="btn">${ic("camera")}Photograph</button><button class="btn">${ic("ask")}Check ${SENDN.wait}</button><button class="btn">${ic("send")}Send ${SENDN.ready}</button></div></div>`;
   }
   return `${status()}<header class="hd"><div class="hd-row"><h1>Shelf</h1><button class="icon-btn" aria-label="Find a card">${ic("search")}</button></div></header><div class="body">${body}</div>${foot}`;
