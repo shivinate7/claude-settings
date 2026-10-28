@@ -1,9 +1,9 @@
 {
-  "title": "A shared Swift package for the iOS apps, only if the copies start to hurt",
-  "phase": "later",
-  "status": "todo",
-  "order": 470,
-  "why": "The iOS kit consultation, Oct 27: keychain wrappers (about 80 to 170 lines) sit in home-app, degen and mailaudit; small WebSocket clients in home-app and mailaudit.",
-  "note": "Deferred (triage, Oct 27): not now. The overlap is small, and mailaudit is public, so a private package would break its CI. Its trigger likely comes with your next iOS app (you plan more, Oct 27); the package would then be public, so mailaudit's CI can pull it, and hold small helpers only, never screens or tokens. Revisit when a fourth app needs the keychain wrapper, or a bug fixed in one copy turns up in another. Port: no. Report: https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq. Note, Oct 27 (consultation): lowest iOS versions differ and no repo says why. home-app 18.0 (maybe family phones on older iOS, unverified); ios-adblock 17.2 (likely the 19 MB content-blocker rule cap, per its research notes); degen and mailaudit 26 (defaults you accepted Oct 11). If every phone runs iOS 26, raising both would remove fallback code; that needs you to say which iOS the family phones run.",
-  "updatedAt": "2026-10-27T00:57:00Z"
+ "title": "A shared Swift package for the iOS apps, only if the copies start to hurt",
+ "phase": "later",
+ "status": "todo",
+ "order": 470,
+ "why": "The iOS kit consultation, Oct 27: keychain wrappers (about 80 to 170 lines) sit in home-app, degen and mailaudit; small WebSocket clients in home-app and mailaudit.",
+ "note": "Deferred (triage, Oct 27): not now. The overlap is small, and mailaudit is public, so a private package would break its CI. Its trigger likely comes with your next iOS app (you plan more, Oct 27); the package would then be public, so mailaudit's CI can pull it, and hold small helpers only, never screens or tokens. Revisit when a fourth app needs the keychain wrapper, or a bug fixed in one copy turns up in another. Port: no. Report: https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq. Note, Oct 27 (consultation): lowest iOS versions differ and no repo says why. home-app 18.0 (maybe family phones on older iOS, unverified); ios-adblock 17.2 (likely the 19 MB content-blocker rule cap, per its research notes); degen and mailaudit 26 (defaults you accepted Oct 11). If every phone runs iOS 26, raising both would remove fallback code; that needs you to say which iOS the family phones run. Due after: a fourth app needs the keychain wrapper, or a fix in one copy is missed in another.",
+ "updatedAt": "2026-10-28T05:12:00Z"
 }
