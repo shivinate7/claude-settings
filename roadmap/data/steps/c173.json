@@ -1,9 +1,9 @@
 {
  "title": "The lane brief template drops its separate ste-changed run",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.30325,
  "why": "From c172's lane, Oct 28: skills/project-ops/templates/brief.md line 24 still tells each lane to run `bin/ste-changed origin/main` on its own, because --lint once skipped the STE step; ci-job --lint now runs it.",
- "note": "Next cloud lane, small: rewrite the brief template's check line so a lane runs `bin/ci-job gates --lint --base origin/main` once, which already runs ste-changed; keep the reason in one clause. Touches skills/project-ops/templates/brief.md only. Due after: #758 (c172) merges. Needs no answer. Port: yes, the skill installs everywhere. Placed after c172 (triage 10, Oct 28): its follow-up; every brief copies the line.",
- "updatedAt": "2026-10-28T09:07:54Z"
+ "note": "Next cloud lane, small: rewrite the brief template's check line so a lane runs `bin/ci-job gates --lint --base origin/main` once, which already runs ste-changed; keep the reason in one clause. Touches skills/project-ops/templates/brief.md only. #758 merged in batch 6. Doing: lane started Oct 28 (orchestrator). Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of c82, after c172 (triage 10, Oct 28): its follow-up; every brief copies the line.",
+ "updatedAt": "2026-10-28T10:46:54Z"
 }
