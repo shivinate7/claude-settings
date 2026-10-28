@@ -1,0 +1,9 @@
+{
+ "title": "a waiting-page option that asks for a press in a web app links to it",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.33836,
+ "why": "Gripe, Oct 28 13:01 CDT (shiv, waiting page item 47 note): \"in these scenarios, option A should've provided me the link out of convenience to github\". Item 47's option a asked him to mark home#374 ready and press Merge, with no link to the PR.",
+ "note": "Next cloud lane: in skills/waiting-page, an option may carry links (label and url) shown on its card; the writer refuses an option or step that names a press in a web app (GitHub PR, settings page) without a link to that exact page; SKILL.md says so. Red first on item 47's old shape. Needs no answer. Port: yes, the skill installs everywhere. Due after: c188 merges (same skill files). Placed after c188 (triage 11, Oct 28): a gripe on every act-in-a-web-app item.",
+ "updatedAt": "2026-10-28T18:05:00Z"
+}
