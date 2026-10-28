@@ -1,9 +1,9 @@
 {
- "title": "Ask in chat while shiv is answering; otherwise the page only",
+ "title": "Ask in chat first; after 5 minutes without an answer, the page; every answer ends on the page",
  "phase": "organize",
  "status": "todo",
  "order": 103.3389994,
- "why": "shiv, Oct 28 15:05 CDT (via the coordinator): \"if im here and ure somehow able to correctly snese that thne speaking in chat is correct ... if u realize im not repsonding or havent that it goes to triage alone but if i am repsonding u can let me answer faster via chat\".",
- "note": "Ruling (shiv, 15:05 CDT): while the owner is responding in a session's chat, that session asks in chat AND on the waiting page; when he is not responding, the page only. Never chat only (shiv, 15:06 CDT, correcting the coordinator's first reading: \"it shd still be both not ONLY chat ever\"). Name: chat is the \"fast lane\" (shiv, 15:07 CDT) next to the page, which always gets the question. The repo does not hold this today: decision questions-go-to-owner on main has no presence rule. Task: amend decision questions-go-to-owner and the waiting-page skill, with a check if one is cheap. Ruling, Oct 28 15:07 CDT (shiv, chat, \"5 minutes\"; waiting-page item 52, b): a session counts him as responding, and uses the fast lane too, if he wrote in that session within the last 5 minutes. Port: yes, every repo with a waiting page. Placed after c201 (triage 12, Oct 28).",
- "updatedAt": "2026-10-28T20:20:00Z"
+ "why": "shiv, Oct 28 15:05 and 15:10 CDT (via the coordinator): ask in chat first; if he has not answered after 5 minutes, the question goes to triage for the page; when he answers in chat, the session sends the answer to triage anyway.",
+ "note": "Ruling, Oct 28 15:10 CDT (shiv, chat, correcting his 15:06 note): a session asks in chat first, the \"fast lane\" (his name, 15:07). If he has not answered in chat after 5 minutes (his number, waiting-page item 52, b), the question goes to triage for the waiting page. When he answers in chat, the session sends the answer to triage anyway, so the page record is always complete. \"Never chat only\" means every question and answer ends on the page, not that both are posted at once. The repo does not hold this today: decision questions-go-to-owner on main has no such rule. Task: amend decision questions-go-to-owner and the waiting-page skill, with a check if one is cheap. Port: yes, every repo with a waiting page. Placed after c201 (triage 12, Oct 28).",
+ "updatedAt": "2026-10-28T20:25:00Z"
 }
