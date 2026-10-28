@@ -2084,3 +2084,8 @@ test("an option that widens a shared tool says it goes against the uniform rulin
   assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your uniform ruling (t18)");
   assert.equal(await b.locator(".widens").count(), 0, "an option that does not widen is labelled");
 });
+
+test("the answered pill keeps a 6px gap between its wrapped rows, as the design draws it", async (t) => {
+  const page = await open(t, { answers: SAVED_A, viewport: { width: 390, height: 900 } }); if (!page) return;
+  assert.equal(await card(page, DECISION).locator(".ans").evaluate((e) => getComputedStyle(e).rowGap), "6px");
+});
