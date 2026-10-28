@@ -48,7 +48,7 @@ repo's brand hex), owner gripe 2026-10-28 13:12 CDT: the no-Palette and no-value
 step c191. A Device section may name written sizes, so it is exempt from the spacing check. Third
 incident, the same d4 mockup gripe (waiting-page item 12, 2026-10-28 13:12 CDT): the mockups were "very
 much a web app with no proportions", and the designer did not read the current iOS guidance or draw for
-the Duo. The Duo, `ios-skill` and mockup-check rules landed in roadmap step c192, 2026-10-28.
+the Duo. The Duo, `ios-skill` and mockup-check rules land in roadmap step c192, 2026-10-28.
 
 Limits: the designer's reads are barred by its own instruction, not by a hook: the guard `designer-scope`
 limits writes only, and no hook knows the lane kind of a read. A designer that opens a barred file is

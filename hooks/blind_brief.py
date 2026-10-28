@@ -224,22 +224,27 @@ def _words(text):
 
 def duo_faults(device, poses):
     """Faults of a Device section in a repo that draws both Duo poses: `duo-unfolded` when it never names the
-    unfolded pose, `duo-order` when it names the unfolded pose before the folded one. Order is the first
-    whole word that sets each pose apart ("folded", "unfolded"), so "unfolded" never counts as "folded"."""
+    unfolded pose, `duo-order` when it names the unfolded pose before the folded one. Order is read from the
+    pose phrases, the device name's words side by side with "iphone" dropped ("duo folded", "duo unfolded"),
+    and only when both phrases appear. So "unfolded, drawn after the folded pose" is no order fault."""
     folded, unfolded = poses
     if not names_device(device, unfolded):
         return [("duo-unfolded", "Device", unfolded)]
-    if not names_device(device, folded):
-        return []  # device-first holds this fault
-    words = _words(device)
-    mark_folded = [w for w in _words(folded) if w not in _words(unfolded)]
-    mark_unfolded = [w for w in _words(unfolded) if w not in _words(folded)]
-    if not mark_folded or not mark_unfolded:
-        return []
-    first = lambda marks: min(words.index(w) for w in marks if w in words)
-    if first(mark_unfolded) < first(mark_folded):
+    at_folded, at_unfolded = _phrase_at(device, folded), _phrase_at(device, unfolded)
+    if at_folded is not None and at_unfolded is not None and at_unfolded < at_folded:
         return [("duo-order", "Device", "%s before %s" % (unfolded, folded))]
     return []
+
+
+def _phrase_at(text, name):
+    """The word index of the first place `text` holds the words of device `name` side by side, with "iphone"
+    dropped while other words remain, or None."""
+    words, need = _words(text), _words(name)
+    need = [w for w in need if w != "iphone"] or need
+    for index in range(len(words) - len(need) + 1):
+        if words[index:index + len(need)] == need:
+            return index
+    return None
 
 
 def ios_skill_faults(text, devices):

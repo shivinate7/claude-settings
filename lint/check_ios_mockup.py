@@ -32,6 +32,7 @@ FONT_FAMILY = re.compile(r"(?<![\w-])font-family\s*:\s*([^;{}]*)", re.I)
 FONT_SHORTHAND = re.compile(r"(?<![\w-])font\s*:\s*([^;{}]*)", re.I)
 CUSTOM = re.compile(r"(?<![\w-])(--[\w-]+)\s*:\s*([^;{}]*)")
 VAR = re.compile(r"var\(\s*(--[\w-]+)\s*(?:,([^()]*))?\)")
+IMPORTANT = re.compile(r"!\s*important\b", re.I)
 SAFE_AREA = re.compile(r"(?<![\w-])env\(\s*safe-area-inset-(?:top|right|bottom|left)\b", re.I)
 
 
@@ -109,8 +110,9 @@ def _is_system(family):
 
 
 def _resolve(value, custom):
-    """`value` with each var(--name, fallback) replaced by the custom property's value, one level deep."""
-    return VAR.sub(lambda m: custom.get(m.group(1), m.group(2) or ""), value)
+    """`value` with each var(--name, fallback) replaced by the custom property's value, one level deep, and
+    with any `!important` removed."""
+    return IMPORTANT.sub("", VAR.sub(lambda m: custom.get(m.group(1), m.group(2) or ""), value))
 
 
 def faults(text):
