@@ -375,6 +375,16 @@ class RecordsAndHealth(Fixture):
         self.assertEqual(repo_map["home"], "MAP.md")
         self.assertEqual(repo_map["read"], git(self.repo, "log", "-1", "--format=%h", "--", "MAP.md").strip())
 
+    def test_map_from_the_layout_extras_without_the_rolled_out_mark(self):
+        (self.repo / "MAP.md").write_text("# map\n", encoding="utf-8")
+        (self.repo / ".claude").mkdir(exist_ok=True)
+        (self.repo / ".claude" / "layout-extras.json").write_text(
+            json.dumps({"kinds": {}, "roadmap": {"map": "MAP.md"}}), encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "map and extras")
+        page, _ = self.build_from_main()
+        self.assertEqual(self.health(page)["Repo map"]["home"], "MAP.md")
+
     def test_compliance_and_session_board_say_why_unknown(self):
         page, _ = self.build_from_main()
         health = self.health(page)

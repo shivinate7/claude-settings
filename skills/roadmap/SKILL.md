@@ -27,7 +27,7 @@ The Records tab shows Health, then each listed record kind (decisions, debts, pl
 clone the newest list reads "unknown", because the history stops before the files were added.
 
 Health shows the repo map, the compliance scores and the session board. The map's path comes from
-the extras: `{"map": "<path>", "github": "<owner>/<repo>"}`, under `"roadmap"` in the rolled-out
+the extras: `{"map": "<path>", "github": "<owner>/<repo>"}`, under `"roadmap"` in the
 layout extras file, else in `roadmap/extras.json` on the record branch. The compliance scores have no
 home yet, and the session board's store lives on one machine, so both read "unknown" and say why.
 
