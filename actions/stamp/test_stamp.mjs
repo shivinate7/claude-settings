@@ -26,36 +26,56 @@ const LOCAL = { base: "main" };
 const SELF = fileURLToPath(import.meta.url);
 const HERE = dirname(SELF);
 
+const POSIX = process.platform !== "win32";
+
 // A fixture git must never wait on a person or start work that outlives its command: no prompt,
 // no editor, no auto gc or maintenance, no fsmonitor daemon. stamp.mjs inherits this env too.
 Object.assign(process.env, { GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GCM_INTERACTIVE: "never" });
+const setKeys = new Set(Array.from({ length: Number(process.env.GIT_CONFIG_COUNT ?? 0) }, (_, i) => process.env[`GIT_CONFIG_KEY_${i}`]));
 for (const [key, value] of [["gc.auto", "0"], ["maintenance.auto", "false"], ["core.fsmonitor", "false"]]) {
+  if (setKeys.has(key)) continue; // the watchdog's child inherits them already set
   const n = Number(process.env.GIT_CONFIG_COUNT ?? 0);
   process.env[`GIT_CONFIG_KEY_${n}`] = key;
   process.env[`GIT_CONFIG_VALUE_${n}`] = value;
   process.env.GIT_CONFIG_COUNT = String(n + 1);
 }
 
-// Every command this suite runs goes through sh() or shSync(). A hung command then reads red at
-// its own test, named, instead of hanging the suite. stdin is closed so nothing can wait on it.
+// Each command this file runs itself goes through sh() or shSync(), capped per call, so a hung
+// command reads red at its own test, named. stdin is closed so nothing can wait on it. stamp.mjs's
+// own git calls and its bash regenerate run uncapped inside stamp(); only the watchdog covers them.
 const CALL_TIMEOUT_MS = 60_000;
 const callOpts = (opts) => ({ timeout: CALL_TIMEOUT_MS, killSignal: "SIGKILL", windowsHide: true,
   stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"], ...opts });
-const timedOut = (cmd, args, opts) =>
-  new Error(`timed out after ${(opts.timeout ?? CALL_TIMEOUT_MS) / 1000} s: ${cmd} ${args.join(" ")}`);
+
+function timedOut(cmd, args, opts, pid) {
+  killOrphansOf(pid);
+  return new Error(`timed out after ${(opts.timeout ?? CALL_TIMEOUT_MS) / 1000} s: ${cmd} ${args.join(" ")}`);
+}
+
+// Windows: a timeout kills only the direct child. A process it started runs on, orphaned, and its
+// parent pid names the dead child, so taskkill /T from the suite misses it. Kill it by that pid.
+// POSIX: an orphan stays in the suite's process group, which the watchdog kills.
+function killOrphansOf(pid) {
+  if (POSIX || !pid) return;
+  const quiet = { timeout: 15_000, windowsHide: true, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
+  const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+    `Get-CimInstance Win32_Process -Filter 'ParentProcessId=${pid}' | ForEach-Object { $_.ProcessId }`], quiet);
+  const pids = (r.stdout ?? "").match(/\d+/g) ?? [];
+  if (pids.length) spawnSync("taskkill", ["/T", "/F", ...pids.flatMap((p) => ["/PID", p])], quiet);
+}
 
 function sh(cmd, args, opts = {}) {
   try {
     return execFileSync(cmd, args, callOpts(opts));
   } catch (e) {
-    if (e.code === "ETIMEDOUT") throw timedOut(cmd, args, opts);
+    if (e.code === "ETIMEDOUT") throw timedOut(cmd, args, opts, e.pid);
     throw e;
   }
 }
 
 function shSync(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, callOpts(opts));
-  if (r.error?.code === "ETIMEDOUT") throw timedOut(cmd, args, opts);
+  if (r.error?.code === "ETIMEDOUT") throw timedOut(cmd, args, opts, r.pid);
   if (r.error) throw r.error;
   return r;
 }
@@ -1773,25 +1793,30 @@ test("scanner: a near-miss after a fence that holds a multi-line template litera
 // ---------------------------------------------------------------- watchdog
 // The suite is synchronous, so a timer inside it never fires while a command hangs. Run normally,
 // this file re-runs itself as a child with piped stdio, so no process under it holds the runner's
-// output pipe, and keeps the timer here. On expiry it names the running test, prints the live
-// process tree, kills that tree and exits 1. STAMP_SUITE_CAP_S sets the cap, inside the step's own.
+// output pipe, and keeps the timer here. On expiry it names the running test, kills the process
+// tree, prints what ran and exits 1. STAMP_SUITE_CAP_S sets the cap, inside the step's own.
 const CHILD = "STAMP_SUITE_CHILD";
-const HANG = "STAMP_SUITE_HANG_FIXTURE"; // a pid file: the child runs only hangFixture
+const HANG = "STAMP_SUITE_HANG_FIXTURE"; // a pid file: the child runs only the hang fixture
+const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold" or "orphan", as hangCommand reads it
 const START = "STAMP-START ";
-const POSIX = process.platform !== "win32";
 
-// A command that never ends, whose own child holds the pipe too. Both write their pids first.
-const hangFixture = {
-  name: "hang fixture: a command and its child sleep forever",
-  fn: () => {
-    const forever = "setInterval(() => {}, 1e9)";
-    const code = `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(forever)}], { stdio: "inherit" });
-require("fs").writeFileSync(process.env.${HANG}, process.pid + " " + c.pid); ${forever}`;
-    shSync(process.execPath, ["-e", code]);
-  },
-};
+// node -e code: its child holds the pipe and sleeps forever. "hold": the command sleeps too.
+// "orphan": the command exits, so the sleeper's parent pid names a dead process. Both pids go to
+// pidFile first. Both command lines carry pidFile, so a check can tell them from a reused pid.
+function hangCommand(pidFile, orphan) {
+  const sleeper = `setInterval(() => {}, 1e9); // ${pidFile}`;
+  return `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], { stdio: "inherit" });
+require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
+${orphan ? "process.exit(0);" : "setInterval(() => {}, 1e9);"}`;
+}
+
+const hangFixture = (kind) => ({
+  name: `hang fixture (${kind}): a command's child holds its pipe and sleeps forever`,
+  fn: () => { shSync(process.execPath, ["-e", hangCommand(process.env[HANG], kind === "orphan")]); },
+});
 
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const readPids = (file) => (existsSync(file) ? readFileSync(file, "utf8").trim().split(" ").map(Number) : []);
 
 // A zombie still answers signal 0, so on Linux its state counts too.
 function alive(pid) {
@@ -1799,70 +1824,111 @@ function alive(pid) {
   try { return !/^\d+ \(.*\) Z/s.test(readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return true; }
 }
 
-test("watchdog: a hung command reads red within the cap, names its test, and leaves no process", () =>
+// Live, and still a fixture process: its command line carries token. A reused pid does not.
+function ours(pid, token) {
+  if (!alive(pid)) return false;
+  const r = POSIX
+    ? shSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 15_000 })
+    : shSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+      `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine`], { encoding: "utf8", timeout: 15_000 });
+  return r.stdout.includes(token);
+}
+
+// Waits for the fixture pids to die, then kills and returns each one still ours.
+function leftovers(pidFile) {
+  const pids = readPids(pidFile);
+  for (let i = 0; i < 30 && pids.some(alive); i++) sleepMs(100);
+  const left = pids.filter((pid) => ours(pid, pidFile));
+  for (const pid of left) { try { process.kill(pid, "SIGKILL"); } catch {} }
+  return { pids, left };
+}
+
+test("a timed-out call names its command, and on Windows leaves no orphan behind", () =>
   withTempDir((dir) => {
     const pidFile = join(dir, "pids");
-    const env = { ...process.env, STAMP_SUITE_CAP_S: "3", [HANG]: pidFile };
-    delete env[CHILD];
-    // A file, not a pipe: without a watchdog the fixture would hold a pipe, and this test, forever.
-    const outFile = join(dir, "out.txt");
-    const fd = openSync(outFile, "w");
-    const t0 = Date.now();
-    let r, pids = [], left = [];
+    let found;
     try {
-      r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 20_000 });
+      assert.throws(() => shSync(process.execPath, ["-e", hangCommand(pidFile, false)], { timeout: 3000 }),
+        /timed out after 3 s: \S*node/);
     } finally {
-      closeSync(fd);
-      if (existsSync(pidFile)) pids = readFileSync(pidFile, "utf8").trim().split(" ").map(Number);
-      for (let i = 0; i < 30 && pids.some(alive); i++) sleepMs(100);
-      left = pids.filter(alive);
-      for (const pid of left) { try { process.kill(pid, "SIGKILL"); } catch {} }
+      found = leftovers(pidFile);
     }
-    const secs = (Date.now() - t0) / 1000;
-    const out = readFileSync(outFile, "utf8");
-    assert.equal(r.status, 1, out);
-    assert.ok(secs < 15, `took ${secs} s\n${out}`);
-    assert.match(out, /FAIL - hang fixture: a command and its child sleep forever/, out);
-    assert.equal(pids.length, 2, out);
-    assert.deepEqual(left, [], `still running: ${left}\n${out}`);
+    assert.equal(found.pids.length, 2);
+    // POSIX: the orphan is the watchdog's to kill, through the process group.
+    if (!POSIX) assert.deepEqual(found.left, [], `still running: ${found.left}`);
   }));
 
-// Each live process under root, one line per process with its command line.
-function processTree(root) {
+for (const kind of ["hold", "orphan"]) {
+  test(`watchdog: a hung command (${kind}) reads red within the cap, names its test, and leaves no process`, () =>
+    withTempDir((dir) => {
+      const pidFile = join(dir, "pids");
+      const env = { ...process.env, STAMP_SUITE_CAP_S: "5", [HANG]: pidFile, [HANG_KIND]: kind };
+      delete env[CHILD];
+      // A file, not a pipe: without a watchdog the fixture would hold a pipe, and this test, forever.
+      const outFile = join(dir, "out.txt");
+      const fd = openSync(outFile, "w");
+      const t0 = Date.now();
+      let r, found;
+      try {
+        r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 40_000 });
+      } finally {
+        closeSync(fd);
+        found = leftovers(pidFile);
+      }
+      const secs = (Date.now() - t0) / 1000;
+      const out = readFileSync(outFile, "utf8");
+      assert.equal(r.status, 1, out);
+      assert.ok(secs < 30, `took ${secs} s\n${out}`);
+      assert.match(out, new RegExp(`FAIL - hang fixture \\(${kind}\\)`), out);
+      assert.equal(found.pids.length, 2, out);
+      assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
+    }));
+}
+
+// POSIX: each live process in the child's group, with its command line. The child leads its own
+// group, so the group holds even an orphan. ps is fast, so it lists before the kill.
+function posixTree(root) {
   try {
-    if (POSIX) {
-      // The child leads its own process group, so the group holds even an orphaned grandchild.
-      const ps = shSync("ps", ["-eo", "pid=,ppid=,pgid=,args="], { encoding: "utf8", timeout: 15_000 });
-      return ps.stdout.split("\n").filter((l) => l.trim().split(/\s+/)[2] === String(root));
-    }
-    const walk = `$all = @(Get-CimInstance Win32_Process); $ids = @(${root});
-for ($i = 0; $i -lt $ids.Count; $i++) { foreach ($p in $all) {
-  if ($p.ParentProcessId -eq $ids[$i] -and $ids -notcontains $p.ProcessId) {
-    $ids += $p.ProcessId; '{0} {1} {2}' -f $p.ProcessId, $p.ParentProcessId, $p.CommandLine } } }`;
-    const ps = shSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], { encoding: "utf8", timeout: 15_000 });
-    return ps.stdout.split(/\r?\n/).filter((l) => l.trim());
+    const ps = shSync("ps", ["-eo", "pid=,ppid=,pgid=,args="], { encoding: "utf8", timeout: 15_000 });
+    return ps.stdout.split("\n").filter((l) => l.trim().split(/\s+/)[2] === String(root));
   } catch (e) {
     return [`(process tree unreadable: ${e.message})`];
   }
 }
 
-// Windows: taskkill /T follows parent links from root, and each listed pid covers a process whose
-// parent already exited.
-function killTree(root, lines) {
-  if (POSIX) {
-    try { process.kill(-root, "SIGKILL"); } catch {}
-    return;
+// Windows, after taskkill /T on root: processes it missed. An orphan's parent pid names a dead
+// process, and a dead parent's own parent is unreadable, so "ours" is read from what is left: a
+// process the suite's programs run, started after the suite, whose parent is dead. Plus their trees.
+function windowsLeftovers(root, startedAt) {
+  const walk = `$start = [datetime]::Parse('${new Date(startedAt).toISOString()}');
+$all = @(Get-CimInstance Win32_Process); $live = @{}; foreach ($p in $all) { $live[[int]$p.ProcessId] = 1 }
+$ids = @(${root});
+foreach ($p in $all) { if ($p.CreationDate -gt $start -and -not $live.ContainsKey([int]$p.ParentProcessId) -and $p.Name -match '^(node|git|git-[\\w-]+|bash|sh)\\.exe$') { $ids += [int]$p.ProcessId } }
+for ($i = 0; $i -lt $ids.Count; $i++) { foreach ($p in $all) { if ($p.ParentProcessId -eq $ids[$i] -and $ids -notcontains $p.ProcessId) { $ids += [int]$p.ProcessId } } }
+foreach ($p in $all) { if ($ids -contains $p.ProcessId) { '{0} {1} {2}' -f $p.ProcessId, $p.ParentProcessId, $p.CommandLine } }`;
+  try {
+    const ps = shSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], { encoding: "utf8", timeout: 8_000 });
+    return ps.stdout.split(/\r?\n/).filter((l) => l.trim());
+  } catch (e) {
+    return [`(leftover processes unreadable: ${e.message})`];
   }
-  const pids = [root, ...lines.map((l) => l.split(" ")[0]).filter((p) => /^\d+$/.test(p))];
-  try { shSync("taskkill", ["/T", "/F", ...pids.flatMap((p) => ["/PID", String(p)])], { timeout: 15_000 }); } catch {}
 }
+
+const taskkill = (pids) => {
+  try {
+    return shSync("taskkill", ["/T", "/F", ...pids.flatMap((p) => ["/PID", String(p)])], { encoding: "utf8", timeout: 15_000 }).stdout;
+  } catch (e) {
+    return `(taskkill failed: ${e.message})`;
+  }
+};
 
 function watchdog() {
   const capS = Number(process.env.STAMP_SUITE_CAP_S) || 240;
+  const startedAt = Date.now() - 1000;
   const child = spawn(process.execPath, [SELF], {
     env: { ...process.env, [CHILD]: "1" }, stdio: ["ignore", "pipe", "pipe"], detached: POSIX, windowsHide: true,
   });
-  let current = null, pending = "", over = false;
+  let current = null, pending = "", over = false, timer;
   const forward = (line) => {
     const bare = line.replace(/\r$/, "");
     if (bare.startsWith(START)) current = bare.slice(START.length);
@@ -1887,18 +1953,37 @@ function watchdog() {
     child.unref();
     process.exitCode = code;
   };
+  // Windows kills first: a cold PowerShell walk can take seconds, and the step cap is near.
   const stopTree = (why) => {
     if (over) return;
     if (pending) { forward(pending); pending = ""; }
     console.error(why);
-    const lines = processTree(child.pid);
-    console.error(lines.length ? lines.join("\n") : "(none)");
-    killTree(child.pid, lines);
+    if (POSIX) {
+      const lines = posixTree(child.pid);
+      console.error(lines.length ? lines.join("\n") : "(none)");
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
+    } else {
+      console.error(taskkill([child.pid]).trim());
+      const left = windowsLeftovers(child.pid, startedAt);
+      console.error(left.length ? `Left after that, killed now:\n${left.join("\n")}` : "Nothing left after that.");
+      const pids = left.map((l) => l.split(" ")[0]).filter((p) => /^\d+$/.test(p));
+      if (pids.length) taskkill(pids);
+    }
     finish(1);
   };
-  const timer = setTimeout(() => stopTree(
-    `FAIL - ${current ?? "(before the first test)"}\nThe suite ran past its ${capS} s cap (STAMP_SUITE_CAP_S). Processes still running under it:`,
-  ), capS * 1000);
+  const arm = () => {
+    timer = setTimeout(() => stopTree(
+      `FAIL - ${current ?? "(before the first test)"}\nThe suite ran past its ${capS} s cap (STAMP_SUITE_CAP_S). Processes under it:`,
+    ), capS * 1000);
+  };
+  // The proof's cap counts from the fixture's pid file, so a slow start cannot read red early.
+  if (process.env[HANG]) {
+    const t0 = Date.now();
+    const wait = setInterval(() => {
+      if (existsSync(process.env[HANG]) || Date.now() - t0 > 30_000) { clearInterval(wait); if (!over) arm(); }
+    }, 50);
+    wait.unref();
+  } else arm();
   child.on("close", (code) => finish(code ?? 1));
   // An exit with no close means a process the suite started still holds its output.
   child.on("exit", (code) => {
@@ -1913,7 +1998,7 @@ function watchdog() {
 if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }
 if (process.env[CHILD] !== "1") watchdog();
 else {
-  const run = process.env[HANG] ? [hangFixture] : tests;
+  const run = process.env[HANG] ? [hangFixture(process.env[HANG_KIND] ?? "hold")] : tests;
   let failed = 0;
   for (const { name, fn } of run) {
     console.log(START + name); // the watchdog reads this to name a hung test
