@@ -181,15 +181,10 @@ def main(argv):
     ap.add_argument("--root", default=".")
     ap.add_argument("--base", default="")
     ap.add_argument("--pins", action="store_true", help="print the pip specs of the tools the tests install, then exit")
-    ap.add_argument("--npm-pins", action="store_true", help="print the npm specs of the tools the tests install, then exit")
     args = ap.parse_args(argv)
     if args.pins:
         tools = load_standard()["tools"]
         print(" ".join("%s==%s" % (k, tools[k]) for k in ("ruff", "mypy", "shellcheck-py")))
-        return 0
-    if args.npm_pins:
-        tools = load_standard()["tools"]
-        print(" ".join("%s@%s" % (k, tools[k]) for k in ("@astrojs/check", "typescript")))
         return 0
     root = os.path.abspath(args.root)
     std = load_standard()

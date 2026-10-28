@@ -104,7 +104,8 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: |
           for spec in $(python3 actions/code-check/code_check.py --pins); do pipx install "$spec"; done
-          npm install -g $(python3 actions/code-check/code_check.py --npm-pins)
+          npm ci --ignore-scripts --prefix actions/code-check/tools
+          export PATH="$PWD/actions/code-check/tools/node_modules/.bin:$PATH"
           python3 actions/code-check/test_action.py
 
       - name: Ruling-kind records-dir input

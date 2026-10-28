@@ -4,7 +4,7 @@ a listed module is red, a shrunk mypy list is red against the base ref, a missin
 an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason).
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
-astro-check (the --npm-pins specs, via npm install -g) must be installed. Without astro-check the Astro tests
+astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
 skip and say so, except under CI, where they fail."""
 import json, os, shutil, subprocess, sys, tempfile, unittest
 
@@ -18,7 +18,7 @@ BAD_ASTRO = "---\nconst n: number = \"x\";\n---\n<p>{n}</p>\n"
 ASTRO_CONFIG = "export default {};\n"
 # CI must not go green by skipping: there a missing astro-check fails the test instead.
 NEEDS_ASTRO = unittest.skipUnless(shutil.which("astro-check") or os.environ.get("CI"),
-                                  "astro-check not on PATH; install the --npm-pins specs (CI does)")
+                                  "astro-check not on PATH; npm ci in actions/code-check/tools (CI does)")
 
 
 def git(cwd, *a):
@@ -200,12 +200,15 @@ class CodeCheck(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn("astro typecheck: astro-check pass", out)
 
-    def test_npm_pins_flag_prints_install_specs_from_the_standard(self):
+    def test_npm_lockfile_matches_the_standard(self):
         std = json.load(open(STANDARD, encoding="utf-8"))
-        p = subprocess.run([sys.executable, RUNNER, "--npm-pins"], capture_output=True, text=True)
-        self.assertEqual(p.returncode, 0, p.stderr)
-        want = ["%s@%s" % (k, std["tools"][k]) for k in ("@astrojs/check", "typescript")]
-        self.assertEqual(p.stdout.split(), want)
+        tools = os.path.join(HERE, "tools")
+        want = {k: std["tools"][k] for k in ("@astrojs/check", "typescript")}
+        self.assertEqual(json.load(open(os.path.join(tools, "package.json"), encoding="utf-8"))["dependencies"], want)
+        lock = json.load(open(os.path.join(tools, "package-lock.json"), encoding="utf-8"))["packages"]
+        self.assertEqual(lock[""]["dependencies"], want)
+        for name, version in want.items():
+            self.assertEqual(lock["node_modules/" + name]["version"], version, name)
 
     def test_format_layer_waits_for_o2(self):
         std = json.load(open(STANDARD, encoding="utf-8"))
