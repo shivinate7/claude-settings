@@ -72,7 +72,7 @@ group line, with its own grade, so one score never hides a finding. A child with
 scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
 that no probe and no mechanism covers.
 
-Write the scorecard to one file, `docs/health/compliance.md` in the checked repo. Pipe the group
+Write the scorecard to one file, the layout's `scorecard` kind (`docs/health/compliance.md`) in the checked repo. Pipe the group
 lines into `python3 lint/compliance_probes.py scorecard <child root>`. It rewrites the file in place
 on each run. Never write a dated copy beside it. The file holds one table, with the columns
 Group, Score, Gold standard, Gap, Source. Gold standard is `in shape`. The script always adds a row
