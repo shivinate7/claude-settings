@@ -60,6 +60,7 @@ t refused "split fetch, FETCH_HEAD names main-x" git update-ref refs/heads/main 
 fh "branch 'main' of $tmp/other"
 t refused "split fetch, FETCH_HEAD names other"  git update-ref refs/heads/main "$tip"
 fh "branch 'main' of $tmp/origin"
+t refused "split fetch, FETCH_HEAD at another commit" git update-ref refs/heads/main feat
 t ok      "split fetch, FETCH_HEAD names origin main" git update-ref refs/heads/main "$tip"
 # install.sh placement: each case a fresh clone with a local commit on feat, then a guarded move
 mk() { # name [hooksPath]: fresh clone at $tmp/name on feat
