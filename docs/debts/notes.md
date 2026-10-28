@@ -1,5 +1,6 @@
 # Notes: findings too unlikely to hit to be debts
 - AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
+- guard-suite-red-on-unparsed: hooks/test_guard.py is not green when hooks/guard_wsl.py is parsed and unparsed, so the report has no same-engine gold row for the guard. Cause unmeasured: find which case reads the source text. Decision: mutation-report-scores-suites.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a refusal case. Decision: wsl-allow-list (WSL allow list).
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
 - agent-brief-no-matcher: SubagentStart agent-brief hook has no matcher, so every agent type gets the standing rules (settings.json)
@@ -261,6 +262,14 @@
 - shell-write-miss-pipe-heredoc: cat <<EOF | sh writing a frozen path is not seen; the heredoc body is stripped first (hooks/guard_core.py)
 - shell-write-miss-sort-output: sort -o P writes P, but sort is not a mutating command and -o is not a redirect (hooks/guard_frozen.py)
 - shell-write-miss-subshell: a write inside ( ... > P) is not seen; the closing parenthesis stays glued to the path (hooks/guard_frozen.py)
+- silent-suite-platform-exit: lint/test_hook_platform_exit.py kills none of 10 mutants of hooks/stall_watch.py; it pins the platform exit only. Decision: mutation-report-scores-suites.
+- silent-suite-reply-judge: hooks/test_reply_judge.py kills none of 10 sampled mutants of lint/report_gate.py, but it goes red when the file is wholly broken, so it does load the file. Cause unmeasured. Decision: mutation-report-scores-suites (the mutation report scores suites).
+- mutant-load-unproven: the report never proves a silent suite loaded the mutant. A suite that skips or reads an installed copy reads silent. Fix: a whole-file break control per file. Decision: mutation-report-scores-suites.
+- mutant-subprocess-throw-kill: a mutant that throws in a child process the suite reports as a FAIL line counts as killed, so the rates are an upper bound. Decision: mutation-report-scores-suites.
+- silent-suite-rule-audit: lint/test_rule_audit.py kills none of 10 mutants of lint/report_gate.py; it names the file as a rule reference only. Decision: mutation-report-scores-suites.
+- silent-suite-session-end-sweep: janitor/test_session_end_sweep.py kills none of 10 mutants of hooks/stall_watch.py; it only names the hook in a list. Decision: mutation-report-scores-suites.
+- silent-suite-settings-matcher: lint/test_settings_matcher.py kills none of 10 mutants of lint/report_gate.py, hooks/feedback_gate.py or hooks/stall_watch.py; it pins hook registration only. Decision: mutation-report-scores-suites.
+- silent-suite-wrappers: hooks/test_wrappers.py kills none of 10 mutants of lint/report_gate.py or hooks/stall_watch.py; it pins the wrapper shape only. Decision: mutation-report-scores-suites.
 - sim-boot-check-xcodebuild: the boot check skips xcodebuild -destination, simctl bootstatus -b and simctl boot with a leading flag (hooks/sim_boot_record.py)
 - skill-rows-fence-indent: a 4-space-indented fence mark inside a fence closes it, so a row inside counts: false green (lint/check_skill_model_rows.py)
 - skill-rows-posix-only-test: the unreadable-folder exit 2 test and symlink case run only on POSIX (lint/check_skill_model_rows.py fixtures)
