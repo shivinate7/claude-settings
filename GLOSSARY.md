@@ -9,8 +9,8 @@ record that defines the term. When a meaning changes, change the home first, the
 the term, never a name from its "Not" cell. `lint/check_glossary.py` fails a row whose home does not
 exist. It also fails a new file path that uses a "Not" name. It fails a line that a change adds,
 too, when an identifier, a rule anchor, a record slug or a hook message uses one. It never reads
-prose. A "Not" name written `word (this sense)` retires only one sense of an everyday word, such as
-`issue` or `block`. The check never reads it. A reviewer does.
+prose. A "Not" name written `word (this sense)` retires one sense of an everyday word, such as
+`issue`. The check reads it in paths, anchors and slugs only. A reviewer reads it everywhere else.
 
 The form comes from the `domain-modeling` skill in
 [mattpocock/skills](https://github.com/mattpocock/skills/tree/main/skills/engineering/domain-modeling):

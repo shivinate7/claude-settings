@@ -23,8 +23,9 @@ Comments, docstrings and every other string are prose, and a reviewer reads pros
 names a "not" word passes. A "not" word inside its own term, plural too (`hole` in `safety_holes`),
 is the term. A line that holds `glossary-ok` is skipped, with its reason beside it.
 A "not" name written `word (this sense)` retires one sense of an everyday word (`block`, `issue`):
-only a reviewer can tell the sense, so the check never reads it. Any other parenthesised tag on a
-"not" name fails. Claude Code's own names stay (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
+it is read in paths, anchors and slugs, never in identifiers, strings or hook messages, where code
+may use the other sense. Any other parenthesised tag on a "not" name fails. Claude Code's own names
+stay (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
 checked or renamed.
 
     python3 lint/check_glossary.py [file ...]
@@ -44,7 +45,7 @@ ROOT = os.path.dirname(HERE)
 GLOSSARY = "GLOSSARY.md"
 SECTION = "## Terms"
 NONE = ("", "-", "—")  # a "not" cell that lists no name
-THIS_SENSE = " (this sense)"  # `issue (this sense)`: only a reviewer tells the sense, so the check never reads it
+THIS_SENSE = " (this sense)"  # `issue (this sense)`: read in paths, anchors and slugs, not in code names
 TAG_RE = re.compile(r"[^()]+ \(this sense\)")  # the one allowed form of a tagged "not" name
 WORD_RE = re.compile(r"[^a-z0-9]+")
 CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")  # batchBranch reads as batch branch
@@ -151,17 +152,20 @@ def same(got, name):
     return got[:-1] == name[:-1] and got[-1] in (name[-1], name[-1] + "s", name[-1] + "es")
 
 
-def name_problems(where, text, table):
-    """One problem per "not" name that the whole words of `text` hold. A name tagged (this sense)
-    is left to the reviewer."""
+def name_problems(where, text, table, plain=False):
+    """One problem per "not" name that the whole words of `text` hold.
+
+    `plain` is a name of code that a person may spell for another sense (`block`, `entry`): a
+    "not" name tagged (this sense) is then left to the reviewer."""
     out = []
     # Read with and without case steps: HandOver may mean handover or hand over.
     forms = [words(text), words(text, camel=True)]
     for term, _homes, names in table:
         spelled = words(term)  # a "not" word inside its own term, such as `hole` in `safety hole`, is the term
         for name in names:
-            if name.endswith(THIS_SENSE):
+            if plain and name.endswith(THIS_SENSE):
                 continue
+            name = name[:-len(THIS_SENSE)] if name.endswith(THIS_SENSE) else name
             n = words(name)
             if n and any(same(w[i:i + len(n)], n) and not inside(w, i, len(n), spelled)
                          for w in forms for i in range(len(w) - len(n) + 1)):
@@ -423,13 +427,13 @@ def code_problems(rel, text, table, lines=None):
             return name in PLATFORM_NAMES or name.startswith(PLATFORM_PREFIXES)
         for line, name in idents:
             if not platform(name) and not (name in YAML_ONLY and ext in (".yml", ".yaml")):
-                hit(line, name_problems("name " + name, name, table))
+                hit(line, name_problems("name " + name, name, table, plain=True))
         for line, last, s in ([] if fixture else strings):
             if NAME_LIKE.fullmatch(s):
                 if not platform(s):
-                    hit(line, name_problems("name " + s, s, table), last)
+                    hit(line, name_problems("name " + s, s, table, plain=True), last)
             elif in_hooks and s.strip() and not REGEX_LIKE.search(s):
-                hit(line, name_problems("message '%s'" % s.strip()[:50], s, table), last)
+                hit(line, name_problems("message '%s'" % s.strip()[:50], s, table, plain=True), last)
     for number, row in enumerate(rows, 1):
         for anchor in ANCHOR_REF.findall(row):
             hit(number, name_problems("anchor " + anchor, anchor, table))
