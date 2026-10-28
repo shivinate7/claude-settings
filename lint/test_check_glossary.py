@@ -49,8 +49,10 @@ class Fixture(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
-    def run_check(self, *args):
+    def run_check(self, *args, ci=False):
         env = {k: v for k, v in os.environ.items() if k != "CI"}
+        if ci:
+            env["CI"] = "true"
         r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_glossary.py"), *args],
                            cwd=self.tree, capture_output=True, encoding="utf-8", env=env)
         return r.returncode, r.stdout + r.stderr
@@ -453,6 +455,103 @@ class CodeNameTests(Fixture):
         code, out = self.run_check()
         self.assertNotIn("Traceback", out)
         self.assertEqual(code, 0, out)
+
+    # Plural terms, diff headers and more script forms
+
+    def test_a_plural_term_that_holds_a_not_word_passes(self):
+        self.green("hooks/x.py", "safety_holes = 1\n")
+        self.green("docs/notes.md", "See `safety-holes-closed`.\n")
+        self.green("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:safety-holes-closed -->\n")
+        self.green("hooks/y.py", "safety_hole = 1\nclass SafetyHole:\n    pass\n")
+        self.green("docs/more.md", "See `safety-hole-closed`.\n")
+        self.red("hooks/z.py", "holes = 1\n", "hooks/z.py:1")
+
+    def test_a_changed_file_with_a_space_in_its_name_is_read(self):
+        self.red("hooks/a b.py", "bundle = 1\n", "hooks/a b.py:1")
+
+    def test_a_repo_with_no_diff_prefix_is_read(self):
+        self.base_repo()
+        self.git("config", "diff.noprefix", "true")
+        self.put("hooks/x.py", "bundle = 1\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("hooks/x.py:1", out)
+
+    def test_a_repo_with_mnemonic_diff_prefix_is_read(self):
+        # Guards against a regression: git ignores this setting for a diff between two commits.
+        self.base_repo()
+        self.git("config", "diff.mnemonicPrefix", "true")
+        self.put("hooks/x.py", "bundle = 1\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("hooks/x.py:1", out)
+
+    def test_an_added_line_that_starts_with_two_pluses_is_not_a_header(self):
+        code, out = self.change("docs/notes.md", "++ x\n")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out)
+        # The row `+++ x` must not end the file's later hunk: the second hunk holds the name.
+        self.change("bin/x.sh", "one\ntwo\nthree\nfour\nfive\n")
+        code, out = self.change("bin/x.sh", "++ x\ntwo\nthree\nfour\nbundle=1\n")
+        self.assertEqual(code, 1, out)
+        self.assertIn("bin/x.sh:5", out)
+        self.assertNotIn("UNKNOWN", out)
+
+    def test_a_diff_header_with_no_readable_path_is_unknown_and_red_in_ci(self):
+        # git quotes a file name that is not UTF-8 as octal escapes, so the header names no path.
+        # The case skips where the file system refuses such a name (Windows, macOS).
+        self.base_repo()
+        os.makedirs(os.path.join(self.tree, "hooks"), exist_ok=True)
+        try:
+            with open(os.path.join(os.fsencode(self.tree), b"hooks", b"\xff.py"), "wb") as f:
+                f.write(b"bundle = 1\n")
+        except (OSError, ValueError):
+            self.skipTest("the file system refuses a name that is not UTF-8")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out)
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 1, out)
+
+    def test_batch_comments_are_prose(self):
+        self.green("bin/x.cmd", "rem the handover note\nREM a bundle\n  :: the handover\n@rem bundle\n")
+        self.red("bin/y.bat", "rem fine\nset bundle=1\n", "bin/y.bat:2")
+        self.red("bin/z.cmd", "remote_bundle=1\n", "bin/z.cmd:1")  # `rem` at a line start is a comment only as a whole word
+
+    def test_a_here_string_or_shift_does_not_open_a_heredoc(self):
+        self.red("bin/x.sh", "cat <<< word\nbundle=1\n", "bin/x.sh:2")
+        self.red("bin/y.sh", "echo $((1 << n))\nbundle=1\n", "bin/y.sh:2")
+        self.red("bin/z.sh", "echo $((1<<n))\nbundle=1\n", "bin/z.sh:2")
+        self.green("bin/w.sh", "cat <<EOF\nthe handover\nEOF\nfine=1\n")
+
+    def test_yaml_keys_beside_a_block_quoted_keys_and_flow_lists(self):
+        self.red("actions/x.yml", "steps:\n  - run: |\n      echo a handover\n    bundle: x\n", "actions/x.yml:4")
+        self.green("actions/v.yml", "steps:\n  - run: |\n      echo a handover\n    shell: bash\n")
+        self.red("actions/y.yml", '"bundle": 1\n', "actions/y.yml:1")
+        self.green("actions/z.yml", 'args: ["--msg", "the bundle failed"]\n')
+        self.red("actions/w.yml", "args: [bundle, x]\n", "actions/w.yml:1")
+
+    def test_a_division_after_an_increment_is_not_a_regex(self):
+        self.red("actions/x.mjs", "let a = i++ / 2; const bundle = b / c;\n", "actions/x.mjs:1")
+        self.red("actions/y.mjs", "let a = i-- / 2; const bundle = b / c;\n", "actions/y.mjs:1")
+
+    def test_a_jsx_self_closing_tag_does_not_hide_the_next_tag(self):
+        self.red("actions/x.jsx", "const p = <Foo a={x} /><Bundle />;\n", "actions/x.jsx:1")
+
+    def test_a_nested_template_literal_is_one_string(self):
+        self.green("actions/x.mjs", "const t = `a ${c ? `the bundle` : ''} b`;\nconst fine = 1;\n")
+        self.red("actions/y.mjs", "const t = `a ${c ? `x` : ''} b`;\nconst bundle = 1;\n", "actions/y.mjs:2")
+        self.red("actions/z.mjs", "const t = `a ${f({k: `x\ny`})}\nb`;\nconst bundle = 1;\n", "actions/z.mjs:4")
+
+    def test_powershell_here_string_body_is_prose(self):
+        self.green("bin/x.ps1", "$m = @'\nthe bundle note\n'@\n$fine = 1\n")
+        self.red("bin/y.ps1", '$m = @"\nthe note\n"@\n$bundle = 1\n', "bin/y.ps1:4")
+
+    def test_the_transcript_folder_name_passes(self):
+        self.green("hooks/x.py", 'D = "subagents"\n')
 
 
 class RepoGlossaryTests(unittest.TestCase):
