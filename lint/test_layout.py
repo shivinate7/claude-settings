@@ -222,6 +222,46 @@ class WaitingPage(Tree):
         self.assertEqual((code, out.strip()), (0, "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"))
 
 
+class WaitingPageBranding(Tree):
+    """A repo states its waiting page's colour and icon in its own extras file (roadmap step c132)."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def keys(self, **keys):
+        self.put(EXTRAS, json.dumps(dict({"kinds": {}}, **keys)))
+
+    def test_no_extras_file_or_no_key_is_none(self):
+        self.assertIsNone(self.layout.waiting_page_colour(self.tree))
+        self.assertIsNone(self.layout.waiting_page_icon(self.tree))
+        self.keys()
+        self.assertIsNone(self.layout.waiting_page_colour(self.tree))
+        self.assertIsNone(self.layout.waiting_page_icon(self.tree))
+
+    def test_colour_reads_lowercased(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, self.layout.WAITING_PAGE_COLOUR: "#A82830"}))
+        self.assertEqual(self.layout.waiting_page_colour(self.tree), "#a82830")
+
+    def test_a_colour_that_is_not_rrggbb_is_an_error(self):
+        for bad in ("red", "#abc", "#12345g", "a82830", 5, ["#a82830"], "#a82830 "):
+            with self.subTest(bad=bad):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-colour": bad}))
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.waiting_page_colour(self.tree)
+
+    def test_icon_reads_its_path(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, self.layout.WAITING_PAGE_ICON: "assets/icon.svg"}))
+        self.assertEqual(self.layout.waiting_page_icon(self.tree), "assets/icon.svg")
+
+    def test_an_icon_outside_the_repo_or_not_a_path_is_an_error(self):
+        for bad in ("../icon.svg", "/etc/icon.svg", "a/../../icon.png", "C:/icon.png", "", 3, " icon.svg"):
+            with self.subTest(bad=bad):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-icon": bad}))
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.waiting_page_icon(self.tree)
+
+
 class RolledOutMark(Tree):
     """An extras file alone is not the mark: "rolled-out": true is (waiting page item 29 (a), the rolled-out mark is its own key).
     Keys that are not about folder placement read whenever the file exists."""

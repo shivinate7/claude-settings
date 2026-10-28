@@ -600,3 +600,5 @@
 - other-checkout-git-pointer: the `.git` exemption covers `<owner>/.git` for every checkout, so from the primary a Write to a linked worktree's `.git` pointer file passes; exempting only `git_common_dir` would close it (hooks/guard.py other_checkout_hit)
 - other-checkout-cp-source: `cd <sibling> && cp a.txt /tmp/o` is refused because the shell write reader treats every `cp` argument as a target, so a copy out of another checkout reads as a write into it (hooks/guard_frozen.py _shell_write_hit)
 - other-checkout-mkdir: `mkdir -p` into another checkout passes, because the shell write reader does not read `mkdir` targets (hooks/guard_frozen.py _shell_write_hit)
+- accent-url-scheme-relative: an unquoted `url(//host/x)` reads as a `//` comment and blanks the rest of its line, so minified CSS with the accent after it on one line gives "unknown"; untested (lint/repo_colour.py _uncommented)
+- accent-lone-backtick: a lone backtick in .astro text opens a template literal to the next backtick and can hide a comment, so a commented-out accent could read as the value; untested (lint/repo_colour.py _uncommented)
