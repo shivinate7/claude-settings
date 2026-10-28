@@ -14,7 +14,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -323,12 +323,48 @@ def holder_text(b, held, now):
     if started_ok:
         text += ", started " + time.strftime("%H:%M:%SZ", time.gmtime(int(f["started"])))
     text += f", expires in {held[1] - now:.0f}s." if held[1] != float("inf") else ", never expires."
+    state = holder_state(held)
+    if state == "alive":
+        return text + " The holder is alive. Wait for it, or ask its session."
+    if state == "dead":
+        return text + " The holder is dead. The next merge run takes the lock over."
+    return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
+
+def holder_state(held):
+    """-> "alive", "dead" or "unknown" for the holder of a lock `held` (read()'s (sha, expiry, message)). Dead only for a pid on this host and platform."""
+    f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
+    started_ok = re.fullmatch(r"[0-9]{1,10}", f.get("started", ""))  # a garbled field means a forged lock: trust none of it
     pid = int(f["pid"]) if re.fullmatch(r"[0-9]{1,10}", f.get("pid", "")) else 0
     if f.get("host") == socket.gethostname() and f.get("platform") == sys.platform and started_ok and 0 < pid < 2 ** 31:  # a pid from another OS reads nothing
-        if pid_alive(pid):
-            return text + " The holder is alive. Wait for it, or ask its session."
-        return text + " The holder is dead. Run: merge --unlock"
-    return text + " Cannot tell if the holder is alive. Ask its owner before: merge --unlock"
+        return "alive" if pid_alive(pid) else "dead"
+    return "unknown"
+
+def refuse_or_take_over(b, held, now):
+    """A live lock stops the run (Held), unless its holder's pid is dead on this host: then one line says so and the take goes on, as for an expired lock."""
+    if holder_state(held) != "dead":
+        raise Held(holder_text(b, held, now))
+    f = dict(re.findall(r"^(\w+): (.*)$", held[2], re.M))
+    say(f"merge: took over the merge lock on {b}: its holder, PR #{f.get('pr', '?')} (branch {f.get('branch', '?')}), pid {f['pid']} on {f['host']}, is dead.")
+
+@contextlib.contextmanager
+def release_on_signals():
+    """SIGTERM and SIGINT end the run through its `finally`, which releases the merge lock. A second signal while it releases is ignored.
+    Where signal handlers cannot be set (another thread), nothing changes."""
+    names = [signal.SIGTERM, signal.SIGINT]
+    def stop(sig, frame):
+        for n in names:
+            signal.signal(n, signal.SIG_IGN)
+        raise SystemExit(128 + sig)
+    try:
+        before = {n: signal.signal(n, stop) for n in names}
+    except ValueError:
+        yield
+        return
+    try:
+        yield
+    finally:
+        for n, h in before.items():
+            signal.signal(n, h)
 
 class Lock:
     """What both backends share: a release that reports and never raises (it runs in a `finally`)."""
@@ -398,7 +434,7 @@ class GitLock(Lock):
         ref = lock_ref(b)
         cur = self.read(b)
         if cur and cur[1] > self.now():
-            raise Held(holder_text(b, cur, self.now()))
+            refuse_or_take_over(b, cur, self.now())
         refuse_old_lock(b, self.read(b, old_lock_ref(b)), self.now())
         tree = git(self.root, "mktree", input="")[1]
         now = self.now()  # read once: the text and `until` come from this one value
@@ -490,7 +526,7 @@ class GhLock(Lock):
     def acquire(self, b, ttl):
         cur = self.read(b)
         if cur and cur[1] > self.now():
-            raise Held(holder_text(b, cur, self.now()))
+            refuse_or_take_over(b, cur, self.now())
         if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
             c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
             if c and not self.gone(out):
@@ -2224,7 +2260,10 @@ def main(argv, host=None, lock=None):
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
-        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
+        if a.confirm:
+            with release_on_signals():
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
+        return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard's gate.", file=sys.stderr)
         return 1

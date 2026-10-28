@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -2630,6 +2630,18 @@ class GhLockTest(unittest.TestCase):
         self.lock.unlock("main")
         self.assertIsNone(self.lock.read("main"))
         self.lock.unlock("main")  # none left: fine
+
+    @unittest.skipIf(os.name == "nt", "the fake gh loses the lock message's newline under cmd.exe (see the test above)")
+    def test_a_live_lock_whose_holder_is_dead_is_taken_over_and_a_live_holder_is_not(self):  # c189 part 3
+        self.lock.holder = {"pr": 7, "branch": "b"}
+        first = self.lock.acquire("main", 600)
+        with unittest.mock.patch.object(merge, "pid_alive", return_value=True), self.assertRaises(merge.Held):
+            self.lock.acquire("main", 600)
+        out = io.StringIO()
+        with unittest.mock.patch.object(merge, "pid_alive", return_value=False), contextlib.redirect_stdout(out):
+            second = self.lock.acquire("main", 600)
+        self.assertNotEqual(first, second)
+        self.assertEqual(len([l for l in out.getvalue().splitlines() if "took over" in l]), 1, out.getvalue())
 
 
 # The fake GitHub REST API behind `gh api`. One home for the routes the merge tool reads and writes (c53): the shim FAKE_GH_PR
@@ -5356,11 +5368,21 @@ class LockHolder(Env):
         self.assertNotIn("session:", msg)
 
     @windows_slice
-    def test_held_says_dead_for_a_lock_on_this_host_whose_pid_is_gone(self):
-        out = self.held(self.new_message(socket.gethostname(), dead_pid()))
-        for want in ("PR #445", "branch b", "dead", "merge --unlock"):
-            self.assertIn(want, out)
-        self.assertNotIn("Cannot tell", out)
+    def test_a_lock_on_this_host_whose_pid_is_gone_is_taken_over_with_one_line(self):  # c189: it was refused with "Run: merge --unlock" (#746)
+        pid = dead_pid()
+        self.push_lock(self.new_message(socket.gethostname(), pid))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        said = [l for l in out.splitlines() if "took over" in l]
+        self.assertEqual(len(said), 1, out)
+        for want in ("PR #445", "branch b", f"pid {pid}", "dead"):
+            self.assertIn(want, said[0])
+        self.assertFalse(self.lock_ref())
+        self.assertNotIn("merge --unlock", out)
+
+    def test_a_dead_holder_on_another_host_stays_refused(self):
+        out = self.held(self.new_message("some-other-host-xyz", dead_pid()))
+        self.assertNotIn("took over", out)
 
     def test_held_says_cannot_tell_for_another_host(self):
         out = self.held(self.new_message("some-other-host-xyz", os.getpid()))
@@ -8644,8 +8666,45 @@ class MergeChecksFromProtection(unittest.TestCase):
         host.gh = lambda *a, **k: self.fail("a gh read was made")
         host.refuse_pinned_mismatch()
 
+@unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
+class SignalReleasesLock(Env):
+    """c189 part 3: a run stopped by SIGTERM or SIGINT releases the merge lock (#746 left one live for 2.7 h)."""
+    def stop_with(self, sig):
+        child = subprocess.Popen([sys.executable, __file__, "--sigchild", self.co], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for line in child.stdout:  # merge's own lines come first
+                if line.strip() == "READY":
+                    break
+            else:
+                self.fail("the run never reached the wait: " + child.stderr.read())
+            self.assertTrue(self.lock_ref())
+            child.send_signal(sig)
+            child.wait(timeout=60)
+        finally:
+            if child.poll() is None:
+                child.kill(); child.wait()
+        err = child.stderr.read()
+        child.stdout.close(); child.stderr.close()
+        self.assertNotEqual(child.returncode, 0)
+        self.assertFalse(self.lock_ref(), err)
+
+    def test_sigterm_releases_the_lock(self):
+        self.stop_with(signal.SIGTERM)
+
+    def test_sigint_releases_the_lock(self):
+        self.stop_with(signal.SIGINT)
+
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
+        # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
+        class Sleep(FakeHost):
+            def wait_checks(self, n, sha, d, prior=None):
+                print("READY", flush=True)
+                time.sleep(60)
+                return True, ""
+        os.chdir(sys.argv[2])
+        sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
         class Die(FakeHost):
