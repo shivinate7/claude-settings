@@ -682,10 +682,18 @@ class Host:
         sha = sha or self.pr(n)["head"]
         rows = []
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
-            bucket = "pending" if r["status"] != "completed" else self.CONCLUSION_BUCKET.get(r.get("conclusion"), "fail")
-            rows.append({"name": r["name"], "bucket": bucket, "link": r.get("details_url"), "startedAt": r.get("started_at"), "completedAt": r.get("completed_at")})
+            rows.append(self.run_row(r, r.get("details_url")))
         for s in self.pages(f"commits/{sha}/status", "statuses"):
             rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "link": s.get("target_url")})
+        return self.buckets(rows, warn)
+
+    def run_row(self, r, link):
+        """A check run, or an Actions job (the same fields), as the row `buckets` judges."""
+        bucket = "pending" if r["status"] != "completed" else self.CONCLUSION_BUCKET.get(r.get("conclusion"), "fail")
+        return {"name": r["name"], "bucket": bucket, "link": link, "startedAt": r.get("started_at"), "completedAt": r.get("completed_at")}
+
+    def buckets(self, rows, warn=True):
+        """-> {name: [(bucket, link), ...]} of check rows, a cancel that ran its full cap turned into the timeout bucket. See checks."""
         try:
             flow = workflow_dir(self.cwd)
             caps = job_caps(p.read_text(encoding="utf-8") for p in sorted(flow.glob("*.y*ml"))) if flow else {}
@@ -793,6 +801,42 @@ class Host:
         if runs and not pending and all(r["conclusion"] == "skipped" for r in runs):
             red = [f"workflow {r['name']}: skipped, no job ran" for r in runs]
         return red, pending
+
+    BASE_EVENTS = ("push", "schedule", "workflow_dispatch")  # the runs of the base's own commits; a dispatch is the tool's own remedy
+
+    def base_state(self, base, flows):
+        """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
+        Judged: per workflow file in `flows` (the paths on the base), its newest completed run on `base` of BASE_EVENTS. A newer run still going
+        waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
+        A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run is unknown, never swapped for an older
+        run (the twin rule of judge_runs would reach across commits here), and any other is red (a broken workflow file runs no job).
+        One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read. A failed read is unknown."""
+        try:
+            c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
+            if c:
+                raise Stop(out)
+            done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
+                    and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
+            red, unknown = [], []
+            for r in {r["path"]: r for r in reversed(done)}.values():
+                if r["conclusion"] in ("success", "skipped", "neutral"):
+                    continue
+                got = self.buckets([self.run_row(j, j.get("html_url")) for j in self.pages(f"actions/runs/{r['id']}/jobs", "jobs")], warn=False)
+                steps = {k: v for k, rows in got.items() if (v := [x for x in rows if x[0] != "cancel" and not x[0].startswith("timed out")])}
+                jobs = [j for j in self.classify(steps, [], self.ignore)[0] if "no check ran" not in j]
+                where = f"run {r['id']} of {r['name']} at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})"
+                if jobs:
+                    red.append(f"{where}: " + "; ".join(jobs))
+                elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
+                    continue
+                elif r["conclusion"] == "cancelled":
+                    unknown.append(f"{where} was cancelled with no red job")
+                else:
+                    red.append(f"{where} ended {r['conclusion']} with no red job")
+        except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
+            return "unknown", " ".join(str(e).split())
+        return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
 
     @staticmethod
     def settle(red, pending, r_red, r_pending):
@@ -1757,13 +1801,17 @@ def job_caps(texts):
             caps[i] = max(cap, caps.get(i, 0))  # one id in two files: the larger cap, so neither the floor nor the warning runs short
     return caps
 
-def base_job_caps(root, ref):
-    """job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
+def base_workflows(root, ref):
+    """The workflow files on `ref`, read with git (the base branch, never the local tree)."""
     c, listed = git(root, "ls-tree", "-r", "--name-only", ref, "--", ".github/workflows")
     if c:
         raise Stop(f"cannot read {ref} to look for .github/workflows: {listed}")
+    return [f for f in listed.splitlines() if f.endswith((".yml", ".yaml"))]
+
+def base_job_caps(root, ref):
+    """job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
     texts = []
-    for f in (f for f in listed.splitlines() if f.endswith((".yml", ".yaml"))):
+    for f in base_workflows(root, ref):
         c, text = git(root, "show", f"{ref}:{f}")
         if c:
             raise Stop(f"cannot read {f} on {ref}: {text}")
@@ -1875,6 +1923,26 @@ def ignore_checks(cfg):
         out[e["name"]] = e["reason"]
     return out
 
+def base_verdict(root, host, base):
+    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown."""
+    try:
+        flows = base_workflows(root, f"origin/{base}")
+    except (Stop, subprocess.TimeoutExpired, OSError) as e:
+        return "unknown", " ".join(str(e).split())
+    return host.base_state(base, flows)
+
+def red_base(root, host, base, red_ok=""):
+    """The red-main check (decision no-merge-onto-red-main): refuse while the base's latest completed run has a red job, or cannot be read.
+    --base-red-ok "<reason>" is a reason flag, as --undo-check-unknown-ok is: the way out for the batch that carries the fix, or for an unknown read. It is logged."""
+    verdict, detail = base_verdict(root, host, base)
+    if verdict == "green":
+        return
+    what = f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, the read failed: {detail}"
+    if red_ok.strip():
+        say(f"merge: {what}. --base-red-ok, reason: {red_ok.strip()}")
+        return
+    raise Stop(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
+
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
     refuse_bad_pr(info, draft_ok=True)  # a draft is previewed, so its silent undos show before it is marked ready
@@ -1903,9 +1971,11 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
     held = lock.read(base)
+    verdict, detail = base_verdict(root, host, base)  # the red-main check's read
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
+        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
         *([f"  records: {records}"] if records else []),
@@ -1915,7 +1985,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok=""):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -1930,6 +2000,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken. Nothing was claimed or pushed.")
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
+        red_base(root, host, base, red_ok)
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
@@ -2101,6 +2172,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
+    p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
@@ -2126,7 +2198,7 @@ def main(argv, host=None, lock=None):
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
-        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
+        return (confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) if a.confirm else preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e} No override lifts this refusal, because this tool runs after the guard's gate.", file=sys.stderr)
         return 1

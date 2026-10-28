@@ -58,7 +58,7 @@ class Tree(unittest.TestCase):
             f.write(text)
 
     def roll_out(self, kinds=None):
-        self.put(EXTRAS, json.dumps({"kinds": kinds or {}}))
+        self.put(EXTRAS, json.dumps({"kinds": kinds or {}, "rolled-out": True}))
 
 
 class LayoutFile(Tree):
@@ -215,6 +215,49 @@ class WaitingPage(Tree):
         self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
         code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", self.tree], self.tree)
         self.assertEqual((code, out.strip()), (0, self.URL))
+
+
+    def test_the_real_repo_prints_its_current_page(self):
+        code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", REPO], REPO)
+        self.assertEqual((code, out.strip()), (0, "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"))
+
+
+class RolledOutMark(Tree):
+    """An extras file alone is not the mark: "rolled-out": true is (waiting page item 29 (a), the rolled-out mark is its own key).
+    Keys that are not about folder placement read whenever the file exists."""
+    URL = "https://claude.ai/artifact/abc123"
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_extras_file_with_a_key_and_no_mark_is_not_rolled_out(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": self.URL}))
+        self.assertFalse(self.layout.rolled_out(self.tree))
+        self.assertEqual(self.layout.path(self.tree, "decisions"), "decisions")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def test_no_mark_extra_kinds_are_not_read(self):
+        self.put(EXTRAS, json.dumps({"kinds": {"records": {"path": "records"}}}))
+        self.assertNotIn("records", self.layout.kinds(self.tree))
+
+    def test_mark_true_is_rolled_out(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": True}))
+        self.assertTrue(self.layout.rolled_out(self.tree))
+        self.assertEqual(self.layout.path(self.tree, "decisions"), "docs/decisions")
+
+    def test_mark_false_or_not_true_is_not_rolled_out(self):
+        for mark in (False, "true", 1):
+            self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": mark}))
+            self.assertFalse(self.layout.rolled_out(self.tree), mark)
+
+    def test_other_keys_read_without_the_mark(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "kind": "ios", "visibility": "private"}))
+        self.assertIsNotNone(self.layout.devices(self.tree))
+        self.assertEqual(self.layout.caution(self.tree)["level"], "private-solo")
+
+    def test_the_layout_repo_itself_is_marked(self):
+        self.assertTrue(self.layout.rolled_out(REPO))
 
 
 class RepoKindAndCaution(Tree):
