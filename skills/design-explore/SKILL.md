@@ -43,7 +43,7 @@ designer.
    A blind lane never reads other files in the design folder, sibling lane mockups included. Point the brief at files; never paste them
    (`tokens-point-brief-at-files`). Write each brief to `<scratchpad>/design-explore/<screen>/<screen>-<kind>-<n>.md`.
    The Device section comes from `python3 ~/.claude/lint/layout.py devices <repo root>`: the repo's devices in
-   order, first device first. Do not type a device list of your own. Outside an iOS repo, a mockup draws the first device only; the rest come on request, or when the layout breaks between them.
+   order, first device first. Do not type a device list of your own. Outside an iOS repo, a mockup draws the first device only. On request, or if the layout breaks between them, it draws the rest too.
    In an iOS repo (skill `ios-apps`, section Mockups), each brief names skill `ios-apps`, and the Device
    section names both Duo poses, folded first. Each mockup draws both poses.
 2. **Check the briefs.** Run `python3 ~/.claude/hooks/blind_brief.py --run <that folder> --root <repo root>`. Add one
