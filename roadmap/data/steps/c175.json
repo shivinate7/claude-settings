@@ -1,9 +1,9 @@
 {
  "title": "The local lint gate runs code-check and zizmor, as CI does",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.25,
  "why": "Incidents, Oct 28: batch 7 (#763) went red on code-check's ruff F541 in c166's merge/test_merge.py, and batch 6 dropped c168 on a zizmor red; in both, the lane's and the orchestrator's local `bin/ci-job gates --lint --base origin/main` had passed.",
- "note": "Debt, same class as c172. Measured by triage 10 on main 599dd58b: `ci-job gates --lint --plan` lists neither the Code check step (a `uses: ./actions/code-check` action) nor the zizmor step (`pipx run zizmor`), since --lint keeps only `python3 lint|actions/...` and bin/ste-changed lines and drops the rest silently. Next cloud lane: --lint runs actions/code-check the way it already runs ste-lint (one home: code_check.py with the --base, on changed files), and runs the zizmor step; a lint-class step it cannot run prints unknown, never nothing. Red first: today's --lint over a planted F541 and a planted zizmor finding passes. Touches bin/ci-job and its tests. Needs no answer. Port: yes, every repo that calls code-check. Placed ahead of c95 and every other cleanup step (triage 10, Oct 28; orchestrator's ask): two batches in a row lost a 50 to 60 min CI run to it.",
- "updatedAt": "2026-10-28T10:53:01Z"
+ "note": "Debt, same class as c172. Measured by triage 10 on main 599dd58b: `ci-job gates --lint --plan` lists neither the Code check step (a `uses: ./actions/code-check` action) nor the zizmor step (`pipx run zizmor`), since --lint keeps only `python3 lint|actions/...` and bin/ste-changed lines and drops the rest silently. Next cloud lane: --lint runs actions/code-check the way it already runs ste-lint (one home: code_check.py with the --base, on changed files), and runs the zizmor step; a lint-class step it cannot run prints unknown, never nothing. Red first: today's --lint over a planted F541 and a planted zizmor finding passes. Touches bin/ci-job and its tests. Needs no answer. Port: yes, every repo that calls code-check. Placed ahead of c95 and every other cleanup step (triage 10, Oct 28; orchestrator's ask): two batches in a row lost a 50 to 60 min CI run to it. Doing: lane started Oct 28 (orchestrator).",
+ "updatedAt": "2026-10-28T10:53:55Z"
 }
