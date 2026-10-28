@@ -60,7 +60,7 @@ Count each limit. Never wait for the owner to notice.
 
 ## Filing
 
-- A message can hold a ruling, a finding, a new step, a debt or a note. File it in the same turn,
+- A message can hold a ruling, a finding, a new step, a known gap or a note. File it in the same turn,
   and tell the owner in one line where it went.
 - Only triage writes new steps, merges, order and closes. Another thread sends the item to triage,
   with the owner's message attached.

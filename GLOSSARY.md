@@ -25,10 +25,10 @@ one name for each thing, and a list of names to avoid.
 | integration branch | The branch that holds the commit of each lane in a batch. | `rule:git-integration-branch-merge` | `batch branch` |
 | integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge` | — |
 | worktree | A linked git working tree under `.claude/worktrees/`, for one agent. The Agent tool's isolation or the EnterWorktree tool makes it. | `docs/decisions/lanes-start-in-tool-worktrees.md` | — |
-| handoff | The notes file of one session, outside git, at `~/.claude/handoffs/<session_id>.md`. The session rewrites it whole at each checkpoint, so the work survives a compaction. | `docs/decisions/precompact-handoff.md` | `handover` |
+| handoff | Notes one holder writes so the next reader can continue: the session itself after a compaction, or the next holder of a role. A session's handoff is its notes file, outside git, at `~/.claude/handoffs/<session_id>.md`, rewritten whole at each checkpoint. A role's handoff is its note to the next holder. | `docs/decisions/precompact-handoff.md`, `skills/project-ops/SKILL.md` | `handover` |
 | ruling | The owner's answer to a question. | `rule:output-answer-has-a-home` | — |
-| decision | A record in `docs/decisions/` for one question. It holds the ruling, the reason, and the kind and home of the ruling. | `rule:git-one-record-per-question`, `docs/decisions/rulings-declare-kind.md` | `ADR` |
-| debt | An open finding or deferred work that Claude is likely to hit in normal work. Each debt is one file in `docs/debts/`. | `docs/debts/README.md` | — |
+| decision | Only the record: one file in `docs/decisions/` for one question. It holds the ruling, the reason, and the kind and home of the ruling. The owner's answer is a ruling, not a decision. | `rule:git-one-record-per-question`, `docs/decisions/rulings-declare-kind.md` | `ADR` |
+| debt | The filed record of a known gap, or of deferred work, that Claude is likely to hit in normal work. Each debt is one file in `docs/debts/`. | `docs/debts/README.md` | — |
 | note | A finding that Claude is not likely to hit in normal work. Each note is one line in `docs/debts/notes.md`. | `rule:roles-findings-are-debts-or-notes`, `docs/debts/notes.md` | — |
 | guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `docs/decisions/guard-guards-mistakes-only.md` | `gate` |
 | check | A lint, test or CI job that passes or fails a change. A check never asks. `lint/rule_audit.py` gives a rule that a check holds the kind `check`. | `docs/decisions/guard-guards-mistakes-only.md` | `gate`, `merge gate` |
@@ -42,9 +42,13 @@ one name for each thing, and a list of names to avoid.
 | override | A prompt from the owner that starts with `override`, or `opus` and a length. The guard then lets a refusal or an ask through, once or for a set time. An Opus override lifts only the Opus spawn ask. | `docs/decisions/owner-override.md` | `override pass` |
 | grant | The owner's leave to do one act, once or standing. It covers the act it names, never a variant. A merge grant is one kind. Claude Code's own approve button is the platform's word, not a grant. | `rule:outcomes-grant-covers-named-act` | `owner word`, `approval` |
 | orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | — |
+| task | What one brief asks one agent to do. | `rule:roles-brief-contents` | — |
 | builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
+| test-author | An agent that writes the new cases first and shows them red on the old code, before a builder changes product code. | `agents/test-author.md` | — |
 | reviewer | An agent that judges the work of a builder against its brief and the governing decisions. A reviewer never edits. | `agents/reviewer.md` | — |
+| session | A top-level Claude Code conversation. | `rule:roles-pick-mode-from-request` | — |
 | agent | Anything the Agent tool or a workflow starts. Claude Code's own names `SubagentStop`, `SubagentStart` and `subagent_type` stay as the platform spells them. | `rule:roles-one-role-per-agent` | `subagent`, `sub-agent`, `worker (this sense)` |
+| suite | Every test a check runs. | `rule:roles-each-layer-proves-once` | — |
 | mutation test | A script that breaks the code on purpose, one mutant at a time, to prove the tests catch each break. | `hooks/mutate_guard.py`, `janitor/mutate_sweep.py` | `mutation harness` |
 | red run | The recorded run of a test-author's new cases on the old code, where they fail. | `rule:roles-each-layer-proves-once` | `red proof` |
 | step | One item of planned work on the roadmap. | `rule:speak-cite-id-plus-gloss` | — |

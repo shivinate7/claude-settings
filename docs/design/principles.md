@@ -32,9 +32,9 @@ ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unkno
 
 Screen copy states only what the product does and what the owner confirmed.
 Check: pass when each promise (a search scope, a feature, a figure, a trust line) is true now.
-Source: joyous `docs/design-brief.md` move 6 (no unsourced statement); sillage
+Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
 `docs/product/screens.md` (search copy promises notes that search does not read); q_max
-`docs/rules/ui-primitives.md` W1 (the weights screen's statement matches whether the blend runs).
+`docs/rules/ui-primitives.md` W1 (the weights screen's claim matches whether the blend runs).
 
 ## ux-machine-text-hidden
 

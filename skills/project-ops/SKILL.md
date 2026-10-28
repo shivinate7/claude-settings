@@ -12,21 +12,22 @@ per role. Without a project, each role is one Claude Code session, and the owner
 ## What it packages
 
 - **Standing roles.** Triage, build advisor, local liaison and merge hand. `templates/operating-model.md`
-  says what each role owns and the hand-off rule that replaces it.
+  says what each role owns and the handoff rule that replaces it.
 - **The roster.** One list of who holds each role now. `templates/roster.md`.
 - **Autopilot.** A step that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
   The model adds only the "frozen at <sha>" line on each merge go.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
-  briefs and role hand-off notes. It is never merged into main.
+  briefs and role handoff notes. It is never merged into main.
 - **The outbox.** `roadmap/outbox/`, one file per thread, for non-urgent notes to triage. Its
   README gives the format. `templates/operating-model.md` says when to message instead.
-- **Briefs and role hand-offs.** `templates/brief.md` and `templates/role-handoff.md`.
+- **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`.
 
-A role hand-off note is not a session handoff. A session handoff is the notes file of one session
-under `~/.claude/handoffs/` (GLOSSARY.md, "handoff"). A role hand-off note is a file in the record
-branch's `handoffs/` folder that a standing role writes for its successor.
+A role handoff note and a session handoff share one meaning: notes one holder writes so the next
+reader can continue (GLOSSARY.md, "handoff"). A session handoff is the notes file of one session
+under `~/.claude/handoffs/`. A role handoff note is a file in the record branch's `handoffs/` folder
+that a standing role writes for its successor.
 
 ## Steps
 
@@ -67,7 +68,7 @@ Decision `shared-resource-owner` (a shared machine names one owning repo) govern
   and the hold record.
 - Before a deploy, a restart or a bulk import, run the owner's preflight and read its holds.
   A hold stops the act.
-- A user repo that needs a change to the preflight or the holds writes a hand-off to the owner
+- A user repo that needs a change to the preflight or the holds writes a handoff to the owner
   repo's session: a note in the owner's outbox on its record branch. It never edits the owner's
   files. It never overrides the owner's guard.
 

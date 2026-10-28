@@ -3,7 +3,7 @@
 ## The ruling
 
 Each agent role has its own model and effort, in the table below. Sonnet is the default and the ceiling.
-Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's round 3 by standing grant,
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's grant for that spawn.
 An audit Explore may run Opus on the owner's grant, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level grant and date, see its row). Any other spawn
 runs Opus only when the owner names it. Round 2 stays Sonnet. Haiku runs only in Explore,
@@ -28,7 +28,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's grant for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
-| builder, round 3 after a FAIL at review round 2 | opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
+| builder, try 3 after a FAIL at review round 2 | opus, the owner's standing grant; set per spawn, which overrides `CLAUDE_CODE_SUBAGENT_MODEL` | high |
 | Plan (`agents/plan.md`) | opus | high |
 | designer (`agents/designer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
 | design-reviewer (`agents/design-reviewer.md`) | opus, the owner's standing grant of 2026-10-26 | high |
@@ -87,7 +87,7 @@ unless the file is a Haiku role. `agents/plan.md` pins Plan.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` line in
 the brief. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
-word. A round 3 builder needs Opus.
+word. A try 3 builder needs Opus.
 
 **No pin, and the ceiling is an ask.** The variable is a true fallback: it decides only the spawns that name no
 model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder

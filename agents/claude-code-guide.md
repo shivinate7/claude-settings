@@ -14,7 +14,7 @@ Start from the docs index: https://code.claude.com/docs/llms.txt. Pick the pages
 needs. Fetch only those pages. They sit under https://code.claude.com/docs/en/. Never fetch the
 whole site.
 
-Quote the exact doc sentence behind each statement, with its URL. Say "unknown" for anything the
+Quote the exact doc sentence behind each claim, with its URL. Say "unknown" for anything the
 docs do not say. Never guess an answer the docs should give you.
 
 You cannot spawn agents. If the question is too large for one agent, report PARTIAL with the
