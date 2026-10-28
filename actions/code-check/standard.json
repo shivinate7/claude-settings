@@ -1,5 +1,5 @@
 {
-  "tools": {"ruff": "0.17.3", "mypy": "2.4.0", "shellcheck-py": "0.11.0.1", "typescript": "5.9.3"},
+  "tools": {"ruff": "0.17.3", "mypy": "2.4.0", "shellcheck-py": "0.11.0.1", "typescript": "5.9.3", "@astrojs/check": "0.9.12"},
   "layers": ["typecheck", "lint", "format"],
   "not_code": {
     "reason": "prose, data and markup: nothing to type check or lint",
@@ -27,6 +27,14 @@
       "shebangs": [],
       "gold": {"typecheck": "tsc --noEmit, strict", "lint": "ESLint, bug rules", "format": "Prettier"},
       "typecheck": {"run": "tsc"},
+      "lint": {"skip": "no bug-rule set chosen for ESLint yet"},
+      "format": {"skip": "after o2"}
+    },
+    "astro": {
+      "extensions": [".astro"],
+      "shebangs": [],
+      "gold": {"typecheck": "astro check", "lint": "ESLint with eslint-plugin-astro, bug rules", "format": "Prettier with prettier-plugin-astro"},
+      "typecheck": {"run": "astro-check"},
       "lint": {"skip": "no bug-rule set chosen for ESLint yet"},
       "format": {"skip": "after o2"}
     },

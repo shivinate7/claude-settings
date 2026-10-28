@@ -4,6 +4,7 @@ description: >
   Fails on a tracked language with no row, on a bug a pinned tool finds, and on a shrunk mypy list.
   The repo's mypy module list and excluded folders live in .code-check.json at its root. The caller
   needs actions/checkout with fetch-depth 0 (the shrink check reads the base ref) and setup-python.
+  Pinned tools run through pipx or npx (tsc, and astro-check for .astro), so the runner needs Node.
   Formatter layers wait for o2 and do not run.
 inputs:
   base:
