@@ -11,7 +11,7 @@ sessions folder or the session reader (hooks/guard_core.py) cannot be read. The 
 direct children of `<Temp>/claude/<project>/`; a link is never followed or removed.
 `<Temp>` is TEMP, else LOCALAPPDATA/Temp.
 
-The Windows-only gate is the caller's, not this file's: the gates run this suite on Linux and macOS
+The Windows-only check is the caller's, not this file's: the checks run this suite on Linux and macOS
 with fixture folders.
 
 Usage:

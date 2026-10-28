@@ -24,7 +24,7 @@ One owner per machine ends the deadlock. A hand-off keeps the owner's guard whol
 
 Risk kind: incident, per `building-guard-needs-incident`: the 3 crashes in 8 days above, landed 2026-10-28.
 
-Cost: CI only: two gate steps, about 23 Python starts per run (one per test case, one for the suite, one for the check), no file written.
+Cost: CI only: two CI steps, about 23 Python starts per run (one per test case, one for the suite, one for the check), no file written.
 
 Protected by `lint/test_check_shared_resources.py`.
 

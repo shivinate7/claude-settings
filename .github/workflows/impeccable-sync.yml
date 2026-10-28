@@ -3,7 +3,7 @@ name: impeccable-sync
 # A Renovate PR moves the tag in skills/impeccable/SOURCE.txt. This job copies the skill folder
 # at that tag into the same branch, so the PR is complete (docs/decisions/design-skills.md).
 # A push made with GITHUB_TOKEN starts no other workflow: close and reopen the PR, or push by
-# hand, to run the gates on the copy.
+# hand, to run the checks on the copy.
 on:
   pull_request:
     branches: [main]

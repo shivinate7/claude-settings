@@ -1,7 +1,7 @@
 """Read a GitHub workflow's jobs and steps by line, stdlib only: no YAML library on a fresh runner or Mac.
 
 The one home of the step parser. lint/test_windows_split.py reads the Windows split with it, and
-bin/ci-job runs a job's steps locally with it. It reads the layout gates.yml keeps: jobs at 2 spaces,
+bin/ci-job runs a job's steps locally with it. It reads the layout checks.yml keeps: jobs at 2 spaces,
 `      - ` steps, step keys at 8 spaces, `env:` keys and `run: |` bodies at 10.
 """
 import re

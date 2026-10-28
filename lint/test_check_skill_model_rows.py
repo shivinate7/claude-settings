@@ -38,12 +38,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CHECK = os.path.join(HERE, "check_skill_model_rows.py")
 RECORD = "decisions/agent-model-cap.md"
-GATES = os.path.join(ROOT, ".github", "workflows", "gates.yml")
+CHECKS = os.path.join(ROOT, ".github", "workflows", "checks.yml")
 CHECK_STEP = "Skill model rows check"
 FIXTURE_STEP = "Skill model rows fixture suite"
 
 sys.path.insert(0, HERE)
-from test_windows_split import all_jobs  # noqa: E402  one home for the gates.yml step parser
+from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
 from check_skill_model_rows import skill_names  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -76,7 +76,7 @@ def need_check():
         raise AssertionError("lint/check_skill_model_rows.py does not exist: no check reads the skill rows")
 
 
-# chmod 000 stops reads only for a non-root POSIX user. CI runs the gates job on ubuntu.
+# chmod 000 stops reads only for a non-root POSIX user. CI runs the checks job on ubuntu.
 POSIX_USER = hasattr(os, "geteuid") and os.geteuid() != 0
 CHECK_LOCKED = "needs POSIX chmod and a non-root user; not pinned on Windows (no ACL change made)"
 
@@ -437,22 +437,22 @@ class SkillNames(unittest.TestCase):
 
 class CiWiring(unittest.TestCase):
     def step(self, name):
-        with open(GATES, encoding="utf-8") as handle:
+        with open(CHECKS, encoding="utf-8") as handle:
             jobs = all_jobs(handle.read())
-        self.assertIn("gates", jobs, "gates.yml has no gates job")
-        found = [s for s in jobs["gates"]["steps"] if s.get("name") == name]
-        self.assertEqual(len(found), 1, "gates job needs exactly one step named %r" % name)
+        self.assertIn("checks", jobs, "checks.yml has no checks job")
+        found = [s for s in jobs["checks"]["steps"] if s.get("name") == name]
+        self.assertEqual(len(found), 1, "checks job needs exactly one step named %r" % name)
         return found[0]
 
-    def test_gates_job_runs_the_check(self):
+    def test_checks_job_runs_the_check(self):
         step = self.step(CHECK_STEP)
         self.assertEqual(step.get("run"), "python3 lint/check_skill_model_rows.py")
-        self.assertNotIn("if", step, "an if: gate lets a skipped check read as passing")
+        self.assertNotIn("if", step, "an if: condition lets a skipped check read as passing")
 
-    def test_gates_job_runs_the_fixture_suite(self):
+    def test_checks_job_runs_the_fixture_suite(self):
         step = self.step(FIXTURE_STEP)
         self.assertEqual(step.get("run"), "python3 lint/test_check_skill_model_rows.py")
-        self.assertNotIn("if", step, "an if: gate lets a skipped suite read as passing")
+        self.assertNotIn("if", step, "an if: condition lets a skipped suite read as passing")
 
 
 if __name__ == "__main__":

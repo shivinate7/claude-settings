@@ -115,7 +115,7 @@ class FakeHost:
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body}
 
     def required_names(self):
-        return ["gates"]
+        return ["checks"]
 
     def head_state(self, n):
         return self.state
@@ -279,9 +279,9 @@ class Flow(Env):
         self.assertEqual(self.worktrees(), 1)
 
     def test_preview_says_the_state_of_the_head_checks(self):
-        self.host.state = "red: gates: fail"
+        self.host.state = "red: checks: fail"
         rc, out = self.run_merge("7")
-        self.assertIn("head checks: red: gates: fail", out)
+        self.assertIn("head checks: red: checks: fail", out)
 
     def test_the_lock_outlives_every_wait_one_run_can_take(self):
         # Each wait_checks call site in merge.py is one wait, and none sits in a loop, so one run takes at most one wait per
@@ -302,10 +302,10 @@ class Flow(Env):
 
     def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
         before = self.refs()
-        self.host.seq = [(False, "a check is red: gates: fail")]
+        self.host.seq = [(False, "a check is red: checks: fail")]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
-        self.assertIn("a check is red: gates: fail", out)
+        self.assertIn("a check is red: checks: fail", out)
         self.assertEqual(self.refs(), before)  # no claim push, and the lock ref is gone
         self.assertEqual(len(self.host.waits), 1)
 
@@ -320,7 +320,7 @@ class Flow(Env):
 
     def test_head_pending_then_red_claims_nothing(self):
         before = self.refs()
-        self.host.seq = [(False, "a check is red: gates: fail https://x")]  # the wait saw pending, then red
+        self.host.seq = [(False, "a check is red: checks: fail https://x")]  # the wait saw pending, then red
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertEqual(self.refs(), before)
@@ -456,7 +456,7 @@ class Flow(Env):
         self.assertFalse(self.lock_ref())
 
     def test_a_refusal_says_that_no_override_lifts_it(self):
-        # merge.py runs as a command, after the guard's gate, so an owner override cannot reach a Stop
+        # merge.py runs as a command, after the guard, so an owner override cannot reach a Stop
         # (decision owner-override). The printed refusal says so.
         self.host.mergeable = "CONFLICTING"
         rc, out = self.run_merge("7", "--confirm")
@@ -923,7 +923,7 @@ class Guards(Env):
             merge.drop_worktree(self.co, tmp, wt)
 
 SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # the real script: the one home of which jobs read which paths
-GATES_YML = ("name: gates\non: pull_request\njobs:\n  gates:\n    runs-on: ubuntu-latest\n    steps:\n"
+CHECKS_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n"
              "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
 SLUG_LINT = '''import collections, os, re, sys
@@ -939,23 +939,23 @@ print(bad or "ok")
 sys.exit(1 if bad else 0)
 '''
 DOC_SUITE = '''import os, sys
-path = os.path.join("docs", "guide.md")  # a gates suite that reads one tracked doc, named in no list
+path = os.path.join("docs", "guide.md")  # a checks suite that reads one tracked doc, named in no list
 sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
 class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
-    The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `gates` job holds one cross-file lint:
-    no two docs share a slug. hooks/test_reads_guide.py is a gates suite outside --lint that reads docs/guide.md."""
+    The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
+    no two docs share a slug. hooks/test_reads_guide.py is a checks suite outside --lint that reads docs/guide.md."""
 
-    def scoped(self, workflow=GATES_YML, scope=True):
+    def scoped(self, workflow=CHECKS_YML, scope=True):
         """Main and feat both gain the CI files; feat then holds main's tip."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
                 put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
-        put(os.path.join(o, ".github/workflows/gates.yml"), workflow)
+        put(os.path.join(o, ".github/workflows/checks.yml"), workflow)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
@@ -1031,7 +1031,7 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/other.md": "---\nslug: second\n---\n"})  # feat's record has slug second: each side alone passes
         self.refused()
 
-    def test_a_main_doc_that_breaks_a_gates_suite_reading_docs_is_refused(self):
+    def test_a_main_doc_that_breaks_a_checks_suite_reading_docs_is_refused(self):
         self.scoped()
         self.on("main", {"docs/guide.md": "BROKEN\n"})
         self.refused()
@@ -1044,7 +1044,7 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.assertIn("exit 3", self.refused())
 
-    def test_the_suites_a_doc_hits_come_from_the_gates_job(self):
+    def test_the_suites_a_doc_hits_come_from_the_checks_job(self):
         root = os.path.join(HERE, "..")
         lints = merge.lint_steps(root, "origin/main")
         hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
@@ -1098,14 +1098,14 @@ class SmallBaseMove(Env):
         self.assertTrue(merge.python_suite_hits(files["hooks/test_y.py"], "hooks/test_y.py", ["docs/decisions/z.md"], read))
         self.assertFalse(merge.python_suite_hits("import nowhere\n", "hooks/test_z.py", ["docs/decisions/z.md"], read))
 
-    def test_a_gates_line_of_no_suite_form_that_names_main_s_path_is_refused(self):
-        self.scoped(workflow=GATES_YML + "      - name: Other runner\n        run: sh -c 'grep -q x docs/guide.md || true'\n")
+    def test_a_checks_line_of_no_suite_form_that_names_main_s_path_is_refused(self):
+        self.scoped(workflow=CHECKS_YML + "      - name: Other runner\n        run: sh -c 'grep -q x docs/guide.md || true'\n")
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.assertIn("docs/guide.md", self.refused())
 
     def test_a_records_only_main_move_keeps_the_green_run(self):
-        """A new record and the page rebuilt on main; a gates suite names the record folder only in its temp tree."""
-        self.scoped(workflow=GATES_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
+        """A new record and the page rebuilt on main; a checks suite names the record folder only in its temp tree."""
+        self.scoped(workflow=CHECKS_YML + "      - name: Temp tree suite\n        run: python3 hooks/test_temp_tree.py\n")
         o = self.other
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         put(os.path.join(o, "hooks/test_temp_tree.py"), 'import os, sys, tempfile\nd = tempfile.mkdtemp()\n'
@@ -1138,12 +1138,12 @@ class SmallBaseMove(Env):
         self.refused()
 
     def test_a_lint_run_that_cannot_find_the_job_is_refused(self):
-        self.scoped(workflow=GATES_YML.replace("  gates:", "  other:"))
+        self.scoped(workflow=CHECKS_YML.replace("  checks:", "  other:"))
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
 
     def test_a_lint_step_ci_job_cannot_read_is_refused(self):
-        self.scoped(workflow=GATES_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
+        self.scoped(workflow=CHECKS_YML + "      - name: Unread\n        if: ${{ github.actor == 'x' }}\n        run: python3 lint/check_slugs.py\n")
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
 
@@ -2329,7 +2329,7 @@ class AfterPush(Env):
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
         # Banchi #595, DEBT81: a red check reverts the claim; the rerun, after green, must claim again.
-        self.host.seq = [(True, ""), (False, "check gates is red")]
+        self.host.seq = [(True, ""), (False, "check checks is red")]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("reverted", out)
@@ -2518,7 +2518,7 @@ class BaseAware(Env):
         fake = self.host
         class WaitHost(merge.Host):  # the real wait loop; every other read comes from the fake
             def __init__(h):
-                super().__init__(["gates"], minute=60, now=lambda: 0, pause=lambda s: None)
+                super().__init__(["checks"], minute=60, now=lambda: 0, pause=lambda s: None)
                 h.in_wait, h.passes = False, 0
             def pr(h, n, *a, **k):
                 info = fake.pr(n)
@@ -2528,8 +2528,8 @@ class BaseAware(Env):
                         info["base"] = "other-base"  # the second pass of the wait sees a new base
                 h.base = info["base"]  # as Host.pr does: the baseline is "integ" from the reads before the wait
                 return info
-            def required_names(h): return ["gates"]
-            def checks(h, n, *a, **k): return {"gates": [("pass", "")]}
+            def required_names(h): return ["checks"]
+            def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
             def runs(h, sha): return []
             def base_state(h, base, flows): return "green", ""
             def head_state(h, n, *a, **k): return "green"
@@ -3103,7 +3103,7 @@ class GhHalf(Env):
         super().setUp()
         install_gh_shim(self)
         self.ticks, self.paused, self.at_pause = 0, [], []
-        self.set(checks_seq=[[("gates", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pass", "")]])
 
     def set(self, **kw):
         p = os.path.join(self.state, "state.json")
@@ -3116,7 +3116,7 @@ class GhHalf(Env):
         p = pathlib.Path(self.state, "calls.log")
         return p.read_text() if p.exists() else ""  # a case that makes no gh call leaves no log
 
-    def gh_host(self, required=("gates",), pause=None, ignore=None, minute=60):
+    def gh_host(self, required=("checks",), pause=None, ignore=None, minute=60):
         def tick(s):
             self.ticks += 1
             self.paused.append(s)
@@ -3134,12 +3134,12 @@ class GhHalf(Env):
 
     def test_a_red_main_run_read_through_gh_refuses_the_merge(self):
         # the red-main check's REST reads through the real gh call: one page of main's runs, then the red run's jobs
-        push_base(self, {".github/workflows/gates.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
-        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("gates", "failure", 20)]})
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # only a workflow file on main is judged
+        self.set(base_runs=[main_run(901, "failure")], base_jobs={"901": [main_job("scope", "success"), main_job("checks", "failure", 20)]})
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("run 901", out)
-        self.assertIn("gates: fail", out)
+        self.assertIn("checks: fail", out)
         self.assertIn("GET actions/runs branch=main per_page=50", self.calls())
         self.assertNotIn("PUT pulls/7/merge", self.calls())
 
@@ -3269,7 +3269,7 @@ class GhHalf(Env):
     def test_5_base_aware_protection_mode_reads_the_protection_of_the_base(self):
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
-        self.set(base="integ", contexts=["gates"])
+        self.set(base="integ", contexts=["checks"])
         self.host = None  # run_merge then lets main() build the real Host from the config
         self.run_merge("7")
         calls = self.calls()
@@ -3368,7 +3368,7 @@ class GhHalf(Env):
         self.assertFalse(self.lock_ref())
 
     def test_a_red_check_named_eof_is_a_refusal_not_a_network_retry(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("EOF lint", "fail", "https://x/y")]])  # "EOF" in the JSON must not match the network pattern
+        self.set(checks_seq=[[("checks", "pass", ""), ("EOF lint", "fail", "https://x/y")]])  # "EOF" in the JSON must not match the network pattern
         rc, out = self.go()
         self.assertEqual(self.paused, [], out)  # no retry, so no pause
         self.assertEqual(rc, 1, out)
@@ -3487,7 +3487,7 @@ class GhHalf(Env):
     def required_read_fails_after_the_claim(self, msg, rate=False):
         """The required-checks read fails with `msg` from the wait after the claim push on. Retried 3 times, then a stop: no revert.
         `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
-        self.set(contexts=["gates"], api_fail={"msg": msg, "after_checks": 1})
+        self.set(contexts=["checks"], api_fail={"msg": msg, "after_checks": 1})
         rc, out = self.go(required="protection")
         self.assertNotIn("reverted on", out)
         self.assertEqual(rc, 1, out)
@@ -3694,7 +3694,7 @@ class GhHalf(Env):
         self.assertFalse(self.lock_ref())
 
     def test_a_plain_403_on_the_required_check_read_reverts_the_claim_and_is_not_retried(self):  # (d): a guard
-        self.set(contexts=["gates"], api_fail={"msg": PLAIN_403_API, "after_checks": 1})
+        self.set(contexts=["checks"], api_fail={"msg": PLAIN_403_API, "after_checks": 1})
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.gh_state("api_failed"), 1, out)  # tried once
@@ -3733,8 +3733,8 @@ class GhHalf(Env):
 
     def test_a_red_check_named_http_500_is_a_refusal_that_reverts_and_is_not_retried(self):
         # the wait after the claim push reads the red check; its name carries "HTTP 500"
-        self.set(checks_seq=[[("gates", "pass", "")], [("gates", "pass", "")],
-                             [("gates", "pass", ""), ("build: HTTP 500 guard", "fail", "https://x/y")]])
+        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")],
+                             [("checks", "pass", ""), ("build: HTTP 500 guard", "fail", "https://x/y")]])
         rc, out = self.go()
         self.assertIn("a check is red: build: HTTP 500 guard: fail", out)
         self.assertIn("reverted on feat", out)
@@ -3746,7 +3746,7 @@ class GhHalf(Env):
         self.assertFalse(self.lock_ref())
 
     def test_green_run_waits_without_a_watch_and_merges_pinned_to_the_claim_head(self):
-        self.set(checks_seq=[[("gates", "pending", "https://github.com/o/r/actions/runs/99/job/1")], [("gates", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pending", "https://github.com/o/r/actions/runs/99/job/1")], [("checks", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         log = self.calls()
@@ -3759,16 +3759,16 @@ class GhHalf(Env):
         self.assertFalse(self.lock_ref())
 
     def test_red_required_check_reverts_the_claim_and_merges_nothing(self):
-        self.set(checks_seq=[[("gates", "fail", "https://x/y"), ("other", "pass", "")]])
+        self.set(checks_seq=[[("checks", "fail", "https://x/y"), ("other", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("a check is red: gates: fail", out)
+        self.assertIn("a check is red: checks: fail", out)
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
         self.assertFalse(self.lock_ref())
 
     def test_a_red_check_that_is_not_required_still_stops_the_merge(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("lint", "fail", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("lint", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: lint: fail", out)
@@ -3788,17 +3788,17 @@ class GhHalf(Env):
             self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_one_red_entry_under_a_name_makes_the_name_red(self):
-        self.set(checks_seq=[[("gates", "fail", ""), ("gates", "pass", "")]])  # a last-entry-wins map would pass
+        self.set(checks_seq=[[("checks", "fail", ""), ("checks", "pass", "")]])  # a last-entry-wins map would pass
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("a check is red: gates: fail", out)
+        self.assertIn("a check is red: checks: fail", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_name_is_green_only_when_every_entry_passed(self):
-        self.set(checks_seq=[[("gates", "pending", ""), ("gates", "pass", "")]])  # pending then pass: never green
+        self.set(checks_seq=[[("checks", "pending", ""), ("checks", "pass", "")]])  # pending then pass: never green
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("Still pending: gates", out)
+        self.assertIn("Still pending: checks", out)
 
     def test_a_lagging_head_is_waited_out_not_called_moved(self):
         self.set(lag={"n": 2, "prior": self.head()})
@@ -3816,17 +3816,17 @@ class GhHalf(Env):
     # Decision ci-wait-reads-run-status: block never runs `gh run watch`. It pauses 30 s, and the next pass of the wait loop reads.
     # The old spin guard ("a watch that returned at once pauses a full minute") went with the watch.
     def test_a_pending_run_pauses_30_seconds_and_returns(self):
-        self.gh_host().block(["gates"], {"gates": [("pending", "https://x/actions/runs/5/job/1")]})
+        self.gh_host().block(["checks"], {"checks": [("pending", "https://x/actions/runs/5/job/1")]})
         self.assertEqual(self.paused, [30])  # one pause, and not host.minute (60 here)
 
     def test_a_pending_run_starts_no_gh_watch_and_makes_no_gh_call(self):
-        self.gh_host().block(["gates", "lint"], {"gates": [("pending", "https://x/actions/runs/5/job/1")],
+        self.gh_host().block(["checks", "lint"], {"checks": [("pending", "https://x/actions/runs/5/job/1")],
                                                   "lint": [("pending", "https://x/actions/runs/6/job/2")]})
         self.assertNotIn("run watch", self.calls())
         self.assertEqual(self.calls(), "")  # block only pauses; the wait loop reads the checks and the runs
 
     def test_dirty_in_the_wait_reverts_the_claim(self):
-        self.set(checks_seq=[[("gates", "pending", "")], [("gates", "pass", "")]], dirty_after_checks=1)
+        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]], dirty_after_checks=1)
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("went DIRTY", out)
@@ -3834,7 +3834,7 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
 
     def test_force_push_in_the_wait_reverts_nothing_and_merges_nothing(self):
-        self.set(checks_seq=[[("gates", "pending", "")], [("gates", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
         rival = []
         rc, out = self.go(pause=lambda: rival.append(self.competitor_push()))
         self.assertEqual(rc, 1)
@@ -3852,17 +3852,17 @@ class GhHalf(Env):
         self.assertIn(f"{MERGE_CALL} merge_method=merge sha={old}", self.calls())  # the sha is the head guard
 
     def test_protection_refusal_reverts_the_claim_and_prints_gh_whole(self):
-        self.set(merge_fail=rest_err(405, 'Required status check "gates" is expected.'))
+        self.set(merge_fail=rest_err(405, 'Required status check "checks" is expected.'))
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("the merge was refused", out)
-        self.assertIn('Required status check "gates" is expected.', out)
+        self.assertIn('Required status check "checks" is expected.', out)
         self.assertNotIn("DELETE", self.calls())
         self.assertTrue(self.reverted())
         self.assertNotIn("merge #", sh(self.co, "git", "log", "origin/main", "--format=%s"))
 
     def test_protection_names_come_from_the_api_and_the_deadline_stops_the_wait(self):
-        self.set(contexts=["gates", "needed"], checks_seq=[[("gates", "pass", "")]])
+        self.set(contexts=["checks", "needed"], checks_seq=[[("checks", "pass", "")]])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 1)
         self.assertIn("deadline of 5 minutes passed. Still pending: needed", out)
@@ -3879,41 +3879,41 @@ class GhHalf(Env):
 
     def test_head_red_pushes_no_claim(self):
         before = self.head()
-        self.set(checks_seq=[[("gates", "fail", "https://x/y")]])
+        self.set(checks_seq=[[("checks", "fail", "https://x/y")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
-        self.assertIn("gates: fail", out)
+        self.assertIn("checks: fail", out)
         self.assertEqual(self.head(), before)
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertFalse(self.lock_ref())
 
     def test_head_pending_then_red_pushes_no_claim(self):
         before = self.head()
-        self.set(checks_seq=[[("gates", "pending", "")], [("gates", "fail", "")]])
+        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertEqual(self.head(), before)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_head_pending_then_green_claims_and_waits_again(self):
-        self.set(checks_seq=[[("gates", "pending", "")], [("gates", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pending", "")], [("checks", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.claims("main"), 1)
         self.assertGreaterEqual(self.paused.count(60), 1)  # the head's own pending check was waited on
 
     def test_the_preview_names_the_head_state(self):
-        for seq, want in (([("gates", "pass", "")], "head checks: green"), ([("gates", "pending", "")], "head checks: pending: gates"),
-                          ([("gates", "fail", "")], "head checks: red: gates: fail")):
+        for seq, want in (([("checks", "pass", "")], "head checks: green"), ([("checks", "pending", "")], "head checks: pending: checks"),
+                          ([("checks", "fail", "")], "head checks: red: checks: fail")):
             self.set(checks_seq=[seq])
             rc, out = self.run_merge("7", host=self.gh_host())
             self.assertEqual(rc, 0, out)
             self.assertIn(want, out)
 
     def test_banchi_604_a_pending_check_that_is_not_required_goes_red_after_the_required_are_green(self):
-        # The head reads green on `gates`, `design` still pending, then red. The wait must not end on the green required check.
+        # The head reads green on `checks`, `design` still pending, then red. The wait must not end on the green required check.
         before = self.head()
-        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pending", "")], [("gates", "pass", ""), ("design", "fail", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
@@ -3921,8 +3921,8 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_banchi_604_same_in_the_wait_after_the_claim_push(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pass", "")], [("gates", "pass", ""), ("design", "pending", "")],
-                             [("gates", "pass", ""), ("design", "fail", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pass", "")], [("checks", "pass", ""), ("design", "pending", "")],
+                             [("checks", "pass", ""), ("design", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
@@ -3930,74 +3930,74 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
 
     def test_a_pending_check_that_is_not_required_is_waited_on_then_merges_on_green(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pending", "")], [("gates", "pass", ""), ("design", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertGreaterEqual(self.paused.count(60), 1)
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("a", "skipping", ""), ("b", "pass", "")]])  # skipped and neutral both land in the skipping bucket
+        self.set(checks_seq=[[("checks", "pass", ""), ("a", "skipping", ""), ("b", "pass", "")]])  # skipped and neutral both land in the skipping bucket
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
     def test_a_required_check_that_is_skipped_reads_green(self):
         # B skips whole jobs on a docs-only PR. A skipped required check is not red, not pending, and the run judge agrees.
-        red, pending, _ = merge.Host.classify({"gates": [("pass", "")], "gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        red, pending, _ = merge.Host.classify({"checks": [("pass", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
         self.assertEqual((red, pending), ([], []))
-        runs = [{"name": "gates", "status": "completed", "conclusion": c} for c in ("success", "skipped", "neutral")]
+        runs = [{"name": "checks", "status": "completed", "conclusion": c} for c in ("success", "skipped", "neutral")]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
-        self.set(checks_seq=[[("gates", "skipping", ""), ("scope", "pass", "")]])  # a required check skipped beside a passing check reads green
+        self.set(checks_seq=[[("checks", "skipping", ""), ("scope", "pass", "")]])  # a required check skipped beside a passing check reads green
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
     def test_a_head_where_no_check_ran_is_unproven_not_green(self):
         # Every check skipped: the synchronize run skipped as a draft.
-        red, pending, _ = merge.Host.classify({"gates": [("skipping", "")], "gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        red, pending, _ = merge.Host.classify({"checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
         self.assertEqual(pending, [])
         self.assertTrue(any("no check ran on this head" in r for r in red), red)
-        self.assertTrue(any("gh workflow run gates.yml --ref" in r for r in red), red)
+        self.assertTrue(any("gh workflow run checks.yml --ref" in r for r in red), red)
         self.assertTrue(any("gh pr ready" in r for r in red), red)
 
     def test_a_docs_only_head_whose_scope_check_passed_is_not_unproven(self):
-        red, pending, _ = merge.Host.classify({"scope": [("pass", "")], "gates": [("skipping", "")], "gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
+        red, pending, _ = merge.Host.classify({"scope": [("pass", "")], "checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
         self.assertEqual((red, pending), ([], []))
 
     def test_a_run_list_where_every_run_skipped_and_none_pending_is_red(self):
-        red, pending = merge.Host.judge_runs([{"name": "gates", "status": "completed", "conclusion": "skipped"}])
-        self.assertEqual(red, ["workflow gates: skipped, no job ran"])
+        red, pending = merge.Host.judge_runs([{"name": "checks", "status": "completed", "conclusion": "skipped"}])
+        self.assertEqual(red, ["workflow checks: skipped, no job ran"])
         self.assertEqual(pending, [])
 
     def test_a_success_run_and_a_skipped_run_on_the_same_head_are_green(self):
-        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates-windows", "status": "completed", "conclusion": "skipped"}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "success"}, {"name": "checks-windows", "status": "completed", "conclusion": "skipped"}]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
 
     def test_an_older_cancelled_run_under_a_newer_success_of_the_same_name_is_superseded(self):
         # gh lists the newest run first. Only the newest run per workflow name counts.
-        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates", "status": "completed", "conclusion": "cancelled"}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "success"}, {"name": "checks", "status": "completed", "conclusion": "cancelled"}]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
 
     def test_a_cancelled_run_beside_a_success_of_its_name_is_superseded(self):
         # On one head, a run of a name that ran outranks a cancelled run of that name.
-        runs = [{"name": "gates", "status": "completed", "conclusion": "cancelled"}, {"name": "gates", "status": "completed", "conclusion": "success"}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "cancelled"}, {"name": "checks", "status": "completed", "conclusion": "success"}]
         self.assertEqual(merge.Host.judge_runs(runs), ([], []))
 
     def test_a_cancelled_run_with_no_newer_run_of_its_name_is_red(self):
-        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "ci", "status": "completed", "conclusion": "cancelled"}]
+        runs = [{"name": "checks", "status": "completed", "conclusion": "success"}, {"name": "ci", "status": "completed", "conclusion": "cancelled"}]
         red, pending = merge.Host.judge_runs(runs)
         self.assertEqual(red, ["workflow ci: cancelled"])
         self.assertEqual(pending, [])
 
-    # Two gates runs start on one head in the same second. GitHub cancels one (concurrency).
+    # Two checks runs start on one head in the same second. GitHub cancels one (concurrency).
     # judge_runs must read the live twin, not the cancelled one, whatever the list order.
     def test_a_cancelled_twin_beside_a_run_of_its_name_is_judged_by_the_run_that_ran_in_either_order(self):
         # Rows, one outcome each: a live twin waits; a succeeded twin is green (a run that ran outranks a cancelled run of its name);
         # a failed twin is red on the failure. Either order.
-        cancelled = {"name": "gates", "status": "completed", "conclusion": "cancelled"}
+        cancelled = {"name": "checks", "status": "completed", "conclusion": "cancelled"}
         rows = (
-            ("live", {"name": "gates", "status": "in_progress", "conclusion": ""}, ([], ["workflow gates"])),
-            ("succeeded", {"name": "gates", "status": "completed", "conclusion": "success"}, ([], [])),
-            ("failed", {"name": "gates", "status": "completed", "conclusion": "failure"}, (["workflow gates: failure"], [])),
+            ("live", {"name": "checks", "status": "in_progress", "conclusion": ""}, ([], ["workflow checks"])),
+            ("succeeded", {"name": "checks", "status": "completed", "conclusion": "success"}, ([], [])),
+            ("failed", {"name": "checks", "status": "completed", "conclusion": "failure"}, (["workflow checks: failure"], [])),
         )
         for twin, other, want in rows:
             for order, runs in (("cancelled first", [cancelled, other]), ("twin first", [other, cancelled])):
@@ -4008,12 +4008,12 @@ class GhHalf(Env):
         # A draft PR marked ready in the same second. The skipped `opened` run is
         # newer than the green `ready_for_review` run of the same workflow. A skip never outranks a run that ran.
         # Rows: the older run is a success, in progress, cancelled, or failed. Each row is one pure judge_runs input.
-        skipped = {"name": "gates", "status": "completed", "conclusion": "skipped"}
+        skipped = {"name": "checks", "status": "completed", "conclusion": "skipped"}
         rows = (
-            ("success", {"name": "gates", "status": "completed", "conclusion": "success"}, ([], [])),
-            ("in progress", {"name": "gates", "status": "in_progress", "conclusion": ""}, ([], ["workflow gates"])),
-            ("cancelled", {"name": "gates", "status": "completed", "conclusion": "cancelled"}, (["workflow gates: cancelled"], [])),
-            ("failure", {"name": "gates", "status": "completed", "conclusion": "failure"}, (["workflow gates: failure"], [])),
+            ("success", {"name": "checks", "status": "completed", "conclusion": "success"}, ([], [])),
+            ("in progress", {"name": "checks", "status": "in_progress", "conclusion": ""}, ([], ["workflow checks"])),
+            ("cancelled", {"name": "checks", "status": "completed", "conclusion": "cancelled"}, (["workflow checks: cancelled"], [])),
+            ("failure", {"name": "checks", "status": "completed", "conclusion": "failure"}, (["workflow checks: failure"], [])),
         )
         for older, run, want in rows:
             with self.subTest(older=older):
@@ -4021,31 +4021,31 @@ class GhHalf(Env):
 
     def test_a_head_where_every_check_skipped_is_refused_with_the_remedy(self):
         before = self.head()
-        self.set(checks_seq=[[("gates", "skipping", "")]], runs_seq=[[("gates", "completed", "skipped")]])
+        self.set(checks_seq=[[("checks", "skipping", "")]], runs_seq=[[("checks", "completed", "skipped")]])
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertIn("no check ran on this head", out)
-        self.assertIn("gh workflow run gates.yml --ref", out)
+        self.assertIn("gh workflow run checks.yml --ref", out)
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.head(), before)
 
     def test_a_newer_skipped_run_on_the_wait_path_does_not_refuse_an_older_success(self):
         # The same race through run_state. Checks pass; the runs are skipped then success.
         before = self.head()
-        self.set(checks_seq=[[("gates", "pass", "")]], runs_seq=[[("gates", "completed", "skipped"), ("gates", "completed", "success")]])
+        self.set(checks_seq=[[("checks", "pass", "")]], runs_seq=[[("checks", "completed", "skipped"), ("checks", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertIn(MERGE_CALL, self.calls())
         self.assertNotEqual(self.head(), before)
 
     def test_a_missing_required_check_beside_a_skipped_one_is_pending_not_red(self):
-        # B1: nothing has reported gates yet. The skipped gates-windows row is not proof that no check ran.
-        red, pending, _ = merge.Host.classify({"gates-windows": [("skipping", "")]}, ["gates", "gates-windows"])
-        self.assertEqual((red, pending), ([], ["gates"]))
+        # B1: nothing has reported checks yet. The skipped checks-windows row is not proof that no check ran.
+        red, pending, _ = merge.Host.classify({"checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
+        self.assertEqual((red, pending), ([], ["checks"]))
 
     def test_a_skipped_head_with_a_run_in_progress_waits_for_the_run(self):
-        # B1: the skipped rows are old. The gates run is still in progress with no job rows, so the wait holds.
-        self.set(checks_seq=[[("gates", "skipping", "")]], runs_seq=[[("gates", "in_progress", "")], [("gates", "completed", "skipped")]])
+        # B1: the skipped rows are old. The checks run is still in progress with no job rows, so the wait holds.
+        self.set(checks_seq=[[("checks", "skipping", "")]], runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "skipped")]])
         rc, out = self.go()
         self.assertGreaterEqual(self.paused.count(60), 1, out)
         self.assertEqual(rc, 1, out)
@@ -4054,26 +4054,26 @@ class GhHalf(Env):
 
     def test_the_remedy_run_in_progress_beside_old_skipped_rows_waits(self):
         # B1: the remedy's own run. Old skipped rows and a run in progress hold the wait, then the pass lets it merge.
-        self.set(checks_seq=[[("gates", "skipping", "")], [("gates", "pass", "")]], runs_seq=[[("gates", "in_progress", "")], [("gates", "completed", "success")]])
+        self.set(checks_seq=[[("checks", "skipping", "")], [("checks", "pass", "")]], runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertGreaterEqual(self.paused.count(60), 1, out)
 
     def test_an_older_run_still_in_progress_holds_the_wait_under_a_newer_success(self):
         # B2: gh lists the newest run first. The older in-progress run is read as pending before the dedup.
-        runs = [{"name": "gates", "status": "completed", "conclusion": "success"}, {"name": "gates", "status": "in_progress", "conclusion": ""}]
-        self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow gates"]))
+        runs = [{"name": "checks", "status": "completed", "conclusion": "success"}, {"name": "checks", "status": "in_progress", "conclusion": ""}]
+        self.assertEqual(merge.Host.judge_runs(runs), ([], ["workflow checks"]))
 
     def test_the_no_check_ran_remedy_names_the_real_branch(self):
-        self.set(checks_seq=[[("gates", "skipping", "")]])
+        self.set(checks_seq=[[("checks", "skipping", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
-        self.assertIn("gh workflow run gates.yml --ref feat", out)
+        self.assertIn("gh workflow run checks.yml --ref feat", out)
         self.assertNotIn("<branch>", out)
 
     def test_cancelled_and_unknown_buckets_stop_the_run(self):
         for conclusion, bucket in (("cancelled", "cancel"), ("startup_failure", "fail")):  # the conclusion GitHub names, and the bucket it lands in
-            self.set(checks_seq=[[("gates", "pass", ""), ("x", conclusion, "")]])
+            self.set(checks_seq=[[("checks", "pass", ""), ("x", conclusion, "")]])
             rc, out = self.go()
             self.assertEqual(rc, 1, bucket)
             self.assertIn(f"x: {bucket}", out)
@@ -4089,20 +4089,20 @@ class GhHalf(Env):
             self.assertFalse(self.lock_ref())
 
     def test_an_ignored_red_check_is_reported_and_the_merge_goes_on(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("design", "fail", ""), ("slow", "pending", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "fail", ""), ("slow", "pending", "")]])
         rc, out = self.go(ignore={"design": "flaky upstream", "slow": "nightly"})
         self.assertEqual(rc, 0, out)
         self.assertIn("design (flaky upstream): fail", out)
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_the_preview_lists_a_pending_check_that_is_not_required(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("design", "pending", "")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.run_merge("7", host=self.gh_host())
         self.assertIn("head checks: pending: design", out)
 
     def test_a_required_check_is_never_ignored(self):
         before = self.head()
-        rc, out = self.go(ignore={"gates": "flaky"})
+        rc, out = self.go(ignore={"checks": "flaky"})
         self.assertEqual(rc, 1)
         self.assertIn("A required check is never ignored", out)
         self.assertEqual(self.head(), before)
@@ -4156,7 +4156,7 @@ class GhHalf(Env):
 
     def test_a_check_that_appears_on_the_settle_reread_holds_the_wait(self):
         before = self.head()
-        self.set(checks_seq=[[("gates", "pass", "")], [("gates", "pass", ""), ("late", "fail", "")]])
+        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", ""), ("late", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("late: fail", out)
@@ -4166,7 +4166,7 @@ class GhHalf(Env):
     def test_a_failed_read_in_the_wait_reverts_the_claim(self):
         before = self.head()
         self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not
-        self.set(checks_seq=[[("gates", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pass", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertRegex(out, r"checks?\b[^\n]*\bfailed")
@@ -4195,7 +4195,7 @@ class GhHalf(Env):
 
     def test_no_config_merges_on_the_defaults_and_claims_nothing(self):
         drop_config(self)
-        self.set(contexts=["gates"])
+        self.set(contexts=["checks"])
         self.host = None  # main builds the real Host from the defaults: requiredChecks "protection"
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
@@ -4210,7 +4210,7 @@ class GhHalf(Env):
 
     def test_no_config_waits_the_default_45_minutes(self):
         drop_config(self)
-        self.set(contexts=["gates"], checks_seq=[[("gates", "pending", "")]])
+        self.set(contexts=["checks"], checks_seq=[[("checks", "pending", "")]])
         rc, out = self.go(required="protection", minute=900)  # a poll every 15 minutes of the fake clock: 3 reads reach the deadline, not 45 (each read is a few process starts)
         self.assertEqual(rc, 1)
         self.assertIn("the deadline of 45 minutes passed", out)
@@ -4219,7 +4219,7 @@ class GhHalf(Env):
     def test_no_config_never_runs_stamp(self):
         drop_config(self)
         mark = stamp_marker(self)
-        self.set(contexts=["gates"])
+        self.set(contexts=["checks"])
         rc, out = self.go(required="protection")
         self.assertEqual(rc, 0, out)
         self.assertFalse(os.path.exists(mark), "stamp.mjs ran with no config")
@@ -4238,7 +4238,7 @@ class GhHalf(Env):
 
     def test_a_partial_merge_block_takes_the_defaults_for_the_missing_fields(self):
         put_base_config(self, json.dumps({"defaultBranch": "main", "merge": {"method": "squash"}}))
-        self.set(contexts=["gates"])
+        self.set(contexts=["checks"])
         self.host = None  # main builds the Host from the filled defaults: requiredChecks "protection"
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
@@ -4287,7 +4287,7 @@ class GhHalf(Env):
         self.assertNotIn("Traceback", out)
 
     def test_a_pr_that_turns_draft_after_the_preview_read_is_refused_at_confirm(self):  # guard: merge.py checks draft under the lock
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["gates"]))))  # complete: no defaults notice in the output
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"]))))  # complete: no defaults notice in the output
         self.set(draft_when_locked=True)  # main's read at the top of --confirm sees a ready PR; confirm's read under the lock sees a draft
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
@@ -4310,12 +4310,12 @@ class RestRoutes(Env):
         super().setUp()
         install_gh_shim(self)
         self.ticks, self.paused, self.at_pause = 0, [], []
-        self.set(checks_seq=[[("gates", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pass", "")]])
 
     # ---- the checks of a head are the check runs AND the commit statuses
 
     def test_one_green_check_run_and_one_pending_status_is_not_green(self):
-        self.set(checks_seq=[[("gates", "pass", ""), ("deploy", "pending", "https://x/s", "status")]], runs_seq=[[("gates", "completed", "success")]])
+        self.set(checks_seq=[[("checks", "pass", ""), ("deploy", "pending", "https://x/s", "status")]], runs_seq=[[("checks", "completed", "success")]])
         verdict, detail = self.gh_host().head_read(7)
         self.assertEqual(verdict, "pending", detail)
         self.assertIn("deploy", detail)
@@ -4328,7 +4328,7 @@ class RestRoutes(Env):
     def test_a_failed_or_errored_status_is_red(self):
         for bucket in ("fail", "error"):  # the status states failure and error
             with self.subTest(status=bucket):
-                self.set(checks_seq=[[("gates", "pass", ""), ("deploy", bucket, "https://x/s", "status")]])
+                self.set(checks_seq=[[("checks", "pass", ""), ("deploy", bucket, "https://x/s", "status")]])
                 verdict, detail = self.gh_host().head_read(7)
                 self.assertEqual(verdict, "red", detail)
                 self.assertIn("deploy", detail)
@@ -4349,8 +4349,8 @@ class RestRoutes(Env):
         c, out = self.gh_host().gh(["api", f"repos/{{owner}}/{{repo}}/commits/{sha}/status", "-X", "GET"])
         self.assertEqual(c, 0, out)
         self.assertEqual((json.loads(out)["state"], json.loads(out)["statuses"]), ("pending", []))  # GitHub's own answer for a commit with no statuses
-        self.assertEqual(self.gh_host().checks(7, warn=False), {"gates": [("pass", "")]})  # the combined state adds no pending entry
-        self.set(runs_seq=[[("gates", "completed", "success")]])
+        self.assertEqual(self.gh_host().checks(7, warn=False), {"checks": [("pass", "")]})  # the combined state adds no pending entry
+        self.set(runs_seq=[[("checks", "completed", "success")]])
         self.assertEqual(self.gh_host().head_read(7), ("green", ""))
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -4365,8 +4365,8 @@ class RestRoutes(Env):
     # ---- a list read takes every page
 
     def test_two_pages_of_check_runs_with_the_red_one_on_page_two_is_red(self):
-        self.set(page_cap=2, checks_seq=[[("lint", "pass", ""), ("gates", "pass", ""), ("e2e", "fail", "https://x/e2e")]])
-        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["e2e", "gates", "lint"])
+        self.set(page_cap=2, checks_seq=[[("lint", "pass", ""), ("checks", "pass", ""), ("e2e", "fail", "https://x/e2e")]])
+        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["checks", "e2e", "lint"])
         verdict, detail = self.gh_host().head_read(7)
         self.assertEqual(verdict, "red", detail)
         self.assertIn("e2e", detail)
@@ -4376,8 +4376,8 @@ class RestRoutes(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_two_pages_of_commit_statuses_with_the_red_one_on_page_two_is_red(self):
-        self.set(page_cap=2, checks_seq=[[("gates", "pass", ""), ("a", "pass", "u", "status"), ("b", "pass", "u", "status"), ("c", "fail", "u", "status")]])
-        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["a", "b", "c", "gates"])
+        self.set(page_cap=2, checks_seq=[[("checks", "pass", ""), ("a", "pass", "u", "status"), ("b", "pass", "u", "status"), ("c", "fail", "u", "status")]])
+        self.assertEqual(sorted(self.gh_host().checks(7, warn=False)), ["a", "b", "c", "checks"])
         verdict, detail = self.gh_host().head_read(7)
         self.assertEqual(verdict, "red", detail)
         self.assertIn("c", detail)
@@ -4579,7 +4579,7 @@ class RestRoutes(Env):
         for name, read, least in (("pr", lambda h: h.pr(url), 1), ("head_read", lambda h: h.head_read(url), 3)):
             with self.subTest(read=name):
                 pathlib.Path(self.state, "repos.log").unlink(missing_ok=True)
-                read(merge.Host(["gates"], "main", minute=60, now=lambda: self.now, pause=lambda s: None))
+                read(merge.Host(["checks"], "main", minute=60, now=lambda: self.now, pause=lambda s: None))
                 used = pathlib.Path(self.state, "repos.log").read_text().split()
                 self.assertGreaterEqual(len(used), least, used)
                 self.assertEqual(set(used), {"acme/widgets"})
@@ -4598,7 +4598,7 @@ class RestRoutes(Env):
         cur = os.path.join(self.t, "cur")
         sh(self.t, "git", "clone", "-q", self.bare, cur)
         sh(cur, "git", "checkout", "-q", "feat")
-        host = merge.Host(["gates"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, cwd=cur)
+        host = merge.Host(["checks"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, cwd=cur)
         for selector in ("", None):
             with self.subTest(selector=selector):
                 info = host.pr(selector)
@@ -4607,7 +4607,7 @@ class RestRoutes(Env):
 
     def test_the_guards_read_by_branch_name_judges_the_head_of_that_branchs_pull_request(self):
         self.two_open_prs()
-        self.set(runs_seq=[[("gates", "completed", "success")]])
+        self.set(runs_seq=[[("checks", "completed", "success")]])
         self.assertEqual(self.gh_host().head_read("feat"), ("green", ""))
         self.assertIn(f"GET commits/{self.head()}/check-runs", self.calls())
 
@@ -4642,7 +4642,7 @@ class RestRoutes(Env):
         for repo, want in (("o/r", "o/r"), (None, "{owner}/{repo}")):
             with self.subTest(repo=repo):
                 pathlib.Path(self.state, "repos.log").unlink(missing_ok=True)
-                host = merge.Host(["gates"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, repo=repo)
+                host = merge.Host(["checks"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, repo=repo)
                 host.pr(7)
                 host.open_heads()
                 host.checks(7, warn=False)
@@ -4757,7 +4757,7 @@ class ConfigFile(Env):
         preview row also names the config file, the line the refusal at load has always printed."""
         rows = [("deadlineMinutes", v) for v in ("45", True, 0, -5, 361, 10 ** 400)]
         rows += [("ignoreChecks", v) for v in (None,
-                                              [{"name": ["gates"], "reason": "x"}],
+                                              [{"name": ["checks"], "reason": "x"}],
                                               [{"name": "design", "reason": None}],
                                               [{"name": 5, "reason": "x"}])]
         for field, bad in rows:
@@ -4786,7 +4786,7 @@ class ConfigFile(Env):
 
     def config_text(self, fields=None, **top):
         """A complete merge block (no defaults notice), with `fields` replaced and `top` keys set at the top level."""
-        block = dict({"method": "merge", "deadlineMinutes": 5, "requiredChecks": ["gates"], "afterMerge": [], "deleteBranch": True}, **(fields or {}))
+        block = dict({"method": "merge", "deadlineMinutes": 5, "requiredChecks": ["checks"], "afterMerge": [], "deleteBranch": True}, **(fields or {}))
         return json.dumps(dict(CONFIG, merge=block, **top))
 
     def refused_at_preview(self, text, field):
@@ -4805,7 +4805,7 @@ class ConfigFile(Env):
         "protection" or a non-empty list of non-empty strings); deleteBranch (not a bool); method (not merge, squash or
         rebase); defaultBranch (not a non-empty string; "" must not fall back to the host, so the host is patched)."""
         rows = [("afterMerge", self.config_text({"afterMerge": v})) for v in (None, 5, True, [1], [""])]
-        rows += [("requiredChecks", self.config_text({"requiredChecks": v})) for v in ([["gates"]], [{}], [1, "gates"], [], "gates", [""])]
+        rows += [("requiredChecks", self.config_text({"requiredChecks": v})) for v in ([["checks"]], [{}], [1, "checks"], [], "checks", [""])]
         rows += [("deleteBranch", self.config_text({"deleteBranch": v})) for v in ("false", 1)]
         rows += [("method", self.config_text({"method": v})) for v in ("admin", "Squash")]
         for i, (field, text) in enumerate(rows):
@@ -4819,7 +4819,7 @@ class ConfigFile(Env):
 
     def test_a_valid_config_with_every_field_is_accepted_at_preview(self):  # the control
         for fields in ({"method": "squash", "requiredChecks": "protection", "afterMerge": ["true"], "deleteBranch": False},
-                       {"method": "rebase", "requiredChecks": ["gates"], "afterMerge": ["true", "echo x"], "deleteBranch": True}):
+                       {"method": "rebase", "requiredChecks": ["checks"], "afterMerge": ["true", "echo x"], "deleteBranch": True}):
             with self.subTest(fields=fields):
                 put_base_config(self, self.config_text(fields))
                 rc, out = self.run_merge("7")
@@ -5567,7 +5567,7 @@ class NetErrorLines(unittest.TestCase):
     def test_a_json_check_list_is_never_a_network_error(self):
         # gh's JSON answer names checks: a check named "build: HTTP 500 guard" is a red check, not a network error
         for out in ('[{"name":"build: HTTP 500 guard","bucket":"fail","link":""}]',
-                    '[{"name":"gates: HTTP 502","bucket":"fail","link":""}]',
+                    '[{"name":"checks: HTTP 502","bucket":"fail","link":""}]',
                     '[{"name":"EOF lint","bucket":"fail","link":""}]'):
             with self.subTest(out=out):
                 self.assertFalse(merge.is_net(1, out))
@@ -5667,13 +5667,13 @@ class RateLimitWait(unittest.TestCase):
         p.start(); self.addCleanup(p.stop)
 
     def host(self):
-        return merge.Host(required=["gates"], base="main", minute=60, now=lambda: self.NOW, pause=self.pauses.append)
+        return merge.Host(required=["checks"], base="main", minute=60, now=lambda: self.NOW, pause=self.pauses.append)
 
     def clocked_host(self, before_wait=None):
         """-> (host, clock). The pauses move the clock on. `before_wait` is what confirm hands the host once the lock is taken: the lock's extend_for
         (see LockExtensionReachesHost). It gets the wait in seconds."""
         clock = Clock(self.NOW)
-        host = merge.Host(required=["gates"], base="main", minute=60, now=clock.now, pause=clock.pause)
+        host = merge.Host(required=["checks"], base="main", minute=60, now=clock.now, pause=clock.pause)
         host.before_wait = before_wait
         return host, clock
 
@@ -5801,7 +5801,7 @@ class RateLimitWait(unittest.TestCase):
     def test_a_rate_wait_in_host_gh_prints_one_line_before_the_wait(self):
         self.replies((1, RATE_403), (0, "[]"))
         buf, snapshots = io.StringIO(), []
-        host = merge.Host(required=["gates"], base="main", minute=60, now=lambda: self.NOW, pause=lambda s: snapshots.append(buf.getvalue()))
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: self.NOW, pause=lambda s: snapshots.append(buf.getvalue()))
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             self.assertEqual(host.gh(["run", "list"]), (0, "[]"))
         assert_one_rate_wait_line(self, buf.getvalue(), snapshots)
@@ -5809,7 +5809,7 @@ class RateLimitWait(unittest.TestCase):
     def test_each_rate_wait_in_host_gh_prints_its_own_line_naming_the_call_and_the_wait(self):
         self.replies(*([(1, RATE_403)] * 3), (0, "[]"))
         buf, snapshots = io.StringIO(), []
-        host = merge.Host(required=["gates"], base="main", minute=60, now=lambda: self.NOW, pause=lambda s: snapshots.append(buf.getvalue()))
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: self.NOW, pause=lambda s: snapshots.append(buf.getvalue()))
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             self.assertEqual(host.gh(["run", "list"]), (0, "[]"))
         assert_rate_wait_lines(self, buf.getvalue(), snapshots, [60, 300, 900], "gh run list")
@@ -6118,7 +6118,7 @@ class ClockedHost(merge.Host):
     def __init__(self, checks_at, head_at=lambda t: "sha"):
         self.clock, self.pauses = [0.0], []
         self.checks_at, self.head_at = checks_at, head_at
-        super().__init__(required=["gates"], base="main", minute=60, now=lambda: self.clock[0], pause=self.advance)
+        super().__init__(required=["checks"], base="main", minute=60, now=lambda: self.clock[0], pause=self.advance)
 
     def advance(self, s):
         self.pauses.append(s)
@@ -6158,16 +6158,16 @@ class WaitProgress(unittest.TestCase):
         self.assertLessEqual(max(gaps), bound, f"longest quiet gap {max(gaps):.0f} s; lines at {[round(t) for t, _ in lines]}")
 
     def test_a_ten_minute_pending_wait_never_goes_120_seconds_without_a_line(self):
-        host = ClockedHost(lambda t: {"gates": [("pending" if t < 600 else "pass", "")]})
+        host = ClockedHost(lambda t: {"checks": [("pending" if t < 600 else "pass", "")]})
         ok, why, lines, waits, end = self.wait(host, 15)
         self.assertTrue(ok, why)
         self.assertTrue(waits, "no `merge: waiting on` line during the 10-minute wait")
-        self.assertIn("gates", waits[0][1])  # the first line names the pending check
+        self.assertIn("checks", waits[0][1])  # the first line names the pending check
         self.assert_gaps_within(lines, 0.0, end)
 
     def test_a_lagging_head_never_goes_120_seconds_without_a_line(self):
         # The head reads as the prior one for 600 s; the checks are pending until 900 s.
-        host = ClockedHost(lambda t: {"gates": [("pending" if t < 900 else "pass", "")]},
+        host = ClockedHost(lambda t: {"checks": [("pending" if t < 900 else "pass", "")]},
                            head_at=lambda t: "old" if t < 600 else "sha")
         ok, why, lines, _, end = self.wait(host, 30, prior="old")
         self.assertTrue(ok, why)
@@ -6176,10 +6176,10 @@ class WaitProgress(unittest.TestCase):
     def test_a_change_in_the_pending_set_prints_at_once(self):
         def checks_at(t):
             if t < 60:
-                return {"gates": [("pending", "")]}
+                return {"checks": [("pending", "")]}
             if t < 300:
-                return {"gates": [("pending", "")], "design": [("pending", "")]}
-            return {"gates": [("pass", "")], "design": [("pass", "")]}
+                return {"checks": [("pending", "")], "design": [("pending", "")]}
+            return {"checks": [("pass", "")], "design": [("pass", "")]}
         host = ClockedHost(checks_at)
         ok, why, _, waits, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
@@ -6188,18 +6188,18 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(design and design[0] < 120, f"a new pending check named at {design[:1]}; lines at {[round(t) for t, _ in waits]}")
 
     def test_a_wait_that_is_green_on_the_first_read_prints_no_waiting_line(self):
-        host = ClockedHost(lambda t: {"gates": [("pass", "")]})
+        host = ClockedHost(lambda t: {"checks": [("pass", "")]})
         ok, why, _, waits, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
         self.assertEqual(waits, [])
 
     def test_a_green_wait_says_what_it_checks_before_the_first_read(self):
         """A start line, not a waiting line: the wait names the checks it reads before its first gh call (fake time 0)."""
-        host = ClockedHost(lambda t: {"gates": [("pass", "")]})
+        host = ClockedHost(lambda t: {"checks": [("pass", "")]})
         ok, why, lines, _, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
         self.assertTrue(lines and lines[0][0] < READ_SECONDS, f"no line before the first read; lines {lines}")
-        self.assertIn("gates", lines[0][1])
+        self.assertIn("checks", lines[0][1])
 
 class SilentWait(Env):
     """Silence: merge printed only the launch line for minutes. A long step printed
@@ -6212,7 +6212,7 @@ class SilentWait(Env):
         Env.setUp(self)
         install_gh_shim(self)
         self.ticks, self.paused, self.at_pause = 0, [], []
-        self.set(checks_seq=[[("gates", "pass", "")]])
+        self.set(checks_seq=[[("checks", "pass", "")]])
 
     def hold_run(self, on, seconds, host):
         """Run the merge in a thread, hold the first `on` call, and read stdout while it is held.
@@ -6261,20 +6261,20 @@ class SilentWait(Env):
         self.assert_names_the_held_step(seen, "the merge call")
 
     def test_red_required_check_beside_skipped_jobs_refuses_at_once(self):
-        self.set(checks_seq=[[("gates", "fail", "https://x/gates"), ("scope", "skipping", ""), ("gate-windows", "skipping", "")]],
-                 runs_seq=[[("gates", "completed", "failure"), ("gate-windows", "completed", "skipped")]])
-        rc, out = self.go(required=("gates", "scope"))
+        self.set(checks_seq=[[("checks", "fail", "https://x/checks"), ("scope", "skipping", ""), ("check-windows", "skipping", "")]],
+                 runs_seq=[[("checks", "completed", "failure"), ("check-windows", "completed", "skipped")]])
+        rc, out = self.go(required=("checks", "scope"))
         self.assertEqual(rc, 1, out)
         self.assertIn("a check is red", out)
         self.assertEqual(self.paused, [], "a red head waited before it refused")
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_zero_contexts_and_a_required_name_with_no_run_say_what_they_wait_on(self):
-        self.set(checks_seq=[[]], runs_seq=[[("gate", "in_progress", None)]])
-        rc, out = self.go(required=("gate",))
+        self.set(checks_seq=[[]], runs_seq=[[("check", "in_progress", None)]])
+        rc, out = self.go(required=("check",))
         self.assertEqual(rc, 1, out)
-        self.assertIn("waiting on gate", out)
-        self.assertIn("workflow gate", out)
+        self.assertIn("waiting on check", out)
+        self.assertIn("workflow check", out)
 
 _real_threading = threading  # the real module. merge's `threading` name is swapped in the scan cases, this name is not
 
@@ -6449,7 +6449,7 @@ class WaitStepLines(unittest.TestCase):
         self.assertRegex(before, r"(?m)^merge: checking", f"printed before the first gh read: {before!r}")
 
     def test_the_merge_step_is_named_before_the_merge_call(self):
-        host = merge.Host(required=["gates"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 0.0, pause=lambda s: None)
         before = self.first_call_text(host, lambda h: h.merge(7, "merge", "sha"))
         self.assertRegex(before, r"(?m)^merge: merging #7", f"printed before the merge call: {before!r}")
 
@@ -6688,7 +6688,7 @@ class RecordsRebuild(RecordsEnv):
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         before = self.head()
-        self.host.seq = [(True, ""), (False, "a check is red: gates: fail")]  # the head is green, the rebuild commit is red
+        self.host.seq = [(True, ""), (False, "a check is red: checks: fail")]  # the head is green, the rebuild commit is red
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("reverted", out)
@@ -6995,11 +6995,11 @@ class RecordsHeal(RecordsEnv):
 
     def test_red_checks_on_the_heal_commit_keep_it_and_merge_nothing(self):
         self.heal_setup()
-        self.host.seq = [(True, ""), (True, ""), (False, "a check is red: gates: fail")]
+        self.host.seq = [(True, ""), (True, ""), (False, "a check is red: checks: fail")]
         rc, out = self.run_merge("7", "--confirm")
         self.assert_kept(rc, out)
         self.assertIn("are not green", out)
-        self.assertIn("gates: fail", out)
+        self.assertIn("checks: fail", out)
 
     def test_a_debt_landing_on_main_during_the_heal_wait_makes_the_page_stale(self):
         self.heal_setup()
@@ -7836,7 +7836,7 @@ class GitLockExtendsForRateWaits(Env):
             return self.gh[min(self.gh_calls, len(self.gh)) - 1]
         p = unittest.mock.patch.object(merge, "sh", fake_sh)
         p.start(); self.addCleanup(p.stop)
-        host = merge.Host(required=["gates"], base="main", minute=60, now=self.clock.now, pause=pause)
+        host = merge.Host(required=["checks"], base="main", minute=60, now=self.clock.now, pause=pause)
         host.before_wait = getattr(self.glock, "extend_for", None)
         return host
 
@@ -8018,20 +8018,20 @@ from datetime import datetime, timedelta, timezone
 
 HEAD_SHA = "a" * 40
 START = datetime(2026, 10, 22, 10, 0, 0, tzinfo=timezone.utc)
-CAP_LINE = "job gates: 40 of 50 min; raise the cap from measured runs, or split its slowest suite"
+CAP_LINE = "job checks: 40 of 50 min; raise the cap from measured runs, or split its slowest suite"
 RE_CAP = "re-cap or split"
 REPO = pathlib.Path(HERE).parent
 
-GATES_WORKFLOW = "\n".join([
-    "name: gates", "on: push", "jobs:",
-    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+CHECKS_WORKFLOW = "\n".join([
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
     "  scope:", "    runs-on: ubuntu-latest", "    timeout-minutes: 10", "    steps:", "      - run: echo ok",
 ]) + "\n"
 
 # A new job with the provisional 60-minute cap (fewer than 5 green runs). The floor is then 65.
 PROVISIONAL_WORKFLOW = "\n".join([
-    "name: gates", "on: push", "jobs:",
-    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
     "  fresh:", "    runs-on: ubuntu-latest",
     "    # provisional: fewer than 5 green runs", "    timeout-minutes: 60", "    steps:", "      - run: echo ok",
 ]) + "\n"
@@ -8039,8 +8039,8 @@ PROVISIONAL_WORKFLOW = "\n".join([
 # Max job cap in this file is 50. Traps that a naive scan would read as caps: a step cap of 90, a
 # block-scalar line of 99, a comment of 120, a quoted string holding "# timeout-minutes: 130", and a lone quote.
 TRAPS_WORKFLOW = "\n".join([
-    "name: gates", "on: push", "jobs:",
-    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:",
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:",
     "      - run: echo it's fine",
     "      - run: |", "          echo \"timeout-minutes: 99\"", "          # timeout-minutes: 120",
     "      - run: \"echo # timeout-minutes: 130\"",
@@ -8064,7 +8064,7 @@ def check(name, bucket, minutes):
 
 
 def run(conclusion):
-    return {"name": "gates", "status": "completed", "conclusion": conclusion, "databaseId": 100}
+    return {"name": "checks", "status": "completed", "conclusion": conclusion, "databaseId": 100}
 
 
 def stamp_text(deadline):
@@ -8092,7 +8092,7 @@ class CapsHost(merge.Host):
     """A real Host whose only seam is `gh`. It serves fixture REST objects for the calls the merge tool makes: the pull request, the check runs of
     its head (with started_at and completed_at) and the commit statuses (none), and run list. Any other gh call fails the test."""
     def __init__(self, cwd, checks, runs):
-        super().__init__(required=["gates"], base="main", minute=60, pause=lambda s: None, cwd=cwd)
+        super().__init__(required=["checks"], base="main", minute=60, pause=lambda s: None, cwd=cwd)
         self.fixture = {"checks": checks, "runs": runs}
 
     def gh(self, args, cwd=None):
@@ -8117,7 +8117,7 @@ class JobCapWarning(Env):
     """Case a (the 70% line) and case b (the timeout verdict), through a real Host with fixture gh output."""
     def setUp(self):
         super().setUp()
-        push_base(self, {".github/workflows/gates.yml": GATES_WORKFLOW})
+        push_base(self, {".github/workflows/checks.yml": CHECKS_WORKFLOW})
 
     def read(self, host, fn):
         out = io.StringIO()
@@ -8126,27 +8126,27 @@ class JobCapWarning(Env):
         return result, out.getvalue()
 
     def test_a_checks_read_prints_one_line_for_a_job_at_80_percent_and_none_at_50(self):
-        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 5)], [run("success")])
+        host = CapsHost(self.co, [check("checks", "pass", 40), check("scope", "pass", 5)], [run("success")])
         _, out = self.read(host, lambda h: h.checks(7))
-        hits = [l for l in out.splitlines() if "job gates:" in l]
+        hits = [l for l in out.splitlines() if "job checks:" in l]
         self.assertEqual(len(hits), 1, out)
         self.assertIn(CAP_LINE, hits[0], out)
         self.assertNotIn("job scope", out)
 
     def test_a_wait_over_a_green_run_prints_the_line_and_still_merges(self):
-        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 5)], [run("success")])
+        host = CapsHost(self.co, [check("checks", "pass", 40), check("scope", "pass", 5)], [run("success")])
         (ok, why), out = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
         self.assertTrue(ok, why)
         self.assertIn(CAP_LINE, out)
 
     def test_a_cancel_at_the_full_cap_is_a_timeout_not_a_test_failure(self):
-        host = CapsHost(self.co, [check("gates", "cancel", 50)], [run("cancelled")])
+        host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
         (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
         self.assertFalse(ok, why)
         self.assertIn(RE_CAP, why)
 
     def test_a_cancel_sooner_than_the_cap_is_not_a_timeout(self):
-        host = CapsHost(self.co, [check("gates", "cancel", 2)], [run("cancelled")])
+        host = CapsHost(self.co, [check("checks", "cancel", 2)], [run("cancelled")])
         (ok, why), _ = self.read(host, lambda h: h.wait_checks(7, HEAD_SHA, 30))
         self.assertFalse(ok, why)
         self.assertNotIn(RE_CAP, why)
@@ -8156,21 +8156,21 @@ class StampDeadlineFloor(Env):
     """Recovery rule: a deadline under the floor does not stop the merge. The merge waits max(deadlineMinutes, floor)
     and prints one line naming the fix. The floor is the largest job timeout-minutes plus 5, clamped at 360."""
     def test_a_deadline_under_the_largest_cap_plus_five_waits_the_floor_and_names_the_fix(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/gates.yml": GATES_WORKFLOW})
+        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": CHECKS_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
         self.assertEqual(out.count(fix_line(55)), 1, out)
 
     def test_a_deadline_at_the_largest_cap_plus_five_waits_itself_and_names_nothing(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/gates.yml": GATES_WORKFLOW})
+        push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/checks.yml": CHECKS_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
         self.assertNotIn("raise merge.deadlineMinutes", out)
 
     def test_the_floor_is_the_largest_job_cap_in_any_file_and_ignores_steps_comments_and_strings(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(64), ".github/workflows/gates.yml": TRAPS_WORKFLOW,
+        push_base(self, {".github/stamp.json": merge_stamp_text(64), ".github/workflows/checks.yml": TRAPS_WORKFLOW,
                          ".github/workflows/sync.yml": SYNC_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
@@ -8178,7 +8178,7 @@ class StampDeadlineFloor(Env):
         self.assertEqual(out.count(fix_line(65)), 1, out)
 
     def test_a_provisional_sixty_minute_cap_sets_the_floor_at_sixty_five(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/gates.yml": PROVISIONAL_WORKFLOW})
+        push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/checks.yml": PROVISIONAL_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {65}, out)
@@ -8212,24 +8212,24 @@ def captured(fn):
 
 
 def cap_workflow(cap_text):
-    """A one-job workflow: job `gates` with `timeout-minutes: <cap_text>`, written as the file holds it."""
+    """A one-job workflow: job `checks` with `timeout-minutes: <cap_text>`, written as the file holds it."""
     return "\n".join([
-        "name: gates", "on: push", "jobs:",
-        "  gates:", "    runs-on: ubuntu-latest", f"    timeout-minutes: {cap_text}", "    steps:", "      - run: echo ok",
+        "name: checks", "on: push", "jobs:",
+        "  checks:", "    runs-on: ubuntu-latest", f"    timeout-minutes: {cap_text}", "    steps:", "      - run: echo ok",
     ]) + "\n"
 
 
-# Job gates has a literal 50 and job fresh an expression. Only the literal sets the floor, which is 55.
+# Job checks has a literal 50 and job fresh an expression. Only the literal sets the floor, which is 55.
 MIXED_WORKFLOW = "\n".join([
-    "name: gates", "on: push", "jobs:",
-    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
     "  fresh:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
 ]) + "\n"
 
-# Job gates has an expression cap (unknown) and job scope a literal 10.
+# Job checks has an expression cap (unknown) and job scope a literal 10.
 EXPR_AND_LITERAL_WORKFLOW = "\n".join([
-    "name: gates", "on: push", "jobs:",
-    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
     "  scope:", "    runs-on: ubuntu-latest", "    timeout-minutes: 10", "    steps:", "      - run: echo ok",
 ]) + "\n"
 
@@ -8239,10 +8239,10 @@ class CapReviewRound1(Env):
     expression caps are read as the merge tool reads them (F5)."""
     def setUp(self):
         super().setUp()
-        push_base(self, {".github/workflows/gates.yml": GATES_WORKFLOW})
+        push_base(self, {".github/workflows/checks.yml": CHECKS_WORKFLOW})
 
     def test_f1_head_read_writes_nothing_to_stdout_when_a_job_is_over_seventy_percent(self):
-        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 5)], [run("success")])
+        host = CapsHost(self.co, [check("checks", "pass", 40), check("scope", "pass", 5)], [run("success")])
         (verdict, detail), out = captured(lambda: host.head_read(7))
         self.assertEqual(verdict, "green", detail)
         self.assertEqual(out, "", "head_read is the guard's read and must print nothing")
@@ -8251,31 +8251,31 @@ class CapReviewRound1(Env):
         old = os.getcwd()
         os.chdir(os.path.join(self.co, "docs", "decisions"))
         self.addCleanup(os.chdir, old)
-        host = CapsHost(None, [check("gates", "cancel", 50)], [run("cancelled")])
+        host = CapsHost(None, [check("checks", "cancel", 50)], [run("cancelled")])
         (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
         self.assertFalse(ok, why)
         self.assertIn(RE_CAP, why)
 
     def test_f5_a_double_quoted_cap_reads_as_its_number_for_the_warning(self):
-        push_base(self, {".github/workflows/gates.yml": cap_workflow('"50"')})
-        host = CapsHost(self.co, [check("gates", "pass", 40)], [run("success")])
+        push_base(self, {".github/workflows/checks.yml": cap_workflow('"50"')})
+        host = CapsHost(self.co, [check("checks", "pass", 40)], [run("success")])
         _, out = captured(lambda: host.checks(7))
         self.assertIn(CAP_LINE, out)
 
     def test_f5_a_single_quoted_cap_reads_as_its_number_for_a_timeout(self):
-        push_base(self, {".github/workflows/gates.yml": cap_workflow("'50'")})
-        host = CapsHost(self.co, [check("gates", "cancel", 50)], [run("cancelled")])
+        push_base(self, {".github/workflows/checks.yml": cap_workflow("'50'")})
+        host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
         (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
         self.assertFalse(ok, why)
         self.assertIn(RE_CAP, why)
 
     def test_f5_an_expression_cap_is_unknown_so_it_gives_no_warning_and_no_timeout(self):
-        push_base(self, {".github/workflows/gates.yml": EXPR_AND_LITERAL_WORKFLOW})
-        host = CapsHost(self.co, [check("gates", "pass", 40), check("scope", "pass", 9)], [run("success")])
+        push_base(self, {".github/workflows/checks.yml": EXPR_AND_LITERAL_WORKFLOW})
+        host = CapsHost(self.co, [check("checks", "pass", 40), check("scope", "pass", 9)], [run("success")])
         _, out = captured(lambda: host.checks(7))
         self.assertIn("job scope: 9 of 10 min", out, "the literal cap must still warn: the control proves the path is live")
-        self.assertNotIn("job gates", out)
-        host = CapsHost(self.co, [check("gates", "cancel", 50)], [run("cancelled")])
+        self.assertNotIn("job checks", out)
+        host = CapsHost(self.co, [check("checks", "cancel", 50)], [run("cancelled")])
         (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
         self.assertFalse(ok, why)
         self.assertNotIn(RE_CAP, why)
@@ -8313,35 +8313,35 @@ class CapReviewFloor(Env):
     """Recovery rule: the floor is min(largest cap + 5, 360) (F2), and a quoted or expression cap
     is read as the merge tool reads it when it sets the floor (F5)."""
     def test_f2_a_cap_of_356_waits_the_clamped_floor_of_360_at_a_deadline_of_360(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(360), ".github/workflows/gates.yml": cap_workflow("356")})
+        push_base(self, {".github/stamp.json": merge_stamp_text(360), ".github/workflows/checks.yml": cap_workflow("356")})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {360}, out)
         self.assertNotIn("raise merge.deadlineMinutes", out)
 
     def test_f2_a_cap_of_360_waits_the_clamped_floor_of_360_at_a_deadline_of_359(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(359), ".github/workflows/gates.yml": cap_workflow("360")})
+        push_base(self, {".github/stamp.json": merge_stamp_text(359), ".github/workflows/checks.yml": cap_workflow("360")})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {360}, out)
         self.assertEqual(out.count(fix_line(360)), 1, out)
 
     def test_f5_a_double_quoted_cap_sets_the_floor_like_a_plain_cap(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/gates.yml": cap_workflow('"50"')})
+        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": cap_workflow('"50"')})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
         self.assertEqual(out.count(fix_line(55)), 1, out)
 
     def test_f5_an_expression_cap_sets_no_floor(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(5), ".github/workflows/gates.yml": cap_workflow("${{ inputs.cap }}")})
+        push_base(self, {".github/stamp.json": merge_stamp_text(5), ".github/workflows/checks.yml": cap_workflow("${{ inputs.cap }}")})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {5}, out)
         self.assertNotIn("raise merge.deadlineMinutes", out)
 
     def test_f5_the_literal_cap_sets_the_floor_beside_an_expression_cap(self):
-        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/gates.yml": MIXED_WORKFLOW})
+        push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": MIXED_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
@@ -8361,35 +8361,35 @@ class DuplicateJobIds(Env):
 
     def test_f8_the_warning_keeps_the_larger_of_two_caps_for_one_job_id(self):
         push_base(self, {".github/workflows/a.yml": cap_workflow("100"), ".github/workflows/b.yml": cap_workflow("10")})
-        host = CapsHost(self.co, [check("gates", "pass", 60)], [run("success")])
+        host = CapsHost(self.co, [check("checks", "pass", 60)], [run("success")])
         _, out = captured(lambda: host.checks(7))
-        self.assertNotIn("job gates", out, "60 of 100 is under 70 percent: the smaller cap of 10 must not be the one kept")
+        self.assertNotIn("job checks", out, "60 of 100 is under 70 percent: the smaller cap of 10 must not be the one kept")
 
 
 class NestedCheckout(Env):
     """F9: a folder holding .git ends the search for workflows. A nested checkout with none reads none, not the parent's."""
     def setUp(self):
         super().setUp()
-        push_base(self, {".github/workflows/gates.yml": GATES_WORKFLOW})
+        push_base(self, {".github/workflows/checks.yml": CHECKS_WORKFLOW})
 
     def test_f9_a_nested_checkout_with_no_workflows_reads_no_cap_from_the_parent(self):
         nested = os.path.join(self.co, "nested")
         os.makedirs(nested)
         sh(nested, "git", "init", "-q")
-        host = CapsHost(nested, [check("gates", "cancel", 50)], [run("cancelled")])
+        host = CapsHost(nested, [check("checks", "cancel", 50)], [run("cancelled")])
         (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
         self.assertNotIn(RE_CAP, why)
 
 
 MAIN_WORKFLOW = "\n".join([
-    "name: gates", "on: push", "jobs:",
-    "  gates:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 50", "    steps:", "      - run: echo ok",
     "  scope:", "    runs-on: ubuntu-latest", "    timeout-minutes: 10", "    steps:", "      - run: echo ok",
-    "  gates-macos:", "    runs-on: macos-latest", "    timeout-minutes: 30", "    steps:", "      - run: echo ok",
+    "  checks-macos:", "    runs-on: macos-latest", "    timeout-minutes: 30", "    steps:", "      - run: echo ok",
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="gates", event="push", path=".github/workflows/gates.yml"):
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml"):
     """One run on main, as `GET actions/runs` lists it."""
     return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
             "head_sha": f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}"}
@@ -8432,7 +8432,7 @@ class RedMainBrake(Env):
     """c166: no batch merge onto a red main. The red-main check judges main's latest completed run, job by job (decision no-merge-onto-red-main)."""
     def setUp(self):
         super().setUp()
-        push_base(self, {".github/workflows/gates.yml": MAIN_WORKFLOW})  # the caps the timeout verdict reads
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # the caps the timeout verdict reads
 
     def go(self, runs, jobs, *flags, confirm=True, **kw):
         self.host = MainRunsHost(self.co, self.other, runs, jobs, **kw)
@@ -8451,44 +8451,44 @@ class RedMainBrake(Env):
         self.assertTrue(getattr(self.host, "merged", False), out)
 
     # Oct 13-14: the latest main run has one failed job among passes, and a job cancelled at its cap.
-    OCT14 = {901: [main_job("scope", "success"), main_job("gates", "failure", 20), main_job("gates-macos", "cancelled", 30)]}
+    OCT14 = {901: [main_job("scope", "success"), main_job("checks", "failure", 20), main_job("checks-macos", "cancelled", 30)]}
 
     def test_a_red_main_refuses_and_names_the_red_job_and_the_run(self):
         rc, out, before = self.go([main_run(901, "failure")], self.OCT14)
         self.refused(rc, out, before)
-        self.assertIn("gates: fail", out)
+        self.assertIn("checks: fail", out)
         self.assertIn("run 901", out)
         self.assertIn("https://github.com/o/r/actions/runs/901", out)
-        self.assertNotIn("gates-macos", out, "a job cancelled at its cap is not a red step")
+        self.assertNotIn("checks-macos", out, "a job cancelled at its cap is not a red step")
         self.assertIn("--base-red-ok", out)
 
     def test_a_main_run_red_only_by_a_timeout_does_not_refuse(self):
-        jobs = {902: [main_job("scope", "success"), main_job("gates", "success", 20), main_job("gates-macos", "cancelled", 30)]}
+        jobs = {902: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "cancelled", 30)]}
         rc, out, _ = self.go([main_run(902, "failure")], jobs)
         self.merged(rc, out)
 
     def test_a_main_run_red_only_by_a_cancelled_twin_job_does_not_refuse(self):
         # the timeout explains the failure; the cancelled twin beside its passing job is no red job
-        jobs = {903: [main_job("gates-macos", "cancelled", 30), main_job("gates", "cancelled", 2), main_job("gates", "success", 20)]}
+        jobs = {903: [main_job("checks-macos", "cancelled", 30), main_job("checks", "cancelled", 2), main_job("checks", "success", 20)]}
         rc, out, _ = self.go([main_run(903, "failure")], jobs)
         self.merged(rc, out)
 
     def test_a_newest_run_cancelled_with_no_red_job_is_unknown_not_an_older_run(self):
         # on main the twin rule would reach across commits: the cancelled run is judged itself, never swapped for an older green one
-        jobs = {904: [main_job("scope", "success"), main_job("gates", "cancelled", 2)]}
+        jobs = {904: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
         rc, out, before = self.go([main_run(904, "cancelled"), main_run(903, "success")], jobs)
         self.refused(rc, out, before)
         self.assertIn("UNKNOWN", out)
         self.assertIn("run 904", out)
 
     def test_a_newest_run_cancelled_by_a_timeout_is_not_red(self):
-        jobs = {904: [main_job("scope", "success"), main_job("gates-macos", "cancelled", 30)]}
+        jobs = {904: [main_job("scope", "success"), main_job("checks-macos", "cancelled", 30)]}
         rc, out, _ = self.go([main_run(904, "cancelled"), main_run(903, "failure")], jobs)
         self.merged(rc, out)
 
     def test_a_failed_run_with_no_judged_job_is_red(self):
         # a broken workflow file: startup_failure and no job; or failure with every job passing
-        for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("gates", "success", 20)])):
+        for conclusion, jobs in (("startup_failure", []), ("failure", [main_job("checks", "success", 20)])):
             with self.subTest(conclusion=conclusion, jobs=len(jobs)):
                 rc, out, before = self.go([main_run(913, conclusion)], {913: jobs})
                 self.refused(rc, out, before)
@@ -8497,32 +8497,32 @@ class RedMainBrake(Env):
 
     def test_a_run_of_a_workflow_file_gone_from_main_is_not_judged(self):
         # a renamed or deleted workflow: its last red run stays in the page, but no new run will ever replace it
-        rc, out, _ = self.go([main_run(910, "success", name="checks"), main_run(909, "failure", path=".github/workflows/old-gates.yml")],
-                             {909: [main_job("gates", "failure", 20)]})
+        rc, out, _ = self.go([main_run(910, "success", name="checks"), main_run(909, "failure", path=".github/workflows/old-checks.yml")],
+                             {909: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
 
     def test_runs_are_judged_per_workflow_file_not_per_name(self):
         # the workflow's name changed in the same file: the newer run is the verdict
-        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure")], {911: [main_job("gates", "failure", 20)]})
+        rc, out, _ = self.go([main_run(912, "success", name="checks"), main_run(911, "failure", name="old-checks")], {911: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
 
     def green_run_of(self, event):
-        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")], {914: [main_job("gates", "failure", 20)]})
+        rc, out, _ = self.go([main_run(915, "success", event=event), main_run(914, "failure")], {914: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
 
     def test_a_green_dispatch_run_clears_an_older_red_push_run(self):
-        self.green_run_of("workflow_dispatch")  # `gh workflow run gates.yml --ref main`, the remedy classify prints
+        self.green_run_of("workflow_dispatch")  # `gh workflow run checks.yml --ref main`, the remedy classify prints
 
     def test_a_green_schedule_run_clears_an_older_red_push_run(self):
         self.green_run_of("schedule")
 
     def test_a_pull_request_run_is_not_judged(self):
-        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("gates", "failure", 20)]})
+        rc, out, _ = self.go([main_run(917, "failure", event="pull_request"), main_run(916, "success")], {917: [main_job("checks", "failure", 20)]})
         self.merged(rc, out)
 
     def test_a_newer_run_in_progress_is_skipped_for_the_latest_completed_one(self):
         rc, out, before = self.go([main_run(906, None, status="in_progress"), main_run(905, "failure")],
-                                  {905: [main_job("gates", "failure", 20)]})
+                                  {905: [main_job("checks", "failure", 20)]})
         self.refused(rc, out, before)
         self.assertIn("run 905", out)
         self.assertNotIn("run 906", out)
@@ -8535,10 +8535,10 @@ class RedMainBrake(Env):
         self.assertFalse([r for r in self.host.reads if r.endswith("/jobs")], "a green run needs no jobs read")
 
     def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
-        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", "this batch carries the gates fix")
+        rc, out, _ = self.go([main_run(901, "failure")], self.OCT14, "--base-red-ok", "this batch carries the checks fix")
         self.merged(rc, out)
         self.assertIn("run 901", out)
-        self.assertIn("--base-red-ok, reason: this batch carries the gates fix", out)
+        self.assertIn("--base-red-ok, reason: this batch carries the checks fix", out)
         self.assertNotIn("Owner override", out, "a reason flag Claude can type is not the owner's override")
 
     def test_the_flag_with_no_reason_does_not_lift(self):

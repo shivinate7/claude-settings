@@ -5,7 +5,7 @@
 # What it does:
 #   ~\.claude\CLAUDE.md      -> one-line pointer: @C:/path/to/claude-settings/CLAUDE.md (UTF-8, no BOM)
 #   ~\.claude\agents\*.md    -> role definitions (builder, reviewer), symlink per file
-#   ~\.claude\lint\*         -> STE linter and report gate (needs python3 on PATH), symlink per file
+#   ~\.claude\lint\*         -> STE linter and report guard (needs python3 on PATH), symlink per file
 #   ~\.claude\hooks\*        -> PreToolUse guard + session-start line, symlink per file
 #   ~\.claude\settings.json  -> symlink to <clone>\settings.json (needs Developer Mode or admin),
 #                               falls back to a copy plus a git post-merge hook that re-copies
@@ -232,7 +232,7 @@ if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
   exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`$repo/install.ps1"
 fi
 # put SRC DEST: build the file at "DEST.cs-new" in DEST's folder, then rename it over DEST, so DEST
-# is never absent or half-written (a gate hook reads it at any moment). A .py that carries an
+# is never absent or half-written (a guard hook reads it at any moment). A .py that carries an
 # guard.py or guard_*.py gets this run's id on its whole placeholder line, the same stamp install.ps1
 # writes. A rename a reader blocks is retried for about 2.5 s; if it still fails, DEST stays as it
 # was, the failure is printed and logged, and the hook exits 1 at the end.
@@ -474,7 +474,7 @@ function Set-InstallId([string]$Path) {
 
 # No-gap replace, one route for every file: build the new file or link at "$Dest.cs-new" in the
 # same folder, stamp it (Set-InstallId), then move it onto $Dest in one call (Move-OverFile).
-# $Dest is never absent and never half-written, so a gate hook that reads it mid-run sees the
+# $Dest is never absent and never half-written, so a guard hook that reads it mid-run sees the
 # old file or the new one. A failed step (a file lock that outlasts the retries, say) leaves
 # $Dest as it was. The failure is logged and the run goes on.
 # Returns 'linked', 'copied', or 'failed'. The temp name ends in .cs-new, so it does not match a
@@ -503,7 +503,7 @@ function Install-File([string]$Src, [string]$Dest) {
 # $KeepOld: it is a backup). If the second rename fails the first is undone.
 # Named gap: Windows cannot swap a directory in one call, so a real directory replaced by a
 # link (or a link by a copy) is absent for the time between the two renames. Skills are not
-# gate scripts; no hook fails closed on one. Returns 'linked', 'copied', or 'failed'.
+# guard scripts; no hook fails closed on one. Returns 'linked', 'copied', or 'failed'.
 function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) {
     $new = "$Dest.cs-new"
     $state = 'unchanged'   # unchanged | refreshing | moved-away | rollback-failed
@@ -747,7 +747,7 @@ if (Test-Path (Join-Path $RepoDir 'package-lock.json')) {
     }
 }
 if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Log "python3 not found on PATH; the guard and the other gates refuse Bash, Write and Edit calls until Python 3 is installed"
+    Log "python3 not found on PATH; the guard and the other guards refuse Bash, Write and Edit calls until Python 3 is installed"
 }
 
 # Retries each file Install-File could not replace, with a longer back-off (2, 4, 8 s), then re-reads

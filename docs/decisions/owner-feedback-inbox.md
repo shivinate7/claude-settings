@@ -14,8 +14,8 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   not captured.
 - **Burst.** A turn's messages are the ones captured since the last Stop. They are a burst when there
   are two or more, or when one message has three or more non-blank lines or two or more bullet lines.
-  Only a burst's messages need items. A lone message of one or two plain lines never triggers the gate.
-  The gate keeps its turn count in `<session_id>.inbox.turns`, beside the inbox. A missing or damaged
+  Only a burst's messages need items. A lone message of one or two plain lines never triggers the guard.
+  The guard keeps its turn count in `<session_id>.inbox.turns`, beside the inbox. A missing or damaged
   count makes every saved message this turn's, so it fails toward asking.
 - **Jot, not solve.** For each burst message, the session writes one or more items: an id, one kind,
   and a home. The work can wait. The jotting cannot.
@@ -27,7 +27,7 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   task. `question` (answered in the reply): `answered`. `note` (context with no decision): `noted`.
   `standing` (a session-only process): the handoff's process-only section, re-read after compaction.
   Promote it to a ruling to keep it.
-- **The gate.** A Stop check refuses to end a turn in four cases. A burst's message has no items. An
+- **The guard.** A Stop check refuses to end a turn in four cases. A burst's message has no items. An
   item has no kind or home. A ruling or task, open or closed, names a home that is not a file under its
   kind's layout paths that some branch's tree holds. An open standing item id is missing from the
   handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. It exits on
@@ -35,7 +35,7 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
   in one line.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
-  home holds it for good. The gate stops asking for a closed standing id in the handoff.
+  home holds it for good. The guard stops asking for a closed standing id in the handoff.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
   message, the hook tells the session, so it jots the message by hand.
 - **Compaction.** The compact hook lists open item ids.

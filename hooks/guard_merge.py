@@ -159,7 +159,7 @@ def has_workflows(where: str) -> bool:
         return True
 
 
-def merge_gate(selector, repo: str, where: str):
+def merge_check(selector, repo: str, where: str):
     """Return (verdict, detail) for the head of the named pull request: green, pending, red or
     unknown. One read, no wait, run in `where` so `gh` names the repo the command names."""
     module = merge_module()
@@ -170,7 +170,7 @@ def merge_gate(selector, repo: str, where: str):
     return host.head_read(selector, nothing_is_green=not has_workflows(where))
 
 
-MERGE_GATE_REASON = (
+MERGE_CHECK_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
     "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on every check, then "
@@ -178,8 +178,8 @@ MERGE_GATE_REASON = (
 )
 
 
-def merge_gate_reason(verdict: str, detail: str) -> str:
-    return MERGE_GATE_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+def merge_check_reason(verdict: str, detail: str) -> str:
+    return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
 def _merge_config_at(root: str) -> bool:

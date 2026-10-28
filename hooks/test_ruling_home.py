@@ -282,7 +282,7 @@ def case_bash_names_specific_file():
 
 
 # ---------------------------------------------------------------------------
-# The Bash path, naming only the folder: every .md file in it counts, each still gated on
+# The Bash path, naming only the folder: every .md file in it counts, each still checked on
 # its own FRESH mtime.
 
 def case_bash_names_folder_only():

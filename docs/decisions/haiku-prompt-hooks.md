@@ -8,7 +8,7 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 | Hook on | Rules it judges |
 |---|---|
-| `Agent` (`hooks/call_judge.py`) | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit gate of `agent-model-cap` |
+| `Agent` (`hooks/call_judge.py`) | `roles-brief-contents`, `tokens-point-brief-at-files`, and the Explore-audit guard of `agent-model-cap` |
 
 - The Agent spawn judge and the AskUserQuestion reviewer are one command hook, `hooks/call_judge.py`, so an override can lift them.
 - The SendMessage wording judge is a command hook, `hooks/sendmessage_state.py`, so an override can lift it. It judges `parallelism-no-mid-task-talk` by wording alone.

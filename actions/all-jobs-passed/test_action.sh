@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Red run: the gate must fail on failure, cancelled, skipped and empty needs; pass on all success.
+# Red run: the check must fail on failure, cancelled, skipped and empty needs; pass on all success.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 bad=0

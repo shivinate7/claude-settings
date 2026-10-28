@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for ste_lint.apply_fixes, the STE auto-fix (decision ste-gate-fixes-not-nags).
+"""Tests for ste_lint.apply_fixes, the STE auto-fix (decision ste-guard-fixes-not-nags).
 
 The fixer keeps only the fixed bloat phrases of STE011, minus eight rows. The three rows the
 decision plain-prose-lint names (in between, in terms of, it would appear that) are not in the

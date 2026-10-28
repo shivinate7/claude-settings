@@ -12,7 +12,7 @@ other files cite it by that name.
 names this record. A config that cannot be read is reported as unknown, never as armed or disarmed.
 
 Reason: the sweep may run only where the liveness read is proven. The read answers alive, dead, or unreadable. Unreadable reaches the
-caller as `None`, and every caller keeps or refuses on `None`. A Windows job in `.github/workflows/gates.yml` runs the guard and sweep
+caller as `None`, and every caller keeps or refuses on `None`. A Windows job in `.github/workflows/checks.yml` runs the guard and sweep
 suites and their mutation tests.
 
 Kind: process
