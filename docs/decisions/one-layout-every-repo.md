@@ -37,6 +37,10 @@ file may repeat a path that map keeps for the kind, never name another. The last
   design ideas.
 - Owner ruling, 2026-10-26 (o15 answer a): the layout gets a core `todo` kind at `docs/todo.md`, with a
   legacy entry for each repo that keeps its tasks elsewhere.
+- Owner ruling, 2026-10-28 (waiting-page item 3 a): a repo counts as rolled out only with `"rolled-out": true`
+  in its `.claude/layout-extras.json`, a mark separate from its other keys.
+- Owner ruling, 2026-10-28 (waiting-page item 32, answer c): home gets its mark at its own roll-out, not
+  before. The mark change waits for that roll-out.
 - A move keeps each file name. No record is renumbered or renamed (one-shared-record-stamp).
 
 Reason: the tools disagreed on where records live. `lint/ste_lint.py` read `docs/decisions` by default,

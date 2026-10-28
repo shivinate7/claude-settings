@@ -25,6 +25,8 @@ means keep.
 - A `buildDirs` value that is not a list of strings deletes nothing, defaults included. `sweep.read_optout` is the one reader of
   `.claude/janitor.json`.
 - Windows deletes the same as macOS and Linux (owner, 2026-10-12). `sweep.is_link` is the one link test.
+- An agent lock does not keep build folders (owner, 2026-10-28, waiting-page item 35 a): the harness holds a lock on
+  every agent tree all session.
 - The hook stops its build-folder scan after 20 s and keeps what it did not reach. The hook's own limit is 60 s.
 - The sweep deletes leftover trash only in registered, non-primary worktrees directly under `.claude/worktrees`.
 
