@@ -1,6 +1,6 @@
 ---
 name: project-ops
-description: Use when the owner asks to give a repo standing roles, counted handoffs, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and hand-off templates. Not for ordinary code edits.
+description: Use when the owner asks to give a repo standing roles, counted handoffs, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
@@ -12,9 +12,9 @@ per role. Without a project, each role is one Claude Code session, and the owner
 ## What it packages
 
 - **Standing roles.** Triage, build advisor, local liaison and merge hand. `templates/operating-model.md`
-  says what each role owns and the hand-off rule that replaces it.
+  says what each role owns and the handoff rule that replaces it.
 - **The roster.** One list of who holds each role now. `templates/roster.md`.
-- **Autopilot.** A step that needs the owner's answer gets a "Deferred" line and waits. All other
+- **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
   The model adds only the "frozen at <sha>" line on each merge go.
@@ -24,7 +24,7 @@ per role. Without a project, each role is one Claude Code session, and the owner
   README gives the format. `templates/operating-model.md` says when to message instead.
 - **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`.
 
-A role handoff note and a session handoff share one meaning: notes one holder writes so the next
+A role handoff note and a session handoff are two cases of one meaning: notes one holder writes so the next
 reader can continue (GLOSSARY.md, "handoff"). A session handoff is the notes file of one session
 under `~/.claude/handoffs/`. A role handoff note is a file in the record branch's `handoffs/` folder
 that a standing role writes for its successor.
