@@ -525,6 +525,12 @@ class LintTools(Job):
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("pipx", lines[0])
 
+    def test_a_tool_free_failure_with_no_pipx_still_fails_the_code_check(self):
+        self.lane({"a.py": 'print("fine")\n', "b.rb": "puts 1\n"})  # no ruby row: a failure that needs no tool
+        rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"), env=NO_PIPX)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+        self.assertIn("could not start", lines[0])
+
     def test_the_code_check_with_no_base_is_skipped(self):
         rc, lines, out = self.run_job(self.CODE)
         self.assertEqual(self.verdicts(lines), ["skipped"], out)

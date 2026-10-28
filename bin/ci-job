@@ -10,7 +10,8 @@
 # (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. Two `uses:` it runs in place, each
 # by its one home and only with a base: actions/ste-lint as `bin/ste-changed <base>` (shared with the action through
 # actions/ste-lint/run.sh), and actions/code-check as its action.yml's command, `python3 code_check.py --base <base>`
-# from this repo. A pinned tool code_check.py could not start makes that step unknown, never PASS or FAIL.
+# from this repo. When every failure code_check.py reports is a pinned tool that could not start, the step is
+# unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips. A lane runs `bin/ci-job gates --lint --base origin/main` before it
@@ -167,14 +168,17 @@ def is_lint(step):
 
 
 def could_not_start(log, start):
-    """Each 'could not start' line code_check.py printed in this run's part of the log: a missing pinned tool."""
+    """(each 'could not start' failure, True when every failure is one) from code_check.py's ::error lines in this
+    run's part of the log. Only then is the step unknown: a failure that needed no tool is still a FAIL."""
     try:
         with open(log, "rb") as f:
             f.seek(start)
             text = f.read().decode("utf-8", "replace")
     except OSError:
-        return []
-    return sorted(set(re.findall(r"^(\S+ could not start: .*)$", text, re.M)))
+        return [], False
+    errors = re.findall(r"^::error title=code-check::(.*)$", text, re.M)
+    unstarted = sorted(set(e for e in errors if re.match(r"\S+ could not start: ", e)))
+    return unstarted, bool(errors) and len(unstarted) == len(set(errors))
 
 
 def plan(step, pr, values):
@@ -300,7 +304,7 @@ def main(argv):
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET},
                                       **env, "VERDICT_LOG": log})
             gone = missing_in_log(log, start, script)
-            unstarted = could_not_start(log, start) if known_action(step) == "code-check" else []
+            unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
         finally:
             os.remove(script)
         first = next((ln for ln in done.stdout.splitlines() if ln.startswith(("PASS ", "FAIL "))),
@@ -308,11 +312,13 @@ def main(argv):
         if done.returncode == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
-        elif unstarted:
+        elif unstarted and only:
             state = "unknown"
             first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
         else:
             state = "PASS" if done.returncode == 0 else "FAIL"
+            if unstarted:
+                first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
         tally["FAIL" if state == "FAIL" else "unknown"] += state != "PASS"
         print("%-15s %s: %s" % (state, name, first))
     if not dry:
