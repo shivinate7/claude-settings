@@ -30,6 +30,8 @@ Oct 28 16:15 CDT (shiv, waiting page): item 50 b, lane sessions run Opus; they k
 
 Fact for the rotation want (coordinator, measured Oct 28 16:18 CDT): get_session on a child returns external_metadata.context_usage {used_tokens, max_tokens} and autocompact_state {threshold, effective_window}. The q_max lane read 171216 of 500000, threshold 384000. So the coordinator reads each standing session's tally itself, with no self-report.
 
+Measured Oct 28 17:53 CDT (coordinator): a cloud lane in shiv's environment "lane test" reports context_usage max_tokens 200000 against the repo default 500000, so a per-environment context window works (items 53 a, 58).
+
 Item 51 a's prose lane starts after batch 13 merges, because it edits #780's words, which are not on main yet.
 
 Placed after c200 (triage 12, Oct 28).
