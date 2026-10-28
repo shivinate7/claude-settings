@@ -6,15 +6,17 @@
 # worktree the hook runs in, so a relative path gets one copy per worktree that exists now.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
-dir="$(git config --path --get core.hooksPath || true)"
+# Each command substitution is its own assignment: as an argument, its failure escapes set -e.
+cdir="$(git rev-parse --git-common-dir)"
+dir="$(git config --path --get core.hooksPath)" || dir=""
 put() {
-  mkdir -p "$1"
+  mkdir -p "$1" || { echo "ERROR: cannot create $1; in a linked worktree .git is a file" >&2; exit 1; }
   cp "$here/reference-transaction" "$1/reference-transaction"
   chmod +x "$1/reference-transaction"
   echo "installed $1/reference-transaction"
 }
 case "$dir" in
-  "") put "$(git rev-parse --git-common-dir)/hooks" ;;
+  "") put "$cdir/hooks" ;;
   /*) put "$dir" ;;
   *)
     # The first entry of a bare repo is its git dir, which is where git resolves the path there.
