@@ -8492,7 +8492,7 @@ class RedMainBrake(Env):
             with self.subTest(conclusion=conclusion, jobs=len(jobs)):
                 rc, out, before = self.go([main_run(913, conclusion)], {913: jobs})
                 self.refused(rc, out, before)
-                self.assertIn(f"run 913", out)
+                self.assertIn("run 913", out)
                 self.assertIn(conclusion, out)
 
     def test_a_run_of_a_workflow_file_gone_from_main_is_not_judged(self):
