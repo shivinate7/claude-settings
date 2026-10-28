@@ -1,9 +1,9 @@
 {
  "title": "A local lint run with no base cannot read as a pass",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.3032,
  "why": "Incident, Oct 28 (orchestrator): batch 5's local `ci-job gates --lint` passed, then CI's gates job failed on lint/check_comment_narration.py (dated comments from c148), costing a CI run.",
- "note": "Debt. Measured by triage 10 on main 4e913588: with --base origin/main the lint plan runs the comment narration check; with no --base it skips it, and the run still reads as a pass. The silent-undo and STE lint steps skip the same way. Next cloud lane: bin/ci-job --lint with no --base exits non-zero and names each skipped pull-request step, or takes origin/main as the default base; the lane picks one and says why in the decision that holds ci-job. Red first: today's no-base run over a planted dated comment passes. Touches bin/ci-job and its tests only. Needs no answer. Port: no; ci-job lives in claude-settings. Placed ahead of c166 (triage 10, Oct 28): every lane and batch runs this check, and a false pass costs a 50 to 60 min CI run.",
- "updatedAt": "2026-10-28T08:50:00Z"
+ "note": "Debt. Measured by triage 10 on main 4e913588: with --base origin/main the lint plan runs the comment narration check; with no --base it skips it, and the run still reads as a pass. The silent-undo and STE lint steps skip the same way. Next cloud lane: bin/ci-job --lint with no --base exits non-zero and names each skipped pull-request step, or takes origin/main as the default base; the lane picks one and says why in the decision that holds ci-job. Red first: today's no-base run over a planted dated comment passes. Touches bin/ci-job and its tests only. Needs no answer. Port: no; ci-job lives in claude-settings. Placed ahead of c166 (triage 10, Oct 28): every lane and batch runs this check, and a false pass costs a 50 to 60 min CI run. Doing: lane started Oct 28 (orchestrator, session_013NEJL2Qcbw).",
+ "updatedAt": "2026-10-28T08:51:21Z"
 }

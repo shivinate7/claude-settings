@@ -1,9 +1,9 @@
 {
  "title": "q_max's silent-undo check follows claude-settings main, not a stale pin",
  "phase": "cleanup",
- "status": "todo",
+ "status": "doing",
  "order": 103.3605,
  "why": "From c76's q_max lane, Oct 28: q_max's gate.yml still checks out claude-settings at e77ccbeb for its silent-undo check, the same stale-pin cost c76 removes.",
- "note": "Next cloud lane, in q_max (grant: waiting page item 2, a, Oct 28 02:31 CDT; read q_max's open branches and PRs first): move gate.yml's silent-undo checkout pin to a claude-settings main commit that descends from e77ccbeb, pin lines only (rule git-integration-branch-merge). Its reviewer checks only that the lane changes pin lines, to a main commit that descends from e77ccbeb. Needs no answer. Port: this is q_max's part of c76. Placed after c76 (triage 10, Oct 28): its named follow-up.",
- "updatedAt": "2026-10-28T08:30:07Z"
+ "note": "Next cloud lane, in q_max (grant: waiting page item 2, a, Oct 28 02:31 CDT; read q_max's open branches and PRs first): move gate.yml's silent-undo checkout pin to a claude-settings main commit that descends from e77ccbeb, pin lines only (rule git-integration-branch-merge). Its reviewer checks only that the lane changes pin lines, to a main commit that descends from e77ccbeb. Needs no answer. Port: this is q_max's part of c76. Placed after c76 (triage 10, Oct 28): its named follow-up. Doing: q_max lane started Oct 28 (orchestrator).",
+ "updatedAt": "2026-10-28T08:51:21Z"
 }
