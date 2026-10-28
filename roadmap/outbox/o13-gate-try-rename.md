@@ -5,3 +5,4 @@
   - The local checks are green, except the load-brake probe case, which is red on main too.
   - Batch 4 brought `gates` names into merge/merge.py. They are renamed to `checks` (commit 77a5993e).
   - The PR merges alone after batch 5, with shiv's protection switch (waiting-page item 33).
+  - Paused (Oct 28 09:00 UTC): batch 5 (#754) carries step c162, which also edits merge.py and test_merge.py. After #754 lands, merge main again (merge commit), rename any new `gates` names, re-run the checks, push, then message the orchestrator.
