@@ -22,6 +22,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["gates_windows", "gates_windows_merge", "gates_windows_rest", "gates_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
+# Flags derived from others, kept out of JOB_FLAGS so the exact-set cases below stay about the base flags:
+# gates_windows_sweep is set with gates_windows_rest, gates_guard when both `code` and `guard` are set.
+DERIVED_FLAGS = ["gates_windows_sweep", "gates_guard"]
 ALL = JOB_FLAGS + STEP_FLAGS
 BASH = shutil.which("bash")
 
@@ -65,6 +68,35 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None):
         lines = open(out).read().split()
         os.remove(out)
         return dict(l.split("=", 1) for l in lines)
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class DerivedFlags(unittest.TestCase):
+    PATHS = [["hooks/guard.py"], ["hooks/test_guard.py"], ["janitor/sweep.py"], ["hooks/test_config_watch.py"], ["merge/merge.py"],
+             ["README.md"], ["skills/ci-hygiene/SKILL.md"], ["bin/ios-ship"], ["lint/layout.json"], ["actions/stamp/stamp.mjs"],
+             ["install.ps1"], ["unlisted/new-file.txt"], ["bin/verdict"], ["settings.json"], ["bin/shoot"]]
+
+    def check(self, got):
+        for n in DERIVED_FLAGS:
+            self.assertIn(n, got, f"output {n} missing: {got}")
+        self.assertEqual(got["gates_windows_sweep"], got["gates_windows_rest"], got)
+        both = got["code"] == "true" and got["guard"] == "true"
+        self.assertEqual(got["gates_guard"], "true" if both else "false", got)
+
+    def test_sweep_flag_follows_rest_and_guard_flag_needs_code_and_guard(self):
+        seen = set()
+        for paths in self.PATHS:
+            for event in ("pull_request", "push"):
+                with self.subTest(paths=paths, event=event):
+                    got = run(paths, event=event)
+                    self.check(got)
+                    seen.add((got["gates_windows_rest"], got["gates_guard"]))
+        # The sample reaches both ends: everything on, and a docs-only change with everything off.
+        self.assertTrue({("true", "true"), ("false", "false")} <= seen, seen)
+
+    def test_unreadable_diff_turns_the_derived_flags_on(self):
+        self.check(run(["hooks/guard.py"], base="0" * 40))
+        self.assertEqual(run(["hooks/guard.py"], base="0" * 40)["gates_guard"], "true")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
