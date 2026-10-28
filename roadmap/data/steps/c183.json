@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.338997,
  "why": "Follows c181. From the q_max and banchi c127 roll-outs, Oct 28 09:55 CDT (orchestrator): both repos still need excludes for .gz, .xlsx, .onnx, .npz, .nvmrc and .npmrc, and actions/code-check/standard.json's not_code list has no row for any of them.",
- "note": "Next cloud lane, in c181's pattern: add not_code rows to actions/code-check/standard.json for .gz, .xlsx, .onnx, .npz, .nvmrc and .npmrc. Red first on a fixture repo with each. Touches actions/code-check/ only. Needs no answer. Port: yes, every repo that runs code-check; the q_max and banchi c127 lanes drop their excludes for these and re-pin. Placed ahead of c182 and right after c139 (triage 11, Oct 28): two c127 roll-outs carry excludes until it lands. PR #776 open (orchestrator, Oct 28 10:05 CDT). After it merges: c184 (banchi) and c185 (q_max) re-pin.",
+ "note": "Next cloud lane, in c181's pattern: add not_code rows to actions/code-check/standard.json for .gz, .xlsx, .onnx, .npz, .nvmrc and .npmrc. Red first on a fixture repo with each. Touches actions/code-check/ only. Needs no answer. Port: yes, every repo that runs code-check; the q_max and banchi c127 lanes drop their excludes for these and re-pin. Placed ahead of c182 and right after c139 (triage 11, Oct 28): two c127 roll-outs carry excludes until it lands. Green and reviewed (Sonnet approve): draft PR #776, head d7f91c3b. After it merges: c184 (banchi) and c185 (q_max) re-pin.",
  "updatedAt": "2026-10-28T15:00:00Z"
 }
