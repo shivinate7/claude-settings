@@ -5,7 +5,7 @@
 - Before you stop or pause, push your work and update your outbox note so a fresh session can resume from it.
 - Never push to any repo other than claude-settings. Use gh api (REST), never gh pr. GraphQL is 403.
 - Never rebase onto main, never merge to main, never touch files outside your step. Merge origin/main INTO your branch (merge commit) only when told.
-- Inside the lane: a builder agent writes the failing test first and shows it red, then the fix, then runs the local gates through `bin/verdict` (`PATH=$PWD/bin:$PATH bin/verdict ci-job gates --lint` plus the suites you touch). A fresh reviewer agent that never saw the build reviews, up to 3 rounds; the builder fixes between rounds. Guard, gate or check changes get the net-value test after round 3.
+- Inside the lane: a builder agent writes the failing test first and shows it red, then the fix, then runs the local gates through `bin/verdict` (`PATH=$PWD/bin:$PATH bin/verdict ci-job gates --lint --base origin/main` (without --base it skips the PR-only checks and still passes) plus the suites you touch). A fresh reviewer agent that never saw the build reviews, up to 3 rounds; the builder fixes between rounds. Guard, gate or check changes get the net-value test after round 3.
 - Models: Opus for guard, hook, merge-gate and CI code, design, and reviews of those; Sonnet for other building and reviewing; Haiku only for trivial mechanical edits.
 - Lane PRs stay drafts; CI skips drafts. "Green" means the local gates pass. Open a draft PR to main via gh api REST.
 - Before handing over, also run `python3 lint/check_silent_undo.py --upstream origin/main --head HEAD --strict`; an intended drop needs a `Drops-lines: <path> -- <reason>` trailer on a real commit.
