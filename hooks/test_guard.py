@@ -96,6 +96,7 @@ FAMILIES = {
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
+    "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -11393,6 +11394,53 @@ def port_get_logs_nothing_case():
 
 LOG_CHECKS_EXTRA.append(("port question: an ArtifactData get is allowed and writes no guard.log line",
                          port_get_logs_nothing_case))
+
+
+# --------------------------------------------------------------------------- a pick never widens a shared tool
+FAMILY = "uniform-pick"
+#
+# Decision uniform-over-variants (topic t18): an option that widens what a shared tool accepts
+# carries `widens: true`, and the item's `pick` never names it. The writer is refused.
+
+UP_WIDE = {"key": "a", "label": "Let the stamp accept banchi's titles", "how": "h", "gain": "g",
+           "lose": "l", "widens": True}
+UP_MATCH = {"key": "b", "label": "Rename banchi's titles to the shared form", "how": "h", "gain": "g",
+            "lose": "l"}
+
+
+def up_item(**over):
+    item = {"id": "banchi-titles", "kind": "decision", "status": "open", "title": "Banchi record titles",
+            "context": "Banchi's titles differ from the shared form.", "options": [UP_WIDE, UP_MATCH],
+            "pick": "a", "why": "Fewer renames."}
+    item.update(over)
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def up(name, expected, item, action="set", **extra):
+    kw = dict(action=action, collection="items", doc_id="banchi-titles", data=item)
+    kw.update(extra)
+    add("uniform pick: " + name, expected, "uniform-pick" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
+
+
+up("today's item (pick names the widening option) is denied", "deny", up_item())
+up("a pick of the option that matches the shared form is allowed", "allow", up_item(pick="b"))
+up("a widening option offered and not picked is allowed", "allow", up_item(pick="b", why="One form."))
+up("an item with no pick is allowed", "allow", up_item(pick=None, why=None))
+up("widens false is not a widening option", "allow",
+   up_item(options=[dict(UP_WIDE, widens=False), UP_MATCH]))
+up("a stood pick of a widening option is denied", "deny", up_item(stands=True))
+up("an update that carries options and a widening pick is denied", "deny",
+   {"options": [UP_WIDE, UP_MATCH], "pick": "a"}, action="update")
+up("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+up("a task is not judged", "allow", up_item(kind="task"))
+up("an items set to another artifact is allowed", "allow", up_item(), url="https://claude.ai/artifact/other")
+add("uniform pick: a batch with today's item among the sets is denied", "deny", "uniform-pick",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles", "data": up_item()}])
+add("uniform pick: the refusal names the ruling and what to pick", "deny", "uniform-pick",
+    carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
+    collection="items", doc_id="banchi-titles", data=up_item())
 
 
 # --------------------------------------------------------------------------- the runner

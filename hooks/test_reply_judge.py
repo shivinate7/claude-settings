@@ -1206,6 +1206,69 @@ def case_port_finding_is_a_note_with_its_rule():
           (run.code, run.out))
 
 
+# --------------------------------------------------------------------------- c139
+# Uniform ruling (topic t18): a repo that differs from a shared format changes to match, and the
+# shared tool never grows a second form. An option that widens what a shared tool accepts carries
+# "Goes against your uniform ruling (t18)" and is never the recommended option.
+
+WIDENS_RULE = "style-option-widens-marked"
+WIDENS_ASK = (
+    "Done: read banchi's record titles.\n"
+    "Input Needed: pick A or B. A: let the stamp accept banchi's titles. B: rename banchi's titles. "
+    "I recommend A.\n"
+)
+WIDENS_FINDING = {"ok": False, "reason": WIDENS_RULE + ": A widens a shared tool; label it and recommend B."}
+COUNT_WORDS = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+
+
+def judged_rules():
+    import ast
+    with open(MODULE_PATH, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "JUDGED_RULES" for t in node.targets):
+            return ast.literal_eval(node.value)
+    return ()
+
+
+def case_prompt_count_matches_judged_rules():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    head = run.prompt().split(WIDENS_ASK, 1)[0]
+    rules = judged_rules()
+    check("rule count: JUDGED_RULES holds %s" % WIDENS_RULE, WIDENS_RULE in rules, rules)
+    m = re.search(r"against (\w+) rules", head)
+    word = COUNT_WORDS[len(rules) - 1] if 0 < len(rules) <= len(COUNT_WORDS) else "?"
+    check("rule count: the prompt's count word is %s" % word, bool(m) and m.group(1) == word, head[:120])
+    check("rule count: the prompt names each judged rule with a colon",
+          all(r + ":" in head for r in rules), [r for r in rules if r + ":" not in head])
+    with open(MODULE_PATH, encoding="utf-8") as f:
+        first = f.read().split("\n", 2)[1]
+    check("rule count: the docstring's count word is %s" % word, ("against %s rules" % word) in first, first[:120])
+
+
+def case_prompt_flags_a_recommended_option_that_widens():
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: a sentence flags a recommended option that widens what a shared tool accepts",
+          has_pin(sentences, ("flag",), ("recommend",), ("widen",), ("shared tool",)), sentences)
+    check("prompt: a sentence flags such an option offered without its label",
+          has_pin(sentences, ("flag",), ("widen",), ("goes against your uniform ruling (t18)",)), sentences)
+    check("prompt: a sentence spares an option where the repo changes to match",
+          has_pin(sentences, ("never flag",), ("repo",), ("match",)), sentences)
+
+
+def case_widens_finding_logs_its_rule():
+    run, config = second_stop(WIDENS_ASK, answer=json.dumps(WIDENS_FINDING), label="c139-log",
+                              session="c139-log")
+    parts = (guard_lines(config) or [""])[0].split("\t")
+    out = parse_stdout(run)
+    check("widens finding: guard.log rule is %s" % WIDENS_RULE, len(parts) == 6 and parts[3] == WIDENS_RULE, parts)
+    check("widens finding: a note, never a block, exit 0",
+          run.code == 0 and isinstance(out, dict) and "decision" not in out
+          and out.get("hookSpecificOutput", {}).get("additionalContext") == WIDENS_FINDING["reason"],
+          (run.code, run.out))
+
+
 # --------------------------------------------------------------------------- d9
 # A pick between visual options needs a picture of each option in the reply. A reply that asks the
 # owner to pick and only links to the mockups (a folder, a repo or a file) is flagged.
@@ -1312,6 +1375,9 @@ CASES = (
     case_prompt_flags_a_port_question_marked_blocking,
     case_prompt_spares_a_departure_not_marked_blocking,
     case_port_finding_is_a_note_with_its_rule,
+    case_prompt_count_matches_judged_rules,
+    case_prompt_flags_a_recommended_option_that_widens,
+    case_widens_finding_logs_its_rule,
 )
 
 
