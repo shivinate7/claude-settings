@@ -217,6 +217,9 @@ carry shows a warning line in its card in place of the picture.
    - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
      focused element, else the whole mockup). The card reserves that height before the mockup loads,
      so the first paint does not jump.
+   - A design may carry `drawn` (a number, the width in mockup pixels it is laid out at; default 390).
+     The page draws the mockup that wide and scales it to the width it has, so a 1200 wide design
+     shows whole. Set it on any design wider than a phone.
    - A design may carry `option` (an option's `key`) and `width` (a name such as `Wide`). Each extra
      width of an option is one more design with that `option`. The first design of an option is its
      picture on the card.
