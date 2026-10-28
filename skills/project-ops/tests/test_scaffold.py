@@ -92,6 +92,43 @@ class Scaffold(unittest.TestCase):
         self.assertIn("publishes the roadmap page", bullet)
         self.assertIn("--live", bullet)
 
+    def assertInOrder(self, flat, clauses):
+        at = [flat.find(x) for x in clauses]
+        for clause, pos in zip(clauses, at):
+            self.assertNotEqual(pos, -1, clause)
+        self.assertEqual(at, sorted(at), clauses)
+
+    def test_handoff_template_lists_pages_to_watch(self):
+        text = tree(SKILL)["templates/role-handoff.md"]
+        section = re.search(r"## Pages\n(.*?)(?=\n## |\Z)", text, re.S)
+        self.assertIsNotNone(section, "no Pages section")
+        self.assertRegex(section.group(1), r"(?m)^Watches stopped at <time>$")
+        flat = " ".join(section.group(1).split())
+        self.assertIn("The URL of each page this role owns", flat)
+        self.assertInOrder(flat, (
+            "old thread stopped watching each one at that time",
+            "answered each comment still open at that time",
+            "wrote this file",
+            "successor watches each one at once",
+            "reads its comments since that time"))
+
+    def test_handoff_rule_moves_page_watches(self):
+        text = tree(SKILL)["templates/operating-model.md"]
+        rule = re.search(r"## Hand-off rule.*?(?=\n## )", text, re.S).group(0)
+        flat = " ".join(rule.split())
+        self.assertInOrder(flat, (
+            "old thread stops watching each page its role owns",
+            "It notes the time",
+            "answers each comment still open at that time",
+            "writes the hand-off file",
+            "with that time",
+            "coordinator starts the successor from the hand-off file",
+            "successor watches each page at once",
+            "reads each page's comments since the time in the hand-off file"))
+        self.assertIn("The coordinator sends no broadcast. Threads read the roster.", flat)
+        self.assertEqual(flat.count("coordinator starts the successor from"), 1,
+                         "one hand-off, one bullet")
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():

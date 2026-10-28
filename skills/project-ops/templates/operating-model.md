@@ -33,9 +33,16 @@ Count each limit. Never wait for the owner to notice.
 - Each standing thread ends every reply with `tally: N messages, M <placements|dispatches|briefs>`.
 - The coordinator reads the tally at each wake from a standing thread. It starts the successor
   when a limit is hit.
-- On a hand-off, the old thread writes `handoffs/<role>-<date>.md` on the record branch from
-  `role-handoff.md`. The coordinator starts the successor from that file, updates the roster,
-  and resolves the old thread. The coordinator sends no broadcast. Threads read the roster.
+- On a hand-off, in this order:
+  1. The old thread stops watching each page its role owns (the roadmap page, the project's
+     waiting page). It notes the time, then answers each comment still open at that time on
+     those pages.
+  2. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
+     `role-handoff.md`, with that time.
+  3. The coordinator starts the successor from the hand-off file, updates the roster, and
+     resolves the old thread. The coordinator sends no broadcast. Threads read the roster.
+  4. The successor watches each page at once. It reads each page's comments since the time in
+     the hand-off file.
 - The owner may exempt a role from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
