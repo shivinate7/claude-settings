@@ -600,3 +600,4 @@
 - other-checkout-git-pointer: the `.git` exemption covers `<owner>/.git` for every checkout, so from the primary a Write to a linked worktree's `.git` pointer file passes; exempting only `git_common_dir` would close it (hooks/guard.py other_checkout_hit)
 - other-checkout-cp-source: `cd <sibling> && cp a.txt /tmp/o` is refused because the shell write reader treats every `cp` argument as a target, so a copy out of another checkout reads as a write into it (hooks/guard_frozen.py _shell_write_hit)
 - other-checkout-mkdir: `mkdir -p` into another checkout passes, because the shell write reader does not read `mkdir` targets (hooks/guard_frozen.py _shell_write_hit)
+- gates-macos-near-cap: gates-macos ran 42 of its 50-min cap on batch 8 (#767, head 7e844b8a) at 07:42 CDT Oct 28; batch 7's ran about 20 min. A second run over ~40 min makes it a debt: re-cap from measured runs, or split the slowest suite (ci-hygiene).
