@@ -612,3 +612,4 @@
 - waiting-stale-preview-dead-button: a design removed or changed under a kept front preview leaves the preview stale, and its "Open this state" now does nothing; the stale keep is old (skills/waiting-page/page.html patch, openShown)
 - waiting-shown-fallback-untested: no test covers openShown's slug+state fallback or its no-match branch (skills/waiting-page/tests/page.test.mjs)
 - waiting-stage-key-label: the stage frame key includes the label. So the Designs tab and an option's View build two frames for one design. A live rename leaves a hidden frame. Harm: extra iframes (skills/waiting-page/page.html showDesign)
+- layout-no-such-kind: the layout cannot say "this repo has no such kind", so a repo with no rules or specs keeps a placeholder README, and its "none yet" line goes stale (lint/layout.json, lint/layout.py)
