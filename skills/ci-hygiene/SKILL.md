@@ -21,7 +21,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    one taken on a quiet machine.
 2. **Check what exists.** Read the current workflow and the log before you build a speedup. The
    CI step may already run in parallel, or be cached.
-3. **Gate slow checks on their inputs.** Run a slow check after a change to the files it reads.
+3. **Run slow checks only on their inputs.** Run a slow check after a change to the files it reads.
    Detect the change with `git diff` against the base commit. Add a nightly full run and a manual
    trigger. If detection cannot read the diff, run the check (fail safe). A check that cannot
    read its own input exits non-zero in CI, never 0: CI reads an exit code as a verdict.
@@ -48,7 +48,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    all version updates for actions. Renovate tracks three custom pins, not actions
    (`renovate.json`). Disable credential persistence on checkout. Run an
    audit tool in CI, and run the same command locally: see the zizmor step in
-   `.github/workflows/gates.yml`.
+   `.github/workflows/checks.yml`.
 8. **Batch lanes.** One CI run per batch, by CLAUDE.md rule `git-integration-branch-merge`.
    "No conflicts" does not prove the lanes work together. A green integration run does not prove
    that no line was lost either: run `lint/check_silent_undo.py` before the merge.
@@ -65,10 +65,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    A cloud session waits on its PR subscription. It sets a `send_later` check-in when it starts to
    wait, and again after each red job, each wider apart: a run with a red job sends no "all checks
    done" wake (rule `git-ci-wait-checks-in`).
-10. **Prove each new gate red once.** Break the gate's target on a scratch copy. Watch the gate
-   fail. Restore the target. A gate you did not see go red is not proven.
-   A pipe hides a gate's exit code. `lint | tail -1` exits 0 when lint fails, so a commit after
-   it runs on a red gate. Gate on the command's own exit code. See `snippets.md`, section 10.
+10. **Prove each new check red once.** Break the check's target on a scratch copy. Watch the check
+   fail. Restore the target. A check you did not see go red is not proven.
+   A pipe hides a check's exit code. `lint | tail -1` exits 0 when lint fails, so a commit after
+   it runs on a red check. Decide on the command's own exit code. See `snippets.md`, section 10.
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
     `ready_for_review`. Skip every job while the PR is a draft, the required check included. Work
     in a draft. Only the integration PR goes ready, once (step 8). A draft cannot merge, so it
@@ -109,10 +109,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 19. **Run one scope job first.** Make it a cheap Linux job. Give every other job `needs: scope`.
     Most jobs add a job-level `if:` on their own flag. That `if:` also holds
     `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs start them.
-    The `gates` job has no job-level `if:`. Its steps carry the flags.
-    Two jobs may share a flag: this repo's `gates-mutate-guard` and `gates-windows-guard` both
+    The `checks` job has no job-level `if:`. Its steps carry the flags.
+    Two jobs may share a flag: this repo's `checks-mutate-guard` and `checks-windows-guard` both
     read `guard`. A job with nothing to test then starts no runner. A docs-only PR skips the code
-    suites. `gates` still runs its lint steps. An unreadable diff or an unmapped path runs everything. A skipped job
+    suites. `checks` still runs its lint steps. An unreadable diff or an unmapped path runs everything. A skipped job
     reads as passing. Put the scope job in the required checks.
 
 ## Public repos

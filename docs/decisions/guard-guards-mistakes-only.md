@@ -1,8 +1,8 @@
-# Every guard, gate and check stops Claude's mistakes, not attacker-crafted forms
+# Every guard and check stops Claude's mistakes, not attacker-crafted forms
 
 ## Ruling
 
-Owner, 2026-10-17 09:07 CDT, "widen": every guard, gate and check stops Claude's mistakes, never an attacker. This covers guard hooks (`hooks/guard*.py`), other gates, lints, CI checks and bin shims such as `bin/rm`.
+Owner, 2026-10-17 09:07 CDT, "widen": every guard and check stops Claude's mistakes, never an attacker. This covers guard hooks (`hooks/guard*.py`), other guards, lints, CI checks and bin shims such as `bin/rm`.
 
 - None of them guards against an act that only a deliberate attacker would write. One example is text hidden in a web page, file, issue or email that Claude reads and obeys (prompt injection).
 - Never build a check that assumes a nefarious actor is present (owner, 2026-10-17 09:05 CDT).

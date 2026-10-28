@@ -35,7 +35,7 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 1. **Scout.** Read the diff. Run `node ~/.claude/skills/plain-english-map/scripts/map-check.mjs` from the
    repository root. Each failed line names the file, table or screen key that has no map entry. The
    command binds no model-call reader, so it skips the `modelSeam` call-site check and prints a note.
-   A host that has its own gate may run the same check bodies there.
+   A host that has its own check may run the same check bodies there.
 2. **Build.** Add a map line for each new code file, table or screen key. Add a trace step for each new
    step in a screen's path. Fix each line that names a file the change moved or deleted.
 3. **Review.** Run the same command until it is green. Then run
@@ -66,6 +66,6 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 
 ## What a host repository may add
 
-A host may register the 8 check bodies with its own gate, and it may bind its own readers. The model-call
+A host may register the 8 check bodies with its own check, and it may bind its own readers. The model-call
 readers go in through `bindConfig` and `bindSeamReader`, and the page readers go in through `bindReaders`.
 With no model-call reader bound, the AI calls tab is empty. A host may also pin a copy of this folder.

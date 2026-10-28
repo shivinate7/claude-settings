@@ -1,4 +1,4 @@
-# Lint only. A failing `ruff check` in the gates job is the only use: no format step, no hook.
+# Lint only. A failing `ruff check` in the checks job is the only use: no format step, no hook.
 # F = Pyflakes (unused imports, undefined names, empty f-strings). E9 = syntax and read errors.
 # No target-version: ruff then checks syntax against its newest Python, so a newer file never
 # reads as an error on an older default.

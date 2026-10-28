@@ -1,4 +1,4 @@
-name: gates
+name: checks
 
 on:
   push:
@@ -43,17 +43,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      gates_windows: ${{ steps.scope.outputs.gates_windows }}
-      gates_windows_merge: ${{ steps.scope.outputs.gates_windows_merge }}
-      gates_windows_rest: ${{ steps.scope.outputs.gates_windows_rest }}
-      gates_windows_sweep: ${{ steps.scope.outputs.gates_windows_sweep }}
-      gates_macos: ${{ steps.scope.outputs.gates_macos }}
+      checks_windows: ${{ steps.scope.outputs.checks_windows }}
+      checks_windows_merge: ${{ steps.scope.outputs.checks_windows_merge }}
+      checks_windows_rest: ${{ steps.scope.outputs.checks_windows_rest }}
+      checks_windows_sweep: ${{ steps.scope.outputs.checks_windows_sweep }}
+      checks_macos: ${{ steps.scope.outputs.checks_macos }}
       shell_macos: ${{ steps.scope.outputs.shell_macos }}
       pointer_windows: ${{ steps.scope.outputs.pointer_windows }}
       code: ${{ steps.scope.outputs.code }}
       mods: ${{ steps.scope.outputs.mods }}
       guard: ${{ steps.scope.outputs.guard }}
-      gates_guard: ${{ steps.scope.outputs.gates_guard }}
+      checks_guard: ${{ steps.scope.outputs.checks_guard }}
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
     steps:
@@ -70,11 +70,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: bash .github/scripts/ci-scope.sh
 
-  gates:
+  checks:
     runs-on: ubuntu-latest
     needs: scope
     # Cap 36 min. Slowest of 30 runs: 30.4 min with the guard suite, about 19.8 min without it, which moved to
-    # gates-guard (decision ci-job-caps). Not lowered: 2x of 19.8 is above 36.
+    # checks-guard (decision ci-job-caps). Not lowered: 2x of 19.8 is above 36.
     timeout-minutes: 36
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -187,14 +187,14 @@ jobs:
       - name: Simulator boot-record fixture suite
         run: python3 hooks/test_sim_boot_record.py
 
-      - name: Gate wrappers fixture suite
+      - name: Guard wrappers fixture suite
         run: python3 hooks/test_wrappers.py
 
       - name: Session start notice suite
         run: python3 hooks/test_session_start.py
 
-      - name: Stop-hook gate fixture suite
-        run: python3 lint/test_gates.py
+      - name: Stop-hook guard fixture suite
+        run: python3 lint/test_report_guard.py
 
       - name: STE auto-fix fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -317,7 +317,7 @@ jobs:
 
       - name: Retired names, one word per meaning
         run: python3 lint/test_retired_names.py
-      # No scope gate: the suite reads the skill's .md templates, and a .md-only change must run it too.
+      # No scope condition: the suite reads the skill's .md templates, and a .md-only change must run it too.
       - name: project-ops skill scaffold suite
         run: python3 skills/project-ops/tests/test_scaffold.py
 
@@ -463,19 +463,19 @@ jobs:
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
-      # plain-english-map skill tests. The same step ends gates-windows and gates-macos. The `mods` flag
+      # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag
       # comes from ci-scope.sh.
       - name: Mod and map-skill tests
         if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
-  # The guard fixture suite alone: 10.6 min slowest of 30 runs (9.8 median), so the gates job stayed under 80% of its cap
+  # The guard fixture suite alone: 10.6 min slowest of 30 runs (9.8 median), so the checks job stayed under 80% of its cap
   # (decision ci-job-caps). Cap 22 min = 2x the slowest, plus setup.
-  gates-guard:
+  checks-guard:
     runs-on: ubuntu-latest
     needs: scope
-    if: ${{ needs.scope.outputs.gates_guard == 'true' || github.event_name != 'pull_request' }}
+    if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -491,10 +491,10 @@ jobs:
         run: python3 hooks/test_guard.py
 
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
-  # `gates` lint job. bin/shoot needs Playwright and Chromium, and this runner has neither. The job
+  # `checks` lint job. bin/shoot needs Playwright and Chromium, and this runner has neither. The job
   # installs the copy that .github/shoot/package-lock.json pins, through actions/playwright-setup.
   # bin/shoot itself never installs either.
-  gates-shoot:
+  checks-shoot:
     runs-on: ubuntu-latest
     needs: scope
     if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
@@ -563,8 +563,8 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
 
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
-  # checkout-detection suite, the ios-ship suite and the sim-test suite (bash 3.2 scripts for macOS) are the only gates
-  # whose result depends on either. gates-macos below covers the rest of the suite, so this job stays narrow, on purpose.
+  # checkout-detection suite, the ios-ship suite and the sim-test suite (bash 3.2 scripts for macOS) are the only checks
+  # whose result depends on either. checks-macos below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
     runs-on: macos-latest
     needs: scope
@@ -604,17 +604,17 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: bash lint/test_sim_test.sh
 
-  # The owner runs this repo on macOS. Before this job, every Python suite in the gates
-  # and gates-windows jobs above proved itself only on Linux and Windows, never on a real
+  # The owner runs this repo on macOS. Before this job, every Python suite in the checks
+  # and checks-windows jobs above proved itself only on Linux and Windows, never on a real
   # Mac, so janitor/install_launchd.py -- the one installer built for the Mac -- had no
-  # macOS signal at all. This job mirrors gates-windows: same OS-touching suites, same order, and the
-  # same `if: ${{ !cancelled() }}` on every step, for the reason gates-windows documents
+  # macOS signal at all. This job mirrors checks-windows: same OS-touching suites, same order, and the
+  # same `if: ${{ !cancelled() }}` on every step, for the reason checks-windows documents
   # above -- a job that stops at its first red step proves nothing about the suites
   # behind it.
-  gates-macos:
+  checks-macos:
     runs-on: macos-latest
     needs: scope
-    if: ${{ needs.scope.outputs.gates_macos == 'true' || github.event_name != 'pull_request' }}
+    if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
     # Cap 50 min = about 2x the slowest green run (figures: debt measured-time-table).
     timeout-minutes: 50
     steps:
@@ -644,7 +644,7 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_hook_platform_exit.py
 
-      # No Guard mutation test here: it runs on the gates job (Linux) only. Accepted risk: a
+      # No Guard mutation test here: it runs on the checks job (Linux) only. Accepted risk: a
       # macOS-only mutation regression is not caught. No mutant is marked macOS-only.
 
       - name: Janitor sweep fixture suite
@@ -732,7 +732,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_sim_boot_record.py
 
-      - name: Gate wrappers fixture suite
+      - name: Guard wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_wrappers.py
 
@@ -740,9 +740,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_session_start.py
 
-      - name: Stop-hook gate fixture suite
+      - name: Stop-hook guard fixture suite
         if: ${{ !cancelled() }}
-        run: python3 lint/test_gates.py
+        run: python3 lint/test_report_guard.py
 
       - name: Ruling home fixture suite
         if: ${{ !cancelled() }}
@@ -788,7 +788,7 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
-  # The Windows suites run in four jobs (gates-windows, gates-windows-guard, gates-windows-merge, gates-windows-rest), and the guard and merge jobs add shard jobs off pull_request. Six python suites in the gates job need a real Windows box to prove: no other
+  # The Windows suites run in four jobs (checks-windows, checks-windows-guard, checks-windows-merge, checks-windows-rest), and the guard and merge jobs add shard jobs off pull_request. Six python suites in the checks job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
   # 35766479009 went green here for the first time, on its own merit, not through
@@ -798,10 +798,10 @@ jobs:
   # continue-on-error. This job stayed advisory-red at its first failing step for a
   # while, and that hid eleven suites behind it that never ran on Windows at all. A
   # job that stops at its first red step proves nothing about the suites behind it.
-  gates-windows:
+  checks-windows:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.gates_windows == 'true' || github.event_name != 'pull_request' }}
+    if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
     # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
     steps:
@@ -847,8 +847,8 @@ jobs:
 
           print("== os.symlink, unprivileged ==")
           tmp_dir = tempfile.gettempdir()
-          target = os.path.join(tmp_dir, "gates_windows_symlink_target.txt")
-          link = os.path.join(tmp_dir, "gates_windows_symlink_link.txt")
+          target = os.path.join(tmp_dir, "checks_windows_symlink_target.txt")
+          link = os.path.join(tmp_dir, "checks_windows_symlink_link.txt")
           try:
               with open(target, "w") as handle:
                   handle.write("scratch")
@@ -875,8 +875,8 @@ jobs:
           echo "== mktemp -d, read from Git Bash =="
           mktemp -d
 
-      # The guard suite runs in gates-windows-guard. No Guard mutation test on Windows: it took 34.5 min
-      # there and hit the 45 min timeout (run 37086259145). It runs in gates-mutate-guard (Linux) only.
+      # The guard suite runs in checks-windows-guard. No Guard mutation test on Windows: it took 34.5 min
+      # there and hit the 45 min timeout (run 37086259145). It runs in checks-mutate-guard (Linux) only.
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
       - name: Load reader against the OS tools
@@ -902,8 +902,8 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
-  # The mutation test for the guard, moved off `gates` by cut F so it runs in parallel.
-  gates-mutate-guard:
+  # The mutation test for the guard, moved off `checks` by cut F so it runs in parallel.
+  checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope
     if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -922,11 +922,11 @@ jobs:
       - name: Guard mutation test
         run: python3 hooks/mutate_guard.py
 
-  # The guard fixture suite on Windows, split off gates-windows by cut F. On pull_request it runs only the cases
+  # The guard fixture suite on Windows, split off checks-windows by cut F. On pull_request it runs only the cases
   # tagged windows (the slice step below), whole, in this job, the required check. Push, schedule and
-  # workflow_dispatch run the full suite in shards: shard 1 here, the rest in gates-windows-guard-<i>, which never
+  # workflow_dispatch run the full suite in shards: shard 1 here, the rest in checks-windows-guard-<i>, which never
   # run on pull_request (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each case runs once).
-  gates-windows-guard:
+  checks-windows-guard:
     runs-on: windows-latest
     needs: scope
     if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -955,11 +955,11 @@ jobs:
           GUARD_TESTS: windows-slice
         run: python hooks/test_guard.py
 
-  gates-windows-guard-2:
+  checks-windows-guard-2:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of gates-windows-guard: its figures and cap are there.
+    # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -978,11 +978,11 @@ jobs:
         run: python hooks/test_guard.py
 
   # The merge suites on Windows. The slice runs whole here on pull_request; off pull_request the full git-half
-  # suite runs in shards, shard 1 here and the rest in gates-windows-merge-<i> (the shard switch in merge/test_merge.py).
-  gates-windows-merge:
+  # suite runs in shards, shard 1 here and the rest in checks-windows-merge-<i> (the shard switch in merge/test_merge.py).
+  checks-windows-merge:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.gates_windows_merge == 'true' || github.event_name != 'pull_request' }}
+    if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
     # Full git-half suite off pull_request: about 6.5 s a test on Windows, so about 59 min in one job (run 40293472341).
     # In 5 shards the jobs took 295 s to 520 s (run 40296937814); 15 min is about 1.7x the slowest.
     timeout-minutes: 15
@@ -1017,11 +1017,11 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python merge/test_cmd.py
 
-  gates-windows-merge-2:
+  checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of gates-windows-merge: its figures and cap are there.
+    # A shard of checks-windows-merge: its figures and cap are there.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1039,11 +1039,11 @@ jobs:
           MERGE_SHARD: 2/5
         run: python merge/test_merge.py
 
-  gates-windows-merge-3:
+  checks-windows-merge-3:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of gates-windows-merge: its figures and cap are there.
+    # A shard of checks-windows-merge: its figures and cap are there.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1061,11 +1061,11 @@ jobs:
           MERGE_SHARD: 3/5
         run: python merge/test_merge.py
 
-  gates-windows-merge-4:
+  checks-windows-merge-4:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of gates-windows-merge: its figures and cap are there.
+    # A shard of checks-windows-merge: its figures and cap are there.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1083,11 +1083,11 @@ jobs:
           MERGE_SHARD: 4/5
         run: python merge/test_merge.py
 
-  gates-windows-merge-5:
+  checks-windows-merge-5:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of gates-windows-merge: its figures and cap are there.
+    # A shard of checks-windows-merge: its figures and cap are there.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1105,12 +1105,12 @@ jobs:
           MERGE_SHARD: 5/5
         run: python merge/test_merge.py
 
-  # The janitor sweep suites, moved out of gates-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
+  # The janitor sweep suites, moved out of checks-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
   # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 40 min = 2x.
-  gates-windows-sweep:
+  checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.gates_windows_sweep == 'true' || github.event_name != 'pull_request' }}
+    if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1130,12 +1130,12 @@ jobs:
         if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
 
-  gates-windows-rest:
+  checks-windows-rest:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.gates_windows_rest == 'true' || github.event_name != 'pull_request' }}
+    if: ${{ needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request' }}
     # Cap 28 min = about 2x the slowest run without the janitor sweep suites (about 13.3 min of 30 runs; they moved to
-    # gates-windows-sweep, decision ci-job-caps).
+    # checks-windows-sweep, decision ci-job-caps).
     timeout-minutes: 28
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1220,7 +1220,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: python hooks/test_daily_note.py
 
-      - name: Gate wrappers fixture suite
+      - name: Guard wrappers fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_wrappers.py
 
@@ -1228,9 +1228,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: python hooks/test_session_start.py
 
-      - name: Stop-hook gate fixture suite
+      - name: Stop-hook guard fixture suite
         if: ${{ !cancelled() }}
-        run: python lint/test_gates.py
+        run: python lint/test_report_guard.py
 
       - name: Ruling home fixture suite
         if: ${{ !cancelled() }}
@@ -1284,23 +1284,23 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - scope
-      - gates
-      - gates-guard
-      - gates-shoot
+      - checks
+      - checks-guard
+      - checks-shoot
       - pointer-windows
       - shell-macos
-      - gates-macos
-      - gates-windows
-      - gates-mutate-guard
-      - gates-windows-guard
-      - gates-windows-guard-2
-      - gates-windows-merge
-      - gates-windows-merge-2
-      - gates-windows-merge-3
-      - gates-windows-merge-4
-      - gates-windows-merge-5
-      - gates-windows-rest
-      - gates-windows-sweep
+      - checks-macos
+      - checks-windows
+      - checks-mutate-guard
+      - checks-windows-guard
+      - checks-windows-guard-2
+      - checks-windows-merge
+      - checks-windows-merge-2
+      - checks-windows-merge-3
+      - checks-windows-merge-4
+      - checks-windows-merge-5
+      - checks-windows-rest
+      - checks-windows-sweep
     if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
     timeout-minutes: 5
     permissions:

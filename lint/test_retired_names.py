@@ -4,9 +4,10 @@
     python3 lint/test_retired_names.py [--repo DIR]     # DIR defaults to this script's repo
 
 Each name below is an exact old file name, record slug, rule anchor, identifier, log value or
-message of groups 5 to 8 of the plan: grant and override, record, finding and safety hole, refuse.
+message of groups 1 and 5 to 9 of the plan: guard and check, grant and override, record, finding and
+safety hole, refuse, round.
 Each is distinctive, so a whole-word match in a tracked file is the old name coming back. This
-file and GLOSSARY.md, whose "Not" cells list them, are the exceptions. A retired word in plain
+file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
 """
 import os
@@ -17,6 +18,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELF = "lint/test_retired_names.py"
 GLOSSARY = "GLOSSARY.md"  # its "Not" cells name retired words on purpose
+RECORDS_PAGE = "docs/records.md"  # generated; the merge tool rebuilds it from the renamed sources (records-index-at-merge)
 
 # old name -> the name that replaced it
 RETIRED = {
@@ -39,6 +41,11 @@ RETIRED = {
     "Override pass:": "Override:",
     "override pass": "override",
     "owner's word": "owner's grant",
+    "recovery-must-not-gate-on-its-own-state": "recovery-independent-of-state",
+    "gates-job-near-timeout": "checks-job-near-timeout",
+    "verification-recovery-not-gated-on-own-state": "verification-recovery-independent-of-state",
+    "roles-third-try-steps-up": "roles-third-round-steps-up",
+    "merge_gate": "merge_check",
 }
 
 
@@ -46,7 +53,7 @@ def hits(repo, name):
     """Tracked files that hold name as a whole word, any case, less the exceptions. None when git
     cannot run."""
     run = subprocess.run(["git", "-C", repo, "grep", "-l", "-i", "-w", "-F", "-e", name, "--", ".", ":!" + SELF,
-                          ":!" + GLOSSARY],
+                          ":!" + GLOSSARY, ":!" + RECORDS_PAGE],
                          capture_output=True, encoding="utf-8", errors="replace")
     if run.returncode not in (0, 1):  # 1 means no match; anything else is no reading
         return None

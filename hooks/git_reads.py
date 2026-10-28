@@ -369,7 +369,7 @@ def session_records():
 
 def _process_start_ms_windows(pid: int):
     """Windows arm of `_process_start_ms`. Only called when `sys.platform` says Windows, so the
-    Windows-only `ctypes` import stays out of every Linux gate run.
+    Windows-only `ctypes` import stays out of every Linux check run.
 
     `OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION` (0x1000) asks for the least a read
     needs. A NULL handle is read through `GetLastError`. Code 87 (`ERROR_INVALID_PARAMETER`)
