@@ -53,8 +53,8 @@ class RepoColour(unittest.TestCase):
         self.assertEqual(self.rc.colour_for("banchi"), self.reg["repos"]["banchi"])
         self.assertEqual(self.rc.colour_for("shivinate7/banchi"), self.reg["repos"]["banchi"])
 
-    def test_ten_repos_in_registry(self):
-        for repo in ("claude-settings", "home-app", "home", "banchi", "q_max", "degen",
+    def test_nine_repos_in_registry(self):
+        for repo in ("claude-settings", "home", "banchi", "q_max", "degen",
                      "ios-adblock", "adblock-lists", "mailaudit", "joyous"):
             c = self.reg["repos"][repo]
             self.assertTrue(len(c) == 7 and c[0] == "#" and all(ch in HEX for ch in c[1:]), (repo, c))
@@ -294,7 +294,7 @@ class Drift(unittest.TestCase):
 
     def test_every_named_source_is_structured_and_in_the_registry(self):
         accents = self.reg["accents"]
-        for repo in ("home-app", "banchi", "q_max", "mailaudit", "joyous"):
+        for repo in ("home", "banchi", "q_max", "mailaudit", "joyous"):
             self.assertIn(repo, accents)
         for repo, src in accents.items():
             self.assertIn(repo, self.reg["repos"])

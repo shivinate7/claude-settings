@@ -176,4 +176,4 @@ ViewThatFits(in: .horizontal) {
 
 Outcome: the same as the web rules. One view serves a phone and an iPad column.
 Check: pass when each stack sets its own spacing, and no child pads itself away from a sibling.
-Source: home-app `ios/HomeApp/Views.swift` (`ViewThatFits` that stacks at accessibility sizes).
+Source: home `ios/HomeApp/Views.swift` (`ViewThatFits` that stacks at accessibility sizes).
