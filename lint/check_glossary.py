@@ -19,7 +19,8 @@ GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, n
   - a hook message: a string with a space in a `.py` file under `hooks/`, a test file apart.
 
 Comments, docstrings and every other string are prose, and a reviewer reads prose. A sentence that
-names a "not" word passes. A line that holds `glossary-ok` is skipped, with its reason beside it.
+names a "not" word passes. A "not" word inside its own term, plural too (`hole` in `safety_holes`),
+is the term. A line that holds `glossary-ok` is skipped, with its reason beside it.
 A "not" name written `word (prose)` is an everyday word (`block`, `entry`): it is read in paths,
 anchors and slugs, never in identifiers, strings or hook messages. Claude Code's own names stay
 (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
@@ -48,7 +49,7 @@ CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")  # batchBranch reads as batch b
 SKIP_CODE = ("GLOSSARY.md", "docs/records.md", "lint/test_retired_names.py", "lint/test_check_glossary.py",
              "skills/impeccable/")
 # GLOSSARY.md, the retired-names test and this check's own cases name the old words on purpose; records.md is generated; impeccable is vendored.
-PLATFORM_NAMES = {"deny", "block", "SubagentStop", "SubagentStart", "subagent_type"}  # Claude Code's own
+PLATFORM_NAMES = {"deny", "block", "SubagentStop", "SubagentStart", "subagent_type", "subagents"}  # Claude Code's own
 PLATFORM_PREFIXES = ("CLAUDE_CODE_",)  # Claude Code's own settings keys
 YAML_ONLY = {"issues"}  # GitHub's own permission key
 OPT_OUT = "glossary-ok"
@@ -59,21 +60,25 @@ REGEX_LIKE = re.compile(r"\\|\(\?")  # a pattern, not a message
 NAME_LIKE = re.compile(r"[\w.$/-]+")  # a string with no space is a name, not a sentence
 # Per language of a non-Python file, how its text is cut: line comment, block comment open and close,
 # whether a backtick opens a template literal, whether `/` can open a regex literal, whether `#` is a
-# comment only at a word start, whether `<<WORD` opens a here-document, and the string escape.
+# comment only at a word start, whether `<<WORD` opens a here-document, whether `@'` or `@"` opens a
+# here-string, a pattern that makes a line a comment when it starts the line, and the string escape.
 JS = {"line": "//", "open": "/*", "close": "*/", "template": True, "regex": True, "esc": "\\"}
 SH = {"line": "#", "wordstart": True, "heredoc": True, "esc": "\\"}
-PS = {"line": "#", "open": "<#", "close": "#>", "esc": "`", "tick": True}
+PS = {"line": "#", "open": "<#", "close": "#>", "esc": "`", "tick": True, "herestring": True}
 HASH = {"line": "#", "esc": "\\"}
 PLAIN = {"esc": "\\"}
+BAT = {"lead": re.compile(r"[ \t]*@?(?:rem(?=[ \t]|$)|::)", re.I | re.M), "esc": "\\"}  # rem, REM, ::
 SCRIPT = {
     ".js": JS, ".mjs": JS, ".cjs": JS, ".ts": JS, ".tsx": JS, ".jsx": JS,
-    ".sh": SH, ".bash": SH, ".ps1": PS, ".toml": HASH, ".json": PLAIN, ".cmd": PLAIN, ".bat": PLAIN,
+    ".sh": SH, ".bash": SH, ".ps1": PS, ".toml": HASH, ".json": PLAIN, ".cmd": BAT, ".bat": BAT,
     ".yml": None, ".yaml": None,  # YAML has its own reader
 }
 REGEX_AFTER = set("(,=:[!&|?{};+-*%<>~^")
 REGEX_WORDS = ("return", "typeof", "case", "in", "of", "delete", "void", "throw", "else")
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_]\w*)\1")
-YAML_KEY = re.compile(r"^(\s*)(?:-\s+)*([A-Za-z_$][\w.$-]*)\s*:(?:\s+(.*?))?\s*$")
+YAML_KEY = re.compile(r"^(\s*)(?:-\s+)*(?P<key>\"(?P<dq>[^\"\n]*)\"|'(?P<sq>[^'\n]*)'|(?P<bare>[A-Za-z_$][\w.$-]*))"
+                      r"\s*:(?:\s+(?P<value>.*?))?\s*$")
+YAML_QUOTED = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
 YAML_ITEM = re.compile(r"^(\s*)-\s+(.*?)\s*$")
 YAML_BLOCK = re.compile(r"[|>][+-]?\d?\s*(?:#.*)?$")
 
@@ -160,8 +165,8 @@ def name_problems(where, text, table, plain=False):
 
 
 def inside(w, i, count, term):
-    """True when words w[i:i + count] lie within one spelling of the term's words in w."""
-    return any(w[j:j + len(term)] == term and j <= i and i + count <= j + len(term)
+    """True when words w[i:i + count] lie within one spelling of the term's words in w, plural too."""
+    return any(same(w[j:j + len(term)], term) and j <= i and i + count <= j + len(term)
                for j in range(len(w) - len(term) + 1))
 
 
@@ -202,7 +207,13 @@ def regex_starts(text, i):
     j = i - 1
     while j >= 0 and text[j] in " \t":
         j -= 1
-    if j < 0 or text[j] == "\n" or text[j] in REGEX_AFTER:
+    if j < 0 or text[j] == "\n":
+        return True
+    if j > 0 and text[j] in "+-" and text[j - 1] == text[j]:
+        return False  # `i++ / 2`: a division after an increment or a decrement
+    if text[j] == "}" and text[i + 1:i + 2] == ">":
+        return False  # `a={x} />`: the end of a JSX tag that closes itself
+    if text[j] in REGEX_AFTER:
         return True
     k = j
     while k >= 0 and (text[k].isalnum() or text[k] in "_$"):
@@ -230,19 +241,51 @@ def regex_end(text, i):
     return -1
 
 
+def template_end(text, i):
+    """The index after the template literal that opens at text[i]. A `${...}` field may hold
+    strings and template literals of its own, so their backticks and braces do not end it."""
+    j, n = i + 1, len(text)
+    while j < n:
+        if text[j] == "\\":
+            j += 2
+        elif text[j] == "`":
+            return j + 1
+        elif text.startswith("${", j):
+            j, depth = j + 2, 1
+            while j < n and depth:
+                c = text[j]
+                if c == "`":
+                    j = template_end(text, j)
+                    continue
+                if c in "'\"":  # a string in the field ends at its quote or its line end
+                    j += 1
+                    while j < n and text[j] not in (c, "\n"):
+                        j += 2 if text[j] == "\\" else 1
+                elif c in "{}":
+                    depth += 1 if c == "{" else -1
+                j += 1
+        else:
+            j += 1
+    return n
+
+
 def scan_script(text, lang):
-    """(identifiers, strings) of a JS, shell, PowerShell, TOML or JSON file, comments left out.
+    """(identifiers, strings) of a JS, shell, PowerShell, batch, TOML or JSON file, comments left out.
 
     One pass, so a comment opener inside a string is text, and a lone quote inside a comment opens
     nothing. A ' or " string ends at its line end, so a lone quote in plain text swallows no later
-    line. A template literal (`) spans lines, a regex literal is skipped whole, and the body of a
-    here-document is prose."""
+    line. A template literal (`) spans lines, nested ones too, a regex literal is skipped whole, and
+    the body of a here-document or a PowerShell here-string is prose. A shell `<<<` here-string and
+    a `<<` shift inside `((...))` open no here-document."""
     idents, strings = [], []
-    i, line, n, doc = 0, 1, len(text), None
-    line_c, open_c, esc = lang.get("line"), lang.get("open"), lang["esc"]
+    i, line, n, doc, arith = 0, 1, len(text), None, 0
+    line_c, open_c, esc, lead = lang.get("line"), lang.get("open"), lang["esc"], lang.get("lead")
     while i < n:
         ch = text[i]
-        if line_c and text.startswith(line_c, i) and (
+        if lead and (i == 0 or text[i - 1] == "\n") and lead.match(text, i):
+            while i < n and text[i] != "\n":
+                i += 1
+        elif line_c and text.startswith(line_c, i) and (
                 not lang.get("wordstart") or i == 0 or text[i - 1] in " \t\n;|&("):
             while i < n and text[i] != "\n":
                 i += 1
@@ -251,10 +294,22 @@ def scan_script(text, lang):
             end = n if end < 0 else end + len(lang["close"])
             line += text.count("\n", i, end)
             i = end
-        elif ch in "'\"" or (ch == "`" and lang.get("template")):
+        elif ch == "@" and lang.get("herestring") and text[i + 1:i + 2] in ("'", '"') \
+                and not text[i + 2:(text.find("\n", i) + 1 or n + 1) - 1].strip():
+            close = text.find("\n" + text[i + 1] + "@", i)  # the closing '@ or "@ starts its line
+            end = n if close < 0 else close + 3
+            strings.append((line, line + text.count("\n", i, end), text[i + 2:end]))
+            line += text.count("\n", i, end)
+            i = end
+        elif ch == "`" and lang.get("template"):
+            end = template_end(text, i)
+            strings.append((line, line + text.count("\n", i, end), text[i + 1:end].rstrip("`")))
+            line += text.count("\n", i, end)
+            i = end
+        elif ch in "'\"":
             start, j = line, i + 1
             quote_esc = esc if not (lang.get("tick") and ch == "'") else None
-            while j < n and text[j] != ch and (ch == "`" or text[j] != "\n"):
+            while j < n and text[j] != ch and text[j] != "\n":
                 if quote_esc and text[j] == quote_esc:
                     j += 1
                 if j < n and text[j] == "\n":
@@ -267,8 +322,13 @@ def scan_script(text, lang):
             i += 2
         elif ch == "/" and lang.get("regex") and regex_starts(text, i) and regex_end(text, i) > 0:
             i = regex_end(text, i)
-        elif ch == "<" and lang.get("heredoc") and text.startswith("<<", i) and not text.startswith("<<<", i) \
-                and HEREDOC.match(text, i):
+        elif lang.get("heredoc") and text.startswith(("((", "))", "<<<"), i):
+            if text.startswith("<<<", i):
+                i += 3
+            else:  # arithmetic depth, so `$((1 << n))` is a shift
+                arith = arith + 1 if ch == "(" else max(0, arith - 1)
+                i += 2
+        elif ch == "<" and lang.get("heredoc") and not arith and HEREDOC.match(text, i):
             doc = HEREDOC.match(text, i).group(2)
             i = HEREDOC.match(text, i).end()
         else:
@@ -309,17 +369,22 @@ def scan_yaml(text):
         key, item = YAML_KEY.match(row), YAML_ITEM.match(row)
         value = None
         if key:
-            idents.append((number, key.group(2)))
-            value = key.group(3)
+            idents.append((number, next(k for k in key.group("dq", "sq", "bare") if k is not None)))
+            value = key.group("value")
         elif item:
             value = item.group(2)
         if value and YAML_BLOCK.match(value):
-            block = indent
+            # Lines under `- run: |` sit deeper than the key `run`, not than its dash.
+            block = key.start("key") if key else indent
             continue
-        value = re.sub(r"\s+#.*$", "", value or "").strip().strip("'\"")
-        if value.startswith(("[", "{")):
-            idents += [(number, w) for w in IDENT.findall(value)]
-        elif NAME_LIKE.fullmatch(value):
+        value = re.sub(r"\s+#.*$", "", value or "").strip()
+        if value.startswith(("[", "{")):  # a flow list or map: bare words are names, a quoted item is a value
+            idents += [(number, w) for w in IDENT.findall(YAML_QUOTED.sub(" ", value))]
+            quoted = ["".join(q) for q in YAML_QUOTED.findall(value)]
+            strings += [(number, number, q) for q in quoted if NAME_LIKE.fullmatch(q)]
+            continue
+        value = value.strip("'\"")
+        if NAME_LIKE.fullmatch(value):
             strings.append((number, number, value))
     return idents, strings
 
@@ -369,7 +434,10 @@ def code_problems(rel, text, table, lines=None):
 
 
 def git_diff(*opts):
-    cmd = ["git", "diff", "--no-color", *opts, "origin/main...HEAD"]
+    # Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool
+    # in the user's config cannot change the `+++ b/<path>` headers that added_lines reads.
+    cmd = ["git", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", *opts,
+           "origin/main...HEAD"]
     r = _nowindow.run(cmd, cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
         print("check_glossary: UNKNOWN, git diff failed: " + r.stderr.strip())
@@ -382,7 +450,10 @@ def added():
 
 
 def diff_path(header):
-    """The path of a `+++ b/<path>` header, unquoted when the diff quoted it; None for no path."""
+    """The path of a `+++ b/<path>` header, unquoted when the diff quoted it; None for no path.
+
+    Git ends the header with a TAB when the path holds a space."""
+    header = header.rstrip("\t")
     if header.startswith('"'):
         try:
             header = ast.literal_eval(header).encode("latin-1").decode("utf-8")
@@ -392,19 +463,28 @@ def diff_path(header):
 
 
 def added_lines():
-    """{path: set of added line numbers} for each file the change adds or edits, renames followed."""
-    out, path = {}, None
+    """({path: set of added line numbers}, unknowns) for each file the change adds or edits, renames
+    followed. A `+++ ` header that yields no path is an unknown, never a skip.
+
+    A `+++ ` row is a header only between `diff --git` and the first `@@`: past that, it is an
+    added line that starts with `++`."""
+    out, unknown, path, header = {}, [], None, False
     for row in git_diff("-U0", "-M", "--diff-filter=AMR").split("\n"):
-        if row.startswith("+++ "):
+        if row.startswith("diff --git "):
+            path, header = None, True
+        elif header and row.startswith("+++ "):
             path = diff_path(row[4:])
             if path:
                 out.setdefault(path, set())
-        elif row.startswith("@@") and path:
+            else:
+                unknown.append("the diff header '%s' names no path" % row[:80])
+        elif row.startswith("@@"):
+            header = False
             m = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", row)
-            if m:
+            if m and path:
                 start, count = int(m.group(1)), int(m.group(2) or 1)
                 out[path].update(range(start, start + count))
-    return out
+    return out, unknown
 
 
 def main(args):
@@ -426,8 +506,7 @@ def main(args):
     for path in paths:
         bad += path_problems(path, table)
     # Given files are read whole; a change is read on the lines it adds.
-    scope = {p: None for p in args} if args else added_lines()
-    unknown = []
+    scope, unknown = ({p: None for p in args}, []) if args else added_lines()
     for rel, lines in sorted(scope.items()):
         text = read(rel)
         if text is None or rel.startswith(SKIP_CODE):
