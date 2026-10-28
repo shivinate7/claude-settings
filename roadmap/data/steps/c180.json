@@ -4,6 +4,6 @@
  "status": "doing",
  "order": 103.3756,
  "why": "From c127's ios-adblock lane, Oct 28 07:10 CDT: the shared code-check fails ios-adblock's own files three ways: no Swift row, .entitlements not in not_code, and #!/bin/zsh scripts not matched.",
- "note": "Debt, blocks c127's ios-adblock part (that lane is paused with no PR). Lane: actions/code-check gains a Swift row (the compiler, per c127's pick: no SwiftLint, warnings fail CI), lists .entitlements as not code, and reads a #!/bin/zsh shebang as shell; the action still fails on a language with no row. Red first on a fixture repo with each of the three. Touches actions/code-check/ only. Needs no answer. Port: yes, every Swift repo (ios-adblock first, then banchi's iOS parts). Placed ahead of c127, after c168 (triage 10, Oct 28): c127's ios-adblock part waits on it. Doing: lane 013NEJKzi9VnLPCC2pBWVx8V, branch code-check-swift-zsh, started 07:11 CDT; joins the next batch.",
- "updatedAt": "2026-10-28T12:12:18Z"
+ "note": "Debt, blocks c127's ios-adblock part (that lane is paused with no PR). Lane: actions/code-check gains a Swift row (the compiler, per c127's pick: no SwiftLint, warnings fail CI), lists .entitlements as not code, and reads a #!/bin/zsh shebang as shell; the action still fails on a language with no row. Red first on a fixture repo with each of the three. Touches actions/code-check/ only. Needs no answer. Port: yes, every Swift repo (ios-adblock first, then banchi's iOS parts). Placed ahead of c127, after c168 (triage 10, Oct 28): c127's ios-adblock part waits on it. Doing: lane 013NEJKzi9VnLPCC2pBWVx8V, branch code-check-swift-zsh, started 07:11 CDT; green as PR #769, in batch 9 (batch-oct28j).",
+ "updatedAt": "2026-10-28T12:44:14Z"
 }
