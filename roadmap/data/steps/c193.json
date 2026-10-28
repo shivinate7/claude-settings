@@ -1,0 +1,9 @@
+{
+ "title": "an answered waiting-page card shrinks to its content once it is out of view",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.338996,
+ "why": "Defect, Oct 28 13:19 CDT (shiv, screenshot of item 47 after his answer): an answered card, filing pending, shows as a huge empty green box; the left overview's chip lists run past the rail and show as clipped rows over the page edge.",
+ "note": "Slug receipt-keeps-height-forever (orchestrator, Oct 28). Cause, read in skills/waiting-page/page.html lines 754-759, patch(): a card that turns into a receipt gets minHeight set to the full unanswered card height, kept until reload; a stability rule applied for good, not for the moment. Next cloud lane, claude-settings only. Part 1: the receipt holds the old height only while in view; once it leaves the viewport (IntersectionObserver) drop the min-height and compensate scroll so nothing in view moves. Red first: a page test that answers a card, scrolls it out of view, and asserts the card shrinks to its content with no shift in what is on screen. Part 2: the left overview's chip lists fit the rail; red first with a test at the rail's width. Same files as c186, c135 and c136, so it lands in step with them. Port: yes, the page installs everywhere. Needs no answer. Placed after c139 (triage 12, Oct 28, on the orchestrator's word).",
+ "updatedAt": "2026-10-28T18:23:00Z"
+}
