@@ -96,15 +96,24 @@ class Scaffold(unittest.TestCase):
         text = tree(SKILL)["templates/role-handoff.md"]
         section = re.search(r"## Pages\n(.*?)(?=\n## |\Z)", text, re.S)
         self.assertIsNotNone(section, "no Pages section")
-        self.assertIn("URL", section.group(1))
-        self.assertIn("watch", section.group(1))
+        flat = " ".join(section.group(1).split())
+        for clause in ("The URL of each page this role owns",
+                       "old thread stops watching each one",
+                       "successor watches each one at once"):
+            self.assertIn(clause, flat)
 
     def test_handoff_rule_moves_page_watches(self):
         text = tree(SKILL)["templates/operating-model.md"]
         rule = re.search(r"## Hand-off rule.*?(?=\n## )", text, re.S).group(0)
         flat = " ".join(rule.split())
-        self.assertIn("successor watches each page its role owns", flat)
-        self.assertIn("old thread stops watching", flat)
+        steps = ("old thread answers each comment it holds",
+                 "then stops watching each page its role owns",
+                 "then writes the hand-off file")
+        at = [flat.find(x) for x in steps]
+        self.assertNotIn(-1, at, steps)
+        self.assertEqual(at, sorted(at))
+        self.assertIn("successor watches each page at once", flat)
+        self.assertIn("comments since the hand-off file's time", flat)
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")

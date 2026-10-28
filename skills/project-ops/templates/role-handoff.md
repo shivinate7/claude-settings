@@ -21,8 +21,9 @@ From "<old thread title>" at <the limit hit, or the slip>. Checked: main <commit
 
 ## Pages
 
-<The URL of each page this role owns. The successor watches each one. The old thread stops
-watching them.>
+<The URL of each page this role owns. The old thread stops watching each one before it writes
+this file. The successor watches each one at once, and reads its comments since this file's
+time.>
 
 ## Threads
 

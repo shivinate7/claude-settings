@@ -36,8 +36,10 @@ Count each limit. Never wait for the owner to notice.
 - On a hand-off, the old thread writes `handoffs/<role>-<date>.md` on the record branch from
   `role-handoff.md`. The coordinator starts the successor from that file, updates the roster,
   and resolves the old thread. The coordinator sends no broadcast. Threads read the roster.
-- On a hand-off, the successor watches each page its role owns: the roadmap page, the project's
-  waiting page. The old thread stops watching them. Two threads on one page act on one comment twice.
+- The old thread answers each comment it holds, then stops watching each page its role owns
+  (the roadmap page, the project's waiting page), then writes the hand-off file.
+- The coordinator starts the successor from that file. The successor watches each page at once.
+  It reads each page's comments since the hand-off file's time.
 - The owner may exempt a role from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
