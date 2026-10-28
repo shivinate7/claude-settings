@@ -15,7 +15,8 @@ import { stamp, claim, check, loadConfig, currentBranch, onDefaultBranch } from 
 
 // Each fixture builds its own git repo. A CI run's GITHUB_REF and GITHUB_BASE_REF name the
 // runner's branch, not the fixture's. GITHUB_ACTIONS picks a hard refusal or an UNKNOWN line
-// for an unreadable base, so each test that reads one sets it itself.
+// for an unreadable base, so each test that reads one sets it itself. The watchdog reads CI first.
+const CI = process.env.GITHUB_ACTIONS === "true";
 delete process.env.GITHUB_REF;
 delete process.env.GITHUB_BASE_REF;
 delete process.env.GITHUB_ACTIONS;
@@ -80,11 +81,13 @@ function shSync(cmd, args, opts = {}) {
   return r;
 }
 
+const TEMP_PREFIX = join(tmpdir(), "stamp-test-"); // every fixture dir starts with it
+
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
 function withTempDir(fn) {
-  const dir = mkdtempSync(join(tmpdir(), "stamp-test-"));
+  const dir = mkdtempSync(TEMP_PREFIX);
   try {
     return fn(dir);
   } finally {
@@ -1802,13 +1805,32 @@ const START = "STAMP-START ";
 
 // node -e code: its child holds the pipe and sleeps forever. "hold": the command sleeps too.
 // "orphan": the command exits, so the sleeper's parent pid names a dead process. Both pids go to
-// pidFile first. Both command lines carry pidFile, so a check can tell them from a reused pid.
+// pidFile first. Both command lines carry pidFile raw, in a comment, so a check can tell them from
+// a reused pid. JSON.stringify doubles a Windows backslash, so a quoted copy alone would not match.
 function hangCommand(pidFile, orphan) {
   const sleeper = `setInterval(() => {}, 1e9); // ${pidFile}`;
   return `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], { stdio: "inherit" });
 require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
-${orphan ? "process.exit(0);" : "setInterval(() => {}, 1e9);"}`;
+${orphan ? "process.exit(0);" : "setInterval(() => {}, 1e9);"}
+// ${pidFile}`;
 }
+
+test("hang fixture: each command line carries a Windows pid-file path raw", () => {
+  const pidFile = "C:\\Temp\\stamp-test-x\\pids";
+  const code = hangCommand(pidFile, false);
+  assert.ok(code.includes(pidFile), code); // the intermediate's own command line
+  assert.ok(JSON.parse(code.match(/"-e", ("(?:[^"\\]|\\.)*")/)[1]).includes(pidFile), code);
+});
+
+// The Windows orphan sweep runs only in CI or when asked. On a dev machine an orphan of this suite
+// may stay; another session's process is never swept.
+const sweepAllowed = (ci, env) => ci || env.STAMP_SUITE_SWEEP === "1";
+
+test("watchdog: the Windows orphan sweep runs only in CI or with STAMP_SUITE_SWEEP=1", () => {
+  assert.equal(sweepAllowed(false, {}), false);
+  assert.equal(sweepAllowed(true, {}), true);
+  assert.equal(sweepAllowed(false, { STAMP_SUITE_SWEEP: "1" }), true);
+});
 
 const hangFixture = (kind) => ({
   name: `hang fixture (${kind}): a command's child holds its pipe and sleeps forever`,
@@ -1862,7 +1884,7 @@ for (const kind of ["hold", "orphan"]) {
   test(`watchdog: a hung command (${kind}) reads red within the cap, names its test, and leaves no process`, () =>
     withTempDir((dir) => {
       const pidFile = join(dir, "pids");
-      const env = { ...process.env, STAMP_SUITE_CAP_S: "5", [HANG]: pidFile, [HANG_KIND]: kind };
+      const env = { ...process.env, STAMP_SUITE_CAP_S: "5", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: kind };
       delete env[CHILD];
       // A file, not a pipe: without a watchdog the fixture would hold a pipe, and this test, forever.
       const outFile = join(dir, "out.txt");
@@ -1898,16 +1920,18 @@ function posixTree(root) {
 
 // Windows, after taskkill /T on root: processes it missed. An orphan's parent pid names a dead
 // process, and a dead parent's own parent is unreadable, so "ours" is read from what is left: a
-// process the suite's programs run, started after the suite, whose parent is dead. Plus their trees.
-function windowsLeftovers(root, startedAt) {
+// process the suite's programs run, started after the suite, whose parent is dead, and whose command
+// line names a fixture dir. Plus their trees. Only the root's tree when sweepAllowed says no.
+function windowsLeftovers(root, startedAt, sweep) {
+  const prefix = TEMP_PREFIX.replace(/'/g, "''");
   const walk = `$start = [datetime]::Parse('${new Date(startedAt).toISOString()}');
 $all = @(Get-CimInstance Win32_Process); $live = @{}; foreach ($p in $all) { $live[[int]$p.ProcessId] = 1 }
 $ids = @(${root});
-foreach ($p in $all) { if ($p.CreationDate -gt $start -and -not $live.ContainsKey([int]$p.ParentProcessId) -and $p.Name -match '^(node|git|git-[\\w-]+|bash|sh)\\.exe$') { $ids += [int]$p.ProcessId } }
+if ($${sweep ? "true" : "false"}) { foreach ($p in $all) { if ($p.CreationDate -gt $start -and -not $live.ContainsKey([int]$p.ParentProcessId) -and $p.Name -match '^(node|git|git-[\\w-]+|bash|sh)\\.exe$' -and $p.CommandLine -and $p.CommandLine.Contains('${prefix}')) { $ids += [int]$p.ProcessId } } }
 for ($i = 0; $i -lt $ids.Count; $i++) { foreach ($p in $all) { if ($p.ParentProcessId -eq $ids[$i] -and $ids -notcontains $p.ProcessId) { $ids += [int]$p.ProcessId } } }
-foreach ($p in $all) { if ($ids -contains $p.ProcessId) { '{0} {1} {2}' -f $p.ProcessId, $p.ParentProcessId, $p.CommandLine } }`;
+foreach ($p in $all) { if ($ids -contains $p.ProcessId) { '{0} {1} {2}' -f $p.ProcessId, $p.ParentProcessId, ($p.CommandLine -replace '\\s+', ' ') } }`;
   try {
-    const ps = shSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], { encoding: "utf8", timeout: 8_000 });
+    const ps = shSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], { encoding: "utf8", timeout: 20_000 });
     return ps.stdout.split(/\r?\n/).filter((l) => l.trim());
   } catch (e) {
     return [`(leftover processes unreadable: ${e.message})`];
@@ -1964,7 +1988,7 @@ function watchdog() {
       try { process.kill(-child.pid, "SIGKILL"); } catch {}
     } else {
       console.error(taskkill([child.pid]).trim());
-      const left = windowsLeftovers(child.pid, startedAt);
+      const left = windowsLeftovers(child.pid, startedAt, sweepAllowed(CI, process.env));
       console.error(left.length ? `Left after that, killed now:\n${left.join("\n")}` : "Nothing left after that.");
       const pids = left.map((l) => l.split(" ")[0]).filter((p) => /^\d+$/.test(p));
       if (pids.length) taskkill(pids);
