@@ -3,7 +3,7 @@
 lint/layout.json holds the kinds. A repo adds its own kinds in its extras file (the layout's
 "extras" path, read from the repo root): {"kinds": {"<name>": {"path": "<folder>", ...}}}. An
 extra kind may not replace a layout kind. The mark that the repo has rolled out to the layout is
-its own key in that file, "rolled-out": true (ROLLED_OUT; owner ruling, Oct 27, waiting page item 29 (a)). An
+its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
 ("waiting-page", "kind", "caution", "visibility", "devices", "roadmap") read whenever the file
 exists (`has_extras()`). The "waiting-page" key holds the URL of the repo's waiting page
