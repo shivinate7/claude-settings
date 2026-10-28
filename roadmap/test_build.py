@@ -1,8 +1,11 @@
-"""build.py refuses a tree with git conflict markers (step c72). Run: python roadmap/test_build.py"""
+"""build.py refuses a tree with git conflict markers (step c72); the pre-commit hook refuses an over-cap
+note (step c138). Run: python roadmap/test_build.py"""
 import contextlib
 import io
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,7 +16,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build  # noqa: E402
 
 STEP = {"title": "t", "status": "open", "phase": "p", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
+HERE = pathlib.Path(__file__).resolve().parent
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
+
+
+def words(n):
+    return " ".join(["w"] * n)
 
 
 class ConflictMarkers(unittest.TestCase):
@@ -73,12 +81,26 @@ class ConflictMarkers(unittest.TestCase):
         self.assertTrue((self.root / "roadmap.html").exists())
 
 
+class OverCap(unittest.TestCase):
+    def test_pairs_of_open_steps_over_cap(self):
+        steps = {"c1": dict(STEP, note=words(251)), "c2": dict(STEP, note=words(250)),
+                 "c3": dict(STEP, status="done", note=words(400))}
+        self.assertEqual(build.over_cap(steps), [("c1", 251)])
+
+    def test_upkeep_text_is_unchanged(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            build.upkeep({"c122": dict(STEP, note=words(263))})
+        self.assertIn("  notes over 250 words: c122 (263)\n", out.getvalue())
+
+
 class DeferredWithNoQuestion(unittest.TestCase):
     def count(self, note):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             build.upkeep({"c1": dict(STEP, note=note)})
-        return out.getvalue().splitlines()[0].rsplit("deferred on shiv with no question: ", 1)[1]
+        line = next(l for l in out.getvalue().splitlines() if l.startswith("upkeep: "))
+        return line.split("deferred on shiv with no question: ", 1)[1].split(";")[0]
 
     def test_deferred_with_no_question_counts(self):
         self.assertEqual(self.count("Deferred (shiv, Oct 26): needs your answer."), "1")
@@ -92,6 +114,361 @@ class DeferredWithNoQuestion(unittest.TestCase):
 
     def test_deferred_by_triage_is_not_on_shiv(self):
         self.assertEqual(self.count("Deferred (triage, Oct 27): not now."), "0")
+
+
+class NoteCapHook(unittest.TestCase):
+    """A real git repo with the real hook and build.py, installed by the setup line in CLAUDE.md."""
+
+    SETUP = ("sh", "roadmap/hooks/install.sh")  # the setup line in CLAUDE.md
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = repo = pathlib.Path(self.tmp.name) / "r"
+        (repo / "roadmap" / "data" / "steps").mkdir(parents=True)
+        shutil.copy(HERE / "build.py", repo / "roadmap" / "build.py")
+        if (HERE / "hooks").is_dir():
+            shutil.copytree(HERE / "hooks", repo / "roadmap" / "hooks")
+        self.env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                        GIT_COMMITTER_EMAIL="t@t", PYTHONDONTWRITEBYTECODE="1")
+        self.git("init", "-q", "-b", "roadmap")
+        self.hooks = pathlib.Path(self.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()) / "hooks"
+        self.hooks.mkdir(exist_ok=True)
+        self.install()
+        self.git("add", "roadmap")
+        self.commit("tools")
+
+    def install(self):
+        r = subprocess.run(self.SETUP, cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def git(self, *args, cwd=None, check=True):
+        r = subprocess.run(["git", *args], cwd=cwd or self.repo, env=self.env, capture_output=True, text=True)
+        if check and r.returncode:
+            self.fail(f"git {' '.join(args)}: {r.stdout}{r.stderr}")
+        return r
+
+    def step(self, sid, n, status="open", where=None):
+        path = (where or self.repo) / "roadmap" / "data" / "steps" / f"{sid}.json"
+        path.write_text(json.dumps(dict(STEP, status=status, note=words(n))), encoding="utf-8")
+
+    def commit(self, msg="m", *extra, cwd=None):
+        return self.git("commit", "-q", "-m", msg, *extra, cwd=cwd, check=False)
+
+    def assert_refused(self, r, *names):
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        for name in names:
+            self.assertIn(name, r.stdout + r.stderr)
+
+    def assert_passed(self, r):
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_grown_note_over_cap_is_refused(self):
+        self.step("c122", 240)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("c122"))
+        self.step("c122", 263)
+        self.git("add", "-A")
+        self.assert_refused(self.commit("grow c122"), "c122 (263 words)")
+
+    def seed(self, *steps):
+        """Commit steps (sid, words[, status]) with the hook off, as if an older writer had."""
+        for st in steps:
+            self.step(*st)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("seed", "--no-verify"))
+
+    def test_note_at_cap_passes(self):
+        self.step("c122", build.NOTE_WORDS)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_new_note_over_cap_is_refused(self):
+        self.step("c1", 10)
+        self.step("c2", 251)
+        self.git("add", "-A")
+        r = self.commit()
+        self.assert_refused(r, "c2 (251 words)")
+        self.assertNotIn("c1 (", r.stderr)
+
+    def test_untouched_over_cap_note_does_not_block(self):
+        self.seed(("c9", 300))
+        self.step("c1", 10)
+        (self.repo / "README.md").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_other_field_of_over_cap_step_passes(self):
+        self.seed(("c9", 300))
+        path = self.repo / "roadmap" / "data" / "steps" / "c9.json"
+        path.write_text(json.dumps(dict(json.loads(path.read_text()), title="new")), encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_done_step_over_cap_passes(self):
+        self.step("c5", 400, status="done")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+
+    def test_deleted_step_passes(self):
+        self.seed(("c9", 300))
+        self.git("rm", "-q", "roadmap/data/steps/c9.json")
+        self.assert_passed(self.commit())
+
+    def test_invalid_json_does_not_block(self):
+        (self.repo / "roadmap" / "data" / "steps" / "c7.json").write_text("{not json", encoding="utf-8")
+        self.git("add", "-A")
+        r = self.commit()
+        self.assert_passed(r)
+        self.assertIn("c7.json is not valid JSON", r.stderr)
+
+    def test_staged_under_cap_worktree_over_passes(self):
+        self.step("c122", 240)
+        self.git("add", "-A")
+        self.step("c122", 300)
+        self.assert_passed(self.commit())
+
+    def test_staged_over_cap_worktree_under_is_refused(self):
+        self.step("c122", 263)
+        self.git("add", "-A")
+        self.step("c122", 240)
+        self.assert_refused(self.commit(), "c122 (263 words)")
+
+    def test_commit_all_checks_the_commit_index(self):
+        self.seed(("c122", 240))
+        self.step("c122", 263)
+        self.assert_refused(self.commit("m", "-a"), "c122 (263 words)")
+
+    def test_amend_with_only_page_staged_passes(self):
+        self.seed(("c9", 300))
+        (self.repo / "roadmap" / "roadmap.html").write_text("<html></html>", encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit("m", "--amend", "--no-edit"))
+        self.assert_passed(self.commit("empty", "--allow-empty"))
+
+    def test_merge_of_other_writers_over_cap_note_passes(self):
+        self.seed(("c1", 10))
+        self.git("checkout", "-q", "-b", "other")
+        self.seed(("c9", 300), ("c1", 20))
+        self.git("checkout", "-q", "roadmap")
+        self.step("c1", 30)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.git("merge", "-q", "other", check=False)  # conflicts on c1
+        self.step("c1", 25)
+        self.git("add", "-A")
+        self.assert_passed(self.commit("merge"))
+        self.assertIn("c9.json", self.git("show", "--stat", "HEAD^2").stdout)
+
+    def test_done_to_open_flip_of_long_note_is_refused(self):
+        self.seed(("c1", 300, "done"))
+        self.step("c1", 300, "open")
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c1 (300 words)")
+
+    def test_trimmed_long_note_passes_and_grown_is_refused(self):
+        self.seed(("c9", 300))
+        self.step("c9", 280)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.step("c9", 281)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c9 (281 words)")
+
+    def test_symlinked_step_is_refused(self):
+        (self.repo / "notes").mkdir()
+        (self.repo / "notes" / "long.json").write_text(json.dumps(dict(STEP, note=words(300))), encoding="utf-8")
+        (self.repo / "roadmap" / "data" / "steps" / "c4.json").symlink_to("../../../notes/long.json")
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "roadmap/data/steps/c4.json", "symlink")
+
+    def test_non_utf8_filename_does_not_crash(self):
+        steps = os.fsencode(self.repo / "roadmap" / "data" / "steps")
+        with open(steps + b"/c\xff.json", "w", encoding="utf-8") as f:
+            f.write(json.dumps(dict(STEP, note=words(5))))
+        self.git("add", "-A")
+        r = self.commit()
+        self.assert_passed(r)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_only_top_level_step_files_count(self):
+        nested = self.repo / "roadmap" / "data" / "steps" / "old"
+        nested.mkdir()
+        (nested / "c2.json").write_text(json.dumps(dict(STEP, note=words(300))), encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.step("c3", 300)
+        (nested / "c3.json").write_text(json.dumps(dict(STEP, note=words(5))), encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c3 (300 words)")
+
+    def test_step_file_named_dot_json_counts(self):
+        self.step("", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), ".json (300 words)")
+
+    def path_with(self, *tools):
+        bin_ = pathlib.Path(self.tmp.name) / ("bin-" + "-".join(tools))
+        bin_.mkdir()
+        for t in ("git", "sh", "dirname", *tools):
+            (bin_ / t).symlink_to(shutil.which(t if t != "python" else "python3"))
+        return dict(self.env, PATH=str(bin_))
+
+    def test_hook_falls_back_to_python(self):
+        self.step("c122", 263)
+        self.git("add", "-A")
+        self.env = self.path_with("python")
+        self.assert_refused(self.commit(), "c122 (263 words)")
+
+    def test_hook_with_no_python_says_so(self):
+        (self.repo / "f").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.env = self.path_with()
+        r = self.commit()
+        self.assert_refused(r, "neither python3 nor python")
+
+    def test_hook_runs_in_a_worktree(self):
+        self.seed(("c1", 10))
+        wt = pathlib.Path(self.tmp.name) / "wt"
+        self.git("worktree", "add", "-q", "-b", "wt", str(wt))
+        self.step("c122", 263, where=wt)
+        self.git("add", "-A", cwd=wt)
+        self.assert_refused(self.commit("m", cwd=wt), "c122 (263 words)")
+        self.step("c122", 240, where=wt)
+        self.git("add", "-A", cwd=wt)
+        self.assert_passed(self.commit("m", cwd=wt))
+
+    def hook(self, name, body):
+        """Install a hook straight into the common hooks dir, the way main's githooks/main-ref/install.sh does."""
+        path = self.hooks / name
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+
+    def sibling(self, name="wt", orphan=False):
+        """A sibling worktree of the same clone, on another branch; orphan: its tree has no roadmap/ at all."""
+        wt = pathlib.Path(self.tmp.name) / name
+        if orphan:
+            self.git("worktree", "add", "-q", "--detach", str(wt))
+            self.git("checkout", "-q", "--orphan", name, cwd=wt)
+            self.git("rm", "-rfq", ".", cwd=wt)
+        else:
+            self.git("worktree", "add", "-q", "-b", name, str(wt))
+        return wt
+
+    def test_main_ref_guard_still_fires_in_every_worktree(self):
+        marks = pathlib.Path(self.tmp.name) / "marks"
+        self.hook("reference-transaction", f'''[ "$1" = prepared ] || exit 0
+lines="$(cat)"
+echo "$PWD" >> "{marks}"
+case "$lines" in *refs/heads/main*) echo "main-ref: refused" >&2; exit 1 ;; esac
+exit 0
+''')
+        self.install()  # setup run again after main-ref is in place
+        self.seed(("c1", 10))
+        wt = self.sibling()
+        self.step("c2", 10, where=wt)
+        self.git("add", "-A", cwd=wt)
+        self.assert_passed(self.commit("m", cwd=wt))
+        seen = marks.read_text(encoding="utf-8").split()
+        self.assertIn(str(self.repo), seen)
+        self.assertIn(str(wt), seen)
+        for where in (self.repo, wt):
+            r = self.git("branch", "-f", "main", "HEAD", cwd=where, check=False)
+            self.assert_refused(r, "main-ref: refused")
+        self.assertEqual((self.hooks / "reference-transaction").read_text(encoding="utf-8").count("main-ref"), 1)
+        self.assertIsNone(self.git("config", "--get", "core.hooksPath", check=False).stdout.strip() or None)
+
+    def test_existing_pre_commit_is_chained(self):
+        ran = pathlib.Path(self.tmp.name) / "ran"
+        self.hook("pre-commit", f'''echo "$PWD" >> "{ran}"
+[ -e "$PWD/refuse" ] && {{ echo "local hook: refused" >&2; exit 3; }}
+exit 0
+''')
+        self.install()
+        self.step("c1", 10)
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.assertEqual(ran.read_text(encoding="utf-8").split(), [str(self.repo)])
+        self.step("c2", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c2 (300 words)")
+        self.assertEqual(len(ran.read_text(encoding="utf-8").split()), 1, "cap refusal comes first")
+        (self.repo / "refuse").write_text("x\n", encoding="utf-8")
+        self.step("c2", 10)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "local hook: refused")
+
+    def test_install_twice_is_idempotent(self):
+        ran = pathlib.Path(self.tmp.name) / "ran"
+        self.hook("pre-commit", f'echo x >> "{ran}"\n')
+        self.install()
+        before = sorted(p.name for p in self.hooks.iterdir())
+        self.install()
+        self.install()
+        self.assertEqual(sorted(p.name for p in self.hooks.iterdir()), before)
+        (self.repo / "f").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.assert_passed(self.commit())
+        self.assertEqual(ran.read_text(encoding="utf-8"), "x\n", "the original hook runs exactly once")
+        self.step("c2", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c2 (300 words)")
+
+    def test_tree_without_roadmap_is_not_capped(self):
+        ran = pathlib.Path(self.tmp.name) / "ran"
+        self.hook("pre-commit", f'echo x >> "{ran}"\n')
+        self.install()
+        wt = self.sibling("main", orphan=True)
+        self.assertFalse((wt / "roadmap").exists())
+        (wt / "roadmap" / "data" / "steps").mkdir(parents=True)
+        self.step("c1", 300, where=wt)
+        self.git("add", "-A", cwd=wt)
+        self.assert_passed(self.commit("m", cwd=wt))
+        self.assertEqual(ran.read_text(encoding="utf-8"), "x\n", "the chained hook still runs there")
+        self.env = self.path_with()  # no python: a non-roadmap tree must not need it
+        (wt / "g").write_text("x\n", encoding="utf-8")
+        self.git("add", "-A", cwd=wt)
+        self.assert_passed(self.commit("m", cwd=wt))
+
+    def test_old_hookspath_setup_is_refused(self):
+        self.git("config", "core.hooksPath", "roadmap/hooks")
+        r = subprocess.run(self.SETUP, cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("core.hooksPath", r.stderr)
+        self.assertEqual((self.repo / "roadmap" / "hooks" / "pre-commit").read_bytes(),
+                         (HERE / "hooks" / "pre-commit").read_bytes())
+
+    def test_hookspath_at_another_worktrees_roadmap_hooks_is_refused(self):
+        other = pathlib.Path(self.tmp.name) / "other wt" / "roadmap"
+        (other / "hooks").mkdir(parents=True)
+        (other / "build.py").write_text("", encoding="utf-8")
+        self.git("config", "core.hooksPath", str(other / "hooks"))
+        r = subprocess.run(self.SETUP, cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("core.hooksPath", r.stderr)
+        self.assertFalse((other / "hooks" / "pre-commit").exists())
+
+    def test_dangling_symlinked_pre_commit_is_kept(self):
+        hooks = pathlib.Path(self.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()) / "hooks"
+        (hooks / "pre-commit").unlink()
+        (hooks / "pre-commit").symlink_to("gone")
+        self.assertFalse((hooks / "pre-commit").exists())
+        subprocess.run(self.SETUP, cwd=self.repo, env=self.env, check=True, capture_output=True)
+        self.assertEqual(str((hooks / "pre-commit.pre-c138").readlink()), "gone")
+
+    def test_relative_hookspath_elsewhere_is_honoured(self):
+        self.git("config", "core.hooksPath", "githooks")
+        sub = self.repo / "roadmap"
+        r = subprocess.run(("sh", "hooks/install.sh"), cwd=sub, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.repo / "githooks" / "pre-commit").is_file())
+        self.assertFalse((sub / "githooks").exists())
+        self.step("c2", 300)
+        self.git("add", "-A")
+        self.assert_refused(self.commit(), "c2 (300 words)")
 
 
 if __name__ == "__main__":
