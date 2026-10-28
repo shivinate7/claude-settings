@@ -1826,3 +1826,14 @@ test("a named picture's not-equal sign sits inside its View bar", async (t) => {
   }, it.id);
   assert.ok(m.n[0] >= m.v[0] - 0.5 && m.n[2] <= m.v[2] + 0.5 && m.n[1] >= m.v[1] - 0.5 && m.n[3] <= m.v[3] + 0.5, "the sign is outside the View bar: " + JSON.stringify(m));
 });
+
+test("a decision card with no differs mark shows no stray null or undefined text", async (t) => {
+  const page = await open(t); if (!page) return;
+  const stray = await page.evaluate((id) => {
+    const w = document.createTreeWalker(document.getElementById("item-" + id), NodeFilter.SHOW_TEXT);
+    const bad = [];
+    for (let n = w.nextNode(); n; n = w.nextNode()) { const s = n.textContent.trim(); if (s === "null" || s === "undefined") bad.push(s); }
+    return bad;
+  }, DECISION.id);
+  assert.deepEqual(stray, [], "stray text in the decision card");
+});
