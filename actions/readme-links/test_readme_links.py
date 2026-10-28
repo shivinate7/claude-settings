@@ -59,6 +59,12 @@ for u in ("https://localhost:8443", "https://feed.home.arpa:8443"):
 assert "DEAD" not in degen.stdout, degen.stdout
 assert readme_links.links("x https://localhost:8443,https://feed.home.arpa:8443 y") == [
     "https://feed.home.arpa:8443", "https://localhost:8443"]
+# A comma inside a query string stays in its URL; a dead link still exits 1 through the CLI.
+assert readme_links.links("https://a.com/s?u=https://b.com,https://c.com") == [
+    "https://a.com/s?u=https://b.com,https://c.com"]
+assert readme_links.links("https://a.com/x,https://b.com/s?q=1") == ["https://a.com/x", "https://b.com/s?q=1"]
+dead = run("[x](https://readme-links-test.invalid/)")
+assert dead.returncode == 1 and "DEAD https://readme-links-test.invalid/" in dead.stdout, dead.stdout
 print("ok   readme_links: local-only links skipped and named, comma pair split")
 
 # Hosts CI cannot reach by design are skipped.

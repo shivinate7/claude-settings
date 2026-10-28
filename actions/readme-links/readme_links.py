@@ -18,9 +18,18 @@ URL = re.compile(r"https?://[^\s)>\]\"'`]+")
 LOCAL_SUFFIXES = (".localhost", ".local", ".home.arpa", ".internal")
 
 
+def split_joined(match):
+    """`https://a,https://b` is one regex match: split it into its URLs. A comma after `?` or `#`
+    belongs to the URL (`?u=https://b,https://c`), so only the part before it is split."""
+    q = re.search(r"[?#]", match)
+    head, rest = (match[:q.start()], match[q.start():]) if q else (match, "")
+    parts = re.split(r",(?=https?://)", head)
+    parts[-1] += rest
+    return parts
+
+
 def links(text):
-    # A comma-joined list (`https://a,https://b`) is one regex match: split it into its URLs.
-    found = (u for m in URL.findall(text) for u in re.split(r",(?=https?://)", m))
+    found = (u for m in URL.findall(text) for u in split_joined(m))
     return sorted({u.rstrip(".,;:*_") for u in found})
 
 
