@@ -10,16 +10,20 @@ Step 1 of c151 (the plan step "compaction timing reads message tokens, not total
 - Hooks were `cat > <scratch>/<event>-$$.json` for `Stop`, `PreCompact` and `statusLine`.
 - `claude -p "say hi" --settings <file>` fired `Stop`. A later `claude -p "say bye" --continue` fired `Stop` again.
 - `claude -p "/compact" --continue --settings <file>` fired `PreCompact` (manual trigger).
-- `statusLine` did not fire in `-p` mode: no capture file was written. Its input is unknown: not run in an interactive session.
-- Auto trigger of `PreCompact`: unknown, not run. Its `trigger` value is untested.
+- `statusLine` did not fire in `-p` mode: no capture file was written.
+- `statusLine` fired in an interactive session: `tmux new-session -d` running `claude --settings <file>`, the trust prompt answered Yes, then `say hi`. The hook was `cat > <scratch>/statusline-$$.json`.
+- `PreCompact` with trigger auto: the same interactive run with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=3`. The 36k baseline passed 3% of a 1M window, so a second prompt compacted.
 
 ## Fields per hook
 
-None of the captured inputs holds a token count, a context size, or a percentage.
+`PreCompact` and `Stop` inputs hold no token count, context size or percentage. `statusLine` does.
 
 - `PreCompact`: `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`, `prompt_id`, `hook_event_name`, `trigger` ("manual"), `custom_instructions` (null). Path fields: `transcript_path`. Token fields: none.
 - `Stop`: `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`, `prompt_id`, `permission_mode`, `effort` (object, `level`), `hook_event_name`, `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons`. Token fields: none. Only `transcript_path` leads to counts.
-- `statusLine`: unknown. No `context_window` or `used_percentage` field was seen, because none was captured.
+- `PreCompact` with trigger auto: the same keys as manual, with `trigger` "auto". No token fields.
+- `statusLine` (interactive): `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`, `prompt_id`, `effort.level`, `model.id`, `model.display_name`, `workspace.current_dir`, `workspace.project_dir`, `workspace.added_dirs`, `version`, `output_style.name`, `cost.*` (dollars, durations, lines), `exceeds_200k_tokens`, `fast_mode`, `thinking.enabled`, and `prompt_cache.*` (also token counts: `cache_write_tokens`, `recache_tokens_if_cold`).
+- `statusLine` token fields: `context_window.total_input_tokens`, `context_window.total_output_tokens`, `context_window.context_window_size` (1000000), `context_window.current_usage.{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens}`, `context_window.used_percentage`, `context_window.remaining_percentage`.
+- Before the first reply, the first `statusLine` call held `current_usage`, `used_percentage` and `remaining_percentage` as null and the token totals as 0.
 
 ## The transcript
 
@@ -32,16 +36,24 @@ Method: read the transcript JSONL. Take each `assistant` entry's `message.usage`
 - The `compact_boundary` entry in the transcript holds `preTokens` 37179, `postTokens` 6250, `cumulativeDroppedTokens` 30929. `preTokens` equals the turn 1 usage sum, so it is total context. What `postTokens` counts is unknown. It is below the overhead, so it may leave out the system prompt and tools.
 - The `cost-state` entry holds `modelUsage` with per-model totals over the session. Not per message.
 
+## statusLine against the transcript
+
+- After `say hi`: `current_usage` was 2 + 0 + 42117 (input, read, creation) and output 13. The transcript usage was the same four numbers, sum 42132.
+- `total_input_tokens` 42119 is `input_tokens` + cache read + cache creation. It leaves out output. `used_percentage` 4 is that figure over 1000000, rounded down.
+- A second run read 36661 = 2 + 31930 + 4729, the same way.
+- So `statusLine` hands over the transcript's last usage as total context, with no transcript read. It does not split system, tools and messages either.
+- `statusLine` is a display hook. It runs per screen refresh in a live session, and it is not run by `claude -p`. A guard hook cannot call it. Its fields are readable only by a command the owner sets as `statusLine`.
+
 ## Answer
 
-- No hook input holds a token count. A hook must open `transcript_path`.
+- `PreCompact` and `Stop` inputs hold no token count. Those hooks must open `transcript_path`. Only `statusLine` holds counts, and only in an interactive session.
 - A "messages only" number is not readable from the transcript. Usage sums the whole request.
 - A messages-only number can be derived. Proxy: last assistant usage sum minus the first assistant usage sum, since the first turn is mostly overhead. This is untested against a long session. It also breaks when the first turn is large or the overhead changes mid-session (a tool set change, a memory file edit). Mark it a proxy.
 
 ## Unknown
 
-- The `statusLine` input fields, and whether it carries context data.
-- `PreCompact` with `trigger` auto.
+- `statusLine` in a session with subagents or after a compact: its `current_usage` there was not read.
+- Whether `statusLine` or the transcript counts the system prompt and tools the same way `preTokens` does after a compact.
 - What `postTokens` counts.
 - Whether a long session (many tool calls, subagents) keeps the same `usage` shape.
 - Whether the first-turn proxy holds on the owner's machine.
@@ -50,7 +62,7 @@ Method: read the transcript JSONL. Take each `assistant` entry's `message.usage`
 
 - A guard hook that already runs may read the last `assistant` usage from `transcript_path` on demand. It starts no process and writes no file (rule `outcomes-mechanize-rules`).
 - Total context is exact: the usage sum. Message tokens are a proxy only. Step 2 should say which one it uses.
-- First measure `statusLine` in an interactive session, since it may hand over context size with no transcript read.
+- `statusLine` gives total context with no transcript read, but only in an interactive session and only to the command set as `statusLine`. The transcript works in every mode.
 
 Raw captures: the scratch folder `c151` under the session scratchpad. Not tracked.
 
