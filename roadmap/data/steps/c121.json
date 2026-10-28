@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.3966,
  "why": "c100 (the waiting page's final look) merged in batch #683; the live pages (home-app, degen, mailaudit) still show the old one. Build advisor, Oct 27 04:25 CDT.",
- "note": "Deferred (shiv, Oct 27): the live pages belong to a third account; the cloud and the Mac both get 404, so they must be shared with this account or republished by you. Asked: waiting page item 4. Then one repo at a time, home-app first; saved answers survive, since the store keys are unchanged. Brief: briefs/c100-republish-live-pages.md. Port: yes, every repo's page.",
- "updatedAt": "2026-10-28T05:10:00Z"
+ "note": "Ruling, Oct 27 23:48 CDT (shiv, waiting page item 4, b): start fresh pages on this account; each repo gets a new page at its visit, and open answers on the old pages (other accounts, 404 here) are dropped; this project's page is https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx. Due after: each repo's visit (r1), home-app first. Brief: briefs/c100-republish-live-pages.md. Port: yes, every repo's page.",
+ "updatedAt": "2026-10-28T04:55:00Z"
 }
