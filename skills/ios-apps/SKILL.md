@@ -1,6 +1,6 @@
 ---
 name: ios-apps
-description: Use in any repo that ships an iPhone app, before you change its build, tests, CI or shipping, when the owner asks for a new iOS app, or before you fold or unfold an iPhone Duo simulator. Holds the one iOS standard every app follows, and a starter that writes a new app at that standard.
+description: Use in any repo that ships an iPhone app, before you draw or brief an iPhone mockup, before you change its build, tests, CI or shipping, when the owner asks for a new iOS app, or before you fold or unfold an iPhone Duo simulator. Holds the one iOS standard every app follows, its mockup rules, and a starter that writes a new app at that standard.
 ---
 
 Every iOS app of the owner works the same way: the same build, tests, phone install and TestFlight
@@ -56,6 +56,55 @@ opens no window. Never drive Device Hub to fold.
   coordinates land on the dark outer screen.
 - `hinge` uses private Apple APIs, so an Xcode update can break it. Then the owner folds by hand:
   Xcode > Open Developer Tool > Device Hub has Closed, Partial and Open buttons.
+
+## Mockups
+
+This section is the one home of the iOS drawing rules. The designer, skill `design-explore` and skill
+`design-review` point here. An iOS repo, for these rules, is a repo whose device list
+(`python3 ~/.claude/lint/layout.py devices <repo root>`) holds both Duo poses. Hook `blind_brief.py` uses
+the same test, and refuses a designer brief there that does not name this skill.
+
+Before you draw, fetch the current Apple pages below and read the parts you use. Do not draw from memory,
+and type no number that a page you read does not give. If a page does not load, say in your notes that
+the read is unknown, and use no number from it. In your notes, cite each page you used, with the date you
+read it.
+
+Pages read 2026-10-28 (each answered 200):
+
+| Page | What it gives a mockup |
+| --- | --- |
+| https://developer.apple.com/design/human-interface-guidelines/layout | Respect the system safe areas, margins and guides. The safe area is the part of the screen that the status bar, a toolbar, a tab bar or the Dynamic Island does not cover. Lay out by size class (compact or regular width), not by device type. |
+| https://developer.apple.com/design/human-interface-guidelines/typography | SF Pro is the iOS system font. Use the built-in text styles: they give Dynamic Type. The page has the table of Dynamic Type sizes; the body style is 17 pt at the default size. |
+| https://developer.apple.com/design/human-interface-guidelines/accessibility | On iOS, the default control size is 44x44 pt and the minimum is 28x28 pt. The default text size is 17 pt and the minimum is 11 pt. Let people make text larger, to at least 200 percent. |
+| https://developer.apple.com/design/human-interface-guidelines/buttons | A button needs a hit region of at least 44x44 pt. |
+| https://developer.apple.com/design/human-interface-guidelines/sheets | A sheet is for a simple task. In a sheet, Cancel goes on the leading edge of the top toolbar, and Done on the trailing edge. |
+| https://developer.apple.com/design/human-interface-guidelines/lists-and-tables | Show text in a list or a table. |
+| https://developer.apple.com/design/human-interface-guidelines/tab-bars | A tab bar is for navigation, not for actions. On iOS it floats above the content at the bottom of the screen. |
+| https://developer.apple.com/design/human-interface-guidelines/toolbars | On iOS, a large title changes to a standard title when people scroll. The old navigation-bars page is gone (404); this page holds its guidance. |
+| https://developer.apple.com/documentation/swiftui/navigationstack, https://developer.apple.com/documentation/swiftui/tabview, https://developer.apple.com/documentation/swiftui/list | The SwiftUI views that the mockup's navigation stack, tab bar and lists become. |
+
+Draw with native controls and native proportions:
+
+- Controls. Draw what SwiftUI gives: a navigation stack with a large title, lists, sheets, and a tab bar
+  for the sections. Draw no control that iOS does not have, such as a hover state, a web page footer or
+  a row of web buttons.
+- Type. The first family in each font-family is `-apple-system` or `system-ui`. Take each size from a
+  Dynamic Type text style on the typography page, at the default size.
+- Safe areas. Pad each frame with `env(safe-area-inset-top)` and the other insets, and keep content and
+  controls out of the status bar and the home indicator areas.
+- Targets. Make each tap target at least 44x44 pt.
+
+Draw the Duo first. Draw the folded pose, then the unfolded pose. Each pose is its own layout, by the
+layout page's size-class rule: the unfolded pose uses its width, for example a list beside its detail. It
+is never the folded layout made wider. Put each pose in its own frame, with
+`data-device="iphone-duo-folded"` or `data-device="iphone-duo-unfolded"`. Draw the regular iPhone only
+when the brief or the owner asks. No Apple page gives a Duo size: take each size from `layout.py devices`,
+and when it says `not written`, draw at the brief's size and say so in your notes.
+
+Before you report, run `python3 ~/.claude/lint/check_ios_mockup.py <mockup>` on each mockup. Exit 0 is
+clean. It checks only that a part is there: the system font first, a safe-area inset, and both Duo frames,
+folded first. It does not judge the look. The design reviewer gives each screen a verdict, `native` or
+`web-like` (skill `design-review`).
 
 ## A new app
 

@@ -36,6 +36,8 @@ direction. The first line of your brief is `Lane kind: blind|informed|directed`,
 Devices. Run `python3 ~/.claude/lint/layout.py devices <repo root>` for the repo's device list. Draw the first
 device only. Draw the others when the brief or the owner asks, or when the layout breaks between them. Never
 invent a size: a device with no written size is drawn at the brief's size, and you say so in your notes.
+In an iOS repo, draw both Duo poses, folded first, each as its own layout, and follow skill `ios-apps`,
+section Mockups: read the Apple pages it names before you draw, and run its mockup check before you report.
 
 Sample figures. Put a "Sample" banner at the top of each mockup: it says that no figure on it is
 real. Label what exists with a dashed "Today: <part>" and what the option adds with a dashed
