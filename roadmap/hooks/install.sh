@@ -17,21 +17,26 @@ else
 fi
 mkdir -p "$dir"
 dir="$(cd "$dir" && pwd -P)"
+# Any worktree's tracked roadmap/hooks (this one or a sibling's) is the old c138 setup.
 case "$dir" in
-  "$(cd "$(dirname "$src")" && pwd -P)")
+  */roadmap/hooks) [ -f "$dir/../build.py" ] && {
     echo "install.sh: core.hooksPath points at roadmap/hooks (the old c138 setup), which turns off the" >&2
     echo "hooks in .git/hooks (main-ref) for every worktree. Run: git config --unset core.hooksPath" >&2
-    echo "then run this again, and rerun githooks/main-ref/install.sh from a main checkout." >&2
-    exit 1 ;;
+    echo "then run this again, and rerun bash githooks/main-ref/install.sh from a main checkout." >&2
+    exit 1; } ;;
 esac
 marker="roadmap-note-cap pre-commit dispatcher"
-if [ -e "$dir/pre-commit" ] && ! grep -q "$marker" "$dir/pre-commit"; then
-  if [ -e "$dir/pre-commit.pre-c138" ]; then
+if { [ -e "$dir/pre-commit" ] || [ -L "$dir/pre-commit" ]; } && ! grep -qs "$marker" "$dir/pre-commit"; then
+  if [ -e "$dir/pre-commit.pre-c138" ] || [ -L "$dir/pre-commit.pre-c138" ]; then
     echo "install.sh: both $dir/pre-commit and pre-commit.pre-c138 exist; merge them by hand, then rerun." >&2
     exit 1
   fi
   mv "$dir/pre-commit" "$dir/pre-commit.pre-c138"
-  echo "moved the existing pre-commit to $dir/pre-commit.pre-c138; it still runs, after the cap check"
+  if [ -x "$dir/pre-commit.pre-c138" ]; then
+    echo "moved the existing pre-commit to $dir/pre-commit.pre-c138; it still runs, after the cap check"
+  else
+    echo "moved the existing pre-commit to $dir/pre-commit.pre-c138; it is not executable, so it does not run"
+  fi
 fi
 cp "$src" "$dir/pre-commit.tmp.$$"
 chmod +x "$dir/pre-commit.tmp.$$"

@@ -441,6 +441,24 @@ exit 0
         self.assertEqual((self.repo / "roadmap" / "hooks" / "pre-commit").read_bytes(),
                          (HERE / "hooks" / "pre-commit").read_bytes())
 
+    def test_hookspath_at_another_worktrees_roadmap_hooks_is_refused(self):
+        other = pathlib.Path(self.tmp.name) / "other wt" / "roadmap"
+        (other / "hooks").mkdir(parents=True)
+        (other / "build.py").write_text("", encoding="utf-8")
+        self.git("config", "core.hooksPath", str(other / "hooks"))
+        r = subprocess.run(self.SETUP, cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("core.hooksPath", r.stderr)
+        self.assertFalse((other / "hooks" / "pre-commit").exists())
+
+    def test_dangling_symlinked_pre_commit_is_kept(self):
+        hooks = pathlib.Path(self.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()) / "hooks"
+        (hooks / "pre-commit").unlink()
+        (hooks / "pre-commit").symlink_to("gone")
+        self.assertFalse((hooks / "pre-commit").exists())
+        subprocess.run(self.SETUP, cwd=self.repo, env=self.env, check=True, capture_output=True)
+        self.assertEqual(str((hooks / "pre-commit.pre-c138").readlink()), "gone")
+
     def test_relative_hookspath_elsewhere_is_honoured(self):
         self.git("config", "core.hooksPath", "githooks")
         sub = self.repo / "roadmap"
