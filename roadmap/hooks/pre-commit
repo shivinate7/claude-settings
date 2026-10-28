@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse a commit whose staged open-step notes go over build.NOTE_WORDS (step c138).
+# Installed by: git config core.hooksPath roadmap/hooks
+cd "$(git rev-parse --show-toplevel)" && exec python3 roadmap/build.py --check-staged

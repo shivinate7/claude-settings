@@ -11,6 +11,8 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
   run `python roadmap/build.py`, commit the JSON and roadmap/roadmap.html, `git push origin roadmap`.
   Then republish roadmap/roadmap.html to the roadmap page,
   https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h (Artifact tool, same URL).
+- Once per clone, run `git config core.hooksPath roadmap/hooks`: the pre-commit hook refuses a commit
+  that adds or grows an open step's note past 250 words (build.py `--check-staged`, step c138).
 - Other threads file here too. Pull right before each write. If roadmap.html conflicts on a pull,
   run build.py again rather than merging it by hand.
 - Briefs go in briefs/, plans in plans/, hand-off notes in handoffs/. A brief's full text also
