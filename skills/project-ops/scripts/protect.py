@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Sets branch protection with the required checks on an adopting repo, so no repo starts with none.
+
+    python3 protect.py --repo <owner>/<name> --checks <a,b,...> [--branch main] [--confirm]
+
+Without --confirm it only reads the branch's protection and prints what it would set. With --confirm it
+sets the required checks: a branch with no protection gets it (the checks, no review rule, no restriction);
+a protected branch gets only its check list set, and an equal list is left alone. merge/merge.py reads the
+required checks from this protection (merge.requiredChecks "protection"), so this is their one home.
+Exit 0 done or previewed, 1 a gh call failed, 2 a bad argument.
+"""
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
+
+
+def run_gh(args, body=None):
+    """-> (code, output) of `gh api`, with `body` as its JSON input."""
+    p = subprocess.run(["gh", "api", *args] + (["--input", "-"] if body is not None else []),
+                       input=json.dumps(body) if body is not None else None, capture_output=True, text=True)
+    return p.returncode, (p.stdout + p.stderr).strip()
+
+
+def main(argv, gh=run_gh):
+    ap = argparse.ArgumentParser(description="Set branch protection with the required checks.")
+    ap.add_argument("--repo", required=True, help="owner/name")
+    ap.add_argument("--checks", required=True, help="comma-separated check names")
+    ap.add_argument("--branch", default="main")
+    ap.add_argument("--confirm", action="store_true", help="set the protection; without it, only preview")
+    a = ap.parse_args(argv)
+    checks = [c.strip() for c in a.checks.split(",") if c.strip()]
+    if not REPO_RE.match(a.repo) or not BRANCH_RE.match(a.branch):
+        print("protect: --repo must be owner/name, and --branch a plain branch name", file=sys.stderr)
+        return 2
+    if not checks:
+        print("protect: --checks names no check. A repo never starts with none.", file=sys.stderr)
+        return 2
+    base = f"repos/{a.repo}/branches/{a.branch}/protection"
+    code, out = gh(["-X", "GET", base + "/required_status_checks"])
+    if code == 0:
+        try:
+            held = json.loads(out)["contexts"]
+        except (ValueError, KeyError, TypeError):
+            print(f"protect: cannot read the required checks of {a.branch}: {out}", file=sys.stderr)
+            return 1
+        if set(held) == set(checks):
+            print(f"protect: {a.branch} already requires {', '.join(checks)}. Nothing to set.")
+            return 0
+        call, body = ["-X", "PATCH", base + "/required_status_checks"], {"strict": False, "contexts": checks}
+        what = f"set the required checks of {a.branch} to {', '.join(checks)} (now: {', '.join(held) or 'none'})"
+    elif "404" in out:
+        call = ["-X", "PUT", base]
+        body = {"required_status_checks": {"strict": False, "contexts": checks}, "enforce_admins": False,
+                "required_pull_request_reviews": None, "restrictions": None}
+        what = f"protect {a.branch} with the required checks {', '.join(checks)}"
+    else:
+        print(f"protect: cannot read the protection of {a.branch}: {out}", file=sys.stderr)
+        return 1
+    if not a.confirm:
+        print(f"protect: would {what}. Run again with --confirm to set it.")
+        return 0
+    code, out = gh(call, body)
+    if code:
+        print(f"protect: the call failed: {out}", file=sys.stderr)
+        return 1
+    print(f"protect: {what}. Done.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
