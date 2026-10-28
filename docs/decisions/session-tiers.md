@@ -15,7 +15,7 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
 - **Who starts which session** (owner, 15:18). The coordinator is the one session that starts other sessions. It starts triage and the batch runner together, as a trio, before any lane session. This refines the triage-first ruling below.
 - **Rotation of standing sessions** (owner, 15:23). Triage and the batch runner each report a tally of their own use, in turns or context, to the coordinator. When a tally nears its limit, the coordinator has that session write its handoff, archives it, and starts a fresh one from the handoff. The coordinator writes its own handoffs and compacts as today.
   - MEASURED (coordinator, 2026-10-28; the second reading at 17:53 CDT, the first's time not given): `get_session` on a child session returns `external_metadata.context_usage` (`used_tokens`, `max_tokens`) and `autocompact_state` (`threshold`, `effective_window`). The q_max lane read 171216 of 500000, threshold 384000. A lane in the owner's environment "lane test" read `max_tokens` 200000, so a per-environment context window works for a cloud lane.
-  - So the coordinator can read each standing session's tally itself. Dropping the self-report needs the owner's word.
+  - So the coordinator can read each standing session's tally itself. Dropping the self-report needs the owner's grant.
 - **No coordinator succession** (owner, 15:24). Handing children to a new coordinator failed in the owner's runs, in two ways.
   - A child refused the new coordinator as not its parent. That was a safety reflex.
   - A child missed a message while busy, after the old coordinator archived itself.
