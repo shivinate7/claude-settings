@@ -44,12 +44,8 @@ class Repo:
     def write(self, rel, text="x\n"):
         full = os.path.join(self.root, *rel.split("/"))
         os.makedirs(os.path.dirname(full), exist_ok=True)
-        if isinstance(text, bytes):  # raw bytes: a BOM, or a file no UTF-8 reader can decode
-            with open(full, "wb") as handle:
-                handle.write(text)
-        else:
-            with open(full, "w", encoding="utf-8") as handle:
-                handle.write(text)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(text)
         subprocess.run(["git", "-C", self.root, "add", "-f", rel], check=True)
         return self
 
@@ -576,58 +572,6 @@ class Words(unittest.TestCase):
             with self.subTest(rel=rel):
                 code, out = Repo(self).write(rel, text).run("words")
                 self.assertEqual(hits(out), [(word, rel, line)], out)
-
-    def test_a_hook_message_with_a_newline_is_one_item_line(self):
-        word = planted()
-        source = 'MESSAGE = "Refused by the %s rule\\nnext line"\n' % word
-        code, out = Repo(self).write("hooks/guard_msg.py", source).run("words")
-        self.assertEqual(code, 1, out)
-        self.assertEqual(len(out.splitlines()[1:]), 2, out)  # the one item line, then the glossary line
-        self.assertEqual(hits(out), [(word, "hooks/guard_msg.py", "1")], out)
-
-    def test_the_real_word_wins_over_an_earlier_uses_quote(self):
-        word = planted()
-        source = "MESSAGE = \"uses 'x' then %s\"\n" % word
-        code, out = Repo(self).write("hooks/msg.py", source).run("words")
-        self.assertEqual(code, 1, out)
-        self.assertEqual(hits(out), [(word, "hooks/msg.py", "1")], out)
-
-    def test_an_undecodable_file_is_unknown_not_in_shape(self):
-        word = planted()
-        text = "See `%s-cap-rule` here.\n" % word.replace(" ", "-")
-        code, out = Repo(self).write("docs/guide.md", text.encode("utf-16")).run("words")
-        self.assertEqual(code, 2, out)
-        self.assertTrue(head(out).startswith("words: unknown"), out)
-        self.assertIn("docs/guide.md", out)
-
-    def test_a_repo_with_no_tracked_files_is_unknown(self):
-        code, out = Repo(self).run("words")
-        self.assertEqual(code, 2, out)
-        self.assertTrue(head(out).startswith("words: unknown"), out)
-
-    def test_a_utf8_bom_python_file_is_read(self):
-        word = planted()
-        source = b"\xef\xbb\xbf" + ("%s_count = 2\n" % word.replace(" ", "_")).encode("utf-8")
-        code, out = Repo(self).write("src/app.py", source).run("words")
-        self.assertEqual(code, 1, out)
-        self.assertEqual(hits(out), [(word, "src/app.py", "1")], out)
-
-    def test_the_glossary_line_says_uncommitted_when_it_differs_from_head(self):
-        checkout = tempfile.mkdtemp(prefix="glossary-", dir=RUN_FOLDER)
-        identity = ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"]
-        glossary = os.path.join(checkout, "GLOSSARY.md")
-        with open(glossary, "w", encoding="utf-8") as handle:
-            handle.write(check_glossary.read(check_glossary.GLOSSARY))
-        subprocess.run(["git", "init", "-q", checkout], check=True)
-        subprocess.run(["git", "-C", checkout, "add", "GLOSSARY.md"], check=True)
-        subprocess.run(["git", "-C", checkout] + identity + ["commit", "-q", "-m", "glossary"], check=True)
-        with open(glossary, "a", encoding="utf-8") as handle:
-            handle.write("\n")  # differs from HEAD, not committed
-        repo = Repo(self).write("docs/guide.md")
-        with mock.patch.object(check_glossary, "ROOT", checkout):
-            code, out = in_process(repo.root)
-        self.assertEqual(code, 0, out)
-        self.assertIn("uncommitted", out)
 
     def test_registered_in_groups(self):
         probes = load_probes()

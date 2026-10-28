@@ -505,7 +505,8 @@ def scorecard(root):
     return finish("scorecard", [], "wrote %s (%d row(s), %d note(s))" % (rel, len(rows), len(notes)), 0)
 
 
-WORD_HIT = re.compile(r"\buses '([^']+)'")  # the word in a problem line of check_glossary
+# The word in a problem line of check_glossary, taken from its fixed tail: a message that quotes `uses 'x'` earlier is not read as the word.
+WORD_HIT = re.compile(r"\buses '([^']+)'; the glossary name is")
 
 
 def glossary_commit(root):
@@ -515,6 +516,15 @@ def glossary_commit(root):
     except OSError:
         return None
     return done.stdout.decode().strip()[:7] if done.returncode == 0 and done.stdout.strip() else None
+
+
+def glossary_uncommitted(root, name):
+    """True when the glossary file differs from HEAD in `root`, or is untracked. False when git cannot say."""
+    try:
+        done = _nowindow.run(["git", "-C", root, "status", "--porcelain", "--", name], capture_output=True)
+    except OSError:
+        return False
+    return done.returncode == 0 and bool(done.stdout.strip())
 
 
 def probe_words(root):
@@ -528,22 +538,25 @@ def probe_words(root):
     table = check_glossary.rows(text)
     if not table:
         raise CannotRun("%s has no rows under '%s'" % (check_glossary.GLOSSARY, check_glossary.SECTION))
-    found = []
+    found, unread, files = [], [], tracked(root)
 
     def add(rel, line, problem, detail):
         word = WORD_HIT.search(problem)
-        item = (word.group(1) if word else "?", rel, line, detail)
+        item = (word.group(1) if word else "?", rel, line, " ".join(detail.split()))  # a message may hold a newline
         if item not in found:
             found.append(item)
 
-    for rel in tracked(root):
+    for rel in files:
         for problem in check_glossary.path_problems(rel, table):  # "<path> uses '<word>'; ..."
             add(rel, "-", problem, problem[len(rel):].strip())
-        if rel.startswith(check_glossary.SKIP_CODE):
-            continue
         body = read(root, rel)
         if body is None:
+            unread.append(rel)
             continue
+        if rel.startswith(check_glossary.SKIP_CODE):
+            continue
+        if body.startswith("\ufeff"):  # the check's own read uses utf-8-sig; a BOM would fail the Python parse
+            body = body[1:]
         try:
             problems = check_glossary.code_problems(rel, body, table, None)
         except SyntaxError as err:
@@ -551,9 +564,17 @@ def probe_words(root):
         for problem in problems:  # "<rel>:<line>: <where> uses '<word>'; ..."
             line, _, detail = problem[len(rel) + 1:].partition(": ")
             add(rel, line, problem, detail)
+    note = "unread: %d files, %s" % (len(unread), ", ".join(unread[:3]) + (", ..." if len(unread) > 3 else ""))
+    if not files:
+        raise CannotRun("no tracked files")
+    if len(unread) == len(files):
+        raise CannotRun("no tracked file could be read (%s)" % note)
     sha = glossary_commit(check_glossary.ROOT)
+    stale = glossary_uncommitted(check_glossary.ROOT, check_glossary.GLOSSARY)
     lines = ["  %s: %s:%s %s" % item for item in found]
-    lines.append("glossary read at %s of claude-settings" % (sha or "an unknown commit"))
+    lines.append("glossary read at %s of claude-settings%s" % (sha or "an unknown commit", " (uncommitted)" if stale else ""))
+    if unread:
+        lines.append(note)
     if found:
         return finish("words", lines, "out", 1)
     return finish("words", lines, "in shape", 0)
