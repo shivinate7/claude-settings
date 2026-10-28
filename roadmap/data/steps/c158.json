@@ -1,0 +1,9 @@
+{
+ "title": "The Windows stamp fixture suite never hangs past its cap",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3034,
+ "why": "c95 step 1a's lane (Oct 27): on run 40542065223 (push to main), the Windows \"Record stamp engine fixture suite\" hung 23 min; its normal maximum is 1.5 min (n=28).",
+ "note": "Debt; cause unknown. #715 gives the step a 5 min cap, so the next hang reads red at its own step. Next cloud lane: after #715 lands, read the next capped hang's log, find the hang, fix it; red first on the hang if it reproduces. Needs no answer. Port: no. Due after: batch 1 (#715 + #721) merges. Placed ahead of c82 (triage, Oct 28): it ate a full run's Windows time.",
+ "updatedAt": "2026-10-28T05:10:00Z"
+}

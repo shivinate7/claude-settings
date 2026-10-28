@@ -1,9 +1,9 @@
 {
-  "note": "Not started; no change since Oct 17. Needs evals first, and none exist for agent definitions in claude-settings (not checked in depth). Related: o12 (bring every skill up to date) does a one-time pass by hand; this step would make it standing.",
-  "order": 440,
-  "phase": "later",
-  "status": "todo",
-  "title": "An agent pruner, gated on evals",
-  "updatedAt": "2026-10-26T05:30:00Z",
-  "why": "Its job is cutting words and rules while tests and evals still pass. An agent definition changes only when an eval shows the new version is better."
+ "note": "Not started; no change since Oct 17. Needs evals first, and none exist for agent definitions in claude-settings (not checked in depth). Related: o12 (bring every skill up to date) does a one-time pass by hand; this step would make it standing. Due after: evals for agent definitions exist.",
+ "order": 440,
+ "phase": "later",
+ "status": "todo",
+ "title": "An agent pruner, gated on evals",
+ "updatedAt": "2026-10-28T05:00:00Z",
+ "why": "Its job is cutting words and rules while tests and evals still pass. An agent definition changes only when an eval shows the new version is better."
 }

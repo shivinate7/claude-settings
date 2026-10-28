@@ -1,9 +1,9 @@
 {
-  "title": "Compaction timing reads message tokens, not total context",
-  "phase": "cleanup",
-  "status": "todo",
-  "order": 108,
-  "why": "Your idea, Oct 27 16:49 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2AdH3Lyos1aUGY9YCpUrDM4, with a screenshot of a 500k context: messages 379k, 76%, and about 85k fixed overhead from system, tools, prompt, memory and skills that compaction cannot shrink): the compact hooks and auto-compact timing could be smarter if they measured messages only.",
-  "note": "Unknown today: whether a hook's input exposes the context breakdown; the transcript file can at least be counted. Step 1, a cloud measuring lane: list what PreCompact, Stop and statusline inputs carry about tokens on the current Claude Code, and count message tokens from the transcript; record the answer in docs/decisions. Step 2, only if a number is readable: base the hand-off and compact thresholds on messages as a share of the room left after the fixed overhead, not on total context; red first on a session whose overhead alone trips today's threshold. No earlier step covers it (closed c25 and o15 shaped the hand-off, not its timing). Needs no answer. Port: no; hooks install from claude-settings. Due after: the usage freeze lifts (coordinator, Oct 27 13:31 CDT). Placed ahead of c58 (triage, Oct 27): useful, not urgent.",
-  "updatedAt": "2026-10-27T21:52:00Z"
+ "title": "Compaction timing reads message tokens, not total context",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 108,
+ "why": "Your idea, Oct 27 16:49 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2AdH3Lyos1aUGY9YCpUrDM4, with a screenshot of a 500k context: messages 379k, 76%, and about 85k fixed overhead from system, tools, prompt, memory and skills that compaction cannot shrink): the compact hooks and auto-compact timing could be smarter if they measured messages only.",
+ "note": "Unknown today: whether a hook's input exposes the context breakdown; the transcript file can at least be counted. Step 1, a cloud measuring lane: list what PreCompact, Stop and statusline inputs carry about tokens on the current Claude Code, and count message tokens from the transcript; record the answer in docs/decisions. Step 2, only if a number is readable: base the hand-off and compact thresholds on messages as a share of the room left after the fixed overhead, not on total context; red first on a session whose overhead alone trips today's threshold. No earlier step covers it (closed c25 and o15 shaped the hand-off, not its timing). Needs no answer. Port: no; hooks install from claude-settings. Placed ahead of c58 (triage, Oct 27): useful, not urgent.",
+ "updatedAt": "2026-10-28T05:00:00Z"
 }

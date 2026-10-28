@@ -1,9 +1,9 @@
 {
-  "title": "Cloud installs keep the hand-off start-up hooks, or say why not",
-  "phase": "cleanup",
-  "status": "todo",
-  "order": 103.3032,
-  "why": "Finding, Oct 27 23:11 CDT (an audit session's report, relayed in cmsg_01DoF7thf3iq2Srr1UsfXgh23uGo4eqsUrqqbGKYMctN3n): install.sh near line 632 makes a cloud install replace every start-up hook with the refresh hook, so cloud sessions lose the hand-off hooks.",
-  "note": "Debt. Unknown whether that is intended; no record says. Next cloud lane: read install.sh's cloud branch and the decision that added it; if not intended, keep the hand-off hooks beside the refresh hook, red first on a cloud install whose settings lack them; if intended, write the reason in the decision. Ties to c54 part 3 (install claude-settings in cloud containers). Needs no answer. Port: no; install.sh lives here. Due after: the usage freeze lifts (c155). Placed ahead of c82 (triage, Oct 28): every cloud session may lose its hand-off.",
-  "updatedAt": "2026-10-28T04:15:00Z"
+ "title": "Cloud installs keep the hand-off start-up hooks, or say why not",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3032,
+ "why": "Finding, Oct 27 23:11 CDT (an audit session's report, relayed in cmsg_01DoF7thf3iq2Srr1UsfXgh23uGo4eqsUrqqbGKYMctN3n): install.sh near line 632 makes a cloud install replace every start-up hook with the refresh hook, so cloud sessions lose the hand-off hooks.",
+ "note": "Debt. Unknown whether that is intended; no record says. Next cloud lane: read install.sh's cloud branch and the decision that added it; if not intended, keep the hand-off hooks beside the refresh hook, red first on a cloud install whose settings lack them; if intended, write the reason in the decision. Ties to c54 part 3 (install claude-settings in cloud containers). Needs no answer. Port: no; install.sh lives here. Placed ahead of c82 (triage, Oct 28): every cloud session may lose its hand-off.",
+ "updatedAt": "2026-10-28T05:00:00Z"
 }

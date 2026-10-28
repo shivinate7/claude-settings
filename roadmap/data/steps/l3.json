@@ -1,9 +1,9 @@
 {
-  "note": "Not started; no change since Oct 17. Conditional on your wanting a second coding model inside Claude Code; no session has asked for one since. Your word, Oct 26: leave it deferred.",
-  "order": 430,
-  "phase": "later",
-  "status": "todo",
-  "title": "Try Grok through grok-plugin-cc",
-  "updatedAt": "2026-10-26T05:05:00Z",
-  "why": "Only if you still want a second coding model inside Claude Code."
+ "note": "Not started; no change since Oct 17. Conditional on your wanting a second coding model inside Claude Code; no session has asked for one since. Your word, Oct 26: leave it deferred. Due after: you ask for a second model.",
+ "order": 430,
+ "phase": "later",
+ "status": "todo",
+ "title": "Try Grok through grok-plugin-cc",
+ "updatedAt": "2026-10-28T05:00:00Z",
+ "why": "Only if you still want a second coding model inside Claude Code."
 }

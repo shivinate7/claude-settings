@@ -1,9 +1,9 @@
 {
-  "title": "Usage freeze: land only in-flight work until the new account takes over",
-  "phase": "cleanup",
-  "status": "active",
-  "order": 103.15,
-  "why": "Your word, Oct 27 13:31 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2DhVeWxLo5gce39C6Hvi7b8): with 10% of your plan left, less critical work pauses, and work that is near landing and critical lands, leaving claude-settings stable.",
-  "note": "Ruling, Oct 27 13:31 CDT (shiv; coordinator's reading: land only #711 and #716, no new placements or dispatches): land only in-flight work. Triage kept filing your gripes as parked steps with a \"Due after: the usage freeze lifts\" line, and started no work. #723 (batch oct27za) merged at 16:55 CDT, after the freeze began. Ends: when the orchestrator on your other account takes over (coordinator, Oct 27 23:12 CDT); that orchestrator lifts it here and clears each parked step's freeze line. Needs no answer. Port: no. Placed ahead of c95 (triage, Oct 28): it governs every step below it.",
-  "updatedAt": "2026-10-28T04:15:00Z"
+ "title": "Usage freeze: land only in-flight work until the new account takes over",
+ "phase": "cleanup",
+ "status": "done",
+ "order": 103.15,
+ "why": "Your word, Oct 27 13:31 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2DhVeWxLo5gce39C6Hvi7b8): with 10% of your plan left, less critical work pauses, and work that is near landing and critical lands, leaving claude-settings stable.",
+ "note": "Ruling, Oct 27 13:31 CDT (shiv): land only in-flight work while 10% of the plan was left. Lifted Oct 27 about 23:20 CDT (shiv, via the orchestrator): a fresh account with ample usage; every parked step's \"Due after: the usage freeze lifts\" line cleared Oct 28 (triage 9). #723 merged at 16:55 CDT during it. Needs no answer. Port: no.",
+ "updatedAt": "2026-10-28T05:00:00Z"
 }

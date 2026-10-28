@@ -1,9 +1,9 @@
 {
-  "title": "The map says how the code fits together, in checked prose, in every repo",
-  "phase": "organize",
-  "status": "todo",
-  "order": 161,
-  "why": "Your ask, Oct 27 15:28 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2TkTAVedLJHUNKVx7WVmM42): a map that you and the AI both read before answering \"how does X work\", which stops building a second copy where a shared thing exists, records facts like a retry wait or which avenues a pricing export covers, and checks that what we say in English is what the code does. You asked to be told plainly if this is the wrong avenue.",
-  "note": "Today skills/plain-english-map (o6, moved here Oct 20) maps files, tables and screens only: no relationships, no pointer to the shared home a file should use, no key values, and its check proves an entry exists, not that its prose is still true. Triage's view: the avenue is right, on one condition; prose that nothing checks rots and then misleads the AI with confidence. So each claim (\"retries every 30 s\", \"export covers A and B\") cites the symbol or constant it describes, and a check reads that value and fails when the two disagree. banchi's docs/map.py and decision-context are the nearest working example. The shared-home half joins t18 (one home, then variants) and lint/find_copies.py (r5). Next: an Opus plan for the claim format and the check, piloted in claude-settings. Due after: the usage freeze lifts (coordinator, Oct 27 13:31 CDT). Port: yes, once perfected; q_max's drifted copy goes in r5. Placed ahead of r5 (triage, Oct 27): each repo's roll-out should carry the map that keeps it honest.",
-  "updatedAt": "2026-10-27T20:32:00Z"
+ "title": "The map says how the code fits together, in checked prose, in every repo",
+ "phase": "organize",
+ "status": "todo",
+ "order": 161,
+ "why": "Your ask, Oct 27 15:28 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2TkTAVedLJHUNKVx7WVmM42): a map that you and the AI both read before answering \"how does X work\", which stops building a second copy where a shared thing exists, records facts like a retry wait or which avenues a pricing export covers, and checks that what we say in English is what the code does. You asked to be told plainly if this is the wrong avenue.",
+ "note": "Today skills/plain-english-map (o6, moved here Oct 20) maps files, tables and screens only: no relationships, no pointer to the shared home a file should use, no key values, and its check proves an entry exists, not that its prose is still true. Triage's view: the avenue is right, on one condition; prose that nothing checks rots and then misleads the AI with confidence. So each claim (\"retries every 30 s\", \"export covers A and B\") cites the symbol or constant it describes, and a check reads that value and fails when the two disagree. banchi's docs/map.py and decision-context are the nearest working example. The shared-home half joins t18 (one home, then variants) and lint/find_copies.py (r5). Next: an Opus plan for the claim format and the check, piloted in claude-settings. Port: yes, once perfected; q_max's drifted copy goes in r5. Placed ahead of r5 (triage, Oct 27): each repo's roll-out should carry the map that keeps it honest.",
+ "updatedAt": "2026-10-28T05:00:00Z"
 }
