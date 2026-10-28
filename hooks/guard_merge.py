@@ -69,7 +69,8 @@ def gh_call_of(segment: str):
 MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
-# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector) that split this one
+# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector; a settled head adds the
+# batch read: the open pull list, then the protection and 2 calls per other ready PR on the base) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a
 # hung `gh` to this one budget (pinned in test_guard.py), so a merge with a dead `gh` is refused fast instead of waiting out
 # each call. From a Linux cloud session, REST calls take 0.3-0.7 s. Windows REST is unmeasured, so the
@@ -160,8 +161,9 @@ def has_workflows(where: str) -> bool:
 
 
 def merge_check(selector, repo: str, where: str):
-    """Return (verdict, detail) for the head of the named pull request: green, pending, red or
-    unknown. One read, no wait, run in `where` so `gh` names the repo the command names."""
+    """Return (verdict, detail) for the head of the named pull request: green, pending, red,
+    batch (another ready PR on the base has a required check pending), or unknown. One read, no
+    wait, run in `where` so `gh` names the repo the command names."""
     module = merge_module()
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
@@ -178,7 +180,17 @@ MERGE_CHECK_REASON = (
 )
 
 
+# The merge tool refuses this case too, so the remedy is to wait, never to run another merge.
+MERGE_BATCH_REASON = (
+    "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base: %s. A merge "
+    "now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
+    "CI-done comment on a red run, wakes the session that watches that PR. Then merge."
+)
+
+
 def merge_check_reason(verdict: str, detail: str) -> str:
+    if verdict == "batch":
+        return MERGE_BATCH_REASON % cap_safe(detail, 160)
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 

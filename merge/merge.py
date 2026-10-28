@@ -76,8 +76,8 @@ def resolve_program(name, env=None):
     return shutil.which(name, path=path) or name
 
 # Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT would let a hung `gh`
-# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes four calls (five with a branch name)
-# for one read, so it shares a single deadline across them instead: each call gets whatever of
+# hold the read for each call in turn; one shared deadline bounds the whole read. `Host.head_read` makes four calls (five with a branch name,
+# more for the batch read of a settled head) for one read, so it shares a single deadline across them instead: each call gets whatever of
 # that one budget the earlier calls left.
 _READ_DEADLINE = None
 
@@ -720,12 +720,32 @@ class Host:
             heads[name] = row
         return heads
 
+    def batch_running(self, n, base):
+        """-> one line per other open, ready pull request on `base` whose head has a required check reported and not completed (rule
+        git-no-merge-during-batch-ci). A required name with no entry on that head does not count: a ready PR whose CI never reports
+        would block every merge. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red."""
+        others = [d for d in self.pages("pulls", fields={"state": "open"})
+                  if d["base"]["ref"] == base and not d.get("draft") and d["number"] != n]
+        if not others:
+            return []  # no protection read when no other pull request could block
+        names = self.required_names()
+        blockers = []
+        for d in others:
+            got = self.checks(d["number"], warn=False, sha=d["head"]["sha"])
+            _, pending, _ = self.classify(got, names, self.ignore)
+            hits = [f"`{k}` is pending: " + next((l for b, l in got[k] if b == "pending"), "")
+                    for k in pending if k in names and got.get(k)]
+            if hits:
+                blockers.append(f"#{d['number']} ({d['head']['ref']}) required check " + "; ".join(hits))
+        return blockers
+
     def required_names(self):
         """The required check names. Never empty: an empty list would pass the wait without a read."""
         if isinstance(self.required, list):
             names = self.required
         else:
-            c, out = self.gh(["api", f"repos/{{owner}}/{{repo}}/branches/{self.base}/protection/required_status_checks", "--jq", ".contexts"])
+            # Through api, so the guard's -R repo and its cwd name the repo whose protection is read.
+            c, out = self.api(f"branches/{self.base}/protection/required_status_checks", "--jq", ".contexts")
             if c:
                 raise Stop(f"cannot read the required checks of {self.base} (no branch protection?). "
                            f"Set merge.requiredChecks to a list of check names.\n{out}")
@@ -971,30 +991,37 @@ class Host:
 
     def head_read(self, n, nothing_is_green=False):
         """One read, no wait, of every check and workflow run on the head, required or not.
-        -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
+        -> (verdict, detail): green, pending, red, batch, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows.
-        Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
+        batch: the head is settled, but another ready PR on its base has a required check pending (batch_running).
+        Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
+        a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
-        not four."""
+        not one per call."""
         try:
             with shared_deadline(SH_TIMEOUT):
-                info = self.pr(n)
-                got = self.checks(n, warn=False, sha=info["head"])
+                num = self.pr_number(n)  # the number, so batch_running can leave this PR out; pr() of a number reads nothing more
+                info = self.pr(num)
+                got = self.checks(num, warn=False, sha=info["head"])
                 red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
                 runs = self.runs(info["head"])
+                red, pending = self.settle(red, pending, *self.judge_runs(runs))
+                unseen = not got and not runs and not nothing_is_green
+                blockers = [] if red or pending or unseen else self.batch_running(num, info["base"])
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
             return "unknown", str(e)
-        red, pending = self.settle(red, pending, *self.judge_runs(runs))
         if red:
             return "red","; ".join(red)
         if pending:
             return "pending", ", ".join(pending)
-        if not got and not runs and not nothing_is_green:
+        if unseen:
             return "pending", "no check and no workflow run is reported on the head yet"
+        if blockers:
+            return "batch", "; ".join(blockers)
         return "green", ""
 
     def block(self, pending, got):
@@ -2037,6 +2064,15 @@ def red_base(root, host, base, red_ok=""):
         return
     raise Stop(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
 
+def batch_refusal(host, n, base):
+    """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a required check pending,
+    else None. A failed read raises Stop. No reason flag lifts it: a merge under a running batch moves the base that run tests."""
+    blockers = host.batch_running(n, base)
+    if not blockers:
+        return None
+    return (f"#{n} does not merge to {base} while another ready PR's required check runs: " + "; ".join(blockers) + ".\n"
+            "Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again.")
+
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
     refuse_bad_pr(info, draft_ok=True)  # a draft is previewed, so its silent undos show before it is marked ready
@@ -2066,9 +2102,15 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     m = cfg.get("merge", {})
     held = lock.read(base)
     verdict, detail = base_verdict(root, host, base)  # the red-main check's read
+    try:
+        blockers = host.batch_running(n, base)
+        batch = "; ".join(blockers) + ". --confirm refuses it." if blockers else "clear"
+    except Stop as e:
+        batch = "unknown (" + " ".join(str(e).split()) + "). --confirm refuses it."
     say(f"merge: PREVIEW for #{n} ({info['branch']} at {info['head'][:9]}). Nothing was pressed.",
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
+        "  batch:  " + batch,
         f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); a run resumes at the wait" if resumed else trailer or "nothing to claim"),
@@ -2095,6 +2137,9 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken. Nothing was claimed or pushed.")
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         red_base(root, host, base, red_ok)
+        busy = batch_refusal(host, n, base)
+        if busy:
+            raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         undo_check(wt, base_ref, unknown_ok, info.get("body", ""))
@@ -2226,6 +2271,14 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
             lanes, dropped = lane_tips(wt, base_ref, sha) if m.get("deleteBranch") else ([], set())  # read before the merge: after it the lane tips are on the base
+            try:  # again right before the PUT: a batch that went ready during the waits is refused, and its claim reverted as for a refused PUT
+                busy = batch_refusal(host, n, base)
+            except NetStop:  # a network error is not a refusal: the claim stays
+                raise
+            except Stop as e:
+                busy = str(e)
+            if busy:
+                fail(busy)
             commit, msg = host.merge(n, m["method"], sha)
             if not commit:
                 fail("the merge was refused:\n" + msg)
