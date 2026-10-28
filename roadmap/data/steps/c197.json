@@ -1,0 +1,9 @@
+{
+ "title": "the silent test files: add real tests, or retire them",
+ "order": 103.338369,
+ "why": "Mutation report finding (decision mutation-report-scores-suites): test files that load their code but test none of its logic give false comfort. Shiv, Oct 28 13:36 CDT: add real tests or retire them.",
+ "note": "Next cloud lane, claude-settings only. The report found suites that killed none of the 10 mutants of the file they name: hooks/test_wrappers.py, lint/test_rule_audit.py, lint/test_settings_matcher.py, lint/test_hook_platform_exit.py and janitor/test_session_end_sweep.py (the files: lint/report_guard.py, hooks/feedback_guard.py, hooks/stall_watch.py), plus hooks/test_reply_judge.py, which loads report_guard.py and only missed the sample. That is 6 files; shiv's message says 7, so recount first and name the seventh or correct the number. For each: add a real test of the file's logic (red first on a mutant) or delete the file when another suite already kills the mutants (test_report_guard.py, test_feedback_inbox.py and both test_stall_watch*.py do), keeping what it pins that nothing else does (a hook's registration, a platform exit, a wrapper shape). A deletion needs the net-value check. Debts silent-suite-* in docs/debts/notes.md close with it. Port: no. Needs no answer. Placed after c196 (triage 12, Oct 28).",
+ "phase": "cleanup",
+ "status": "todo",
+ "updatedAt": "2026-10-28T18:45:00Z"
+}
