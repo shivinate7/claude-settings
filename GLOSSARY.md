@@ -27,11 +27,12 @@ one name for each thing, and a list of names to avoid.
 | decision | A record in `docs/decisions/` for one question. It holds the ruling, the reason, and the kind and home of the ruling. | `rule:git-one-record-per-question`, `docs/decisions/rulings-declare-kind.md` | `ADR` |
 | debt | An open finding or deferred work that Claude is likely to hit in normal work. Each debt is one file in `docs/debts/`. | `docs/debts/README.md` | `gap` |
 | note | A finding that Claude is not likely to hit in normal work. Each note is one line in `docs/debts/notes.md`. | `rule:roles-findings-are-debts-or-notes`, `docs/debts/notes.md` | — |
-| guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `docs/decisions/guard-guards-mistakes-only.md` | — |
-| check | A lint, test or CI job that passes or fails a change. A check never asks. | `docs/decisions/guard-guards-mistakes-only.md` | — |
+| guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `docs/decisions/guard-guards-mistakes-only.md` | `gate` |
+| check | A lint, test or CI job that passes or fails a change. A check never asks. `lint/rule_audit.py` gives a rule that a check holds the kind `check`. | `docs/decisions/guard-guards-mistakes-only.md` | `gate`, `merge gate` |
 | record | One file in `docs/decisions/`, `docs/debts/` or `docs/plans/`, or one rule in `CLAUDE.md`. Its slug is its id. | `rule:git-record-own-file-per-kind`, `rule:git-one-record-per-question` | `entry` |
 | finding | Anything a reviewer or an audit reports. An open finding becomes a debt or a note. | `rule:roles-findings-are-debts-or-notes` | `issue` |
 | defect | Wrong behaviour in code or a check. | `rule:outcomes-tests-are-claims` | `bug` |
+| round | One review and the fix after it. A change gets at most three. A builder's round N is the build or fix that review round N reads; its brief says `Round N of 3`. | `rule:roles-review-cap-three`, `rule:roles-third-round-steps-up` | `try` |
 | safety hole | A guard or check that lets through an act that main refuses or asks about. Always both words. | `rule:roles-review-cap-three`, `docs/decisions/hold-unsafe-after-round-3.md` | `hole` |
 | refuse | What a guard does when it stops an act. The code wraps Claude Code's own `deny` and `block` values in `refuse()`. | `hooks/guard_core.py`, `docs/decisions/guard-guards-mistakes-only.md` | `block`, `deny` |
 | owner | The person who owns these repos. Only the owner makes a ruling or a grant. `CLAUDE.md` speaks as the owner. | `rule:outcomes-grant-covers-named-act` | — |
@@ -52,12 +53,3 @@ one name for each thing, and a list of names to avoid.
 | blind lane | A designer lane whose brief names only the screen's job, users, data shapes and the house UX rules. Its brief withholds the current screen and the repo's design spec, and it is told not to read them. | `skills/design-explore/SKILL.md` | — |
 | informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
 | directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
-
-## Open: one term, two meanings
-
-Each term below has two or more meanings in this repo today. No meaning is chosen yet. Until the
-owner picks one, say which meaning you use.
-
-- **gate.** (1) A hook that can block a tool call or a reply (`docs/decisions/gate-hooks-fail-closed.md`,
-  `lint/report_gate.py`). (2) Any file that enforces a rule and has a test that proves it
-  (`lint/rule_audit.py`, kind `gate`), lints included.

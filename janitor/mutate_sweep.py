@@ -105,7 +105,7 @@ SUITE_FOR_TARGET = {
 # (or a distinctive fragment of it) that MUST appear among the suite's own FAIL lines). One
 # mutant per PROTECTION, not per line: the seven refusals, the keep rule in both directions, the
 # only-copy remote-contains test, the pid-vs-start-time liveness read, the tombstone's write
-# order, the purge's age source, and the --confirm gate. `target` says which file's copy carries
+# order, the purge's age source, and the --confirm check. `target` says which file's copy carries
 # the anchor: "sweep" for janitor/sweep.py's own code, "guard" or "guard_<name>" for the guard
 # module that holds the primitive sweep.py calls and never re-implements (see the module docstring
 # above).
@@ -1038,7 +1038,7 @@ MUTATIONS = [
      '        if True:  # one line per repository',
      "test_preview_appends_no_run_line_and_the_confirm_after_it_does"),
     # ---- strict default: merged and idle 1 hour (decisions/when-a-worktree-may-be-removed.md) ----
-    ("strict: the merged-and-idle gate is skipped",
+    ("strict: the merged-and-idle check is skipped",
      "sweep",
      '    elif not attended:\n        kept = _strict_keep(where, path, idle, batch)',
      '    elif False:\n        kept = _strict_keep(where, path, idle, batch)',
@@ -1053,7 +1053,7 @@ MUTATIONS = [
      '               attended: bool = False):',
      '               attended: bool = True):',
      "test_the_attended_flag_reaches_the_sweep"),
-    ("strict: the gate applies to a person's run too",
+    ("strict: the check applies to a person's run too",
      "sweep",
      '    elif not attended:\n        kept = _strict_keep(where, path, idle, batch)',
      '    elif True:\n        kept = _strict_keep(where, path, idle, batch)',
@@ -1314,7 +1314,7 @@ MUTATIONS = [
      '        if kept and agent_rule and _is_agent_worktree(where, path):',
      '        if False:',
      "test_a_removes_a_clean_pushed_tree_idle_5h_with_its_local_branch"),
-    ("agent rule: the path gate is dropped, so any tree can go",
+    ("agent rule: the path check is dropped, so any tree can go",
      "sweep",
      '        if kept and agent_rule and _is_agent_worktree(where, path):',
      '        if kept and agent_rule:',

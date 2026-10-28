@@ -29,7 +29,7 @@ The guard finds a WSL call by its launcher path:
 - `bash.exe` under `System32` or `Sysnative`. Git bash is not one of these.
 - `ubuntu*.exe`, `debian*.exe` and `kali*.exe`.
 
-Reason: the list stops accidents. It does not stop a hostile test, because WSL interop and `/mnt/c` let a test file run any code, and a native test run has the same limit. Each form is how the `gates` CI workflow runs one of this repo's own suites.
+Reason: the list stops accidents. It does not stop a hostile test, because WSL interop and `/mnt/c` let a test file run any code, and a native test run has the same limit. Each form is how the `checks` CI workflow runs one of this repo's own suites.
 
 Kind: process
 Home: hooks/guard_wsl.py

@@ -86,7 +86,7 @@ feature_branch() {
 
 run_check() {
   local local_dir="$1"
-  # Check mode gets only what it needs: no REF, no DEFAULT_BRANCH, no gate, no bot.
+  # Check mode gets only what it needs: no REF, no DEFAULT_BRANCH, no bot.
   MODE=check CONFIG="$local_dir/stamp.json" STAMP_JS="$STAMP_JS" \
     bash -c "cd '$local_dir' && bash '$RUN_SH'" >"$WORK/check.log" 2>&1
 }

@@ -1591,7 +1591,7 @@ def path_is_inside(path: str, root: str):
 
 # A directory change that is the WHOLE call, as a recovery step: an agent whose shell cwd has left
 # its home must still be able to `cd` back, or it is stuck (the PowerShell tool keeps its cwd
-# between calls). Rule verification-recovery-not-gated-on-own-state. Any other word, any chained
+# between calls). Rule verification-recovery-independent-of-state. Any other word, any chained
 # step, or a target not plainly inside `home` is no recovery, and stays refused.
 # `sl`, `chdir` and `set-location` are PowerShell names. In Bash they move nothing, so they are no
 # recovery step there.

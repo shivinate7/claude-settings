@@ -33,7 +33,7 @@ Seams: STALL_WATCH_NOW (epoch seconds, the clock), STALL_WATCH_OUTPUT_BASE (a fo
 replaces the folder of each transcript output path and keeps its file name), STALL_WATCH_QUIET
 (the age in seconds). STALL_WATCH_MODULE picks the module under test, as in test_stall_watch.py.
 
-No posix gate: this mode must run on Windows. These cases use no sh, ps or lsof. Every case that
+No posix check: this mode must run on Windows. These cases use no sh, ps or lsof. Every case that
 expects silence also runs a control that must list a stale job, so a mode that is absent or
 silent everywhere cannot pass it.
 """
@@ -546,7 +546,7 @@ def garbage_or_truncated_line_keeps_earlier_jobs():
 
 
 @case
-def stop_mode_has_no_posix_gate():
+def stop_mode_has_no_posix_check():
     """S13. with os.name patched to nt the mode still lists the stale job"""
     base = new_dir()
     output_file(base, "bnt600", 600)

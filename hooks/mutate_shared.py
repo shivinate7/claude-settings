@@ -12,7 +12,7 @@ collision that suffix was written to fix could still happen on the janitor side.
 module instead of a second copy is what closes that gap for good, not just for today.
 
 STDLIB ONLY, AND NOTHING RUNS AT IMPORT TIME beyond defining these names. Both callers are
-gates: an import error or a syntax error here takes both mutation tests down at once instead of one,
+checks: an import error or a syntax error here takes both mutation tests down at once instead of one,
 so this file stays small, has no side effects on import, and takes on no new dependency.
 
 What stays OUT of this module, and why: `mutation_parts` and `run_mutant` are NOT shared, even
@@ -22,7 +22,7 @@ required?, only_on?, target defaulting to "guard"; janitor/mutate_sweep.py: labe
 new, required, only_on?, target always required) and `run_mutant` mutates one bare file in one
 case and lays out a whole multi-file scaffold directory in the other. Forcing those into one
 shared shape means either reordering hundreds of literal mutation tuples that are themselves the
-tested gate content (the reordering itself becoming a real chance to misfile a field and quietly
+tested check content (the reordering itself becoming a real chance to misfile a field and quietly
 weaken a mutation), or writing a shared function that takes the field order as a parameter,
 which recreates the duplication as a configuration option instead of removing it. Neither closes
 real duplication; both add the fragility this module exists to avoid. They stay two local

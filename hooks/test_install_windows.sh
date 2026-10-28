@@ -8,7 +8,7 @@
 #
 # Windows only (a MINGW, MSYS or CYGWIN uname); elsewhere it prints SKIP and exits 0.
 # INSTALL_SH_UNDER_TEST runs another copy of install.sh, as in hooks/test_install_src.sh. That suite
-# covers the same guard under a stub uname (win_sh1 to win_sh3), on the Linux gates job and the macOS job in CI.
+# covers the same guard under a stub uname (win_sh1 to win_sh3), on the Linux checks job and the macOS job in CI.
 
 set -u
 
