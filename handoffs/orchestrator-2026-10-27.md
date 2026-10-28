@@ -19,15 +19,19 @@ After a compaction: re-read this note, the roadmap, then act.
 | session_013NEJL2MGgXjRHvvgCSGfjS | c142 reviewers in rounds 2-3 run Sonnet | c142-reviewer-sonnet (new) |
 | session_013NEJL1Njy2efqjaZTYpMWt | c126 + d9 + c131: viewer at 390 px; reconcile d9 with #713 | claude/project-thread-xczmrz (new PR) |
 | session_013NEJKzCxa1AvvBqcazZNgY | c150 small merges skip the full re-run (merge gate, Opus) | c150-small-merge-rerun (new) |
+| session_013NEJKzw1eseznuAM7QFDro | c154 cloud install keeps hand-off hooks | c154-cloud-handoff-hooks (new) |
+| session_013NEJL3jmJpaids3FbhgU8a | c149 orchestrators never open the question box | c149-orchestrator-no-box (new) |
+| session_013NEJL275fENvKpMWEvCZQV | c143 layout knows docs/health | c143-docs-health-kind (new) |
 | session_013NEJL2u86hPSv13Jrg8KjL | Design d4: Banchi phone app, blind | roadmap (designs/) |
 
 ## Open PRs
-- #715 c95 step 1a (full CI run stops timing out): green, reviewed, waits for #721. Adds required checks gates-guard and gates-windows-sweep.
-- #721 c95 step 1b: lane merging main in.
-- #720: lane adding tests.
+- #725 batch oct28a = #715 + #721 (c95 steps 1a, 1b). Ready, CI running since 23:30 CDT; ci-scope.sh 2-line union resolved in the batch. After merge: shiv adds gates-guard and gates-windows-sweep to branch protection.
+- #720 (c157) green, reviewed, head f2067ab: queued for batch 2.
+- Roadmap page: https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h (triage republishes).
+- Asked shiv (Oct 27 23:35 CDT): d9 picture-on-every-option vs #713's skip; lane kept d9; non-blocking.
 - #639 o13 lane A (old): to be closed when the redo lane opens its PR.
 
 ## Next 3 actions
-1. When the #721 lane reports green: build batch 1 (#715 + #721) on origin/main, open the integration PR, mark it ready, ask shiv to hold his merges while CI runs.
+1. Batch 2 opens after #725 merges: #720 plus any green heads.
 2. On batch 1 green: merge with merge/merge.py, tell shiv to add gates-guard and gates-windows-sweep to main's branch protection, archive the #721 lane, have triage republish.
 3. Then start o13 lane A (whole-tree rename, its own batch) and pull the next ready steps from triage's queue.
