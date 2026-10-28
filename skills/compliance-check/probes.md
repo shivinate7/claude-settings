@@ -52,6 +52,8 @@ session transcripts, not a repo.
 | Style | none: `output-styles/shiv-stylisms.md` governs replies, a session act | `n/a (session)` |
 | Reports | none: `report_gate.py` covers it | `parent-covered` |
 
+Each probe prints its group line first, then its item lines, the order the scorecard step writes.
+
 ## Layout
 
 `$PY $P/lint/compliance_probes.py layout .` reads `lint/layout.json` through
