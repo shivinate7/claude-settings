@@ -324,9 +324,11 @@
 - verdict-log-truncation: a child that truncates verdict's log then writes more can hide a marker; no known runner does this; upgrade is a pipe verdict owns Decision: none
 - stash-stack-kind-build-plan-only: stash-stack-is-a-shared-subject is Kind: build with plan sections that only name CI jobs; the guard rule is built, so Kind: process with Home hooks/guard_shared_tree.py may fit (owner call)
 - precompact-digest-60k-loses-detail: the digest keeps the last 60,000 characters, so a long talk-heavy gap since the last checkpoint can lose detail after compaction
-- precompact-compaction-before-checkpoint-small-model: the hook reads autoCompactWindow from settings.json but cannot see the model's own window, so a smaller model can compact before a checkpoint
+- precompact-compaction-before-checkpoint-small-model: the hook reads the window from env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow in settings.json, then the default. It cannot see the model's own window, so a smaller model can compact before a checkpoint.
 - precompact-stop-block-skips-other-guards: the reply after a checkpoint block runs with stop_hook_active set so other Stop guards skip it, and when another Stop hook refuses first the checkpoint fires one stop later
 - precompact-rewrite-vs-append-unchecked: nothing checks that a session rewrote the handoff and did not append; the prompt asks and the owner reads the result
+- precompact-env-parse-narrow: the hook reads CLAUDE_CODE_AUTO_COMPACT_WINDOW as a plain integer. Claude Code also takes `200k` and `1m`, and clamps the value to 100,000..1,000,000. With a suffix, the hook falls back to settings and nudges late (hooks/precompact_handoff.py window_limit)
+- precompact-date-strip-untested: no test row catches a date regex that also strips a version tail, such as `-4-5`, so `claude-opus-4-5` could match key `claude-opus-4-1` (hooks/test_precompact_handoff.py)
 - silent-undo-history-window-60: the --history audit misses a reversal older than --window (default 60 commits); --window 0 reads all history
 - silent-undo-git-utf8-replace: git() decodes output as UTF-8 with errors=replace, so two lines that differ only in bad bytes compare equal
 - silent-undo-unread-shapes: a binary file is not read, a resolver half-rewritten line passes, and a reversal that also rewrites a line reads as a new edit
@@ -632,3 +634,5 @@
 - press-link-title-context: when the steps name no page, the task title is the page. A title that names a PR then makes "Press Copy" a press, refused until a link is added (hooks/guard.py press_link_hit). Decision: act-in-place
 - press-link-unlabelled-link: the guard counts a link with a url and no label, which the page does not draw (hooks/guard.py press_link_hit, skills/waiting-page/page.html isLink). Decision: act-in-place
 - press-link-links-not-list: `links` set to true or a number makes the guard fail open and log a crash line (hooks/guard.py press_link_hit). Decision: act-in-place
+- step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
+- step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
