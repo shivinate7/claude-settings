@@ -742,6 +742,11 @@ function designPreview(it) {
   };
   draw(); return box;
 }
+// Block "nearest" honours the scroll margins, so it would move an option already whole between the header and the bar.
+function showOpt(o) {
+  const r = o.getBoundingClientRect();
+  if (r.top < document.querySelector(".hdr").getBoundingClientRect().bottom || r.bottom > $("bar").getBoundingClientRect().top) o.scrollIntoView({ block: "nearest" });
+}
 function buildCard(it) {
   const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it);
   const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
@@ -780,7 +785,7 @@ function buildCard(it) {
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
         multi ? h("span", { class: "sp" }) : null,
-        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); const r = $("o-" + it.id + "-" + pk[0]); if (r) { r.closest(".opt").scrollIntoView({ block: "nearest" }); r.focus({ preventScroll: true }); } } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
+        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); const r = $("o-" + it.id + "-" + pk[0]); if (r) { showOpt(r.closest(".opt")); r.focus({ preventScroll: true }); } } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
