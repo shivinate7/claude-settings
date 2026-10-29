@@ -62,10 +62,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
-  time), `note`, and `choice` (a decision) or `done: true` (a task). "Take my pick", and a pick that
-  stands, write `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes
-  `choice: "none"`, and the page sends it only with a note that says what the owner wants
-  instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
+  time), `note`, and `choice` (a decision). A task answer has `done: true`, or a `note` with no
+  `done`. "Take my pick", and a pick that stands, write `choice` equal to `pick`, with the note
+  `accepted pick`. "None of these" writes `choice: "none"`, and the page sends it only with a note
+  that says what the owner wants instead. A note typed with no option picked is the same answer:
+  `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
   A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
@@ -183,10 +184,11 @@ relays an answer. An answer typed in the chat counts the same.
 
 ## Route and close
 
-Sort the answer first. A `none` answer takes step 3 only. Any other answer that is not clear takes
-step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
-turn it is filed. An answer whose lane is busy is filed at
-once as a note on its step (the item's home), never held for the lane.
+Sort the answer first. A `none` answer takes step 3 only. A task answer with no `done` is a question
+or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
+item's `context`. Any other answer that is not clear takes step 4 only. A clear answer takes steps
+1 and 2 in the same turn it is read. A clear answer is closed the turn it is filed. An answer
+whose lane is busy is filed at once as a note on its step (the item's home), never held for the lane.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
