@@ -1820,9 +1820,8 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
-# The brief's first non-blank line also counts when `Round N of 3` sits anywhere in it, such as
-# "Builder, Round 3 of 3. Lane ..." (owner ruling 2026-10-29 16:29 CDT). Case-sensitive, so prose such as
-# "the round 2 of 3 notes" does not count.
+# The brief's first non-blank line also counts when `Round N of 3` sits anywhere in it (a role word or markup
+# ahead of the marker). Case-sensitive, so lowercase prose about a round does not count (decision agent-model-cap).
 FIRST_LINE_MARKER = re.compile(r"\b(Round)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
