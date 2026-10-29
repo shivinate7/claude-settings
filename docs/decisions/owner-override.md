@@ -46,6 +46,14 @@ Orchestrator's call, not an owner grant:
 
 Orchestrator's call, not an owner grant: the required unit, the role list, and the `general-purpose` default.
 
+## The step grant
+
+- A grant on the lane's roadmap step lifts the Opus spawn ask too, and nothing else (decision `agent-model-cap`). Triage writes it. `role` is null for every role, or one role from `OPUS_ROLES`.
+- `take()` reads it after the Opus override and before the override, so a lift spends no one-act override.
+- The lane id is `session_<x>` when `CLAUDE_CODE_REMOTE_SESSION_ID` is `cse_<x>`, else the session id. Exactly one step must name the lane, and its status must not be `done`.
+- A record that cannot be read, a grant of the wrong shape, an unknown role or a git error is no lift.
+- `guard.log` gets one line per lift (`step-grant`, with the step) and per unreadable record (`step-grant-unread`).
+
 ## Outside every override
 
 - Owner, 2026-10-18 15:34 CDT: a write to a frozen path, and a command that sets a git location variable (`git-env-set-refused`, a git-env-set command is refused).

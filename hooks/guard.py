@@ -3052,7 +3052,7 @@ def main() -> None:
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
-        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"))
     except Exception:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:
