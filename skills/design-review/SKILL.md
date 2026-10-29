@@ -69,7 +69,9 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 7. **Verdict.** Give a verdict per screen at each size and theme
    (verification-screens-verdict: a verdict per screen, never a description). A screen that did
    not render, or has no screenshot, gets `unknown`, never pass or fail
-   (`verification-report-unknown-reads`).
+   (`verification-report-unknown-reads`). In an iOS repo (skill `ios-apps`, section Mockups), the design
+   reviewer also gives one line per screen, built or mockup: `native` or `web-like`, with the reason.
+   A `web-like` screen is a finding for the builder or the designer.
 
 ## Mockup set check
 
@@ -80,7 +82,8 @@ It is not a review of a built screen.
    and the current screens or routes of the same job. It reads both.
 2. For each mockup, it gives one structure verdict: `same` when the mockup keeps today's views or
    tabs, today's way to move between them, and today's first screen, with only their layout or
-   style changed; else `new`. It names the parts that decide the verdict.
+   style changed; else `new`. It names the parts that decide the verdict. In an iOS repo, it also gives
+   each mockup the `native` or `web-like` line of step 7.
 3. When every mockup is `same`, the orchestrator puts one flag at the top of the owner's list: the set
    holds no new structure. It offers one more round of blind lanes, from the template.
 4. When a blind mockup is `same`, the orchestrator reads that lane's brief against the template

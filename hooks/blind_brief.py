@@ -20,6 +20,10 @@ start per Agent or Task call, no file written but the guard.log line of a refusa
 
 - With a repo that names its app kind (lint/layout.py devices), a blind brief's Device section must name the
   first resolved device (`device-first`). The hook reads the repo from the payload's `cwd`, the CLI from `--root`.
+- When that list holds both iPhone Duo poses (an iOS app repo, roadmap step c192), a blind brief's Device
+  section must name the unfolded pose (`duo-unfolded`), and must name the folded pose before the unfolded one
+  (`duo-order`). Each brief with a kind line, of any kind, must name skill `ios-apps` (`ios-skill`), the one
+  home of the iOS drawing rules. The pose names come from lint/layout.json by id, never typed here.
 
 CLI: `python3 blind_brief.py --run DIR [--root REPO] [--current NAME ...] [--owner-asked-none WORDS]` checks every
 *.md brief in DIR as one explore run (run_faults). `--current` names a view of today's product, refused
@@ -123,6 +127,8 @@ COMPILED["token-font"] += [re.compile(p) for p in (
     r"|General Sans)\b",
     r"\b[Ff]onts?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
     r"\b[Tt]ypefaces?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)")]
+IOS_SKILL = re.compile(r"(?<![\w-])ios-apps(?![\w-])", re.I)
+DUO_FOLDED, DUO_UNFOLDED = "iphone-duo-folded", "iphone-duo-unfolded"  # device ids in lint/layout.json
 TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
 
 
@@ -192,6 +198,69 @@ def device_names(root):
     return [d["name"] for d in found] if found else None
 
 
+def duo_names():
+    """(folded name, unfolded name) of the iPhone Duo poses in lint/layout.json, or None when the table cannot
+    be read. The ids are the constants the layout emits; the names are read, never typed here."""
+    try:
+        lint = os.path.join(HERE, "..", "lint")
+        if lint not in sys.path:
+            sys.path.insert(0, lint)
+        import layout
+        table = layout.layout()["devices"]
+        return table[DUO_FOLDED]["name"], table[DUO_UNFOLDED]["name"]
+    except Exception:  # fail open: no names means no Duo check
+        return None
+
+
+def duo_poses(devices):
+    """(folded name, unfolded name) when the resolved device list holds both Duo poses, else None."""
+    names = duo_names() if devices else None
+    return names if names and all(name in devices for name in names) else None
+
+
+def _words(text):
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def duo_faults(device, poses):
+    """Faults of a Device section in a repo that draws both Duo poses: `duo-unfolded` when it never names the
+    unfolded pose, `duo-order` when it names the unfolded pose before the folded one. Order is read from the
+    pose words, the words in one device name and not in the other ("folded", "unfolded"), and only when both
+    appear. So "Duo unfolded, then folded" is an order fault."""
+    folded, unfolded = poses
+    if not names_device(device, unfolded):
+        return [("duo-unfolded", "Device", unfolded)]
+    at_folded, at_unfolded = _pose_rank(device, folded, unfolded), _pose_rank(device, unfolded, folded)
+    if at_folded is not None and at_unfolded is not None and at_unfolded < at_folded:
+        return [("duo-order", "Device", "%s before %s" % (unfolded, folded))]
+    return []
+
+
+ORDER_WORDS = {"after": -1, "before": 1}  # "drawn after the folded pose": folded goes first
+
+
+def _pose_rank(text, name, other):
+    """The draw rank of the first pose word of device `name` in `text`, or None. A pose word is a word of
+    `name` that is not in device `other`. The rank is the word index. A pose word with "after" or "before" in
+    the two words before it ranks first or last, so "unfolded, drawn after the folded pose" puts folded
+    first."""
+    words, pose = _words(text), set(_words(name)) - set(_words(other))
+    for index, word in enumerate(words):
+        if word in pose:
+            for near in words[max(0, index - 2):index]:
+                if near in ORDER_WORDS:
+                    return ORDER_WORDS[near] * len(words)
+            return index
+    return None
+
+
+def ios_skill_faults(text, devices):
+    """`ios-skill` when the repo draws both Duo poses and the brief never names skill ios-apps."""
+    if duo_poses(devices) and not IOS_SKILL.search(text):
+        return [("ios-skill", "brief", "no ios-apps")]
+    return []
+
+
 def names_device(text, name):
     """True when `text` holds every word of device `name`, ignoring case, punctuation and spacing, in any
     order. The word "iphone" is dropped while other words remain, so "Duo folded" names "iPhone Duo, folded"
@@ -204,7 +273,8 @@ def names_device(text, name):
 
 def brief_faults(text, current=(), template=None, devices=None):
     """Faults of one blind brief, as (code, where, matched) triples. An empty list is a clean brief.
-    `devices` is the repo's resolved list (device_names): the Device section must name the first one."""
+    `devices` is the repo's resolved list (device_names): the Device section must name the first one, and
+    the Duo and ios-apps rules apply when it holds both Duo poses."""
     faults = []
     header, parts, extra, repeated = sections(text)
     lines = [line.strip() for line in header if line.strip()]
@@ -240,6 +310,10 @@ def brief_faults(text, current=(), template=None, devices=None):
             faults.append(("placeholder", "header", PLACEHOLDER.search(line).group(0)))
     if devices and parts.get("Device") and not names_device(parts["Device"], devices[0]):
         faults.append(("device-first", "Device", devices[0]))
+    poses = duo_poses(devices)
+    if poses and parts.get("Device"):
+        faults.extend(duo_faults(parts["Device"], poses))
+    faults.extend(ios_skill_faults(text, devices))
     for name in FREE:
         body = parts.get(name, "")
         hit = PLACEHOLDER.search(body)
@@ -282,6 +356,9 @@ def run_faults(texts, owner_none="", current=(), template=None, devices=None):
             blind += 1
             faults.extend((code, "brief %d, %s" % (index + 1, where), matched)
                           for code, where, matched in brief_faults(text, current, template, devices))
+        else:
+            faults.extend((code, "brief %d, %s" % (index + 1, where), matched)
+                          for code, where, matched in ios_skill_faults(text, devices))
     if not texts:
         faults.append(("no-brief", "run", ""))
     elif blind == 0 and not owner_none.strip():
@@ -298,6 +375,9 @@ REFUSE_BLIND = ("this blind designer brief breaks the template: %s. Build it aga
               "design-explore blind template: the job in the users' words, the device, and the fixed "
               "House rules and Deliver text. Name nothing of today's product, and no colour, font or "
               "spacing value.")
+REFUSE_IOS = ("This designer brief is for an iPhone app: it must name skill ios-apps (ios-skill), whose "
+             "Mockups section the designer reads before it draws, and its Device section names the Duo "
+             "folded, then unfolded.")
 REFUSE_COUNT = ("an informed or directed designer brief must carry a line `Blind lanes: <n>`, with n of 1 or "
               "more, or `Blind lanes: none, owner: \"<the owner's words>\"`. Start the run's blind lanes "
               "too (skill design-explore).")
@@ -336,16 +416,26 @@ def hook(stdin):
     if role.rsplit(":", 1)[-1].strip().lower() != "designer":
         return
     kind = kind_of(prompt)
+    if kind is None:
+        return
+    cwd = payload.get("cwd")
+    devices = device_names(cwd) if isinstance(cwd, str) and cwd else None
     if kind == "blind":
         if template_fixed() is None:
             print("blind_brief: template unreadable, fixed sections not checked", file=sys.stderr)
-        cwd = payload.get("cwd")
-        faults = brief_faults(prompt, devices=device_names(cwd) if isinstance(cwd, str) and cwd else None)
+        faults = brief_faults(prompt, devices=devices)
         if faults:
-            refuse(payload, payload["tool_name"], REFUSE_BLIND % ", ".join(dict.fromkeys(f[0] for f in faults)),
-                 describe(faults)[:200])
-    elif kind in ("informed", "directed") and not blind_lanes_ok(prompt):
-        refuse(payload, payload["tool_name"], REFUSE_COUNT, "Blind lanes line: " + kind)
+            codes = list(dict.fromkeys(f[0] for f in faults))
+            reason = REFUSE_BLIND % ", ".join(codes)
+            if {"ios-skill", "duo-unfolded", "duo-order"} & set(codes):
+                reason += " " + REFUSE_IOS
+            refuse(payload, payload["tool_name"], reason, describe(faults)[:200])
+        return
+    reasons = [] if blind_lanes_ok(prompt) else [REFUSE_COUNT]
+    if ios_skill_faults(prompt, devices):
+        reasons.append(REFUSE_IOS)
+    if reasons:
+        refuse(payload, payload["tool_name"], " ".join(reasons), "Blind lanes line or ios-apps: " + kind)
 
 
 def cli(argv):
