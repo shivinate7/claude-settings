@@ -197,5 +197,20 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(self.tier_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
 
 
+class SessionStartMergeRoleTests(unittest.TestCase):
+    """The tier line tells a cloud session how to record its merge role: `merge --role <tier>`, for the two tiers that may run
+    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES). It reads the hook's own text, so no repo fixture is built. The existing
+    SessionStartTierLineTests prove the line prints once and only in the cloud."""
+
+    def test_the_tier_line_names_the_role_writer(self):
+        self.assertIn("merge --role", hook_tier_line())
+
+    def test_the_tier_line_names_both_merge_tiers(self):
+        line = hook_tier_line()
+        for tier in ("coordinator", "batch-runner"):
+            with self.subTest(tier=tier):
+                self.assertIn(tier, line)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
