@@ -763,10 +763,10 @@ test("the cue shows before the picture's end, goes at the end, and the shades ad
   await frameSettled(page, 2400);
   const a = await cueState(page, it.id);
   assert.equal(a.disp, "flex", "the cue is not drawn");
-  assert.equal(a.op, 1, "the cue is faded before the end");
+  assert.equal(a.op, 1, "the cue is not fully shown before the end");
   assert.equal(a.text, "↓ More");
   assert.ok(!/at-end/.test(a.cls), "the picture is at its end before any scroll");
-  assert.equal(a.top, 0, "the top shade shows before any scroll");
+  assert.equal(a.top, 0, "the top shade is shown before any scroll");
   const m = await measure(page, it.id);
   assert.ok(Math.abs(m.sh - m.sizer) <= 1, `the scroll height ${m.sh} is not the picture's ${m.sizer}`);
   await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = 200; });
@@ -808,6 +808,13 @@ test("a press on the scrollbar gutter opens nothing and picks nothing, and a pre
   await page.mouse.click(r.x + r.width - 4, r.y + 100);
   assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the scrollbar opened View");
   assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the scrollbar picked the option");
+  // A drag that starts on the scroll thumb and ends on the picture scrolls it; it is not a press on the picture.
+  await page.mouse.move(r.x + r.width - 4, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 24, r.y + 250, { steps: 15 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a drag from the scrollbar onto the picture opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a drag from the scrollbar onto the picture picked the option");
   await page.mouse.click(r.x + 20, r.y + 100);
   assert.equal(await page.locator("#dsheet").isVisible(), true, "a press on the picture did not open View");
 });
@@ -872,13 +879,22 @@ for (const width of [390, 1280, 1440]) {
       assert.equal(m.w, Math.ceil(bw * sc) + 2, "the box width");
       assert.equal(m.h, Math.ceil(bh * sc), "the box height");
       assert.ok(!/scroll/.test(m.cls), "a picture that fits scrolls");
-      assert.equal(await page.locator(boxSel(it.id)).evaluate((w) => { const c = w.querySelector(".dcue"); return !c || getComputedStyle(c).display === "none"; }), true, "the cue is drawn");
+      assert.equal(await page.locator(boxSel(it.id)).evaluate((w) => { const c = w.querySelector(".dcue"); return !c || getComputedStyle(c).display === "none"; }), true, "the cue is drawn on a picture that fits");
       const tf = await page.locator(`${boxSel(it.id)} iframe`).evaluate((f) => f.style.transform);
       assert.ok(Math.abs(+/scale\(([-\d.e]+)\)/.exec(tf)[1] - sc) < 1e-6, `the scale is not the formula's ${sc}: ${tf}`);
       if (focus) assert.ok(Math.abs(+/translate\([^,]*,\s*([-\d.e]+)px\)/.exec(tf)[1] + ty * sc) < 0.01, `the focus is not moved to ${-ty * sc}: ${tf}`);
     });
   }
 }
+
+test("a 1564px mockup at 390 wide scrolls in its box, and the cue shows", async (t) => {
+  const it = picItem("scroll-edge", 56);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1564) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1564);
+  const m = await measure(page, it.id);
+  assert.ok(m.sh - m.ch > 0, `the picture does not scroll: its scroll range is ${m.sh - m.ch}px`);
+  assert.equal((await cueState(page, it.id)).disp, "flex", "the cue is not drawn on a picture that scrolls");
+});
 
 test("a mockup 1px over the fitted height gives a box of at most 480 and no cue, at 390 wide", async (t) => {
   const it = picItem("edge", 53);
