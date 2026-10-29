@@ -307,13 +307,27 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
 fi
 
 # Cloud only: git over the cloud proxy reaches repos that are out of the session's scope; the tarball
-# URL gets a 403 there, and a tarball copy has no .git. cloud_git bounds a stalled transfer at 10 s.
-cloud_git() { GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"; }
+# URL gets a 403 there, and a tarball copy has no .git. cloud_git bounds a stalled transfer at 10 s
+# and a slow one at 40 s, because the hook that runs this script is killed at 60 s.
+cloud_git() {
+  if command -v timeout >/dev/null 2>&1; then
+    GIT_TERMINAL_PROMPT=0 timeout 40 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+  else
+    GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+  fi
+}
 
 # Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
-# person's own and is never moved. A failed fetch keeps the clone as it was.
+# person's own and is never moved. A failed fetch keeps the clone as it was, and so does a local
+# main commit that origin lacks: moving main would drop it. The fetch has no --depth: a depth-1 fetch
+# cuts the new tip's parents, so the ancestor test below could never pass. In a shallow clone this
+# fetches only the commits since the last sync.
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
-  if cloud_git -C "$SRC" fetch -q --depth 1 origin "$REF" && git -C "$SRC" checkout -q -B main FETCH_HEAD; then
+  if ! cloud_git -C "$SRC" fetch -q origin "$REF"; then
+    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
+  elif ! git -C "$SRC" merge-base --is-ancestor main FETCH_HEAD 2>/dev/null; then
+    log "WARN: the clone $SRC has local commits on main that $REF lacks; keeping it as it is"
+  elif git -C "$SRC" checkout -q -B main FETCH_HEAD; then
     log "refreshed the clone $SRC to $REF"
   else
     log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
@@ -324,10 +338,14 @@ fi
 # copy. A .git at the clone path that checkout_at refused is not ours: it is never removed.
 if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; then
   clone_tmp="$HOME/claude-settings.clone.$$"
+  # A killed run leaves its temp clone behind. Older than 5 minutes is past the hook's 60 s cap, so
+  # no run still owns it; a newer one may belong to a run in parallel.
+  find "$HOME" -maxdepth 1 -name 'claude-settings.clone.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
   rm -rf "$clone_tmp"
   if cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
      && git -C "$clone_tmp" checkout -q -B main \
-     && git -C "$clone_tmp" config claude-settings.cloudMirror true; then
+     && git -C "$clone_tmp" config claude-settings.cloudMirror true \
+     && [ -f "$clone_tmp/CLAUDE.md" ] && [ -f "$clone_tmp/settings.json" ]; then
     old_copy="$HOME/claude-settings.old.$$"
     rm -rf "$old_copy"
     if { [ ! -e "$HOME/claude-settings" ] || mv "$HOME/claude-settings" "$old_copy"; } && mv "$clone_tmp" "$HOME/claude-settings"; then
