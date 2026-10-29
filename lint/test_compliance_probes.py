@@ -463,8 +463,8 @@ def planted(prose=False):
     table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
     for _, _, names in table:
         for name in names:
-            tagged = name.endswith(check_glossary.PROSE_TAG)
-            word = name[:-len(check_glossary.PROSE_TAG)] if tagged else name
+            tagged = name.endswith(check_glossary.THIS_SENSE)
+            word = name[:-len(check_glossary.THIS_SENSE)] if tagged else name
             if tagged == prose and word not in SPARE:
                 return word
     raise AssertionError("the glossary holds no such name")
