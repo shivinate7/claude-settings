@@ -629,3 +629,5 @@
 - ios-duo-order-word-window: the Duo order check reads only the two words before a pose word for "after" or "before", so "Draw the Duo unfolded after the Duo folded." gets a false duo-order and "Draw the Duo folded after the Duo unfolded." passes; the ios-apps rule and the mockup frame-order check back it up (hooks/blind_brief.py _pose_rank). Decision: blind-briefs-use-a-template
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
+- take-pick-header-edge-untested: no test puts the picked option partly under the header, so a showOpt edit that reads top < 0 for the header bottom passes (skills/waiting-page/tests/page.test.mjs)
+- opt-scroll-margin-no-safe-area: .opt scroll-margin-top is 64px with no top safe-area inset, while .hdr sits at that inset; same as .card and .tier (skills/waiting-page/page.html)
