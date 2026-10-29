@@ -79,10 +79,12 @@ let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
+  // errors: when given, collects each uncaught page error, from the first render on.
+  if (errors) page.on("pageerror", (e) => errors.push(e.message));
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
   t.after(() => page.close());
   await page.emulateMedia({ colorScheme: scheme });
@@ -2138,8 +2140,6 @@ const STATUS_REFUSED = "Not copied. The text is selected; copy it by hand.";
 // A missing element fails with its own message, not as a locator timeout.
 const need = async (loc, msg) => assert.equal(await loc.count(), 1, msg);
 const boxHeight = async (loc) => (await loc.boundingBox())?.height ?? 0;
-// A link's accessible name: its label, then the hidden words. Chromium puts a space before the comma; that is accepted.
-const linkName = (label) => new RegExp("^" + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*, opens in a new tab$");
 // Waits up to 3 s for a page condition; a miss returns false, so the assert names it.
 const holds = (page, fn, arg = null) => page.waitForFunction(fn, arg, { timeout: 3000 }).then(() => true, () => false);
 // The clipboard either takes the text into window.__copied or refuses it, as a frame without permission does.
@@ -2160,7 +2160,7 @@ test("a decision option's link sits between its how text and its timing rows, na
   assert.ok(got.text.startsWith(LINK.label), "the link text is not its label");
   assert.equal(got.arrow, "↗", "the arrow is not in a span hidden from screen readers");
   assert.equal(got.sr, ", opens in a new tab", "no screen-reader words say where the link opens");
-  assert.equal(await page.getByRole("link", { name: linkName(LINK.label) }).count(), 1, "the link is not named for where it opens");
+  assert.equal(await page.getByRole("link", { name: LINK.label + ", opens in a new tab", exact: true }).count(), 1, "the link is not named for where it opens");
   assert.equal(await card(page, LINKED).locator(".opts.olinks").count(), 1, "the options do not take the olinks class");
   assert.equal(await card(page, LINKED).locator(`label[for="o-${LINKED.id}-b"] span.nolinks`).count(), 1, "an option with no link has no nolinks span");
   assert.equal(await card(page, PLAIN).locator(".opts.olinks").count(), 0, "a card with no link took the olinks class");
@@ -2183,7 +2183,7 @@ test("a tap on an option's link opens it in a new tab and leaves the radio unche
 
 test("a task's link has the same screen-reader name as an option's link", async (t) => {
   const page = await open(t, { items: [RUN] }); if (!page) return;
-  assert.equal(await page.getByRole("link", { name: linkName("Sample repo on GitHub") }).count(), 1, "the task link is not named for where it opens");
+  assert.equal(await page.getByRole("link", { name: "Sample repo on GitHub, opens in a new tab", exact: true }).count(), 1, "the task link is not named for where it opens");
 });
 
 test("a task's command sits after its steps, closed behind Show the command, and Copy writes it exactly while it is closed", async (t) => {
@@ -2249,3 +2249,21 @@ for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
   });
 }
+
+// A links value that is a string, not a list, must not break the page. The card still renders, with no links row.
+test("an option whose links is a string, not a list, renders with no page error and no links row", async (t) => {
+  const errors = [];
+  const it = mk("string-links", 33, {
+    options: [
+      { key: "a", label: "Merge it", how: "Mark it ready and press Merge.", gain: "g", lose: "l", links: "https://github.example.test/sample-repo/pull/374" },
+      { key: "b", label: "Wait", how: "Leave it open.", gain: "g", lose: "l" },
+    ],
+    pick: "a", why: "It lands now.",
+  });
+  const page = await open(t, { items: [it], errors }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
+  if (!page) { assert.deepEqual(errors, [], "the page threw on a string links value"); return; }
+  await page.waitForTimeout(200); // a page error can land a tick after the card appears
+  assert.deepEqual(errors, [], "the page threw on a string links value");
+  assert.equal(await card(page, it).locator(".opt").count(), 2, "the option cards did not render");
+  assert.equal(await card(page, it).locator(".links").count(), 0, "a string links value shows a links row");
+});
