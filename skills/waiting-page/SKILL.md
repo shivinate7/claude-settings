@@ -56,6 +56,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
     with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
+      `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
+      On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. `why` stays one text.
+      A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
     (a number, or text such as `3 min`).
@@ -63,7 +67,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). "Take my pick", and a pick that
-  stands, write `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes
+  stands, write `choice` equal to `pick`, with the note `accepted pick`. On a `multi` item `choice` is a
+  list of option keys, in rank order when `ranked`, and "Take my pick" writes the whole `pick` list. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
@@ -129,10 +134,11 @@ into `meta/page`.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
      and a one-sentence `why`. Set `group` on both items.
+   - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
-     open: choosing another option is the only way out. A question that touches a rule starts blank.
+     open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Ask the owner where the item is seen (ruling 3a, narrowed by ruling 3b):
    - While an agent, a lane or a background command of this session runs, or starts in the same
      response, open no question box. Put the question
@@ -174,9 +180,12 @@ relays an answer. An answer typed in the chat counts the same.
   the owner withdrew it: the item is still open, and nothing is ruled.
 - `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
-  answer for item 27.
+  answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
+  `+`, in rank order when `ranked`.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
-  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`. On a `multi` item,
+  `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
+  A list on a pick-one item, or a string on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
