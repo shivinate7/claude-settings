@@ -10,11 +10,11 @@ variant. My ruling covers each test and path that expects exactly what it ruled 
 with its time.<!-- rule:outcomes-grant-covers-named-act --> Once ready, turn each rule below
 into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written. An agent's own write may read the machine load once, inside the guard hook already running for it (decision machine-load-brake).<!-- rule:outcomes-mechanize-rules -->
 
-**Roles, if this session can spawn agents.** Pick solo or orchestrate from my request. Say the
-pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
+**Roles, if this session can spawn agents.** Pick the session's shape from my request: solo, one
+lane, or coordinator (`session-tiers`, the session shapes). One lane: one line of work, run with its own agents; a lane session is one, and runs Opus (`agent-model-cap`). Coordinator: a standing build. It starts triage and the batch runner, then lane sessions. Say the pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
 nothing to run in parallel. Build them yourself.<!-- rule:roles-solo-builds-short-edit-list --> In solo, a fresh reviewer reads the diff before
-merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic. Other edits merge on passing checks alone.<!-- rule:roles-solo-reviews-logic-diffs-only --> If a solo job grows, switch to orchestrate and say so in one line.<!-- rule:roles-solo-grows-switch-to-orchestrate --> Orchestrate: every other job.
-This session plans, briefs, verifies, reports. It writes records, docs, and briefs. It builds
+merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic. Other edits merge on passing checks alone.<!-- rule:roles-solo-reviews-logic-diffs-only --> A shape can grow: solo to one lane, one lane to coordinator. Say each switch in one line.<!-- rule:roles-solo-grows-switch-to-orchestrate --> Every session that spawns agents is an orchestrator.
+Every orchestrator but a solo session plans, briefs, verifies, reports. It writes records, docs, and briefs. It builds
 only when the change cannot move a verdict, one bounded command proves it, and the report
 names both. A change that touches a rule's behaviour, a guard's or check's verdict, or product code a
 reviewer must see goes to a lane, at
