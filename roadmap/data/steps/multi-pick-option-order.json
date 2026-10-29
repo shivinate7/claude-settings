@@ -1,0 +1,9 @@
+{
+  "title": "Fix debt multi-pick-option-order on the waiting page",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33758,
+  "why": "Debt multi-pick-option-order, from c135 design review round 3 (#817): an unranked multi-choice item whose pick is out of option order keeps the Take my pick button shown. #817 ships in batch 21 with it open (coordinator, Oct 29 16:44 CDT).",
+  "note": "Lane started Oct 29 16:44 CDT (coordinator; session_013NEJKza7454EWH548Va4Uv). Needs no answer. Placed after sim-no-diagnose (triage 12, Oct 29).",
+  "updatedAt": "2026-10-29T21:55:00Z"
+}

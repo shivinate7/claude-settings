@@ -1,9 +1,9 @@
 {
   "title": "iPhone test runs never start Xcode's 10-minute diagnostic collector",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33757,
   "why": "Incident, Oct 29 (shiv, from an iOS repo session): when a test fails, xcodebuild starts simctl diagnose on its own; it runs up to 10 minutes and gathers logs nobody reads. Restyle's run left one going (pid 26958), and Duo's phone run hit the same at 19:33. Each repo was patching it alone.",
-  "note": "Fix it once, in the shared home: bin/sim-test line 32 runs `xcodebuild test` for every repo; add `-collect-test-diagnostics never`. Also check bin/ios-ship and skills/ios-apps (Makefile.tmpl, the standard page) so any other test run carries it, and add a compliance probe line so an iOS repo calling xcodebuild test without it is flagged. Red first: lint/test_sim_test.sh shows the flag missing today. Cloud: yes for the edit and its test; the proof that no diagnose starts needs one Mac run, which rides c196's Mac session. Needs no answer: shiv flagged it (Oct 29 16:35 CDT). Port: yes, every iOS repo through the shared tool; Restyle and Duo drop their own copies at their next visit. Placed after zero-value-merges (triage 12, Oct 29). Feeds c196 (the Mac at load 123).",
-  "updatedAt": "2026-10-29T21:40:00Z"
+  "note": "Fix it once, in the shared home: bin/sim-test line 32 runs `xcodebuild test` for every repo; add `-collect-test-diagnostics never`. Also check bin/ios-ship and skills/ios-apps (Makefile.tmpl, the standard page) so any other test run carries it, and add a compliance probe line so an iOS repo calling xcodebuild test without it is flagged. Red first: lint/test_sim_test.sh shows the flag missing today. Cloud: yes for the edit and its test; the proof that no diagnose starts needs one Mac run, which rides c196's Mac session. Needs no answer: shiv flagged it (Oct 29 16:35 CDT). Port: yes, every iOS repo through the shared tool; Restyle and Duo drop their own copies at their next visit. Placed after zero-value-merges (triage 12, Oct 29). Feeds c196 (the Mac at load 123). Lane started Oct 29 (coordinator; session_013NEJL1jE1D9uihUUkVJfLb).",
+  "updatedAt": "2026-10-29T21:55:00Z"
 }
