@@ -87,8 +87,9 @@ cannot time out, so the guard allows Opus at round 3 and the owner's grant stays
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
-the brief. Two forms count: a line that starts with it, or the leftmost `Round N of 3` anywhere in the brief's first
-non-blank line, such as "Builder, Round 3 of 3. Lane ...". Owner ruling 2026-10-29 16:29 CDT: a round-3
+the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
+leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
+leftmost `Try N of 3` there adds nothing. Owner ruling 2026-10-29 16:29 CDT: a round-3
 builder on Opus just runs, with no approval. The first-line form is case-sensitive. Later lines count only
 when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
 word. A try 3 builder needs Opus.

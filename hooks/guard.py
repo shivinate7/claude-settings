@@ -1820,23 +1820,25 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
-# The brief's first non-blank line also counts its leftmost `Round N of 3`, wherever it sits (a role word or markup
-# ahead of the marker); a later one on that line is prose. Case-sensitive, so lowercase prose about a round does not count (decision agent-model-cap).
-FIRST_LINE_MARKER = re.compile(r"\b(Round)[ \t]+(\d)[ \t]+of[ \t]+3\b")
+# A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
+# it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
+# prose, so a leftmost `Try N of 3` adds nothing. Case-sensitive, so lowercase prose does not count (decision agent-model-cap).
+FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
 
 
 def brief_markers(brief) -> list:
-    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus `Round N of 3`
-    as the leftmost match in the first non-blank line. The one home of the marker scan."""
+    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
+    marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
+    home of the marker scan."""
     if not isinstance(brief, str):
         return []
     found = STEP_UP_MARKER.findall(brief)
     first = next((line for line in brief.split("\n") if line.strip()), "")
-    lead = FIRST_LINE_MARKER.search(first)
-    return found + ([lead.groups()] if lead else [])
+    lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
+    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
 
 
 def builder_third_round(brief) -> bool:
