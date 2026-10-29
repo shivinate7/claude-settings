@@ -1,14 +1,15 @@
-## Standing threads
+## Standing sessions
 
-This roster is the one record of who holds each standing role. The coordinator updates it in the
-same turn that a role changes hands. A new coordinator reads it first. A thread reads it right before it messages a standing thread.
+This roster is the one record of who holds each standing session. The coordinator updates it in
+the same turn that a session rotates. A session reads it right before it messages a standing session.
 
-- Triage (gatekeeper and page publisher): "<thread title>", <thread id>, since <date and time>.
-- Build advisor (dispatcher, build order, merge queue, integration branch): "<thread title>",
-  <thread id>, since <date and time>.
-- Local liaison (briefs and reports for local sessions): "<thread title>", <thread id>, since
+- Coordinator (starts every other session, holds lane state, talks with the owner): "<session title>",
+  <session id>, since <date and time>. It compacts in place and has no successor.
+- Triage (gatekeeper, waiting page and roadmap page): "<session title>", <session id>, since
   <date and time>.
-- Merge hand (runs the merge command on integration PRs): "<thread title>", <thread id>, since
-  <date and time>.
+- Batch runner (integration batch, CI waits, merge tool runs, archiving finished lanes):
+  "<session title>", <session id>, since <date and time>.
 
-Exemptions: <none, or the role, the limit, the condition and the owner's date>.
+Lane sessions are not on the roster. The coordinator holds lane state.
+
+Exemptions: <none, or the session, the limit, the condition and the owner's date>.
