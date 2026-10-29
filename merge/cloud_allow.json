@@ -1,10 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Bash(merge * --confirm)",
-      "Bash(merge * --confirm *)",
-      "Bash(bin/merge * --confirm)",
-      "Bash(bin/merge * --confirm *)",
       "Bash(~/.claude/bin/merge * --confirm)",
       "Bash(~/.claude/bin/merge * --confirm *)"
     ]

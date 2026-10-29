@@ -2402,7 +2402,7 @@ def main(argv, host=None, lock=None):
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("a cloud session may merge only as the coordinator or the batch runner. Hand the pull request number and its head to the batch runner.")
+            raise Stop("this session may not merge. Hand the pull request number and its head to the batch runner.")
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
