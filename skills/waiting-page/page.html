@@ -639,7 +639,9 @@ const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) 
 // One home for a link on an option card and on a task card. The arrow is hidden from screen readers; a hidden phrase says where it opens.
 const linkEl = (l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, h("span", {}, l.label, h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab")));
 // `links` counts only as an Array; any other value renders no links row and no error.
-const linksOf = (x) => (Array.isArray(x.links) ? x.links : []);
+// A link that is not an object with a string url and label would draw an empty or broken anchor.
+const isLink = (l) => !!l && typeof l === "object" && typeof l.url === "string" && typeof l.label === "string";
+const linksOf = (x) => (Array.isArray(x.links) ? x.links.filter(isLink) : []);
 const hasOptLinks = (it) => (it.options || []).some((o) => linksOf(o).length);
 // An option that widens what a shared tool accepts (`widens`) breaks the owner's uniform ruling, topic t18; its card says so.
 function optCard(it, o, chosen) {
@@ -704,7 +706,7 @@ function cmdBlock(it) {
       box.classList.add("copied"); say.replaceChildren("Command", h("span", { class: "sr" }, " Copied."));
       timer = setTimeout(() => { box.classList.remove("copied"); say.textContent = "Command"; }, 2000);
     } else {
-      box.classList.add("failed"); say.textContent = "Not copied. The text is selected; copy it by hand.";
+      box.classList.add("failed"); say.textContent = "Not copied. Copy the selected text by hand.";
       more.open = true;
       const r = document.createRange(); r.selectNodeContents(pre.firstChild);
       const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
