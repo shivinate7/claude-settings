@@ -38,7 +38,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - the merge tool runs,
   - archiving finished lanes.
   The coordinator holds only lane state and talks with the owner.
-- **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. The coordinator starts it, since the "Who starts which session" bullet makes the coordinator the one session that starts others. It differs from the coordinator, which holds only lane state and talks with the owner.
+- **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. Who starts it follows the "Who starts which session" bullet: the coordinator. The arbiter holds the ruling voice. The coordinator holds only lane state and talks with the owner.
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
