@@ -798,7 +798,7 @@ class Green(unittest.TestCase):
         self.assertEqual(r.verdict(), [])
 
 
-GATES = """\
+WORKFLOW_YML = """\
 name: {name}
 on:
   pull_request:
@@ -807,7 +807,7 @@ on:
 {perm}jobs:
   gate:
     runs-on: ubuntu-latest
-{t_gate}    steps:
+{t_build}    steps:
 {pins}      - name: Check out
         uses: actions/checkout@v4
       - name: Run the gate
@@ -833,14 +833,14 @@ PINS = PIN + "".join("      - uses: actions/%s@%s # %s\n" % x for x in (
     ("upload-artifact", "b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882", "v4.4.3")))
 
 
-def workflow(name="gates", perm="", t_gate="", t_lint="", pins=""):
+def workflow(name="gates", perm="", t_build="", t_lint="", pins=""):
     """The workflow file as the base has it. Each block keyword is what main's earlier PR adds."""
-    return GATES.format(name=name, perm=perm, t_gate=t_gate, t_lint=t_lint, pins=pins)
+    return WORKFLOW_YML.format(name=name, perm=perm, t_build=t_build, t_lint=t_lint, pins=pins)
 
 
 def after_51(**edits):
     """The workflow once PR 51 has landed: a unique line, three pin lines, and one line added in two jobs."""
-    return workflow(**dict(dict(perm=PERM, t_gate=TIMEOUT, t_lint=TIMEOUT, pins=PINS), **edits))
+    return workflow(**dict(dict(perm=PERM, t_build=TIMEOUT, t_lint=TIMEOUT, pins=PINS), **edits))
 
 
 class RenamedFile(unittest.TestCase):
@@ -950,7 +950,7 @@ class RenamedFile(unittest.TestCase):
 
     def conflicted_limit(self, renamed):
         """Main moves the limit 10 to 15; the branch moves it to 20, renamed or not; the merge resolves to 30, a third value."""
-        r, limit = self.r, lambda n: workflow(t_gate="    timeout-minutes: %d\n" % n)
+        r, limit = self.r, lambda n: workflow(t_build="    timeout-minutes: %d\n" % n)
         r.put(self.OLD, limit(10))
         r.commit("set a limit")
         r.push()
