@@ -1452,12 +1452,15 @@ def _log_unlock(handle) -> None:
 
 
 _override_who = ("", None)  # (session id, agent id) of the call this process judges
+_override_cwd = ""  # the call's directory, where the step grant is read
 
 
-def set_override_context(session_id, agent_id) -> None:
-    """Name the session and agent whose call this process judges, for the owner override."""
-    global _override_who
+def set_override_context(session_id, agent_id, cwd=None) -> None:
+    """Name the session and agent whose call this process judges, and its directory, for the owner
+    override."""
+    global _override_who, _override_cwd
     _override_who = (session_id, agent_id or None)
+    _override_cwd = cwd if isinstance(cwd, str) else ""
 
 
 def set_override_veto(veto) -> None:
@@ -1486,11 +1489,13 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
             import override
-            lifted = override.take(_override_who[0], _override_who[1], override.now(), rule, spawn_role)
+            lifted = override.take(_override_who[0], _override_who[1], override.now(), rule, spawn_role,
+                                   _override_cwd)
+            step = override.step_read() if lifted in (override.STEP_LIFTED, override.STEP_UNREAD) else None
         except Exception:
-            lifted = None
+            lifted = step = None
         if lifted:
-            record(tool, lifted, rule, matched)
+            record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
                 sys.exit(0)
     record(tool, decision, rule, matched)

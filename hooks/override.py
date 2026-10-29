@@ -23,6 +23,12 @@ rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
+A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
+roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn ask that no Opus override
+lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
+one git show per hit. The lane id is session_<x> for env CLAUDE_CODE_REMOTE_SESSION_ID=cse_<x>, else the
+payload's session id. Exactly one step must bind the lane, with status not done and a grant whose role
+is null or the spawn's role. A record that names the lane and cannot be read logs STEP_UNREAD.
 A file that is missing, unreadable or corrupt is no override. take() never raises into the guard: an
 error means no override, so the refusal stands.
 
@@ -58,7 +64,13 @@ LIFTED = "override"  # the log decision of a lifted act
 UNREAD = "override-unread"  # the log decision when an override file cannot be read
 OPUS_LIFTED = "opus-override"  # the log decision of an Opus spawn an Opus override lifted
 OPUS_UNREAD = "opus-unread"  # the log decision when an Opus override file cannot be read
-LIFTS = (LIFTED, OPUS_LIFTED)  # the take() results that let the act through
+STEP_LIFTED = "step-grant"  # the log decision of an Opus spawn a grant on the lane's roadmap step lifted
+STEP_UNREAD = "step-grant-unread"  # the log decision when a step record that names the lane cannot be read
+LIFTS = (LIFTED, OPUS_LIFTED, STEP_LIFTED)  # the take() results that let the act through
+STEP_REF = "refs/remotes/origin/roadmap"  # the record branch as the lane last fetched it; never fetched here
+STEP_DIR = "roadmap/data/steps/"
+LANE_ENV, LANE_ENV_PREFIX, LANE_PREFIX = "CLAUDE_CODE_REMOTE_SESSION_ID", "cse_", "session_"
+_step_read = None  # the step id the last take() read for its step decision, for the log line
 # What a refusal prints so the owner can copy the word that lifts it (step c80). The line names the
 # typed word and never the refused target. A model or an agent only offers the line; text from an
 # agent grants nothing, because the grant file lives in frozen state.
@@ -234,15 +246,101 @@ def _take_opus(session_id, spawn_role, at):
     return OPUS_LIFTED
 
 
-def take(session_id, agent_id, at, rule=None, spawn_role=None):
+def _lane_id(session_id):
+    """The lane's id as a step's `lane` field names it, or None. A set env value of another shape is no id."""
+    remote = os.environ.get(LANE_ENV)
+    if remote:
+        rest = remote[len(LANE_ENV_PREFIX):] if remote.startswith(LANE_ENV_PREFIX) else ""
+        lane = LANE_PREFIX + rest if rest else None
+    else:
+        lane = session_id
+    if not isinstance(lane, str) or not SESSION_ID.fullmatch(lane) or lane[0] == ".":
+        return None
+    return lane
+
+
+def _grant_role(grant):
+    """The role a well-formed grant covers: None for every role, else one role from OPUS_ROLES. Raises
+    ValueError for a grant of the wrong shape or an unknown role."""
+    if (not isinstance(grant, dict) or "role" not in grant or grant.get("by") != "triage"
+            or not isinstance(grant.get("words"), str) or not grant["words"].strip()):
+        raise ValueError("grant shape")
+    if datetime.fromisoformat(grant["at"]).tzinfo is None:
+        raise ValueError("grant time has no offset")
+    role = grant["role"]
+    if role is not None and (not isinstance(role, str) or opus_role(role) != role):
+        raise ValueError("unknown role")
+    return role
+
+
+def _take_step(session_id, spawn_role, cwd):
+    """STEP_LIFTED when the one step bound to this lane grants an Opus spawn of spawn_role, STEP_UNREAD
+    when a record that names the lane cannot be read or has the wrong shape, else None. Sets _step_read
+    to the step the decision names."""
+    global _step_read
+    _step_read = None
+    lane = _lane_id(session_id)
+    if lane is None or not isinstance(cwd, str) or not cwd:
+        return None
+    import git_reads  # lazy: only an Opus spawn ask that no Opus override lifted needs it
+    hits = git_reads._git(cwd, "grep", "-l", "-F", "-e", lane, STEP_REF, "--", STEP_DIR)
+    if hits is None or hits.returncode != 0:
+        return None  # no ref, no repository, no hit or a git error: no lift
+    bound = []
+    for name in hits.stdout.splitlines():
+        if not name.strip():
+            continue
+        _step_read = name.rsplit("/", 1)[-1]
+        shown = git_reads._git(cwd, "show", name)
+        try:
+            if shown is None or shown.returncode != 0:
+                raise ValueError("unread")
+            step = json.loads(shown.stdout)
+            if not isinstance(step, dict):
+                raise ValueError("not a record")
+            if step.get("lane") != lane:
+                continue  # the id appears in another field or as part of a longer id
+            grants = step.get("grants", [])
+            if not isinstance(grants, list) or not isinstance(step.get("status"), str):
+                raise ValueError("record shape")
+            roles = [_grant_role(grant) for grant in grants]
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return STEP_UNREAD
+        bound.append((str(step.get("id") or _step_read), step["status"], roles))
+    _step_read = None
+    if len(bound) != 1:
+        return None  # no step or two steps bind the lane: no lift
+    step_id, status, roles = bound[0]
+    role = str(spawn_role).lower()
+    if status == "done" or not any(r is None or r == role for r in roles):
+        return None
+    _step_read = step_id
+    return STEP_LIFTED
+
+
+def step_read():
+    """The step the last take() named for a step decision, or None."""
+    return _step_read
+
+
+def take(session_id, agent_id, at, rule=None, spawn_role=None, cwd=None):
     """LIFTED when the override lifts this refusal (a one-act override is spent), UNREAD when its file
     exists but cannot be read, else None. Of calls racing for one one-act override, only the one that
     creates its claim marker wins. For the Opus spawn ask (rule OPUS_RULE with a spawn_role) the Opus
-    override is read first, so a lift it covers spends no one-act override."""
+    override is read first, then the step grant (STEP_LIFTED or STEP_UNREAD), so a lift either one covers
+    spends no one-act override. `cwd` is the call's directory, where the step grant is read."""
     opus = _take_opus(session_id, spawn_role, at) if rule == OPUS_RULE and spawn_role is not None else None
     if opus == OPUS_LIFTED:
         return opus
-    return _take_override(session_id, agent_id, at) or opus
+    step = None
+    if rule == OPUS_RULE and spawn_role is not None:
+        try:  # an error in the step read is no lift, and it never stops the override read below
+            step = _take_step(session_id, spawn_role, cwd)
+        except Exception:
+            step = None
+        if step == STEP_LIFTED:
+            return step
+    return _take_override(session_id, agent_id, at) or opus or step
 
 
 def _take_override(session_id, agent_id, at):
