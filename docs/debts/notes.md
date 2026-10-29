@@ -627,3 +627,4 @@
 - ios-duo-order-word-window: the Duo order check reads only the two words before a pose word for "after" or "before", so "Draw the Duo unfolded after the Duo folded." gets a false duo-order and "Draw the Duo folded after the Duo unfolded." passes; the ios-apps rule and the mockup frame-order check back it up (hooks/blind_brief.py _pose_rank). Decision: blind-briefs-use-a-template
 - task-names-check-line-not-truth: the guard sees the Why yours line, not whether its check is true, so a task with a false check passes (hooks/guard.py task_check_hit; decision task-names-its-check)
 - task-names-check-update-no-kind: an update that carries `context` but no `kind` is not judged, since the guard cannot see the stored kind (hooks/guard.py task_check_hit; decision task-names-its-check)
+- task-names-check-file-path-no-cwd-join: `file_path` data is read with no cwd join, and an unreadable file passes (hooks/guard.py _write_data; decision task-names-its-check)
