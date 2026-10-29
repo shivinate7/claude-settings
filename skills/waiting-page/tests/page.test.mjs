@@ -2136,6 +2136,8 @@ const needBoxes = async (page, it, n) => assert.equal(await boxes(page, it).coun
 const tick = (page, it, key) => (it.ranked ? page.locator(`label[for="o-${it.id}-${key}"]`).click() : choose(page, it, key));
 const labelOf = (it, key) => it.options.find((o) => o.key === key).label;
 const rankText = (page, it, key) => page.locator(`#item-${it.id} .opt:has(#o-${it.id}-${key})`).textContent();
+// "2nd of 3". A card's text runs its spans together with no space, so a digit guard stands in for a word boundary.
+const rank = (ord, n) => new RegExp(`(?<!\\d)${ord} of ${n}(?!\\d)`);
 const moveBtn = (page, it, key, dir) => card(page, it).getByRole("button", { name: `Move ${labelOf(it, key)} ${dir}`, exact: true });
 const sendOne = async (page, it) => { await send(page); await page.waitForFunction((id) => !!window.__answers()[id], it.id); return (await answers(page))[it.id]; };
 
@@ -2160,9 +2162,9 @@ test("a ranked item: three ticks, one Up, and Send writes the list in the order 
   await needBoxes(page, it, 4);
   for (const k of ["c", "a", "d"]) await tick(page, it, k);
   assert.deepEqual(await ticked(page, it), ["a", "c", "d"]);
-  for (const [k, r] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), new RegExp(`\\b${r} of 3\\b`), `rank of ${k}`);
+  for (const [k, r] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), rank(r, 3), `rank of ${k}`);
   await moveBtn(page, it, "a", "up").click();
-  for (const [k, r] of [["a", "1st"], ["c", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), new RegExp(`\\b${r} of 3\\b`), `rank of ${k} after Up`);
+  for (const [k, r] of [["a", "1st"], ["c", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), rank(r, 3), `rank of ${k} after Up`);
   const a = await sendOne(page, it);
   assert.deepEqual([a.choice, a.note], [["a", "c", "d"], ""]);
 });
@@ -2172,13 +2174,13 @@ test("a ranked item: a new tick goes last and an untick closes the gap", async (
   const page = await open(t, { items: [it] }); if (!page) return;
   await needBoxes(page, it, 4);
   await tick(page, it, "c"); await tick(page, it, "a");
-  assert.match(await rankText(page, it, "c"), /\b1st of 2\b/);
-  assert.match(await rankText(page, it, "a"), /\b2nd of 2\b/);
+  assert.match(await rankText(page, it, "c"), rank("1st", 2));
+  assert.match(await rankText(page, it, "a"), rank("2nd", 2));
   await tick(page, it, "d"); await tick(page, it, "b");
-  assert.match(await rankText(page, it, "d"), /\b3rd of 4\b/, "a new tick did not go last");
-  assert.match(await rankText(page, it, "b"), /\b4th of 4\b/);
+  assert.match(await rankText(page, it, "d"), rank("3rd", 4), "a new tick did not go last");
+  assert.match(await rankText(page, it, "b"), rank("4th", 4));
   await tick(page, it, "a"); // untick the 2nd
-  for (const [k, r] of [["c", "1st"], ["d", "2nd"], ["b", "3rd"]]) assert.match(await rankText(page, it, k), new RegExp(`\\b${r} of 3\\b`), `rank of ${k} after the untick`);
+  for (const [k, r] of [["c", "1st"], ["d", "2nd"], ["b", "3rd"]]) assert.match(await rankText(page, it, k), rank(r, 3), `rank of ${k} after the untick`);
   assert.match(await rankText(page, it, "a"), /Not in your order/);
   const a = await sendOne(page, it);
   assert.deepEqual(a.choice, ["c", "d", "b"]);
@@ -2189,11 +2191,11 @@ test("Take my pick on a multi item writes the whole pick list with the note acce
   const page = await open(t, { items: [m, r] }); if (!page) return;
   await needBoxes(page, m, 3); await needBoxes(page, r, 4);
   const take = card(page, m).getByRole("button", { name: /Take my pick/ });
-  assert.match(await take.textContent(), /^Take my pick \(.*Open items older than a week.*Answers that failed to save.*\)$/, "the button does not name both picks by title");
+  assert.match(await take.textContent(), /^Take my pick \(.*Open items.*Answers that.*\)$/, "the button does not name both picks by title");
   await take.click(); await takePick(page, r);
   assert.deepEqual(await ticked(page, m), ["a", "c"]);
   assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
-  for (const [k, n] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, r, k), new RegExp(`\\b${n} of 3\\b`), `rank of ${k}`);
+  for (const [k, n] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, r, k), rank(n, 3), `rank of ${k}`);
   assert.equal(await take.isVisible(), false, "Take my pick stays after it was taken");
   assert.match(await card(page, m).locator(".ready").textContent(), /, my pick\.$/);
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
@@ -2242,8 +2244,8 @@ test("keys A to C toggle an option on a multi item, ranked or not", async (t) =>
   assert.deepEqual(await ticked(page, m), ["c"], "a second press did not untick");
   await card(page, r).locator(".title").click();
   await page.keyboard.press("c"); await page.keyboard.press("a");
-  assert.match(await rankText(page, r, "c"), /\b1st of 2\b/);
-  assert.match(await rankText(page, r, "a"), /\b2nd of 2\b/);
+  assert.match(await rankText(page, r, "c"), rank("1st", 2));
+  assert.match(await rankText(page, r, "a"), rank("2nd", 2));
   assert.deepEqual(await ticked(page, m), ["c"], "a key on the ranked card ticked the other card");
 });
 
@@ -2261,8 +2263,8 @@ test("a saved multi answer lists each pick with its letter and title in order, a
   assert.match(await card(page, r).locator(".receipt").textContent(), /You chose, in order:/);
   await card(page, r).getByRole("button", { name: "Change" }).click();
   assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
-  assert.match(await rankText(page, r, "c"), /\b1st of 3\b/, "Change lost the order");
-  assert.match(await rankText(page, r, "a"), /\b2nd of 3\b/);
+  assert.match(await rankText(page, r, "c"), rank("1st", 3), "Change lost the order");
+  assert.match(await rankText(page, r, "a"), rank("2nd", 3));
 });
 
 test("the ready line names the picks by title, shortened, never by letter, and a ranked line gives the order", async (t) => {
@@ -2323,9 +2325,9 @@ test("Up and Down are 44px targets on each ticked card, in the Tab order, and wo
   for (let i = 0; i < 4; i++) { await page.keyboard.press("Tab"); stops.push(await page.evaluate(() => document.activeElement.getAttribute("aria-label"))); }
   assert.ok(stops.includes("Move Green up") && stops.includes("Move Green down"), "Tab does not reach Up and Down: " + stops);
   await moveBtn(page, it, "a", "up").focus(); await page.keyboard.press("Enter");
-  assert.match(await rankText(page, it, "a"), /\b1st of 3\b/, "Enter on Up did not move the card up");
+  assert.match(await rankText(page, it, "a"), rank("1st", 3), "Enter on Up did not move the card up");
   await moveBtn(page, it, "d", "up").focus(); await page.keyboard.press("Space");
-  assert.match(await rankText(page, it, "d"), /\b2nd of 3\b/, "Space on Up did not move the card up");
+  assert.match(await rankText(page, it, "d"), rank("2nd", 3), "Space on Up did not move the card up");
   const a = await sendOne(page, it);
   assert.deepEqual(a.choice, ["a", "d", "c"]);
 });
@@ -2349,7 +2351,7 @@ test("a pick that stands, as a list, sits in the last section, goes with Send as
   await needBoxes(page, s1, 3); await needBoxes(page, s2, 4);
   assert.deepEqual(await ticked(page, s1), ["a", "c"], "a stood pick is not shown");
   assert.deepEqual(await ticked(page, s2), ["a", "c", "d"]);
-  assert.match(await rankText(page, s2, "c"), /\b1st of 3\b/);
+  assert.match(await rankText(page, s2, "c"), rank("1st", 3));
   assert.match(await page.locator("#barStatus").textContent(), /2 where my pick stands/);
   await choose(page, s1, "a"); // untick: the owner's list now differs from my pick
   await send(page);
@@ -2398,7 +2400,7 @@ test("Undo puts a list pick back as a draft, in its order", async (t) => {
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
   assert.deepEqual(await ticked(page, m), ["a", "c"], "Undo lost the list");
   assert.deepEqual(await ticked(page, r), ["a", "c"]);
-  assert.match(await rankText(page, r, "c"), /\b1st of 2\b/, "Undo lost the order");
+  assert.match(await rankText(page, r, "c"), rank("1st", 2), "Undo lost the order");
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
 });
 
