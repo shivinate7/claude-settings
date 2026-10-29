@@ -852,57 +852,106 @@ force_main_branch() {
   ( cd "$1" && git branch -m main >/dev/null 2>&1 )
 }
 
-caseF1() {
-  name="caseF1: pointer on main and behind origin/main prints the stale line"
-  co="$work/caseF1-checkout"; cfg="$work/caseF1-cfg"; bare="$work/caseF1-origin.git"
-  extra="$work/caseF1-extra"
+# behind_fixture NAME MARKED: the pointer cases' state under $work/NAME-*. A checkout on main at
+# $work/NAME-checkout, its origin a bare repo two commits ahead of it, and a pointer config at
+# $work/NAME-cfg that names the checkout. MARKED=1 sets claude-settings.cloudMirror on the checkout,
+# as install.sh's clone does. Sets co, cfg and fx_err: fx_err is empty when the fixture built the
+# behind-by-2 state. That check compares the checkout and the bare repo directly, never the hook, so
+# a fixture failure is never reported as a hook failure.
+behind_fixture() {
+  co="$work/$1-checkout"; cfg="$work/$1-cfg"; bare="$work/$1-origin.git"
+  extra="$work/$1-extra"
+  fx_err=""
   git init -q --bare "$bare"
-  # A bare repo's HEAD follows init.defaultBranch, which this machine may set to
-  # main but a GitHub runner leaves unset, defaulting to master. Force it, the
-  # same way force_main_branch already does for checkouts, so this case does not
-  # depend on the runner's git config.
+  # A bare repo's HEAD follows init.defaultBranch, which this machine may set to main but a GitHub
+  # runner leaves unset, defaulting to master. Force it, as force_main_branch does for checkouts.
   git -C "$bare" symbolic-ref HEAD refs/heads/main
-  make_checkout "$co" "# caseF1 content" "$bare"
+  make_checkout "$co" "# $1 content" "$bare"
   force_main_branch "$co"
   ( cd "$co" && git push -q origin main )
-  # Advance origin two commits past the checkout's own main, from a second clone, so
-  # the checkout is behind by an exact, known count. Captured, not swallowed: a
-  # setup step whose exit status nobody reads can silently fail to build the state
-  # the case is about to judge the hook against.
+  # Advance origin two commits past the checkout's own main, from a second clone. Captured, not
+  # swallowed: a setup step whose exit status nobody reads can silently fail to build the state.
   extra_log=$( { git clone -q "$bare" "$extra" \
       && cd "$extra" && git config user.email t@example.com && git config user.name t \
       && echo a >> extra.txt && git add extra.txt && git commit -q -m extra1 \
       && echo b >> extra.txt && git add extra.txt && git commit -q -m extra2 \
       && git push -q origin main ; } 2>&1 )
   extra_rc=$?
-  mkdir -p "$cfg"
-  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
-
-  # Precondition: verify the fixture actually built "checkout is 2 behind origin",
-  # by comparing the checkout's own main to the bare repo's main directly, never by
-  # asking the hook under test. A hook failure and a fixture failure must never be
-  # reported as the same thing.
   co_main=$(cd "$co" && git rev-parse main 2>/dev/null)
   bare_main=$(cd "$bare" && git rev-parse main 2>/dev/null)
   behind_built=$(cd "$bare" && git rev-list --count "$co_main..$bare_main" 2>/dev/null)
-
   if [ "$extra_rc" -ne 0 ]; then
-    bad "$name" "FIXTURE failed to advance origin: $extra_log"
-    return
+    fx_err="FIXTURE failed to advance origin: $extra_log"
   elif [ "$behind_built" != "2" ]; then
-    bad "$name" "FIXTURE did not build the behind-by-2 state (checkout vs origin main differ by [$behind_built])"
-    return
+    fx_err="FIXTURE did not build the behind-by-2 state (checkout vs origin main differ by [$behind_built])"
   fi
+  if [ "$2" = 1 ]; then git -C "$co" config claude-settings.cloudMirror true; fi
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+}
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF1err)
+# pointer_hook_run REMOTE: runs the hook in $co with the pointer config $cfg. REMOTE is the value of
+# CLAUDE_CODE_REMOTE; empty leaves it unset. Sets out, rc and errsize (the stderr byte count).
+pointer_hook_run() {
+  if [ -n "$1" ]; then
+    out=$(cd "$co" && env CLAUDE_CODE_REMOTE="$1" CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pointer-err")
+  else
+    out=$(cd "$co" && env -u CLAUDE_CODE_REMOTE CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pointer-err")
+  fi
   rc=$?
-  errsize=$(wc -c < /tmp/cF1err | tr -d '[:space:]'); rm -f /tmp/cF1err
+  errsize=$(wc -c < "$work/pointer-err" | tr -d '[:space:]')
+}
 
-  if [ $rc -ne 0 ]; then
+caseF1() {
+  name="caseF1: pointer on main and behind origin/main prints the stale line"
+  behind_fixture caseF1 0
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  pointer_hook_run ""
+
+  if [ "$rc" -ne 0 ]; then
     bad "$name" "exit $rc"
   elif [ "$errsize" != "0" ]; then
     bad "$name" "wrote to stderr"
   elif ! printf '%s\n' "$out" | grep -q "$co is 2 commits behind origin/main"; then
+    bad "$name" "expected stale line naming 2 commits behind, got: $out"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseF7, caseF8: the freshness check in a cloud session, on a clone install.sh made ----
+# A clone install.sh made carries the cloudMirror marker, and the resume refreshes it, so a behind
+# count on it is not a warning. An unmarked clone behind origin still warns in a cloud session.
+caseF7() {
+  name="caseF7: a marked cloud clone behind origin prints no behind or freshness line in a cloud session"
+  behind_fixture caseF7 1
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  pointer_hook_run true
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif ! printf '%s\n' "$out" | grep -qF "checkout $co on main,"; then
+    bad "$name" "the hook did not run: no checkout line: $out"
+  elif printf '%s\n' "$out" | grep -q 'commits behind origin/main\|freshness unknown'; then
+    bad "$name" "a marked cloud clone printed a freshness line: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF8() {
+  name="caseF8: an unmarked clone behind origin still warns in a cloud session"
+  behind_fixture caseF8 0
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  pointer_hook_run true
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif ! printf '%s\n' "$out" | grep -qF "$co is 2 commits behind origin/main"; then
     bad "$name" "expected stale line naming 2 commits behind, got: $out"
   else
     ok "$name"
@@ -2760,8 +2809,22 @@ make_github_fixture() {
   git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "fixture main"
   git clone -q --bare "$1/src" "$1/bare.git"
 }
-# Commit one change, named $2, to the fixture's main and push it to the bare repo.
+# Commit one change, named $2, to the fixture's main and push it to the bare repo. With $3 = merge, the
+# change is a merge of a two-commit branch named $2, so the history under main is merge-based.
 advance_github_fixture() {
+  if [ "${3:-}" = merge ]; then
+    git -C "$1/src" checkout -q -b "side-$2"
+    printf 'side %s a\n' "$2" > "$1/src/SIDE-$2-a.txt"
+    git -C "$1/src" add -A
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "side $2 a"
+    printf 'side %s b\n' "$2" > "$1/src/SIDE-$2-b.txt"
+    git -C "$1/src" add -A
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "side $2 b"
+    git -C "$1/src" checkout -q main
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false merge -q --no-ff -m "merge $2" "side-$2"
+    git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
+    return
+  fi
   printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"
   git -C "$1/src" add RESUME.txt
   git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "advance $2"
@@ -2974,11 +3037,14 @@ caseK5() {
 }
 
 # ---- caseK6: a .git at the clone path that is not this repo is kept, and the tarball path runs ----
+# The GitHub repo is served here, so a clone would succeed. Only the guard on the clone step keeps
+# install.sh from making one; without it the clone replaces the foreign checkout and its .git and sentinel go.
 caseK6() {
   name="caseK6: a .git at the clone path with another origin is kept, and the tarball path runs"
-  h="$work/k6-home"; scratch="$work/k6-scratch"; bin="$work/k6-bin"; co="$h/claude-settings"
-  mkdir -p "$scratch"
-  default_home "$h"
+  fx="$work/k6-fx"; h="$work/k6-home"; scratch="$work/k6-scratch"; bin="$work/k6-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  write_redirect "$h" "$fx/bare.git"
   make_checkout "$co" "# K6 other checkout" "https://gitlab.com/someone/else.git"
   printf 'keep me\n' > "$co/K6-SENTINEL.txt"
   make_curl_stub "$bin"
@@ -2986,14 +3052,14 @@ caseK6() {
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $(install_problems)"
-  elif ! grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
-    bad "$name" "install.sh did not run the tarball path"
   elif [ ! -d "$co/.git" ]; then
     bad "$name" "the .git at $co was removed"
   elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://gitlab.com/someone/else.git" ]; then
-    bad "$name" "the origin of the checkout at $co changed"
+    bad "$name" "the origin of the checkout at $co changed to $(git -C "$co" config --get remote.origin.url)"
   elif [ ! -f "$co/K6-SENTINEL.txt" ]; then
     bad "$name" "the sentinel in the checkout at $co was removed"
+  elif ! grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
+    bad "$name" "install.sh did not run the tarball path"
   else
     ok "$name"
   fi
@@ -3096,6 +3162,51 @@ caseK10() {
   fi
 }
 
+# ---- caseK11: a resume after upstream merges fetches only the new tip, not the history under it ----
+# Both installs run on a merge-based main. The first install is a depth-1 clone, so the resume is the
+# only fetch that could pull history. A full-history fetch leaves more than the new tip's commits here.
+caseK11() {
+  name="caseK11: a resume after upstream merges fetches only the new tip, not the merged history"
+  fx="$work/k11-fx"; h="$work/k11-home"; scratch="$work/k11-scratch"; bin="$work/k11-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  advance_github_fixture "$fx" m1 merge
+  advance_github_fixture "$fx" m2 merge
+  advance_github_fixture "$fx" m3 merge
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "setup: no marked clone after the first install: $(install_problems)"
+    return
+  fi
+  if [ "$(git -C "$co" rev-parse --is-shallow-repository)" != true ]; then
+    bad "$name" "setup: the first install is not a shallow clone, so the resume proves nothing about depth"
+    return
+  fi
+  if [ "$(git -C "$fx/bare.git" rev-list --merges --count main)" -lt 3 ]; then
+    bad "$name" "FIXTURE main has fewer than 3 merges, so the history is not merge-based"
+    return
+  fi
+
+  advance_github_fixture "$fx" m4 merge
+  advance_github_fixture "$fx" m5 merge
+  want=$(fixture_sha "$fx")
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the resume: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "after the resume HEAD is $(git -C "$co" rev-parse HEAD), want the new main $want"
+  else
+    n=$(git -C "$co" rev-list --count HEAD)
+    if [ "$n" -gt 2 ]; then
+      bad "$name" "the clone holds $n commits reachable from main after the resume: the resume fetched history, not the new tip"
+    else
+      ok "$name"
+    fi
+  fi
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -3162,6 +3273,8 @@ run caseF3
 run caseF4
 run caseF5
 run caseF6
+run caseF7
+run caseF8
 run caseG1
 run caseG2
 run caseG3
@@ -3199,6 +3312,7 @@ run caseK7
 run caseK8
 run caseK9
 run caseK10
+run caseK11
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
