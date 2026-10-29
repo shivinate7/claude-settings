@@ -288,6 +288,9 @@ jobs:
       - name: Waiting page staleness fixture suite
         run: python3 skills/waiting-page/test_stale_pages.py
 
+      - name: Waiting page splice fixture suite
+        run: python3 skills/waiting-page/test_splice.py
+
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 
@@ -520,10 +523,14 @@ jobs:
 
       # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
       # all-on arm of ci-scope.sh, so a change there runs this job. A red shoot suite above
-      # skips this step; it runs again once that suite is green.
+      # skips this step; it runs again once that suite is green. The merged-page cases run the
+      # roadmap build and the splice (tests/merged_page.py), so the runner needs python3 and git.
+      # ubuntu-latest has both; the first line fails the step at once if one goes missing.
       - name: waiting page suite
         shell: bash
-        run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs
+        run: |
+          python3 --version && git --version
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.

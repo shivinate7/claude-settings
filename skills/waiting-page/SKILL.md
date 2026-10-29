@@ -3,16 +3,17 @@ name: waiting-page
 description: Use when a session has a question, a decision or a task for the owner, when it starts a turn with items open on the waiting page, or when a repo makes its waiting page. Puts every item waiting on the owner on one page per repo, and reads the owner's answers back.
 ---
 
-The waiting page is one private page per repo or project. It holds every item that waits on the
-owner. Only a session that reads its own answers at a wake writes an item.
+The waiting page is the one private page per repo or project. Its Questions tab holds every item
+that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only a session that
+reads its own answers at a wake writes an item.
 
 A lane never writes an item. A lane is a background agent, or a lane session that ends. It puts its
 question in its report. The orchestrator writes the item with itself as `owner`. It routes the
 answer back to the lane or its next try.
 
 Every repo's page is the same template. The page is fixed. All content lives in its database,
-through the ArtifactData tool. The one exception is a design mockup: it is stored in the page
-itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each
+through the ArtifactData tool. Two exceptions are stored in the page itself: a design mockup (see
+"Add a design") and the roadmap data block (see "Update the Status block"). Rule `questions-go-to-owner` (questions go to the owner) sends each
 question here. Decision `questions-go-to-owner` holds the rulings.
 
 ## Find the page
@@ -268,6 +269,27 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
 
+## Update the Status block
+
+The roadmap build makes the Status tab's data. The waiting-page writer alone publishes the page file,
+so the repo has one page and one publisher. The skill roadmap publishes nothing.
+
+1. Build the block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
+   (add `--live <file>` as the skill roadmap says).
+2. Read the live page with `Artifact` action `read` and save it. Never build the new page from an
+   older copy: the live page holds the designs for the items still open.
+3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.
+   It replaces the block between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->` and keeps every
+   other byte, the `designData` block among them. It refuses a page with no block or an unclosed
+   one. A page that predates the block is first updated to the current template ("Update a repo's pages").
+4. Publish `<new page>` to the same URL with the capabilities `db` and `{comments: {}}`. One publish
+   at a time, never with `force`. The database and its saved answers stay.
+5. A design republish ("Add a design", step 5) is the same act the other way: it replaces only the
+   `designData` block and keeps the roadmap block.
+
+The old roadmap page retires. The repo's extras key for the roadmap points at this page's URL, and
+the old URL gets no more publishes.
+
 ## Update a repo's pages
 
 A batch that changes `page.html` republishes each waiting page this account can reach, before the
@@ -280,8 +302,9 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
 3. For each `behind` page, republish `page.html` to the same URL with the capabilities `db` and
-   `{comments: {}}`. Keep the page's `designData` block for the items still open. A republish with
-   less drops the saved items or the wake.
+   `{comments: {}}`. Keep the page's `designData` block for the items still open, and its roadmap
+   block. A republish with less drops the saved items, the wake or the Status tab. `stale_pages.py`
+   compares with both blocks emptied, so a page that differs only in them is current.
 4. Update one page first, then read its items: they must all still be there. That the database
    survives a republish is unmeasured.
 5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
