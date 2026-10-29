@@ -2,7 +2,9 @@
 
 `data/` holds one JSON file per document: `data/steps/<id>.json`, `data/topics/<id>.json` and
 `data/meta/<name>.json`. A step file holds the fields `title`, `status` (`todo`, `active`, `done`),
-`phase`, `order`, `why`, `note`, `ask` and `updatedAt`.
+`phase`, `order`, `why`, `note`, `ask` and `updatedAt`. Two more fields serve the guard: `lane`
+(`"session_<id>"`, the lane bound to the step; the coordinator writes it) and `grants` (step grants,
+each `{"words", "at", "role", "by": "triage"}`; triage writes them only). The skill gives their shape.
 
 The block builder is `skills/roadmap` in claude-settings. Build the roadmap block from this repo's checkout:
 
