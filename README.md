@@ -265,11 +265,11 @@ It reuses the first booted iPhone. With none booted, it boots the shared iPhone 
 Before that boot it applies the guard's cap itself: with 2 devices of any kind booted, it boots nothing, names them, and exits 1.
 It never shuts down a simulator it did not boot. The exit code is xcodebuild's. The tool takes no lock and waits for no load.
 
-## Standing roles and a roadmap record for a repo
+## Session tiers and a roadmap record for a repo
 
-The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds four
-standing roles (triage, build advisor, local liaison, merge hand), one roster, counted handoffs and
-autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
+The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds the
+session tiers (a coordinator that starts triage and the batch runner, then lane sessions), one roster,
+rotation of the standing sessions by a usage tally, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
 the roster, a brief and a role handoff note. A repo adopts it only on the owner's grant. See
 `skills/project-ops/SKILL.md`.

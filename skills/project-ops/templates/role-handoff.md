@@ -1,6 +1,6 @@
 # <Role> handoff, <date>
 
-From "<old thread title>" at <the limit hit, or the slip>. Checked: main <commit>, record branch
+From "<old session title>" at <the limit hit, or the slip>. Checked: main <commit>, record branch
 <commit>.
 
 ## Standing instructions
@@ -9,7 +9,7 @@ From "<old thread title>" at <the limit hit, or the slip>. Checked: main <commit
 
 ## State
 
-<What merged, what is in flight, and the work order now, in words.>
+<What merged, what is in flight, each wait handed over and to whom, and the work order now, in words.>
 
 ## Deferred for the owner
 
@@ -23,10 +23,10 @@ From "<old thread title>" at <the limit hit, or the slip>. Checked: main <commit
 
 Watches stopped at <time>
 
-<The URL of each page this role owns. The old thread stopped watching each one at that time,
+<The URL of each page this role owns. The old session stopped watching each one at that time,
 answered each comment still open at that time, then wrote this file. The successor watches
 each one at once, and reads its comments since that time.>
 
-## Threads
+## Sessions
 
-<Each running thread this role talks to, by title.>
+<Each running session this role talks to, by title.>

@@ -23,8 +23,8 @@ from guard_pointer import (
 # quoted message and a heredoc body name an act and perform none.
 #
 # 1. merge-checks: a merge made outside the merge tool is
-#    refused while the head has a check or a workflow run pending or red, or when that read could
-#    not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    refused while the head has a check or a workflow run pending or red, while another ready PR
+#    on the same base runs CI (decision no-merge-during-batch-ci), or when that read could not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.
 # 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
 #    its path is refused. The id is the record's file name without folder or `.md`, the slug
@@ -69,7 +69,9 @@ def gh_call_of(segment: str):
 MERGE_TOOLS = ("mcp__github__merge_pull_request",)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
-# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector) that split this one
+# Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector; a settled head adds the
+# batch read: the open pull list, then, when another ready PR is on the base, the protection (none with a pinned list) and
+# 3 calls per such PR: its check runs, its commit statuses and its workflow run list) that split this one
 # deadline (merge.py's shared_deadline), each getting whatever of it the earlier calls left. The shared deadline bounds a
 # hung `gh` to this one budget (pinned in test_guard.py), so a merge with a dead `gh` is refused fast instead of waiting out
 # each call. From a Linux cloud session, REST calls take 0.3-0.7 s. Windows REST is unmeasured, so the
@@ -160,14 +162,20 @@ def has_workflows(where: str) -> bool:
 
 
 def merge_check(selector, repo: str, where: str):
-    """Return (verdict, detail) for the head of the named pull request: green, pending, red or
-    unknown. One read, no wait, run in `where` so `gh` names the repo the command names."""
+    """Return (verdict, detail) for the head of the named pull request: green, pending, red,
+    batch (another ready PR on the base has a workflow run or a required check pending), or unknown. One read, no
+    wait, run in `where` so `gh` names the repo the command names."""
     module = merge_module()
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
-    host = module.Host(repo=repo or None, cwd=where or None)
-    return host.head_read(selector, nothing_is_green=not has_workflows(where))
+    try:  # the tool's own parser; a bad entry is refused there, so it is unknown here
+        ignore = next((module.ignore_checks(c) for c in _merge_configs(where) if isinstance(c["merge"], dict)), {}) if where else {}
+    except Exception as e:
+        return "unknown", str(e)
+    host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
+    # The ignore list reaches only the batch read: this head counts every check, so an ignored red check on it still refuses.
+    return host.head_read(selector, nothing_is_green=not has_workflows(where), batch_ignore=ignore)
 
 
 MERGE_CHECK_REASON = (
@@ -178,32 +186,58 @@ MERGE_CHECK_REASON = (
 )
 
 
+# The merge tool refuses this case too, so the remedy is to wait, never to run another merge.
+MERGE_BATCH_REASON = (
+    "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base: %s. A merge "
+    "now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
+    "CI-done comment on a red run, wakes the session that watches that PR. Then merge."
+)
+
+
 def merge_check_reason(verdict: str, detail: str) -> str:
+    if verdict == "batch":
+        return MERGE_BATCH_REASON % cap_safe(detail, 160)
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
-def _merge_config_at(root: str) -> bool:
-    """True when the nearest folder at or above `root` that holds `.git` has a `.github/stamp.json`
-    JSON object with a `merge` key. Any other outcome is False."""
+def _merge_config_at(root: str):
+    """The `.github/stamp.json` object in the nearest folder at or above `root` that holds `.git`,
+    when it is a JSON object with a `merge` key. Any other outcome is None."""
     while not os.path.exists(os.path.join(root, ".git")):
         if os.path.dirname(root) == root:
-            return False
+            return None
         root = os.path.dirname(root)
     try:
         with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as handle:
             config = json.load(handle)
     except (OSError, ValueError):
-        return False
-    return isinstance(config, dict) and "merge" in config
+        return None
+    return config if isinstance(config, dict) and "merge" in config else None
+
+
+def _merge_configs(where: str):
+    """The merge configs of the repo the cwd sits in. The path is walked as written AND with symlinks
+    resolved: a cwd that is a symlink into a repo finds its `.git` only on the real path, and a
+    symlink out of one only on the written path."""
+    configs = (_merge_config_at(root) for root in dict.fromkeys((os.path.abspath(where), os.path.realpath(where))))
+    return [c for c in configs if c is not None]
 
 
 def uses_merge_tool(where: str) -> bool:
-    """True when the repo the cwd sits in uses the merge tool (see `_merge_config_at`). The path is
-    walked as written AND with symlinks resolved: a cwd that is a symlink into a repo finds its
-    `.git` only on the real path, and a symlink out of one only on the written path. No root, or a
+    """True when the repo the cwd sits in uses the merge tool (see `_merge_configs`). No root, or a
     missing, unreadable, invalid or non-object file, is False: nothing to ask."""
-    return any(_merge_config_at(root) for root in dict.fromkeys(
-        (os.path.abspath(where), os.path.realpath(where))))
+    return bool(_merge_configs(where))
+
+
+def pinned_required(where: str):
+    """The repo's pinned `merge.requiredChecks` list, when it is a non-empty list of names; else None,
+    and the batch read takes the names from the branch protection."""
+    for config in _merge_configs(where) if where else ():
+        merge = config["merge"]
+        names = merge.get("requiredChecks") if isinstance(merge, dict) else None
+        if isinstance(names, list) and names and all(isinstance(k, str) and k for k in names):
+            return names
+    return None
 
 
 BARE_MERGE_REASON = (
