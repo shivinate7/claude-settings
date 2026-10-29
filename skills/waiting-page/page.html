@@ -630,7 +630,7 @@ function rcOf(it) {
 function receipt(it) {
   const sv = state.answers[it.id], rc = rcOf(it);
   let what;
-  if (it.kind === "task") what = sv.done ? "Marked done" : "Note, not done";
+  if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
   else if (sv.choice === NONE) what = "None of these";
   else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
   return h("div", { class: "receipt" },
@@ -1036,9 +1036,10 @@ function answerLine() {
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "task") {
-      const done = state.draft[it.id] ? !!d.done : !!(a && a.done); // a draft replaces the saved answer
-      if (done) parts.push(it.n + " done" + (note ? " (" + note + ")" : ""));
-      else if ((note || "").trim()) parts.push(it.n + " note, not done (" + note + ")");
+      const live = !!state.draft[it.id] && draftReady(it); // only a draft that would send replaces the saved answer
+      const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : (a && a.note);
+      if (done) parts.push(it.n + " done" + (tnote ? " (" + tnote + ")" : ""));
+      else if ((tnote || "").trim()) parts.push(it.n + " note, not done (" + tnote + ")");
     }
   });
   return parts.join(", ");
