@@ -1,0 +1,9 @@
+{
+  "title": "The coordinator holds standing merge authority in every repo until shiv withdraws it",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.3376,
+  "why": "Ruling, Oct 29 16:47 CDT (shiv, chat, via coordinator): the coordinator has perpetual standing merge authority for claude-settings and his other repos \"for now\", until he withdraws it; no more merge asks.",
+  "note": "Home: decision session-tiers, through lane coordinator-merge-grant (session_013NEJL2CLR7z2G51iU1Zit1, coordinator, Oct 29 16:47 CDT); each child repo's CLAUDE.md gets its line in that repo's next lane. Waiting page: no merge-only item was open when it landed (items 75, 79 and 80 were already closed). It does not lift CI: rule git-never-merge-failing-ci still holds. Needs no answer. Port: yes, every repo. Placed ahead of zero-value-merges (triage 12, Oct 29).",
+  "updatedAt": "2026-10-29T22:20:00Z"
+}
