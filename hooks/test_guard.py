@@ -11580,6 +11580,9 @@ def decide(case):
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
+    # dropped here too. A step-grant case sets its own through `env`.
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
     env.update(case.get("env") or {})   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
     if case.get("no_root"):   # no forced root, and a PATH with no `ps`: the root is unknown
@@ -15486,8 +15489,9 @@ GS_BAD = ("roadmap/data/steps/%s.json" % GS_STEP,  # a bound record cut short: i
 
 
 def gs_step(step_id, lane, status="in_progress", grants=()):
-    """One step record as the roadmap holds it: its path and its JSON text."""
-    body = {"id": step_id, "title": "Step " + step_id, "status": status, "lane": lane,
+    """One step record as the roadmap holds it: its path and its JSON text. `lane` is the bare lane id;
+    the record names it session_<lane>, as the roadmap does."""
+    body = {"id": step_id, "title": "Step " + step_id, "status": status, "lane": "session_" + lane,
             "grants": list(grants)}
     return "roadmap/data/steps/%s.json" % step_id, json.dumps(body, indent=2) + "\n"
 
@@ -15592,42 +15596,91 @@ def gs_cost_check():
     return True, "a Sonnet spawn was allowed, and no git call the guard made named the roadmap"
 
 
+def gs_runner_id_check():
+    """The runner's own lane id would bind a case that sets none to a lane. The runner drops it, so a reviewer
+    spawn on a step bound to that id, with a reviewer grant, still asks. The id is set in this process only,
+    and restored after the call."""
+    repo = gs_repo("runner-id", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]))
+    config, session = ov_config("grant-runner-id"), "gs-payload-runner-id"
+    saved = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = "cse_" + GS_LANE
+    try:
+        problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER, env=None), "ask", "agent-model-cap")
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        else:
+            os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = saved
+    return (not problem), (problem or "asked: the runner's own lane id did not reach the case")
+
+
+# Each ask case below has a control: the same fixture with its one defect repaired, which must be allowed.
+# A control that asks would mean the reader never ran, so the ask case would pass for the wrong reason.
 GS_CHECKS = (
     ("step grant: a reviewer spawn on the lane's step is allowed by a grant for reviewers, and logged",
      gs_lift_check),
     ("step grant: a step with no grant asks an Opus spawn",
      gs_verdict_check("no-grant", dict([gs_step(GS_STEP, GS_LANE)]), OP_REVIEWER, "ask")),
+    ("step grant: control for no grant, the step with a reviewer grant is allowed",
+     gs_verdict_check("ctl-no-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a grant on another lane's step does not lift this lane's Opus spawn",
      gs_verdict_check("other-step", dict([gs_step(GS_STEP, GS_LANE),
-                                          gs_step("step-b", "session_zz9y8x", grants=[gs_grant(None)])]),
+                                          gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
                       OP_REVIEWER, "ask")),
+    ("step grant: control for another lane's step, this lane's own step with a grant is allowed",
+     gs_verdict_check("ctl-other-step", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")]),
+                                              gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a grant for builders does not lift a reviewer spawn",
      gs_verdict_check("builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("builder")])]),
                       OP_REVIEWER, "ask")),
+    ("step grant: control for a builder grant, a reviewer grant for a reviewer is allowed",
+     gs_verdict_check("ctl-builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a bound step that cannot be parsed asks an Opus spawn",
      gs_verdict_check("bad-json", dict([GS_BAD]), OP_REVIEWER, "ask")),
+    ("step grant: control for an unparseable step, the same step parsed with a reviewer grant is allowed",
+     gs_verdict_check("ctl-bad-json", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a grant with an unknown role asks, even for a spawn of that role",
      gs_verdict_check("unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("wizard")])]),
                       GS_WIZARD, "ask")),
+    ("step grant: control for an unknown role, a reviewer grant for a reviewer is allowed",
+     gs_verdict_check("ctl-unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a grant with no role key asks an Opus spawn",
      gs_verdict_check("no-role-key", dict([gs_step(GS_STEP, GS_LANE,
                                                    grants=[gs_grant("reviewer", drop_role=True)])]),
                       OP_REVIEWER, "ask")),
+    ("step grant: control for no role key, the same grant with its role is allowed",
+     gs_verdict_check("ctl-no-role-key", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a grant with role null allows a builder spawn",
      gs_verdict_check("null-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
                       OP_BUILDER, "allow")),
     ("step grant: a step with status done asks an Opus spawn, even with a grant",
      gs_verdict_check("done", dict([gs_step(GS_STEP, GS_LANE, status="done", grants=[gs_grant(None)])]),
                       OP_REVIEWER, "ask")),
+    ("step grant: control for done, the same step not done is allowed",
+     gs_verdict_check("ctl-done", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a repository with no origin/roadmap ref asks an Opus spawn",
      gs_verdict_check("no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
                       OP_REVIEWER, "ask", ref=False)),
+    ("step grant: control for no ref, the same step on the ref is allowed",
+     gs_verdict_check("ctl-no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: two steps bound to this lane ask an Opus spawn, even with a grant on one",
      gs_verdict_check("two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)]),
                                          gs_step("step-c", GS_LANE)]),
                       OP_REVIEWER, "ask")),
+    ("step grant: control for two steps, one step bound to this lane with the grant is allowed",
+     gs_verdict_check("ctl-two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
     ("step grant: a Sonnet spawn runs no git call that names the roadmap", gs_cost_check),
     ("step grant: an unparseable bound step is logged as step-grant-unread", gs_unread_log_check),
+    ("step grant: the runner's own lane id does not reach a case that sets none", gs_runner_id_check),
 )
 for _label, _check in GS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
