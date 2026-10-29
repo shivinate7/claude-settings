@@ -708,13 +708,17 @@ if [ "$CLOUD" = 1 ]; then
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
   HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"
   if command -v jq >/dev/null 2>&1; then
-    jq --arg cmd "$HOOK_CMD" \
-      '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])' \
+    # merge/cloud_allow.json: the `merge --confirm` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
+    ALLOW_FILE="$SRC/merge/cloud_allow.json"
+    [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
+    jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
+      '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
+       | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
       "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"
-    log "wrote $TARGET_JSON (repo settings + cloud refresh hook)"
+    log "wrote $TARGET_JSON (repo settings + cloud refresh hook + merge/cloud_allow.json rules)"
   else
     cp "$SRC/settings.json" "$TARGET_JSON"
-    log "wrote $TARGET_JSON (jq missing, no refresh hook added)"
+    log "wrote $TARGET_JSON (jq missing, no refresh hook and no merge/cloud_allow.json rules added)"
   fi
 else
   # Local: symlink, so `git pull` in the clone is the whole update.
