@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10 and 2026-10-29 16:47 CDT: the coordinator holds a standing merge grant in claude-settings and in the owner's other repos. The other repos are banchi, q_max, home, degen, mailaudit, ios-adblock and joyous (the coordinator's list, 2026-10-29). Each build has one holder. In a build with a coordinator, the coordinator holds the grant. A solo session with no coordinator in claude-settings holds the 2026-10-10 grant there. A lane session never merges. The grant holds "for now", until the owner withdraws it in chat. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
+Owner rulings, 2026-10-10 and 2026-10-29 16:47 CDT: the coordinator holds a standing merge grant in claude-settings and in the owner's other repos. The other repos are banchi, q_max, home, degen, mailaudit, ios-adblock and joyous (the coordinator's list, 2026-10-29). Each build has one holder. In a build with a coordinator, the coordinator holds the grant. A session with no coordinator (solo or one lane) in claude-settings holds the 2026-10-10 grant there. A lane session that a coordinator started never merges. The grant holds "for now", until the owner withdraws it in chat. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
 
 The owner's words, 2026-10-29 16:47 CDT, in web chat:
 
