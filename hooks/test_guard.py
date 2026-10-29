@@ -11658,6 +11658,34 @@ add("press link: a batch of linked sets is allowed", "allow", tool="ArtifactData
              "data": pl_item(options=[dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT])}])
 
 
+pl("a Merge on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Merge home#374 on GitHub."), PL_KEEP_OPT]))
+pl("an Approve on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Approve it", "Approve the PR on GitHub."), PL_KEEP_OPT]))
+pl("a Hit on the PR with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Hit Merge on the PR."), PL_KEEP_OPT]))
+pl("a Go to Settings with no link is denied", "deny",
+   pl_item(options=[pl_opt("Turn it on", "Go to Settings and turn it on."), PL_KEEP_OPT]))
+pl("a press with a space before the # and no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374."), PL_KEEP_OPT]))
+pl("a press with a space before the # and a link to /pull/375 is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374.", links=PL_WRONG), PL_KEEP_OPT]))
+pl("a press with a space before the # and a link to /pull/374 is allowed", "allow",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374.", links=PL_LINK), PL_KEEP_OPT]))
+pl("a label with the ref and a how with the click are judged together and denied", "deny",
+   pl_item(options=[pl_opt("Merge home#374 yourself", "Click the green button."), PL_KEEP_OPT]))
+pl("a task step that opens the PR #374 and approves it, with no links, is denied", "deny",
+   pl_task(["Open the PR #374 and approve it"]))
+pl("press on with the PR open is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press on; the PR stays open."), PL_KEEP_OPT]))
+pl("press on with the claude-settings lane is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press on with the claude-settings lane."), PL_KEEP_OPT]))
+pl("press Save after editing settings.json is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press Save after you edit settings.json."), PL_KEEP_OPT]))
+pl("marking the decision ready once the PR is open is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Mark the decision ready once the PR is open."), PL_KEEP_OPT]))
+
+
 # --------------------------------------------------------------------------- a task step never sends the owner to a file for a command
 FAMILY = "command-in-item"
 #
@@ -11699,6 +11727,12 @@ ci("a decision that opens a file and runs its command is not judged", "allow",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
+
+
+ci("a file step with the command set is denied", "deny",
+   ci_task(CI_STEPS, command="git push origin --delete old-a"))
+ci("a run-the-command-in-file step with the command set is denied", "deny",
+   ci_task(["Run the command in plans/c152.md"], command="git push origin --delete old-a"))
 
 
 # --------------------------------------------------------------------------- the runner
