@@ -3462,25 +3462,41 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
     real file, no fake."""
 
     CHILD = (
+        "import os\n"
         "import sys\n"
         "sys.path.insert(0, __JANITOR__)\n"
         "import agent_end_reap\n"
+        "__PRELUDE__"
         "lo, hi = int(sys.argv[1]), int(sys.argv[2])\n"
         "for i in range(lo, hi):\n"
         "    agent_end_reap.log({'raw': 'x', 'run': 'r' + str(i), 'state': 'done'})\n"
     ).replace("__JANITOR__", repr(os.path.dirname(os.path.abspath(__file__))))  # repr: Windows backslashes
 
-    def run_writers(self, writers, rows):
-        folder = tempfile.mkdtemp(prefix="reap_log_")
-        self.addCleanup(shutil.rmtree, folder, True)
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=folder)
+    def run_writers(self, writers, rows, prelude="", folder=None, env_extra=None):
+        """Start `writers` real writer processes, each with its share of `rows` rows, on one payload log.
+        `prelude` is Python each writer runs before its first row. No writer may print that it dropped a
+        row: its stderr names the cause, so a red run says which path lost the row."""
+        if folder is None:
+            folder = tempfile.mkdtemp(prefix="reap_log_", dir=ROOT)  # the module's run folder, not the system temp dir
+            self.addCleanup(shutil.rmtree, folder, True)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, **(env_extra or {}))
+        child = self.CHILD.replace("__PRELUDE__", prelude)
         step = rows // writers
-        procs = [subprocess.Popen([sys.executable, "-c", self.CHILD, str(w * step), str((w + 1) * step)],
+        procs = [subprocess.Popen([sys.executable, "-c", child, str(w * step), str((w + 1) * step)],
                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                  for w in range(writers)]
-        for proc in procs:
-            _out, err = proc.communicate(timeout=120)
-            self.assertEqual(proc.returncode, 0, "writer failed: %s" % err)
+        errors = []
+        try:
+            for proc in procs:
+                _out, err = proc.communicate(timeout=120)
+                self.assertEqual(proc.returncode, 0, "writer failed: %s" % err)
+                errors.append(err)
+        finally:
+            for proc in procs:
+                if proc.poll() is None:  # only the writers this call started
+                    proc.kill()
+        drops = [err.strip() for err in errors if "payload log write failed" in err]
+        self.assertEqual(drops, [], "%d writer(s) dropped a row: %s" % (len(drops), drops))
         path = os.path.join(folder, "state", "agent-end-payloads.jsonl")
         with open(path, encoding="utf-8") as handle:
             lines = handle.read().splitlines()
@@ -3503,6 +3519,97 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         for writers in (3, 24):
             with self.subTest(writers=writers):
                 self.run_writers(writers, 120)
+
+    # The Windows branch of _log_lock, forced on this host. msvcrt.locking(LK_LOCK) retries for about ten
+    # seconds and then raises. This stand-in tries three times, 0.2 s apart, so it gives up inside the
+    # holder's hold below. It takes the real flock, so the holder's lock is the one it waits on. Only the
+    # module's own `sys` reference reports win32.
+    LOCK_GIVE_UP_PRELUDE = (
+        "import fcntl as _fcntl\n"
+        "import time as _time\n"
+        "import types as _types\n"
+        "class _WinSys:\n"
+        "    platform = 'win32'\n"
+        "    def __getattr__(self, name):\n"
+        "        return getattr(sys, name)\n"
+        "agent_end_reap.sys = _WinSys()\n"
+        "_marked = []\n"
+        "def _locking(fd, mode, nbytes):\n"
+        "    if not _marked:\n"
+        "        open(os.environ['WRITER_ATTEMPT_MARK'], 'w').close()\n"
+        "        _marked.append(True)\n"
+        "    if mode == 0:\n"
+        "        _fcntl.flock(fd, _fcntl.LOCK_UN)\n"
+        "        return\n"
+        "    tries = 3 if mode == 1 else 1\n"
+        "    for attempt in range(tries):\n"
+        "        try:\n"
+        "            _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)\n"
+        "            return\n"
+        "        except BlockingIOError:\n"
+        "            if attempt + 1 < tries:\n"
+        "                _time.sleep(0.2)\n"
+        "    raise OSError(36, 'lock wait gave up (forced)')\n"
+        "sys.modules['msvcrt'] = _types.SimpleNamespace(locking=_locking, LK_LOCK=1, LK_NBLCK=2, LK_UNLCK=0)\n"
+    )
+
+    # The second drop path on Windows: os.replace refuses the temp file while a reader holds the
+    # destination. log() tries five times, 50 ms apart, and then drops the row. This refuses the first
+    # six calls in each writer, so the first row's five tries all fail.
+    REPLACE_REFUSED_PRELUDE = (
+        "_real_replace = os.replace\n"
+        "_refusals = [6]\n"
+        "def _refuse_then_replace(src, dst):\n"
+        "    if _refusals[0] > 0:\n"
+        "        _refusals[0] -= 1\n"
+        "        raise PermissionError(13, 'destination held (forced)')\n"
+        "    return _real_replace(src, dst)\n"
+        "os.replace = _refuse_then_replace\n"
+    )
+
+    # Holds the payload log's real lock until 5 s after `attempt` appears, so a writer that asks for
+    # the lock meets it held. Its own pid is the only one it touches.
+    HOLDER = (
+        "import fcntl, os, sys, time\n"
+        "lock, ready, attempt = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+        "handle = open(lock, 'a+')\n"
+        "fcntl.flock(handle, fcntl.LOCK_EX)\n"
+        "open(ready, 'w').close()\n"
+        "end = time.time() + 60\n"
+        "while not os.path.exists(attempt) and time.time() < end:\n"
+        "    time.sleep(0.02)\n"
+        "time.sleep(5)\n"
+    )
+
+    def test_a_lock_wait_that_gives_up_loses_no_row(self):
+        """The Windows lock wait, forced: a give-up must not drop a row. The holder keeps the real lock
+        for 5 s after the first writer asks for it. The stand-in gives up in about 0.6 s, so the writer
+        must keep waiting and land its row once the holder lets go."""
+        folder = tempfile.mkdtemp(prefix="reap_lock_", dir=ROOT)
+        self.addCleanup(shutil.rmtree, folder, True)
+        state = os.path.join(folder, "state")
+        os.makedirs(state)
+        ready = os.path.join(folder, "lock-held")
+        attempt = os.path.join(folder, "writer-attempted")
+        holder = subprocess.Popen([sys.executable, "-c", self.HOLDER,
+                                   os.path.join(state, "agent-end-payloads.jsonl.lock"), ready, attempt])
+        try:
+            deadline = time.time() + 30
+            while not os.path.exists(ready):
+                if holder.poll() is not None or time.time() > deadline:
+                    self.fail("the holder never took the payload log lock")
+                time.sleep(0.02)
+            self.run_writers(3, 12, prelude=self.LOCK_GIVE_UP_PRELUDE, folder=folder,
+                             env_extra={"WRITER_ATTEMPT_MARK": attempt})
+        finally:
+            if holder.poll() is None:  # the holder this test started, by its own handle
+                holder.kill()
+            holder.wait(timeout=30)
+
+    def test_a_replace_that_stays_refused_loses_no_row(self):
+        """The Windows replace, forced: os.replace refuses each writer's first five tries. A refusal
+        that outlasts log()'s tries must not drop the row."""
+        self.run_writers(3, 12, prelude=self.REPLACE_REFUSED_PRELUDE)
 
 
 class AgentEndReapBatchTests(unittest.TestCase):
