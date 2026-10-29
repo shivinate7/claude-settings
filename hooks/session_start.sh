@@ -1,12 +1,23 @@
 #!/bin/sh
 # Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
-# Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr.
+# Outside a git tree or when git is missing, prints only the cloud tier line. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 [ -n "$cwd" ] || cwd=$(pwd)
 
-command -v git >/dev/null 2>&1 || exit 0
+# tier_line: cloud sessions only (the CLAUDE_CODE_REMOTE read install.sh makes), tell the session how
+# to find its tier (decision session-tiers). One call runs per run: at the no-git or no-toplevel exit,
+# or right after the checkout line, so a cloud session gets it in any folder. The hook cannot read the
+# tier itself: get_session and list_sessions are MCP tools only, and a hook never calls the sessions API
+# with a token. Cost: one env read, no network, no new process, no timer, no file written.
+tier_line() {
+  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed.'
+  fi
+}
+
+command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
 # bounded_git <dir> <outfile> <git args...>: runs git in <dir>, stdout to <outfile>, killed after
 # CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). Returns git's status, or a kill's (above 1)
@@ -34,7 +45,7 @@ bounded_fetch() {
 }
 
 toplevel=$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
-[ -n "$toplevel" ] || exit 0
+[ -n "$toplevel" ] || { tier_line; exit 0; }
 
 branch=$(cd "$cwd" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
 [ "$branch" = "HEAD" ] && branch="detached"
@@ -42,14 +53,7 @@ branch=$(cd "$cwd" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
 n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
-
-# Cloud sessions only (the CLAUDE_CODE_REMOTE read install.sh makes): tell the session how to find its
-# tier (decision session-tiers). The hook cannot read the tier itself: get_session and list_sessions are
-# MCP tools only, and a hook never calls the sessions API with a token. Cost: one env read, no network,
-# no new process, no timer, no file written.
-if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
-  printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a live session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo; if one is found, coordinate with it, else proceed.'
-fi
+tier_line
 
 # core.worktree in the SHARED config re-points every checkout of the clone at one tree. A child
 # `git init` that inherits GIT_DIR and GIT_WORK_TREE writes it.
