@@ -106,7 +106,7 @@ Other tools, in `judge` order:
                        call with no `agent_id` from a `.claude/worktrees/<name>` folder, cleared by that
                        session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
                        `.git`, a target outside the clone, reads and non-writing shell pass. An
-                       override lifts it. No git spawn.
+                       override lifts it. It adds no git spawn beyond what the call already spends.
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -2878,8 +2878,13 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
 # default branch, behind everything. The record `<primary>/.git/session-homes/<session_id>` holds the
 # worktree path, so a later call can tell "never had a worktree" from "its worktree is gone". Only a
 # call with no `agent_id` writes or clears it: an agent shares its session's id. The primary is found
-# by path shape and a stat walk, never by git, so the rule adds no git spawn.
+# by path shape and a stat walk, never by git, so the rule adds no git spawn beyond what the call
+# already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
+# The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
+# is left out in session_home_git_hit.
+SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
+                          "stash", "cherry-pick", "revert", "am", "apply")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
@@ -2931,23 +2936,60 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     if not record:
         return
     try:
-        if tool == "ExitWorktree":
-            if os.path.exists(record):
-                os.remove(record)
-            return
-        if not lane:
-            return
         try:
             with open(record, encoding="utf-8") as handle:
-                if handle.read().strip() == lane:
-                    return
+                held = handle.read().strip()
         except OSError:
-            pass
-        os.makedirs(os.path.dirname(record), exist_ok=True)
-        with open(record, "w", encoding="utf-8") as handle:
-            handle.write(lane)
+            held = ""
+        if tool == "ExitWorktree":
+            # Only an exit from the recorded worktree, still standing, ends the record. From the
+            # primary, or from another folder, the record stays and the guard keeps judging.
+            if lane and held and os.path.isdir(held) and os.path.realpath(held) == lane:
+                os.remove(record)
+            return
+        if not lane or held == lane:
+            return
+        import tempfile   # lazy: only a first or changed record reaches here
+        folder = os.path.dirname(record)
+        os.makedirs(folder, exist_ok=True)
+        handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(lane)
+            os.replace(temp, record)  # one step: a reader never sees a half-written path
+        except BaseException:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            raise
     except Exception:
         pass  # an unwritable record means no refusal later, never a failed call
+
+
+def session_home_git_hit(command: str, where: str, in_primary) -> str:
+    """The verb of a git call in COMMAND that changes the primary's files or branch and runs in the
+    primary checkout, else ''. A leading `cd` and `git -C <path>` name the folder it runs in; a folder
+    that holds a variable is unknown and passes."""
+    ends = []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        verbs = [(verb, args) for verb, args in git_calls(segment) if verb in SESSION_HOME_GIT_VERBS]
+        if not verbs:
+            continue
+        folder = dir_before_segment(segments, number, where, ends) or where
+        tokens = segment_tokens(segment)
+        named = _segment_git_c_target(tokens) if tokens else None
+        if named is not None:
+            folder = None if _unexpanded(named) else shell_abs(named, folder)
+        if not folder:
+            continue
+        for verb, args in verbs:
+            if verb == "stash" and args[:1] in (["list"], ["show"]):
+                continue
+            if in_primary(folder, folder):
+                return verb
+    return ""
 
 
 def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -2962,7 +3004,8 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     elif tool in SHELL_TOOLS:
         targets = None
         command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
-        if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)):
+        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
+        if not writes and "git" not in command:
             return ""
     else:
         return ""
@@ -2988,10 +3031,14 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
             return False
         return (path_is_inside(resolved, primary) is True
                 and path_is_inside(resolved, clone_git) is not True
-                and path_is_inside(resolved, lanes) is not True)
+                and (path_is_inside(resolved, lanes) is not True
+                     or path_is_inside(resolved, home) is True))  # the gone home path is the primary's too
 
     if targets is None:
-        hit = _shell_write_hit(command, where, in_primary, follow_cd=True)
+        verb = session_home_git_hit(command, where, in_primary)
+        if verb:
+            return "git " + verb + " in the primary checkout"
+        hit = _shell_write_hit(command, where, in_primary, follow_cd=True) if writes else ""
         return "shell write into the primary checkout: " + hit if hit else ""
     for target in targets:
         if in_primary(target, where):
