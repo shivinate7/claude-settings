@@ -14952,16 +14952,17 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None):
+            temp=None, env=None, load=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
-    adds variables to this one guard run."""
+    adds variables to this one guard run. `load` is the machine reading a lane-start call meets
+    (LB_NORMAL when None)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
-        "env": fixed, "tool_input": tool_input,
+        "env": fixed, "tool_input": tool_input, "load": load,
     })
 
 
@@ -15683,6 +15684,59 @@ GS_CHECKS = (
     ("step grant: the runner's own lane id does not reach a case that sets none", gs_runner_id_check),
 )
 for _label, _check in GS_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
+
+
+# THE LOAD BRAKE ON A LIFTED OPUS SPAWN. A lifted Opus spawn ask exits in refuse() before rule 9d, the
+# machine-load brake, runs, so a full machine would not refuse a spawn that a grant or an override lifted.
+# The brake applies to every lane start, lifted or not. LB_ALL_HIGH is a full machine: memory and disk both
+# over the full line, and the case's `load` key is that reading.
+def gl_check(name, tool_input, config_name, session_name, typed=None, grant=None, load=None, want="deny"):
+    """One lane-start call on a machine with the given reading. `grant` is the step's grant list, when the
+    lane is bound to a step; `typed` is an owner prompt typed before the call. Returns the verdict wanted."""
+    config, session = ov_config(config_name), session_name
+    if grant is not None:
+        repo = gs_repo(name, dict([gs_step(GS_STEP, GS_LANE, grants=grant)]))
+        cwd, env = repo, GS_ENV
+    else:
+        cwd, env = NOGIT, None
+    note = ov_type(config, session, typed) if typed else ""
+    problem = ov_want(*ov_call("Agent", dict(tool_input), cwd, config, session, 60, env=env, load=load),
+                      want, "load-brake" if want == "deny" else "agent-model-cap")
+    return (not problem), (problem or ("%s, as wanted" % want)) + ("; " + note if note and problem else "")
+
+
+def gl_step_grant_full_check():
+    return gl_check("load-grant", OP_BUILDER, "load-grant", "gl-payload-grant",
+                    grant=[gs_grant(None)], load=LB_ALL_HIGH)
+
+
+def gl_typed_override_full_check():
+    return gl_check("load-typed", OP_BUILDER, "load-typed", "gl-payload-typed",
+                    typed="opus 2h", load=LB_ALL_HIGH)
+
+
+def gl_step_grant_normal_check():
+    return gl_check("load-normal", OP_BUILDER, "load-normal", "gl-payload-normal",
+                    grant=[gs_grant(None)], want="allow")
+
+
+def gl_sonnet_full_check():
+    return gl_check("load-sonnet", GS_SONNET, "load-sonnet", "gl-payload-sonnet", load=LB_ALL_HIGH)
+
+
+GL_CHECKS = (
+    ("lift and load brake: a step grant lifts an Opus spawn, and a full machine still denies it",
+     gl_step_grant_full_check),
+    ("lift and load brake: a typed opus 2h lifts an Opus spawn, and a full machine still denies it",
+     gl_typed_override_full_check),
+    ("lift and load brake: control, the same step grant on a normal machine lets the spawn through",
+     gl_step_grant_normal_check),
+    ("lift and load brake: control, a Sonnet spawn on a full machine is denied by the load brake",
+     gl_sonnet_full_check),
+)
+for _label, _check in GL_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)
 
