@@ -376,8 +376,8 @@ body.sheet-open { overflow: hidden; }
   .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
   .prail .nm > span:first-child { overflow-wrap: anywhere; }
 }
-/* Below 340px five chips are too narrow for a name and the current-phase dot: the rail wraps to three columns. */
-@container (max-width: 339px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* Five chips fit a name and the current-phase dot on one line only from a 410px box (measured on Organize, the longest name). Below that the rail wraps to three columns. */
+@container (max-width: 409px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 .cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 @container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
