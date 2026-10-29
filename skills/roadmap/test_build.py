@@ -11,13 +11,19 @@ import pathlib
 import re
 import subprocess
 import sys
+import shutil
 import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(1, str(HERE.parent.parent / "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import build  # noqa: E402
+
+# Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
+RUN_FOLDER = None
 
 STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
@@ -63,7 +69,7 @@ def git(repo, *args):
 
 def run_build(*argv):
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
         try:
             build.main(list(argv))
             code = 0
@@ -77,37 +83,56 @@ def build_info(page):
     return json.loads(found.group(1).replace("<\\/", "</"))
 
 
+def make_repo(root, steps=None, meta=None):
+    """The one roadmap fixture repo, under `root`: `main` holds the record homes, `roadmap` holds
+    roadmap/data/. Leaves HEAD on `roadmap`. `steps` and `meta` add files ({stem: JSON}) to its data."""
+    repo = pathlib.Path(root) / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "decisions").mkdir()
+    (repo / "decisions" / "one.md").write_text("# one\n", encoding="utf-8")
+    (repo / "README.md").write_text("# r\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "main")
+    git(repo, "checkout", "-q", "--orphan", "roadmap")
+    git(repo, "rm", "-rq", "--cached", ".")
+    for name in ("decisions", "README.md"):
+        p = repo / name
+        if p.is_dir():
+            for f in p.iterdir():
+                f.unlink()
+            p.rmdir()
+        else:
+            p.unlink()
+    data = repo / "roadmap" / "data"
+    for folder in ("steps", "topics", "meta"):
+        (data / folder).mkdir(parents=True)
+    for stem, step in {"c1": STEP, **(steps or {})}.items():
+        (data / "steps" / (stem + ".json")).write_text(json.dumps(step), encoding="utf-8")
+    (data / "topics" / "t01.json").write_text(json.dumps({"title": "x", "order": 1}), encoding="utf-8")
+    for stem, doc in {"cull": {"stopRule": "s"}, **(meta or {})}.items():
+        (data / "meta" / (stem + ".json")).write_text(json.dumps(doc), encoding="utf-8")
+    (repo / "briefs").mkdir()
+    (repo / "briefs" / "c1.md").write_text("# c1\n\nA brief.\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "roadmap")
+    return repo
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
 class Fixture(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.repo = repo = pathlib.Path(self.tmp.name) / "repo"
-        repo.mkdir()
-        git(repo, "init", "-q", "-b", "main")
-        (repo / "decisions").mkdir()
-        (repo / "decisions" / "one.md").write_text("# one\n", encoding="utf-8")
-        (repo / "README.md").write_text("# r\n", encoding="utf-8")
-        git(repo, "add", "-A")
-        git(repo, "commit", "-q", "-m", "main")
-        git(repo, "checkout", "-q", "--orphan", "roadmap")
-        git(repo, "rm", "-rq", "--cached", ".")
-        for name in ("decisions", "README.md"):
-            p = repo / name
-            if p.is_dir():
-                for f in p.iterdir():
-                    f.unlink()
-                p.rmdir()
-            else:
-                p.unlink()
-        self.data = repo / "roadmap" / "data"
-        for folder in ("steps", "topics", "meta"):
-            (self.data / folder).mkdir(parents=True)
-        self.write_step("c1", STEP)
-        (self.data / "topics" / "t01.json").write_text(json.dumps({"title": "x", "order": 1}), encoding="utf-8")
-        (self.data / "meta" / "cull.json").write_text(json.dumps({"stopRule": "s"}), encoding="utf-8")
-        (repo / "briefs").mkdir()
-        (repo / "briefs" / "c1.md").write_text("# c1\n\nA brief.\n", encoding="utf-8")
-        git(repo, "add", "-A")
-        git(repo, "commit", "-q", "-m", "roadmap")
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.repo = make_repo(self.tmp.name)
+        self.data = self.repo / "roadmap" / "data"
         self.out = pathlib.Path(self.tmp.name) / "page.html"
 
     def tearDown(self):
@@ -487,6 +512,80 @@ class LiveWork(Fixture):
         self.write_live({"readAt": "x", "threads": [{"title": "</script><!-- y", "state": "working"}], "pulls": []})
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertNotIn("</script><!--", page)
+
+
+OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
+
+
+def baked(text, key):
+    """The JSON value right after `key` in a page or a block. The data is plain JSON in a script."""
+    at = text.index(key) + len(key)
+    return json.JSONDecoder().raw_decode(text, at)[0]
+
+
+class BlockOnly(Fixture):
+    """--block writes only the roadmap data block, for the waiting-page writer to splice in
+    (one-page notes, "Build constraints": the build never publishes and never writes ROADMAP_DB)."""
+
+    def block_from_main(self):
+        self.on_main()
+        code, out = run_build("--repo", str(self.repo), "--block", "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        return self.out.read_text(encoding="utf-8")
+
+    def test_file_is_one_marked_block_holding_the_two_globals(self):
+        block = self.block_from_main()
+        self.assertTrue(block.strip().startswith(OPEN), block[:80])
+        self.assertTrue(block.strip().endswith(CLOSE), block[-80:])
+        self.assertEqual((block.count(OPEN), block.count(CLOSE), block.count("<script")), (1, 1, 1))
+        self.assertIn("window.ROADMAP_DATA = ", block)
+        self.assertIn("window.ROADMAP_BUILD = ", block)
+        for word in ("<html", "<head", "<body", "<style"):
+            self.assertNotIn(word, block, "the file is more than the data block")
+
+    def test_never_writes_roadmap_db(self):
+        block = self.block_from_main()
+        self.assertNotIn("ROADMAP_DB", block)
+        self.assertNotIn("window.claude", block)
+
+    def test_data_is_what_the_full_build_bakes(self):
+        page, _ = self.build_from_main()
+        block = self.block_from_main()
+        data = baked(block, "window.ROADMAP_DATA = ")
+        self.assertEqual(data, baked(page, "const DATA = "))
+        self.assertEqual(data["steps"]["c1"], STEP, "two empty values would pass the line above")
+        got, want = baked(block, "window.ROADMAP_BUILD = "), build_info(page)
+        got.pop("builtAt"), want.pop("builtAt")  # the build time differs between the two builds
+        self.assertEqual(got, want)
+
+    def test_no_record_branch_bakes_null_data_and_says_why(self):
+        self.on_main()
+        code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--block",
+                              "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        block = self.out.read_text(encoding="utf-8")
+        self.assertIn("window.ROADMAP_DATA = ", block)
+        self.assertIsNone(baked(block, "window.ROADMAP_DATA = "))
+        self.assertNotIn("ROADMAP_DB", block)
+        steps = next(p for p in baked(block, "window.ROADMAP_BUILD = ")["panels"] if p["name"] == "Steps")
+        self.assertTrue(steps["read"].startswith("unknown"), steps)
+        self.assertIn("no-such-branch", steps["read"])
+
+    def test_on_the_record_branch_it_still_writes_only_the_out_file(self):
+        code, out = run_build("--repo", str(self.repo), "--block", "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        self.assertTrue(self.out.exists())
+        self.assertFalse((self.repo / "roadmap" / "roadmap.html").exists(), "the page was written too")
+
+    def test_markup_in_the_data_cannot_end_the_block_early(self):
+        # A closing script tag, comment openers, a lone quote and a second line, all in one note.
+        note = "</script><!-- x --> it's \"q\"\nline two // # /* `tick`"
+        self.write_step("c1", dict(STEP, note=note))
+        git(self.repo, "commit", "-qam", "note")
+        block = self.block_from_main()
+        self.assertEqual(block.count("</script>"), 1)
+        self.assertEqual(block.count("<!--"), 2, "a comment opener from the data reached the block")
+        self.assertEqual(baked(block, "window.ROADMAP_DATA = ")["steps"]["c1"]["note"], note)
 
 
 if __name__ == "__main__":
