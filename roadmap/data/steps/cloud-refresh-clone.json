@@ -1,0 +1,9 @@
+{
+  "title": "A cloud session on a child repo gets claude-settings with its git history, so compliance-check can name the parent commit",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 309.5,
+  "why": "In a cloud session on ios-adblock, the session-start refresh got HTTP 403 when it fetched the claude-settings tarball, so /root/claude-settings was a copy with no .git and compliance-check stopped at step 1, unable to name the parent commit.",
+  "note": "Coordinator, Oct 29 14:41 CDT. claude-settings is public, so the 403 is likely the cloud proxy, not a private repo. Fix: the cloud refresh gets claude-settings by git clone, or another route the proxy allows, so every child-repo session has a known parent commit. Red first: a refresh in a cloud session on a child repo leaves /root/claude-settings with no .git. Workaround meanwhile: the r1 lanes attach claude-settings with add_repo. Needs no answer. Port: no (the refresh lives here). Placed ahead of r1 (triage 12, Oct 29): every r1 visit in the cloud hits it.",
+  "updatedAt": "2026-10-29T19:50:00Z"
+}
