@@ -2225,3 +2225,56 @@ test("the document title names the open tab: <repo>: Questions, then <repo>: Sta
   await page.click("#tabQ");
   assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
 });
+
+// ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)
+// The rail's current phase carries a dot, so its name has the least room. No phase name may break
+// inside a word at any page width from 320 to 414px. The page is the five real phases (Clean up,
+// Organize, Design, Roll out, Later) with Organize current, the longest name beside the dot. Each word is
+// measured with a Range: more than one client rect is a word on two lines. The width is swept on one
+// page with setViewportSize, so the rail re-lays out as it does when a phone turns or a window is dragged.
+
+const RAIL_WIDTHS = Array.from({ length: 414 - 320 + 1 }, (_, i) => 320 + i);
+const railWords = (page) => page.evaluate(() => {
+  const words = [], split = [];
+  for (const nm of document.querySelectorAll(".prail .nm > span:first-child")) {
+    const walk = document.createTreeWalker(nm, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      for (const m of n.textContent.matchAll(/\S+/g)) {
+        const r = document.createRange();
+        r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        words.push(m[0]);
+        if (r.getClientRects().length > 1) split.push(m[0]);
+      }
+    }
+  }
+  return { words, split };
+});
+// "372-380px Organize; 381px Design": the widths of each word's splits as runs.
+const splitRuns = (hits) => {
+  const byWord = new Map();
+  for (const { w, word } of hits) byWord.set(word, [...(byWord.get(word) || []), w]);
+  return [...byWord].map(([word, ws]) => {
+    const runs = [];
+    for (const w of ws) { const last = runs[runs.length - 1]; if (last && last[1] === w - 1) last[1] = w; else runs.push([w, w]); }
+    return runs.map(([a, b]) => (a === b ? a : a + "-" + b) + "px").join(", ") + " " + word;
+  }).join("; ");
+};
+
+for (const scheme of ["light", "dark"]) {
+  test(`no phase name breaks inside a word at any page width from 320 to 414px, ${scheme} theme`, async (t) => {
+    const page = await open(t, { pageHtml: mergedPage("--current", "organize"), viewport: { width: RAIL_WIDTHS[0], height: 900 }, scheme }); if (!page) return;
+    await openStatus(page);
+    assert.equal(await page.locator(".prail > button").count(), 5, "the rail does not hold the five phases");
+    assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+    assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), "Organize", "the current phase is not Organize");
+    const hits = [];
+    for (const w of RAIL_WIDTHS) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const { words, split } = await railWords(page);
+      assert.deepEqual(words, ["Clean", "up", "Organize", "Design", "Roll", "out", "Later"], `${w}px: the rail's words`);
+      for (const word of split) hits.push({ w, word });
+    }
+    assert.equal(hits.length, 0, `a phase name breaks inside a word, first at ${hits[0] && hits[0].w}px on "${hits[0] && hits[0].word}"; every split: ${splitRuns(hits)}`);
+  });
+}
