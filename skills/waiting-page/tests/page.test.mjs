@@ -2404,7 +2404,7 @@ test("an unranked multi item keeps its ticks in option order: C then A equals my
   assert.match(s[0].text, /(?<!\d)61 a\+c(?![+\w])/, "the notice does not read a+c: " + s[0].text);
 });
 
-// Debt "multi-pick-option-order" (an unranked multi pick out of option order keeps Take my pick): an unranked pick is saved and compared in option order;
+// An unranked multi pick out of option order must not keep Take my pick: an unranked pick is saved and compared in option order;
 // a ranked pick keeps the order it was ticked or picked in.
 test("a multi item whose pick is out of option order: option-order ticks hide Take my pick, Take my pick saves option order, and a ranked pick keeps its order", async (t) => {
   const uHand = multi("po-u-hand", 81, { pick: ["c", "a"] }), uTake = multi("po-u-take", 82, { pick: ["c", "a"] });
