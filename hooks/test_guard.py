@@ -11539,6 +11539,62 @@ add("uniform pick: the refusal names the ruling and what to pick", "deny", "unif
     carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="banchi-titles", data=up_item())
 
+# Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
+# option keys. The list never holds a key of an option marked `widens: true`, as a string pick never does.
+UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
+            "lose": "l"}
+UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
+
+up("a multi item whose list pick holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+up("a multi item whose list pick holds the widening option last is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c", "a"]))
+up("a multi item whose list pick is the widening option alone is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a"]))
+up("a multi item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"]))
+up("a multi item with a widening option offered and not in the list pick is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["c"], why="One form."))
+up("a multi item whose widening option has widens false is allowed", "allow",
+   up_item(multi=True, options=[dict(UP_WIDE, widens=False), UP_MATCH, UP_THIRD], pick=["a", "b"]))
+up("a ranked item whose list pick holds the widening option is denied", "deny",
+   up_item(ranked=True, options=UP_THREE, pick=["b", "a"]))
+up("a ranked item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(ranked=True, options=UP_THREE, pick=["c", "b"]))
+up("a stood multi pick that holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "c"], stands=True))
+up("a stood multi pick of non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"], stands=True))
+up("an update that carries options and a widening list pick is denied", "deny",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
+up("an update that carries options and a non-widening list pick is allowed", "allow",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
+up("a task with a list pick is not judged", "allow",
+   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"]))
+# A list that holds a non-string member still names its string members. The page reads such a list as
+# not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
+up("a multi item whose list pick holds the widening key and a null is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", None]))
+up("a multi item whose list pick holds a number and a widening key is denied", "deny",
+   up_item(multi=True, options=[dict(UP_WIDE, key="w"), UP_MATCH, UP_THIRD], pick=[1, "w"]))
+# A widening option with no key is named by no pick. An item with no pick, or a null pick, picks nothing, so
+# the missing pick never reads as the key None.
+UP_KEYLESS = {k: v for k, v in UP_WIDE.items() if k != "key"}
+up("a widening option with no key and an item with no pick is allowed", "allow",
+   up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+up("a widening option with no key and an item with a null pick is allowed", "allow",
+   dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+up("a widening option with no key and a multi item with no pick is allowed", "allow",
+   up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
+add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
+    "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
+             "data": up_item(multi=True, options=UP_THREE, pick=["a", "b"])}])
+add("uniform pick: the refusal of a widening list pick names the ruling and what to pick", "deny",
+    "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    action="set", collection="items", doc_id="banchi-titles",
+    data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+
 
 # --------------------------------------------------------------------------- the runner
 
@@ -11580,6 +11636,9 @@ def decide(case):
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
+    # dropped here too. A step-grant case sets its own through `env`.
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
     env.update(case.get("env") or {})   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
     if case.get("no_root"):   # no forced root, and a PATH with no `ps`: the root is unknown
@@ -15018,13 +15077,17 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None):
+            temp=None, env=None, load=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
-    reads as the system temp: a git write under it is a throwaway, and silent-write skips it."""
+    reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
+    adds variables to this one guard run. `load` is the machine reading a lane-start call meets
+    (LB_NORMAL when None)."""
+    fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
+    fixed.update(env or {})
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
-        "env": {"LOCAL_TIME_NOW": ov_clock(seconds)}, "tool_input": tool_input,
+        "env": fixed, "tool_input": tool_input, "load": load,
     })
 
 
@@ -15303,8 +15366,9 @@ def op_pass_path(config, session):
     return os.path.join(config, "state", "override", "opus", session + ".json")
 
 
-def op_spawn(config, session, seconds, spawn=None, agent_id=None):
-    return ov_call("Agent", dict(spawn or OV_OPUS_SPAWN), NOGIT, config, session, seconds, agent_id)
+def op_spawn(config, session, seconds, spawn=None, agent_id=None, cwd=NOGIT, env=None):
+    return ov_call("Agent", dict(spawn or OV_OPUS_SPAWN), cwd, config, session, seconds, agent_id,
+                   env=env)
 
 
 def op_timed_check():
@@ -15533,6 +15597,273 @@ for _label, _check in (
     ("opus override: the grant, each lift and the end each write one log line", op_log_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# THE STEP GRANT (lane opus-grant-on-step: the lift of rule agent-model-cap that reads the lane's roadmap
+# step). An Opus spawn that no typed override lifts is read against the owner's grant on the lane's step:
+# the step record on the local `origin/roadmap` ref, read from the call's cwd. Each case builds a real
+# repository whose `origin/roadmap` ref holds the step records, so no case mocks the reader. The lane's
+# id comes from the environment, not from the payload's session id, so the payload names another id.
+GS_LANE = "a1b2c3"  # the lane: its step names it as session_<this>
+GS_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_" + GS_LANE}  # the environment names it as cse_<this>
+GS_STEP = "step-a"  # the step bound to this lane
+GS_AT = "2026-10-17T10:00:00-05:00"  # a grant time before the clock these cases run at
+GS_SONNET = {"prompt": "Round 1 of 3. Review the diff.", "model": "sonnet", "subagent_type": "reviewer"}
+GS_WIZARD = {"prompt": "Round 1 of 3. Start the fix.", "model": "claude-opus-5-5", "subagent_type": "wizard"}
+GS_BAD = ("roadmap/data/steps/%s.json" % GS_STEP,  # a bound record cut short: it does not parse
+          '{"id": "%s", "lane": "session_%s", "status": ' % (GS_STEP, GS_LANE))
+
+
+def gs_step(step_id, lane, status="in_progress", grants=()):
+    """One step record as the roadmap holds it: its path and its JSON text. `lane` is the bare lane id;
+    the record names it session_<lane>, as the roadmap does."""
+    body = {"id": step_id, "title": "Step " + step_id, "status": status, "lane": "session_" + lane,
+            "grants": list(grants)}
+    return "roadmap/data/steps/%s.json" % step_id, json.dumps(body, indent=2) + "\n"
+
+
+def gs_grant(role="reviewer", drop_role=False):
+    """A grant as triage writes it: role None covers every Opus spawn. drop_role leaves the key out."""
+    grant = {"words": "opus 2h" if role is None else "opus %s 2h" % role, "at": GS_AT, "role": role,
+             "by": "triage"}
+    if drop_role:
+        del grant["role"]
+    return grant
+
+
+def gs_repo(name, files, ref=True):
+    """A checkout under this run's folder, holding `files` on main. With `ref`, its commit is also
+    refs/remotes/origin/roadmap, the one ref the guard reads."""
+    where = os.path.join(ROOT, "grant", name)
+    make_repo(where, dict(files))
+    if ref:
+        made = run_vcs(where, "update-ref", "refs/remotes/origin/roadmap", "HEAD")
+        if made.returncode != 0:
+            sys.exit("fixture setup failed in gs_repo: update-ref in %r. stderr: %s"
+                     % (where, made.stderr.strip()))
+    return where
+
+
+def gs_read(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def gs_log_lines(config):
+    return [line for line in gs_read(os.path.join(config, "guard.log")).splitlines() if line.strip()]
+
+
+def gs_spawn(config, session, repo, spawn, seconds=60, env=GS_ENV):
+    """The lane's call: a spawn from inside `repo`, with the lane's environment."""
+    return op_spawn(config, session, seconds, spawn, cwd=repo, env=env)
+
+
+def gs_verdict_check(name, files, spawn, want, ref=True):
+    """A check: the lane's spawn, judged in the repository `name` holds `files` gives `want`."""
+    def check():
+        repo = gs_repo(name, files, ref)
+        config, session = ov_config("grant-" + name), "gs-payload-" + name
+        problem = ov_want(*gs_spawn(config, session, repo, spawn), want, "agent-model-cap")
+        return (not problem), (problem or "%s, as wanted" % want)
+    return check
+
+
+def gs_lift_check():
+    """A reviewer spawn on the lane's step, which grants reviewers, is allowed. guard.log gets one
+    step-grant line that names the step and ends in the payload's session id."""
+    repo = gs_repo("lift", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]))
+    config, session = ov_config("grant-lift"), "gs-payload-lift"
+    problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER), "allow", "agent-model-cap")
+    if problem:
+        return False, problem
+    lifts = [line.split("\t") for line in gs_log_lines(config) if "\tstep-grant\t" in line]
+    fields = lifts[0] if len(lifts) == 1 else []
+    if (len(fields) != 6 or fields[3] != "agent-model-cap" or GS_STEP not in fields[4]
+            or fields[5] != session):
+        return False, ("guard.log wrote %r, want one step-grant line for agent-model-cap that names %s"
+                       % (["\t".join(f) for f in lifts], GS_STEP))
+    return True, "allowed on the lane's own grant; one step-grant line names the step"
+
+
+def gs_unread_log_check():
+    """A bound step the guard cannot parse asks, and guard.log gets a step-grant-unread line for it."""
+    repo = gs_repo("unread-log", dict([GS_BAD]))
+    config, session = ov_config("grant-unread-log"), "gs-payload-unread-log"
+    problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER), "ask", "agent-model-cap")
+    if problem:
+        return False, problem
+    if not [line for line in gs_log_lines(config) if "\tstep-grant-unread\t" in line]:
+        return False, "guard.log has no step-grant-unread line for the bound step"
+    return True, "asked, and the unreadable bound step is logged as step-grant-unread"
+
+
+def gs_cost_check():
+    """A Sonnet spawn runs no git call that names the roadmap. GIT_TRACE makes each git process write its
+    argv, and the guard's git children inherit it. A control runs first, through the guard itself: a hard
+    reset in a linked worktree makes the guard read git state, so its trace must be written. Only then
+    does an empty roadmap trace on the Sonnet spawn mean something."""
+    repo = gs_repo("cost", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]))
+    config, session = ov_config("grant-cost"), "gs-payload-cost"
+    control, traced = os.path.join(ROOT, "grant", "control.trace"), os.path.join(ROOT, "grant", "cost.trace")
+    ov_call("Bash", {"command": VCS + " reset --hard"}, GITWT, ov_config("grant-cost-control"),
+            "gs-control", 0, env={"GIT_TRACE": control})
+    if not gs_read(control).strip():
+        return False, "the guard's own git call wrote no trace, so an empty roadmap trace would prove nothing"
+    problem = ov_want(*gs_spawn(config, session, repo, GS_SONNET, env=dict(GS_ENV, GIT_TRACE=traced)),
+                      "allow", "agent-model-cap")
+    if problem:
+        return False, "the Sonnet spawn: " + problem
+    named = [line for line in gs_read(traced).splitlines() if "origin/roadmap" in line or "roadmap/data" in line]
+    if named:
+        return False, "a git call names the roadmap on a Sonnet spawn: %s" % named[0][:120]
+    return True, "a Sonnet spawn was allowed, and no git call the guard made named the roadmap"
+
+
+def gs_runner_id_check():
+    """The runner's own lane id would bind a case that sets none to a lane. The runner drops it, so a reviewer
+    spawn on a step bound to that id, with a reviewer grant, still asks. The id is set in this process only,
+    and restored after the call."""
+    repo = gs_repo("runner-id", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]))
+    config, session = ov_config("grant-runner-id"), "gs-payload-runner-id"
+    saved = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = "cse_" + GS_LANE
+    try:
+        problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER, env=None), "ask", "agent-model-cap")
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        else:
+            os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = saved
+    return (not problem), (problem or "asked: the runner's own lane id did not reach the case")
+
+
+# Each ask case below has a control: the same fixture with its one defect repaired, which must be allowed.
+# A control that asks would mean the reader never ran, so the ask case would pass for the wrong reason.
+GS_CHECKS = (
+    ("step grant: a reviewer spawn on the lane's step is allowed by a grant for reviewers, and logged",
+     gs_lift_check),
+    ("step grant: a step with no grant asks an Opus spawn",
+     gs_verdict_check("no-grant", dict([gs_step(GS_STEP, GS_LANE)]), OP_REVIEWER, "ask")),
+    ("step grant: control for no grant, the step with a reviewer grant is allowed",
+     gs_verdict_check("ctl-no-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant on another lane's step does not lift this lane's Opus spawn",
+     gs_verdict_check("other-step", dict([gs_step(GS_STEP, GS_LANE),
+                                          gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for another lane's step, this lane's own step with a grant is allowed",
+     gs_verdict_check("ctl-other-step", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")]),
+                                              gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant for builders does not lift a reviewer spawn",
+     gs_verdict_check("builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("builder")])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for a builder grant, a reviewer grant for a reviewer is allowed",
+     gs_verdict_check("ctl-builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a bound step that cannot be parsed asks an Opus spawn",
+     gs_verdict_check("bad-json", dict([GS_BAD]), OP_REVIEWER, "ask")),
+    ("step grant: control for an unparseable step, the same step parsed with a reviewer grant is allowed",
+     gs_verdict_check("ctl-bad-json", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant with an unknown role asks, even for a spawn of that role",
+     gs_verdict_check("unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("wizard")])]),
+                      GS_WIZARD, "ask")),
+    ("step grant: control for an unknown role, a reviewer grant for a reviewer is allowed",
+     gs_verdict_check("ctl-unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant with no role key asks an Opus spawn",
+     gs_verdict_check("no-role-key", dict([gs_step(GS_STEP, GS_LANE,
+                                                   grants=[gs_grant("reviewer", drop_role=True)])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for no role key, the same grant with its role is allowed",
+     gs_verdict_check("ctl-no-role-key", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant with role null allows a builder spawn",
+     gs_verdict_check("null-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_BUILDER, "allow")),
+    ("step grant: a step with status done asks an Opus spawn, even with a grant",
+     gs_verdict_check("done", dict([gs_step(GS_STEP, GS_LANE, status="done", grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for done, the same step not done is allowed",
+     gs_verdict_check("ctl-done", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a repository with no origin/roadmap ref asks an Opus spawn",
+     gs_verdict_check("no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "ask", ref=False)),
+    ("step grant: control for no ref, the same step on the ref is allowed",
+     gs_verdict_check("ctl-no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: two steps bound to this lane ask an Opus spawn, even with a grant on one",
+     gs_verdict_check("two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)]),
+                                         gs_step("step-c", GS_LANE)]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for two steps, one step bound to this lane with the grant is allowed",
+     gs_verdict_check("ctl-two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a Sonnet spawn runs no git call that names the roadmap", gs_cost_check),
+    ("step grant: an unparseable bound step is logged as step-grant-unread", gs_unread_log_check),
+    ("step grant: the runner's own lane id does not reach a case that sets none", gs_runner_id_check),
+)
+for _label, _check in GS_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
+
+
+# THE LOAD BRAKE ON A LIFTED OPUS SPAWN. A lifted Opus spawn ask exits in refuse(), so unless rule 9c, the
+# machine-load brake, runs first, a full machine would not refuse a spawn that a grant or an override lifted.
+# The brake applies to every lane start, lifted or not. LB_ALL_HIGH is a full machine: memory and disk both
+# over the full line, and the case's `load` key is that reading.
+def gl_check(name, tool_input, config_name, session_name, typed=None, grant=None, load=None, want="deny"):
+    """One lane-start call on a machine with the given reading. `grant` is the step's grant list, when the
+    lane is bound to a step; `typed` is an owner prompt typed before the call. Returns the verdict wanted."""
+    config, session = ov_config(config_name), session_name
+    if grant is not None:
+        repo = gs_repo(name, dict([gs_step(GS_STEP, GS_LANE, grants=grant)]))
+        cwd, env = repo, GS_ENV
+    else:
+        cwd, env = NOGIT, None
+    note = ov_type(config, session, typed) if typed else ""
+    problem = ov_want(*ov_call("Agent", dict(tool_input), cwd, config, session, 60, env=env, load=load),
+                      want, "load-brake" if want == "deny" else "agent-model-cap")
+    return (not problem), (problem or ("%s, as wanted" % want)) + ("; " + note if note and problem else "")
+
+
+def gl_step_grant_full_check():
+    return gl_check("load-grant", OP_BUILDER, "load-grant", "gl-payload-grant",
+                    grant=[gs_grant(None)], load=LB_ALL_HIGH)
+
+
+def gl_typed_override_full_check():
+    return gl_check("load-typed", OP_BUILDER, "load-typed", "gl-payload-typed",
+                    typed="opus 2h", load=LB_ALL_HIGH)
+
+
+def gl_step_grant_normal_check():
+    return gl_check("load-normal", OP_BUILDER, "load-normal", "gl-payload-normal",
+                    grant=[gs_grant(None)], want="allow")
+
+
+def gl_sonnet_full_check():
+    return gl_check("load-sonnet", GS_SONNET, "load-sonnet", "gl-payload-sonnet", load=LB_ALL_HIGH)
+
+
+GL_CHECKS = (
+    ("lift and load brake: a step grant lifts an Opus spawn, and a full machine still denies it",
+     gl_step_grant_full_check),
+    ("lift and load brake: a typed opus 2h lifts an Opus spawn, and a full machine still denies it",
+     gl_typed_override_full_check),
+    ("lift and load brake: control, the same step grant on a normal machine lets the spawn through",
+     gl_step_grant_normal_check),
+    ("lift and load brake: control, a Sonnet spawn on a full machine is denied by the load brake",
+     gl_sonnet_full_check),
+)
+for _label, _check in GL_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
 
 
 def ov_once_expiry_check():

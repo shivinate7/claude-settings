@@ -1261,6 +1261,29 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
 
 
+# Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
+# flags it and says to ask it as a multi-select item (`multi: true`). Options that exclude each other,
+# such as now or later, stay a pick-one question.
+COMBINE_ASK = (
+    "Done: read the waiting page.\n"
+    "Input Needed: pick A, B or C. A: add rank buttons to the page. B: add picture cards to the page. "
+    "C: add a keyboard shortcut to the page. I recommend A.\n"
+)
+
+
+def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
+    run = run_hook(COMBINE_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, COMBINE_ASK)
+    check("prompt: the prompt carries the reply", COMBINE_ASK in run.prompt(), run.prompt()[:300])
+    check("prompt: a sentence flags a pick-one question whose options could combine and names multi-select",
+          has_pin(sentences, ("flag",), ("pick-one", "pick one"), ("combine",), ("multi: true", "multi-select")),
+          sentences)
+    check("prompt: a sentence never flags options that exclude each other",
+          has_pin(sentences, ("never flag",), ("exclude",)), sentences)
+    check("prompt: the prompt still judges against eight rules",
+          has_pin(sentences, ("against eight rules",)), sentences[:2])
+
+
 def case_widens_finding_logs_its_rule():
     run, config = second_stop(WIDENS_ASK, answer=json.dumps(WIDENS_FINDING), label="c139-log",
                               session="c139-log")
@@ -1382,6 +1405,7 @@ CASES = (
     case_prompt_count_matches_judged_rules,
     case_prompt_flags_a_recommended_option_that_widens,
     case_widens_finding_logs_its_rule,
+    case_prompt_flags_a_pick_one_question_whose_options_could_combine,
 )
 
 

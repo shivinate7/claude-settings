@@ -150,7 +150,8 @@ The matched text goes to the log, so a person can still see what fired.
 An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
-only the Opus spawn ask. No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
+only the Opus spawn ask, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
+No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
 `agent-model-floor`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
@@ -2590,21 +2591,26 @@ def _git_root_of(cwd):
 #
 # docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
 # (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `pick`. Read at the same ArtifactData call.
+# option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`.
+# Read at the same ArtifactData call.
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
                  "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
                  "match the shared format, or leave pick out.")
 
 
 def widens_pick_hit(data) -> str:
-    """The matched text when this write's `pick` names an option it marks `widens: true`. An update
-    that carries `pick` without `options` cannot see the stored options and passes."""
+    """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
+    `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
     options, pick = data.get("options"), data.get("pick")
-    if not isinstance(options, list) or not isinstance(pick, str):
-        return ""
-    if any(isinstance(o, dict) and o.get("key") == pick and o.get("widens") is True for o in options):
+    if isinstance(pick, str):
+        pick = [pick]
+    if not isinstance(pick, list) or not isinstance(options, list):
+        return ""  # an absent or null pick picks nothing, so it never matches a keyless option
+    keys = {p for p in pick if isinstance(p, str)}
+    if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
+           and o.get("widens") is True for o in options):
         return "pick names a widening option"
     return ""
 
@@ -2942,21 +2948,22 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9c. The Opus ceiling: a spawn on Opus with no standing grant asks. An override or an Opus
-    # pass for the spawn's role lifts it. A spawn with no role runs general-purpose.
+    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
+    load_reason, load_matched = load_hit(tool, tool_input)
+    if not load_reason:
+        load_reason, load_matched = running_lane_hit(payload, tool)
+    if load_reason:
+        refuse(tool, "deny", "load-brake", load_reason, load_matched)
+
+    # 9d. The Opus ceiling: a spawn on Opus with no standing grant asks. An override, an Opus
+    # pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
     opus_model = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "ask", "agent-model-cap",
                OPUS_BUILDER_REASON if tool_input.get("subagent_type") == "builder" else OPUS_SPAWN_REASON,
                opus_model,
                spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
-
-    # 9d. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
-    load_reason, load_matched = load_hit(tool, tool_input)
-    if not load_reason:
-        load_reason, load_matched = running_lane_hit(payload, tool)
-    if load_reason:
-        refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
@@ -3073,7 +3080,7 @@ def main() -> None:
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
-        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"))
     except Exception:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:

@@ -6,7 +6,7 @@ Each agent role has its own model and effort, in the table below. Sonnet is the 
 Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's grant for that spawn.
 An audit Explore may run Opus on the owner's grant, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level grant and date, see its row). Any other spawn
-runs Opus only when the owner names it. A lane session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
+runs Opus only when the owner names it. A lane session or an arbiter session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling: an Agent
 or Task spawn that sets model opus asks, unless Plan, Explore, designer, design-reviewer or a builder's `Round 3 of 3` covers it.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
@@ -55,6 +55,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`) | main model unless the owner names one | default |
 | lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | default |
+| arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a path with a `decisions` folder segment) | haiku, through `decision_watch.invoke_model` | xhigh |
@@ -143,6 +144,14 @@ write that changes the fallback stays: a write is a standing change, not a dispa
 Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'})` literal or a
 `start_session` on Opus. The static scan of a Workflow script reads only the Haiku floor and the step-up, and a model set
 through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).
+
+A step grant also lifts the Opus spawn ask (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
+Triage writes the owner's grant in the `grants` field of the lane's roadmap step. The step names its
+lane in the field `lane`. `take()` in `hooks/override.py` reads it only on an Opus spawn ask that no Opus
+override lifted. It reads the local ref `origin/roadmap` in the call's cwd and never fetches. Cost: one
+`git grep` for the lane id, and one `git show` for each hit. Freshness: the lane sees a grant only after
+it fetches `origin/roadmap`; until then the ask stays. Kind of risk: likely. Landed 2026-10-29. Incident:
+the Opus reviewer spawn of step c202, ask-in-chat-first, waited about 2 hours on the ask.
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `agent-model-cap`.

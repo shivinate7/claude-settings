@@ -125,9 +125,12 @@ make_checkout() {
 
 # A curl stub for the fetch-fallback path: writes minimal fixtures instead of hitting
 # GitHub. Installed at $1/curl.
+# $2 = fail-tarball: the tarball URL exits 1, so a case can prove a path never fetched it. Every fetch
+# that carries an output file is logged to $stub_bin/calls.
 make_curl_stub() {
   stub_bin="$1"
   mkdir -p "$stub_bin"
+  if [ "${2:-}" = fail-tarball ]; then : > "$stub_bin/fail-tarball"; fi
   # $work is captured at generation time (unquoted heredoc marker); everything else is
   # escaped so it stays a literal to be evaluated when the stub itself runs.
   cat > "$stub_bin/curl" <<EOF
@@ -140,8 +143,9 @@ for a in "\$@"; do
   prev="\$a"
 done
 [ -n "\$out" ] || exit 1
+printf '%s\n' "\$*" >> "$stub_bin/calls"
 case "\$*" in
-  *.tar.gz*) cp "$work/repo.tar.gz" "\$out" ;;
+  *.tar.gz*) [ -e "$stub_bin/fail-tarball" ] && exit 1; cp "$work/repo.tar.gz" "\$out" ;;
   *CLAUDE.md*) printf '# fallback mirror CLAUDE.md\n' > "\$out" ;;
   *settings.json*) printf '{}\n' > "\$out" ;;
   *) printf '# stub\n' > "\$out" ;;
@@ -154,7 +158,7 @@ EOF
 # ---- Case 1: piped cloud install, checkout present -> SRC is the checkout ----------------
 case1() {
   name="case1: piped cloud install with checkout present uses the checkout"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/case1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/case1-checkout"
   make_checkout "$co" "# repo CLAUDE.md case1"
 
   # Simulate `curl ... | bash -s -- --cloud`: bash reads the script off its own stdin
@@ -181,7 +185,7 @@ case1() {
 # ---- Case 2: piped cloud install, no checkout anywhere -> old fallback mirror -------------
 case2() {
   name="case2: piped cloud install with no checkout fetches the fallback mirror"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; scratch="$work/case2-scratch"
+  h=$(new_home); cfg="$h/.claude-cfg"; scratch="$work/case2-scratch"
   mkdir -p "$scratch"
 
   # Stub curl: instead of hitting GitHub, write minimal local fixtures.
@@ -215,7 +219,7 @@ case2() {
 # ---- Case 3: local ./install.sh from a clone -> unchanged, SRC is the clone --------------
 case3() {
   name="case3: local install.sh from a clone points the pointer at the pinned checkout <clone>-live"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/case3-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/case3-checkout"
   make_checkout "$co" "# repo CLAUDE.md case3"
   git -C "$co" branch -q -M main
   cp "$INSTALL_SH" "$co/install.sh"
@@ -244,7 +248,7 @@ case3() {
 origin_case() {
   case_name="$1"; origin_url="$2"; should_match="$3"   # should_match: yes|no
 
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   co="$work/origin-$(printf '%s' "$case_name" | tr -c 'a-zA-Z0-9' '-')-checkout"
   make_checkout "$co" "# origin case content" "$origin_url"
 
@@ -297,7 +301,7 @@ case_origins() {
 # ---- Case 7: no $CLAUDE_PROJECT_DIR, cwd not the checkout -> bounded root search finds it --
 case7() {
   name="case7: no CLAUDE_PROJECT_DIR, cwd elsewhere, checkout under \$HOME is still found"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   co="$h/some-project-dir"     # one level under $HOME, as the bounded search expects
   make_checkout "$co" "# case7 content"
   notacheckout="$work/case7-elsewhere"; mkdir -p "$notacheckout"
@@ -334,7 +338,7 @@ case7() {
 # pair here, so this case cannot go blind to a directory the manifest adds.
 case8() {
   name="case8: fallback mirror lands every tracked file under every landed directory"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; scratch="$work/case8-scratch"
+  h=$(new_home); cfg="$h/.claude-cfg"; scratch="$work/case8-scratch"
   mkdir -p "$scratch"
 
   stub_bin="$work/case8-bin"
@@ -376,7 +380,7 @@ seed_pointer() {
 
 pointer_case1() {
   name="pointer1: pointer names a checkout two levels under \$HOME, root scan can't reach it"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   co="$h/Developer/claude-settings"     # two levels deep, mirrors the owner's layout
   make_checkout "$co" "# pointer1 content"
   seed_pointer "$cfg" "$co"
@@ -407,7 +411,7 @@ pointer_case1() {
 
 pointer_case2() {
   name="pointer2: pointer names a directory that does not exist, falls through to fallback"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   seed_pointer "$cfg" "$h/no-such-checkout"
   elsewhere="$work/pointer2-elsewhere"; mkdir -p "$elsewhere"
   stub_bin="$work/pointer2-bin"; make_curl_stub "$stub_bin"
@@ -433,7 +437,7 @@ pointer_case2() {
 
 pointer_case3() {
   name="pointer3: pointer names a directory that is not a git checkout, falls through"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   notgit="$h/not-a-checkout"; mkdir -p "$notgit"
   seed_pointer "$cfg" "$notgit"
   elsewhere="$work/pointer3-elsewhere"; mkdir -p "$elsewhere"
@@ -460,7 +464,7 @@ pointer_case3() {
 
 pointer_case4() {
   name="pointer4: pointer names a checkout with a rejected origin, is not accepted"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   co="$h/evil-checkout"
   make_checkout "$co" "# pointer4 content" "https://gitlab.com/shivinate7/claude-settings.git"
   seed_pointer "$cfg" "$co"
@@ -490,7 +494,7 @@ pointer_case4() {
 
 pointer_case5() {
   name="pointer5: no pointer file at all, cwd-based detection is unaffected"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   co="$work/pointer5-checkout"
   make_checkout "$co" "# pointer5 content"
   # No seed_pointer call: $cfg does not exist yet, same as a first-ever install.
@@ -514,7 +518,7 @@ pointer_case5() {
 
 pointer_case6() {
   name="pointer6: pointer line uses the ~/ form, expands and matches"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"
+  h=$(new_home); cfg="$h/.claude-cfg"
   co="$h/Developer/claude-settings"
   make_checkout "$co" "# pointer6 content"
   # The pointer line must hold a literal "~/", so install.sh expands it; $HOME would test another form.
@@ -684,7 +688,7 @@ prune_case1() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune1-checkout"
   make_checkout "$co" "# prune1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   printf '#!/bin/sh\necho hi\n' > "$co/hooks/temp_hook.sh"
@@ -705,7 +709,7 @@ prune_case1() {
 
 prune_case2() {
   name="prune2: hand-placed regular file in config dir survives prune"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune2-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune2-checkout"
   make_checkout "$co" "# prune2 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$cfg/hooks"
@@ -732,7 +736,7 @@ prune_case3() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune3-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune3-checkout"
   make_checkout "$co" "# prune3 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$cfg/hooks"
@@ -759,7 +763,7 @@ prune_case3() {
 
 prune_case4() {
   name="prune4: a .bak.* file land_dir created survives prune"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune4-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune4-checkout"
   make_checkout "$co" "# prune4 content"
   cp "$INSTALL_SH" "$co/install.sh"
   printf '#!/bin/sh\necho new\n' > "$co/hooks/foo.sh"
@@ -793,7 +797,7 @@ prune_case5() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune5-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune5-checkout"
   make_checkout "$co" "# prune5 content"
   cp "$INSTALL_SH" "$co/install.sh"
   printf '#!/bin/sh\necho keep\n' > "$co/hooks/keep.sh"
@@ -815,7 +819,7 @@ prune_case5() {
 
 prune_case6() {
   name="prune6: cloud mode does not prune a stale copy (documented, not fixed)"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/prune6-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune6-checkout"
   make_checkout "$co" "# prune6 content"
   cp "$INSTALL_SH" "$co/install.sh"
   printf '#!/bin/sh\necho cloud\n' > "$co/hooks/cloud_hook.sh"
@@ -848,57 +852,106 @@ force_main_branch() {
   ( cd "$1" && git branch -m main >/dev/null 2>&1 )
 }
 
-caseF1() {
-  name="caseF1: pointer on main and behind origin/main prints the stale line"
-  co="$work/caseF1-checkout"; cfg="$work/caseF1-cfg"; bare="$work/caseF1-origin.git"
-  extra="$work/caseF1-extra"
+# behind_fixture NAME MARKED: the pointer cases' state under $work/NAME-*. A checkout on main at
+# $work/NAME-checkout, its origin a bare repo two commits ahead of it, and a pointer config at
+# $work/NAME-cfg that names the checkout. MARKED=1 sets claude-settings.cloudMirror on the checkout,
+# as install.sh's clone does. Sets co, cfg and fx_err: fx_err is empty when the fixture built the
+# behind-by-2 state. That check compares the checkout and the bare repo directly, never the hook, so
+# a fixture failure is never reported as a hook failure.
+behind_fixture() {
+  co="$work/$1-checkout"; cfg="$work/$1-cfg"; bare="$work/$1-origin.git"
+  extra="$work/$1-extra"
+  fx_err=""
   git init -q --bare "$bare"
-  # A bare repo's HEAD follows init.defaultBranch, which this machine may set to
-  # main but a GitHub runner leaves unset, defaulting to master. Force it, the
-  # same way force_main_branch already does for checkouts, so this case does not
-  # depend on the runner's git config.
+  # A bare repo's HEAD follows init.defaultBranch, which this machine may set to main but a GitHub
+  # runner leaves unset, defaulting to master. Force it, as force_main_branch does for checkouts.
   git -C "$bare" symbolic-ref HEAD refs/heads/main
-  make_checkout "$co" "# caseF1 content" "$bare"
+  make_checkout "$co" "# $1 content" "$bare"
   force_main_branch "$co"
   ( cd "$co" && git push -q origin main )
-  # Advance origin two commits past the checkout's own main, from a second clone, so
-  # the checkout is behind by an exact, known count. Captured, not swallowed: a
-  # setup step whose exit status nobody reads can silently fail to build the state
-  # the case is about to judge the hook against.
+  # Advance origin two commits past the checkout's own main, from a second clone. Captured, not
+  # swallowed: a setup step whose exit status nobody reads can silently fail to build the state.
   extra_log=$( { git clone -q "$bare" "$extra" \
       && cd "$extra" && git config user.email t@example.com && git config user.name t \
       && echo a >> extra.txt && git add extra.txt && git commit -q -m extra1 \
       && echo b >> extra.txt && git add extra.txt && git commit -q -m extra2 \
       && git push -q origin main ; } 2>&1 )
   extra_rc=$?
-  mkdir -p "$cfg"
-  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
-
-  # Precondition: verify the fixture actually built "checkout is 2 behind origin",
-  # by comparing the checkout's own main to the bare repo's main directly, never by
-  # asking the hook under test. A hook failure and a fixture failure must never be
-  # reported as the same thing.
   co_main=$(cd "$co" && git rev-parse main 2>/dev/null)
   bare_main=$(cd "$bare" && git rev-parse main 2>/dev/null)
   behind_built=$(cd "$bare" && git rev-list --count "$co_main..$bare_main" 2>/dev/null)
-
   if [ "$extra_rc" -ne 0 ]; then
-    bad "$name" "FIXTURE failed to advance origin: $extra_log"
-    return
+    fx_err="FIXTURE failed to advance origin: $extra_log"
   elif [ "$behind_built" != "2" ]; then
-    bad "$name" "FIXTURE did not build the behind-by-2 state (checkout vs origin main differ by [$behind_built])"
-    return
+    fx_err="FIXTURE did not build the behind-by-2 state (checkout vs origin main differ by [$behind_built])"
   fi
+  if [ "$2" = 1 ]; then git -C "$co" config claude-settings.cloudMirror true; fi
+  mkdir -p "$cfg"
+  printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
+}
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF1err)
+# pointer_hook_run REMOTE: runs the hook in $co with the pointer config $cfg. REMOTE is the value of
+# CLAUDE_CODE_REMOTE; empty leaves it unset. Sets out, rc and errsize (the stderr byte count).
+pointer_hook_run() {
+  if [ -n "$1" ]; then
+    out=$(cd "$co" && env CLAUDE_CODE_REMOTE="$1" CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pointer-err")
+  else
+    out=$(cd "$co" && env -u CLAUDE_CODE_REMOTE CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/pointer-err")
+  fi
   rc=$?
-  errsize=$(wc -c < /tmp/cF1err | tr -d '[:space:]'); rm -f /tmp/cF1err
+  errsize=$(wc -c < "$work/pointer-err" | tr -d '[:space:]')
+}
 
-  if [ $rc -ne 0 ]; then
+caseF1() {
+  name="caseF1: pointer on main and behind origin/main prints the stale line"
+  behind_fixture caseF1 0
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  pointer_hook_run ""
+
+  if [ "$rc" -ne 0 ]; then
     bad "$name" "exit $rc"
   elif [ "$errsize" != "0" ]; then
     bad "$name" "wrote to stderr"
   elif ! printf '%s\n' "$out" | grep -q "$co is 2 commits behind origin/main"; then
+    bad "$name" "expected stale line naming 2 commits behind, got: $out"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseF7, caseF8: the freshness check in a cloud session, on a clone install.sh made ----
+# A clone install.sh made carries the cloudMirror marker, and the resume refreshes it, so a behind
+# count on it is not a warning. An unmarked clone behind origin still warns in a cloud session.
+caseF7() {
+  name="caseF7: a marked cloud clone behind origin prints no behind or freshness line in a cloud session"
+  behind_fixture caseF7 1
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  pointer_hook_run true
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif ! printf '%s\n' "$out" | grep -qF "checkout $co on main,"; then
+    bad "$name" "the hook did not run: no checkout line: $out"
+  elif printf '%s\n' "$out" | grep -q 'commits behind origin/main\|freshness unknown'; then
+    bad "$name" "a marked cloud clone printed a freshness line: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF8() {
+  name="caseF8: an unmarked clone behind origin still warns in a cloud session"
+  behind_fixture caseF8 0
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  pointer_hook_run true
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif ! printf '%s\n' "$out" | grep -qF "$co is 2 commits behind origin/main"; then
     bad "$name" "expected stale line naming 2 commits behind, got: $out"
   else
     ok "$name"
@@ -1050,7 +1103,7 @@ skills_case1() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/skills1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/skills1-checkout"
   make_checkout "$co" "# skills1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$co/skills/fresh-prose"
@@ -1082,7 +1135,7 @@ skills_case1() {
 # ---- skills case, cloud mode: an existing real directory is backed up, never rm -rf'd ------
 skills_case2() {
   name="skills2: cloud mode backs up a pre-existing real skill directory before overwriting it"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/skills2-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/skills2-checkout"
   make_checkout "$co" "# skills2 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$co/skills/fresh-prose"
@@ -1120,7 +1173,7 @@ skills_case2() {
 cloud_settings1() {
   name="cloud_settings1: cloud settings.json keeps every repo SessionStart hook, then adds the refresh hook"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/cloud_settings1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/cloud_settings1-checkout"
   make_checkout "$co" "# cloud_settings1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   cp "$REPO_ROOT/settings.json" "$co/settings.json"
@@ -1153,7 +1206,7 @@ cloud_settings1() {
 # ---- skills backups, cloud mode: a repeat run replaces its own copy, and a needed backup lands outside skills/ ----
 # Each cloud run installs again, so a backup inside skills/ piled up and loaded as one more skill each.
 skills_bak_setup() {
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/$1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/$1-checkout"
   make_checkout "$co" "# $1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$co/skills/fresh-prose"
@@ -1278,7 +1331,7 @@ EOF
 
 copymode_case1() {
   name="copymode1: two runs under a copying \`ln\` leave no skill/agent .bak, one settings.json.bak holding run 1, and land current content"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/copymode1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/copymode1-checkout"
   make_checkout "$co" "# copymode1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$co/skills/sample-skill"
@@ -1334,7 +1387,7 @@ copymode_case1() {
 # ---- backup cases: a person's own CLAUDE.md or settings.json is never lost ------------------
 backup_case1() {
   name="backup1: a pre-existing CLAUDE.md with its own content is backed up before the pointer replaces it"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/backup1-checkout"
   make_checkout "$co" "# backup1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$cfg"
@@ -1363,7 +1416,7 @@ backup_case2() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/backup2-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/backup2-checkout"
   make_checkout "$co" "# backup2 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$cfg"
@@ -1397,7 +1450,7 @@ settings_repeat_case1() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/settings_repeat1-checkout"
   make_checkout "$co" "# settings_repeat1 content"
   cp "$INSTALL_SH" "$co/install.sh"
 
@@ -1432,7 +1485,7 @@ settings_repeat_case2() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat2-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/settings_repeat2-checkout"
   make_checkout "$co" "# settings_repeat2 content"
   cp "$INSTALL_SH" "$co/install.sh"
 
@@ -1465,7 +1518,7 @@ settings_repeat_case3() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat3-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/settings_repeat3-checkout"
   make_checkout "$co" "# settings_repeat3 content"
   cp "$INSTALL_SH" "$co/install.sh"
 
@@ -1503,7 +1556,7 @@ settings_repeat_case4() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/settings_repeat4-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/settings_repeat4-checkout"
   make_checkout "$co" "# settings_repeat4 content"
   cp "$INSTALL_SH" "$co/install.sh"
 
@@ -1572,7 +1625,7 @@ run_with_bin() {
 
 orig_case1() {
   name="orig1: copy-mode runs 2 and 3 leave the user's first settings.json in .orig and one settings.json.bak.*"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/orig1-checkout"
   make_checkout "$co" "# orig1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   log="$work/orig1-mv.log"; : > "$log"
@@ -1600,7 +1653,7 @@ orig_case1() {
 
 orig_case2() {
   name="orig2: a repeat run never prunes or overwrites an existing settings.json.orig"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig2-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/orig2-checkout"
   make_checkout "$co" "# orig2 content"
   cp "$INSTALL_SH" "$co/install.sh"
   log="$work/orig2-mv.log"; : > "$log"
@@ -1628,7 +1681,7 @@ orig_case2() {
 
 bakname_case1() {
   name="bakname1: repeat runs 2 and 3 in the same second back up to distinct names"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bakname1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/bakname1-checkout"
   make_checkout "$co" "# bakname1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   log="$work/bakname1-mv.log"; : > "$log"
@@ -1662,7 +1715,7 @@ bakname_case1() {
 
 bakfail_case1() {
   name="bakfail1: a failed settings.json backup move exits non-zero, prunes nothing, leaves settings.json as it was"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bakfail1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/bakfail1-checkout"
   make_checkout "$co" "# bakfail1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   log="$work/bakfail1-mv.log"; : > "$log"
@@ -1711,7 +1764,7 @@ legacy_case1() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/legacy1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/legacy1-checkout"
   make_checkout "$co" "# legacy1 content"
   cp "$INSTALL_SH" "$co/install.sh"
 
@@ -1745,7 +1798,7 @@ legacy_case1() {
 # settings.json goes to a fresh .bak.<T>.<pid>.
 orig_case3() {
   name="orig3: a first install with settings.json.orig present keeps .orig and backs the plain file to .bak.<T>.<pid>"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/orig3-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/orig3-checkout"
   make_checkout "$co" "# orig3 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$cfg"
@@ -1781,7 +1834,7 @@ bin_case1() {
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bin1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/bin1-checkout"
   make_checkout "$co" "# bin1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   cp "$REPO_ROOT/bin/claude-janitor" "$co/bin/claude-janitor"
@@ -1818,7 +1871,7 @@ bin_case1() {
 
 bin_case2() {
   name="bin2: a directory named janitor.py is left alone"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/bin2-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/bin2-checkout"
   make_checkout "$co" "# bin2 content"
   cp "$INSTALL_SH" "$co/install.sh"
   mkdir -p "$cfg/bin/janitor.py"
@@ -1840,7 +1893,7 @@ run_path_install() {
 
 path_case1() {
   name="path1: zsh SHELL gets the marked block in ~/.zshrc once, not in ~/.bashrc, second run adds nothing"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/path1-checkout"
   make_checkout "$co" "# path1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   printf '# my zshrc\n' > "$h/.zshrc"
@@ -1862,7 +1915,7 @@ path_case1() {
 
 path_case2() {
   name="path2: bash SHELL gets the marked block in ~/.bashrc, not in ~/.zshrc"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path2-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/path2-checkout"
   make_checkout "$co" "# path2 content"
   cp "$INSTALL_SH" "$co/install.sh"
   if [ -e "$h/.bashrc" ] || [ -e "$h/.zshrc" ]; then
@@ -1879,7 +1932,7 @@ path_case2() {
 
 path_case3() {
   name="path3: SHELL unset under set -u does not abort install and writes ~/.bashrc"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path3-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/path3-checkout"
   make_checkout "$co" "# path3 content"
   cp "$INSTALL_SH" "$co/install.sh"
   if [ -e "$h/.bashrc" ]; then bad "$name" "fixture precondition failed: ~/.bashrc exists"; rm -rf "$h"; return; fi
@@ -1896,7 +1949,7 @@ path_case3() {
 
 path_case4() {
   name="path4: --cloud and CLAUDE_CODE_REMOTE=true touch no rc file"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/path4-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/path4-checkout"
   make_checkout "$co" "# path4 content"
   cp "$INSTALL_SH" "$co/install.sh"
   printf '# my bashrc\n' > "$h/.bashrc"; printf '# my zshrc\n' > "$h/.zshrc"
@@ -2070,7 +2123,7 @@ caseG7() {
 # listing). Returns 1 when git cannot make the worktree.
 refuse_fixture() {
   rw_co="$work/$1-main"; rw_wt="$work/$1-wt"; rw_cfg="$work/$1-cfg"
-  rw_h=$(mktemp -d); rw_h=$(realpwd "$rw_h")
+  rw_h=$(new_home)
   make_checkout "$rw_co" "# $1 main"
   git -C "$rw_co" worktree add -q --detach "$rw_wt" >/dev/null 2>&1 || return 1
   cp "$INSTALL_SH" "$rw_wt/install.sh"
@@ -2088,7 +2141,7 @@ refuse_check() {
   printf '%s\n' "$3" | grep -qi 'main clone' || why="$why no output line names the main clone;"
   [ "$(cat "$rw_cfg/CLAUDE.md" 2>/dev/null)" = "$rw_ptr" ] || why="$why pointer changed to [$(cat "$rw_cfg/CLAUDE.md" 2>/dev/null)];"
   [ "$(find "$rw_cfg" | sort)" = "$rw_snap" ] || why="$why config dir changed;"
-  [ -z "$(ls -A "$rw_h")" ] || why="$why fake HOME was written;"
+  [ -z "$(home_entries "$rw_h")" ] || why="$why fake HOME was written;"
   if [ -z "$why" ]; then ok "$1"; else bad "$1" "$why"; fi
 }
 
@@ -2122,7 +2175,7 @@ keep_check() {
 keep_wt1() {
   name="keep_wt1: main clone of a repo with a linked worktree still installs and points at its pinned checkout"
   co="$work/keep_wt1-main"; wt="$work/keep_wt1-wt"; cfg="$work/keep_wt1-cfg"
-  h=$(mktemp -d); h=$(realpwd "$h")
+  h=$(new_home)
   make_checkout "$co" "# keep_wt1 main"
   git -C "$co" branch -q -M main
   cp "$INSTALL_SH" "$co/install.sh"
@@ -2137,7 +2190,7 @@ keep_wt1() {
 keep_plain1() {
   name="keep_plain1: a plain folder copy with no .git still installs"
   dir="$work/keep_plain1-release"; cfg="$work/keep_plain1-cfg"
-  h=$(mktemp -d); h=$(realpwd "$h")
+  h=$(new_home)
   make_checkout "$dir" "# keep_plain1 release"
   rm -rf "$dir/.git"
   cp "$INSTALL_SH" "$dir/install.sh"
@@ -2154,7 +2207,7 @@ keep_plain1() {
 pinned_wt1() {
   name="pinned_wt1: install.sh run from the pinned checkout <clone>-live is not refused"
   co="$work/pinned_wt1-main"; pin="$work/pinned_wt1-main-live"; cfg="$work/pinned_wt1-cfg"
-  h=$(mktemp -d); h=$(realpwd "$h")
+  h=$(new_home)
   make_checkout "$co" "# pinned_wt1 main"
   force_main_branch "$co"
   git -C "$co" worktree add -q --detach "$pin" >/dev/null 2>&1 \
@@ -2391,7 +2444,7 @@ guard_run() {
 swap1sh() {
   name="swap1sh: a copy-mode install stalled between two guard landings never makes the guard crash, and after it the guard loads one new set"
   install_set_setup
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/swap1sh-bin"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/swap1sh-bin"
   make_swap_bin "$swap_bin"
   make_guard_clone "$work/swap1sh-one" one
   make_guard_clone "$work/swap1sh-two" two
@@ -2433,7 +2486,7 @@ swap1sh() {
 lock1sh() {
   name="lock1sh: a second copy-mode install started while the first is stalled lands no guard file before the first exits, or exits with one lock line"
   install_set_setup
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/lock1sh-bin"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/lock1sh-bin"
   make_swap_bin "$swap_bin"
   make_guard_clone "$work/lock1sh-one" A
   make_guard_clone "$work/lock1sh-two" B
@@ -2484,7 +2537,7 @@ lock1sh() {
 # plain hook go through put_file.
 putfile_nogap1() {
   name="putfile_nogap1: a copy-mode install replaces each landed hook file by one rename over the old file, never by a delete or a rewrite in place"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/putfile_nogap1-bin"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/putfile_nogap1-bin"
   make_swap_bin "$swap_bin"
   one="$work/putfile_nogap1-one"; two="$work/putfile_nogap1-two"
   make_guard_clone "$one" one
@@ -2528,7 +2581,7 @@ putfile_nogap1() {
 # # INSTALL_ID = "uninstalled" is stamped with a real id. A guard file lands twice: in guard.d/<id>/ and flat.
 putfile_prose1() {
   name="putfile_prose1: a copy-mode install stamps only the exact INSTALL_ID placeholder line and copies a prose comment unchanged"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/putfile_prose1-bin"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/putfile_prose1-bin"
   clone="$work/putfile_prose1-clone"
   make_guard_clone "$clone" one
   printf '%s\nX = 1\n' '# INSTALL_ID = "<id>", and the cases put that line at the top of every copy, as an install does.' > "$clone/hooks/guard_prose.py"
@@ -2557,7 +2610,7 @@ putfile_prose1() {
 # leaves the run looking unfinished and the id looking like a second run.
 installlog1() {
   name="installlog1: one install writes one start line and one end line with the same id and pid, and the end line says exit=0"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/installlog1-bin"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/installlog1-bin"
   clone="$work/installlog1-clone"
   make_guard_clone "$clone" one
   ev="$work/installlog1-ev"; : > "$ev"
@@ -2590,14 +2643,14 @@ pinlive_check() {
   [ "$2" -ne 0 ] || why="$why exit 0, want non-zero;"
   [ "$(cat "$4/CLAUDE.md" 2>/dev/null)" = "$6" ] || why="$why pointer changed to [$(cat "$4/CLAUDE.md" 2>/dev/null)];"
   [ "$(find "$4" | sort)" = "$7" ] || why="$why config dir changed;"
-  [ -z "$(ls -A "$5")" ] || why="$why fake HOME was written;"
+  [ -z "$(home_entries "$5")" ] || why="$why fake HOME was written;"
   if [ -z "$why" ]; then ok "$1"; else bad "$1" "$why output: $3"; fi
 }
 
 pinlive1() {
   name="pinlive1: install.sh run from <clone>-live on a lane branch is refused and writes nothing"
   co="$work/pinlive1-main"; pin="$work/pinlive1-main-live"; cfg="$work/pinlive1-cfg"
-  h=$(mktemp -d); h=$(realpwd "$h")
+  h=$(new_home)
   make_checkout "$co" "# pinlive1 main"
   force_main_branch "$co"
   git -C "$co" worktree add -q -b lane "$pin" >/dev/null 2>&1 \
@@ -2618,7 +2671,7 @@ pinlive1() {
 pinlive2() {
   name="pinlive2: install.sh run from <clone>-live detached at a commit that is not main is refused and writes nothing"
   co="$work/pinlive2-main"; pin="$work/pinlive2-main-live"; cfg="$work/pinlive2-cfg"
-  h=$(mktemp -d); h=$(realpwd "$h")
+  h=$(new_home)
   make_checkout "$co" "# pinlive2 main"
   force_main_branch "$co"
   git -C "$co" worktree add -q --detach "$pin" >/dev/null 2>&1 \
@@ -2649,7 +2702,7 @@ pinlive2() {
 # the janitor share. guard_core.py imports it the same way, so the set holds it too, equal to the flat copy.
 guardset_install() {
   install_set_setup
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; swap_bin="$work/$1-bin"
+  h=$(new_home); cfg="$h/.claude-cfg"; swap_bin="$work/$1-bin"
   make_swap_bin "$swap_bin"
   make_guard_clone "$work/$1-clone" one
   cp "$REPO_ROOT/hooks/config_watch.py" "$work/$1-clone/hooks/config_watch.py"
@@ -2711,7 +2764,7 @@ guardset2() {
 # pinned checkout).
 win_sh_case() {
   name="$1: install.sh under uname $2 exits 0 at once, names install.ps1, and writes nothing"
-  h=$(mktemp -d); h=$(realpwd "$h"); cfg="$h/.claude-cfg"; co="$work/$1-checkout"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/$1-checkout"
   make_checkout "$co" "# repo CLAUDE.md $1"
   git -C "$co" branch -q -M main
   cp "$INSTALL_SH" "$co/install.sh"
@@ -2720,7 +2773,7 @@ win_sh_case() {
   out=$(cd "$co" && env -i PATH="$work/$1-bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
         bash ./install.sh 2>&1)
   rc=$?
-  left=$(find "$h" -mindepth 1 2>/dev/null | head -n 1)
+  left=$(home_entries "$h" | head -n 1)
   lines=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
 
   if [ $rc -ne 0 ]; then
@@ -2741,6 +2794,422 @@ win_sh_case() {
 win_sh1() { win_sh_case win_sh1 MINGW64_NT-10.0-26200; }
 win_sh2() { win_sh_case win_sh2 MSYS_NT-10.0-26200; }
 win_sh3() { win_sh_case win_sh3 CYGWIN_NT-10.0-26200; }
+
+# ---- cloud fetch: a clone of the repo at main, refreshed on resume, the tarball only when the clone fails ----
+# The GitHub repo is a bare repo built here from this repo's own tarball. Every case's HOME gets a
+# .gitconfig from default_home (new_home for a mktemp HOME). A case that clones GitHub sets its own
+# with write_redirect. The redirect sends the GitHub URLs to a file:// path (git's insteadOf), and
+# protocol.allow refuses every transport but file, so no case reaches the network: a URL the redirect
+# misses fails, it does not leak.
+make_github_fixture() {
+  mkdir -p "$1/src"
+  tar -xzf "$work/repo.tar.gz" --strip-components=1 -C "$1/src"
+  git init -q -b main "$1/src"
+  git -C "$1/src" add -A
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "fixture main"
+  git clone -q --bare "$1/src" "$1/bare.git"
+}
+# Commit one change, named $2, to the fixture's main and push it to the bare repo. With $3 = merge, the
+# change is a merge of a two-commit branch named $2, so the history under main is merge-based.
+advance_github_fixture() {
+  if [ "${3:-}" = merge ]; then
+    git -C "$1/src" checkout -q -b "side-$2"
+    printf 'side %s a\n' "$2" > "$1/src/SIDE-$2-a.txt"
+    git -C "$1/src" add -A
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "side $2 a"
+    printf 'side %s b\n' "$2" > "$1/src/SIDE-$2-b.txt"
+    git -C "$1/src" add -A
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "side $2 b"
+    git -C "$1/src" checkout -q main
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false merge -q --no-ff -m "merge $2" "side-$2"
+    git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
+    return
+  fi
+  printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"
+  git -C "$1/src" add RESUME.txt
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "advance $2"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
+}
+# Commit a branch, named $2, off main that deletes CLAUDE.md, and push it to the bare repo. Main is unchanged.
+branch_without_claude_md() {
+  git -C "$1/src" checkout -q -b "$2"
+  git -C "$1/src" rm -q CLAUDE.md
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "no CLAUDE.md on $2"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/$2
+  git -C "$1/src" checkout -q main
+}
+fixture_sha() { git -C "$1/bare.git" rev-parse refs/heads/main; }
+# write_redirect HOME BARE: HOME's .gitconfig sends the GitHub repo, with or without ".git", to BARE, and
+# allows only the file transport. Caution: `git remote get-url origin` shows the rewritten path, not the
+# GitHub URL. install.sh reads the config value, so a clone of this repo passes its origin check here.
+# K3 (not K4) catches an install.sh that reads origin through get-url: its resume never refreshes the clone.
+write_redirect() {
+  {
+    printf '[url "file://%s"]\n' "$2"
+    printf '\tinsteadOf = https://github.com/shivinate7/claude-settings.git\n'
+    printf '\tinsteadOf = https://github.com/shivinate7/claude-settings\n'
+    printf '[url "file://%s/no-network/"]\n' "$work"
+    printf '\tinsteadOf = https://github.com/\n'
+    printf '[protocol]\n\tallow = never\n[protocol "file"]\n\tallow = always\n'
+  } > "$1/.gitconfig"
+}
+# default_home DIR: the default HOME. Its GitHub URLs go to a file:// path that is never created, so a
+# clone or fetch fails at once instead of reaching github.com.
+default_home() { mkdir -p "$1"; write_redirect "$1" "$work/no-such-github.git"; }
+# new_home: a fresh temp HOME with the default .gitconfig. Prints its physical path.
+new_home() { d=$(mktemp -d); d=$(realpwd "$d"); default_home "$d"; printf '%s\n' "$d"; }
+# The entries a run left under a fake HOME, not counting its default .gitconfig.
+home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
+# One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
+# stub folder $3, and the ref $4 (empty means main). Sets rc and out.
+cloud_install() {
+  out=$(cd "$2" && env -i PATH="$3:$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" \
+        CLAUDE_SETTINGS_REF="${4:-}" GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+}
+# The WARN, ERROR and fatal lines of the last install: a failure message names the problem, not the whole log.
+install_problems() { printf '%s\n' "$out" | grep -E 'WARN|ERROR|fatal' | head -n 3; }
+
+# ---- caseK1: a fresh cloud install clones the repo at main, sets the marker, and never fetches the tarball ----
+caseK1() {
+  name="caseK1: a fresh cloud install clones the repo at main, sets the cloudMirror marker, and never fetches the tarball"
+  fx="$work/k1-fx"; h="$work/k1-home"; scratch="$work/k1-scratch"; bin="$work/k1-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  co="$h/claude-settings"
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$h/.claude-cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
+    bad "$name" "install.sh fetched the tarball; the clone path did not run"
+  elif [ ! -d "$co/.git" ]; then
+    bad "$name" "no clone at $co/.git: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want"
+  elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
+    bad "$name" "clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
+  elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/shivinate7/claude-settings.git" ]; then
+    bad "$name" "clone origin is $(git -C "$co" config --get remote.origin.url)"
+  elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
+    bad "$name" "clone has no claude-settings.cloudMirror marker"
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
+    bad "$name" "pointer target [$pointer] != clone [$co]"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK2: an old tarball copy (no .git) at the clone path is replaced by a clone at main ----
+caseK2() {
+  name="caseK2: an old tarball copy with no .git at the clone path is replaced by a clone at main"
+  fx="$work/k2-fx"; h="$work/k2-home"; scratch="$work/k2-scratch"; bin="$work/k2-bin"
+  co="$h/claude-settings"
+  mkdir -p "$co" "$scratch"
+  tar -xzf "$work/repo.tar.gz" --strip-components=1 -C "$co"
+  printf 'only in the old copy\n' > "$co/OLD-TARBALL-ONLY.txt"
+  make_github_fixture "$fx"; want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ ! -d "$co/.git" ]; then
+    bad "$name" "the old copy at $co still has no .git: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want"
+  elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
+    bad "$name" "clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
+  elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
+    bad "$name" "clone has no claude-settings.cloudMirror marker"
+  elif [ -e "$co/OLD-TARBALL-ONLY.txt" ]; then
+    bad "$name" "a file only the old copy had survived, so the copy was patched, not replaced"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK3: a cloud install on a marked clone refreshes it in place: HEAD moves to the new main commit ----
+caseK3() {
+  name="caseK3: a cloud install on a marked clone refreshes it in place: HEAD moves to the new main commit"
+  fx="$work/k3-fx"; h="$work/k3-home"; scratch="$work/k3-scratch"; bin="$work/k3-bin"
+  co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; first=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" != "$first" ] \
+     || [ "$(git -C "$co" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "the first install did not leave a marked clone at $first, so there was nothing to resume: $(install_problems)"
+    return
+  fi
+
+  # A file inside .git that only a refresh in place keeps: a clone that is replaced loses it.
+  : > "$co/.git/caseK3-sentinel"
+  advance_github_fixture "$fx" second; want=$(fixture_sha "$fx")
+  if [ "$want" = "$first" ]; then
+    bad "$name" "setup: the fixture main did not move, so the resume has nothing new to fetch"
+    return
+  fi
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the resume: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "after the resume HEAD is $(git -C "$co" rev-parse HEAD), want the new main $want (the first install was $first)"
+  elif [ ! -e "$co/.git/caseK3-sentinel" ]; then
+    bad "$name" "the clone was replaced by a new one, not refreshed in place"
+  elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
+    bad "$name" "after the resume the clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
+  elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
+    bad "$name" "the resume dropped the cloudMirror marker"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK4: an unmarked clone at the clone path is never moved, even when main has a new commit ----
+caseK4() {
+  name="caseK4: an unmarked clone of the repo at the clone path stays on its commit when main moves"
+  fx="$work/k4-fx"; h="$work/k4-home"; scratch="$work/k4-scratch"; bin="$work/k4-bin"
+  co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; first=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  setup_err=$(env -i PATH="$PATH" HOME="$h" git clone -q --depth 1 --branch main \
+    https://github.com/shivinate7/claude-settings.git "$co" 2>&1)
+  if [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" != "$first" ] \
+     || [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/shivinate7/claude-settings.git" ]; then
+    bad "$name" "setup: no unmarked clone at $first with the GitHub origin: $setup_err"
+    return
+  fi
+
+  advance_github_fixture "$fx" second
+  if [ "$(fixture_sha "$fx")" = "$first" ]; then
+    bad "$name" "setup: the fixture main did not move, so the case proves nothing about a new commit"
+    return
+  fi
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$first" ]; then
+    bad "$name" "the unmarked clone moved to $(git -C "$co" rev-parse HEAD), want it kept at $first"
+  elif [ -n "$(git -C "$co" config --get claude-settings.cloudMirror)" ]; then
+    bad "$name" "install.sh set the cloudMirror marker on a clone it did not make"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK5: a clone that fails falls back to the tarball, which lands CLAUDE.md, and leaves no clone or stray entry ----
+caseK5() {
+  name="caseK5: a clone that fails falls back to the tarball, which lands CLAUDE.md, and leaves no clone or stray entry"
+  h="$work/k5-home"; scratch="$work/k5-scratch"; bin="$work/k5-bin"
+  co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  write_redirect "$h" "$work/k5-missing.git"   # this path is never created, so the clone fails
+  make_curl_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin"
+  left=$(find "$h" -mindepth 1 -maxdepth 1 ! -name .gitconfig ! -name .claude-cfg ! -name claude-settings | head -n 1)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif ! grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
+    bad "$name" "install.sh did not fall back to the tarball after the clone failed"
+  elif ! cmp -s "$co/CLAUDE.md" "$REPO_ROOT/CLAUDE.md"; then
+    bad "$name" "CLAUDE.md at $co is not the repo's CLAUDE.md: the fallback did not land"
+  elif [ -e "$co/.git" ]; then
+    bad "$name" "the fallback copy has a .git: a clone was left behind"
+  elif [ -n "$left" ]; then
+    bad "$name" "a stray entry is left under HOME after the failed clone: $left"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK6: a .git at the clone path that is not this repo is kept, and the tarball path runs ----
+# The GitHub repo is served here, so a clone would succeed. Only the guard on the clone step keeps
+# install.sh from making one; without it the clone replaces the foreign checkout and its .git and sentinel go.
+caseK6() {
+  name="caseK6: a .git at the clone path with another origin is kept, and the tarball path runs"
+  fx="$work/k6-fx"; h="$work/k6-home"; scratch="$work/k6-scratch"; bin="$work/k6-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  write_redirect "$h" "$fx/bare.git"
+  make_checkout "$co" "# K6 other checkout" "https://gitlab.com/someone/else.git"
+  printf 'keep me\n' > "$co/K6-SENTINEL.txt"
+  make_curl_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ ! -d "$co/.git" ]; then
+    bad "$name" "the .git at $co was removed"
+  elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://gitlab.com/someone/else.git" ]; then
+    bad "$name" "the origin of the checkout at $co changed to $(git -C "$co" config --get remote.origin.url)"
+  elif [ ! -f "$co/K6-SENTINEL.txt" ]; then
+    bad "$name" "the sentinel in the checkout at $co was removed"
+  elif ! grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
+    bad "$name" "install.sh did not run the tarball path"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK7: a failed clone leaves an old copy with no .git in place, and the tarball path runs ----
+caseK7() {
+  name="caseK7: a failed clone leaves an old copy with no .git in place, and the tarball path runs"
+  h="$work/k7-home"; scratch="$work/k7-scratch"; bin="$work/k7-bin"; co="$h/claude-settings"
+  mkdir -p "$co" "$scratch"
+  printf 'only in the old copy\n' > "$co/OLD-COPY-ONLY.txt"
+  default_home "$h"   # the clone fails: its redirect points at a path that is never created
+  make_curl_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif ! grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
+    bad "$name" "install.sh did not run the tarball path after the clone failed"
+  elif [ "$(cat "$co/OLD-COPY-ONLY.txt" 2>/dev/null)" != "only in the old copy" ]; then
+    bad "$name" "the old copy's file at $co did not survive"
+  elif [ -e "$co/.git" ]; then
+    bad "$name" "a clone was swapped in over the old copy"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK8: a ref whose tree lacks CLAUDE.md is not swapped in, and an old copy with no .git survives ----
+caseK8() {
+  name="caseK8: a ref whose tree lacks CLAUDE.md is not swapped in; an old copy with no .git survives"
+  fx="$work/k8-fx"; h="$work/k8-home"; scratch="$work/k8-scratch"; bin="$work/k8-bin"; co="$h/claude-settings"
+  mkdir -p "$co" "$scratch"
+  printf 'old copy sentinel\n' > "$co/OLD-COPY-ONLY.txt"
+  make_github_fixture "$fx"
+  branch_without_claude_md "$fx" no-claude-md
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin" no-claude-md
+
+  if [ -e "$co/.git" ]; then
+    bad "$name" "the clone of the ref without CLAUDE.md was swapped in over the old copy"
+  elif [ "$(cat "$co/OLD-COPY-ONLY.txt" 2>/dev/null)" != "old copy sentinel" ]; then
+    bad "$name" "the old copy's file at $co did not survive: $(install_problems)"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK9: a marked clone whose main has a commit origin lacks keeps that commit on resume ----
+caseK9() {
+  name="caseK9: a marked clone with a local main commit that origin lacks keeps it on resume, exit 0"
+  fx="$work/k9-fx"; h="$work/k9-home"; scratch="$work/k9-scratch"; bin="$work/k9-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "setup: no marked clone after the first install: $(install_problems)"
+    return
+  fi
+
+  git -C "$co" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m "local only"
+  local_sha=$(git -C "$co" rev-parse HEAD)
+  advance_github_fixture "$fx" second
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the resume: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$local_sha" ]; then
+    bad "$name" "the resume moved main to $(git -C "$co" rev-parse HEAD) and dropped the local commit $local_sha"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK10: a stale clone temp folder older than the run is removed; a newer one is kept ----
+caseK10() {
+  name="caseK10: a stale claude-settings.clone temp folder is removed by a cloud install; a newer one is kept"
+  fx="$work/k10-fx"; h="$work/k10-home"; scratch="$work/k10-scratch"; bin="$work/k10-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  stale="$h/claude-settings.clone.4242"; newer="$h/claude-settings.clone.4343"
+  mkdir -p "$stale" "$newer"
+  : > "$stale/partial"; : > "$newer/partial"
+  touch -t 202001010000 "$stale"; touch -t 209901010000 "$newer"
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ -e "$stale" ]; then
+    bad "$name" "the stale temp folder $stale is still there"
+  elif [ ! -e "$newer" ]; then
+    bad "$name" "the newer temp folder $newer was removed"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK11: a resume after upstream merges fetches only the new tip, not the history under it ----
+# Both installs run on a merge-based main. The first install is a depth-1 clone, so the resume is the
+# only fetch that could pull history. A full-history fetch leaves more than the new tip's commits here.
+caseK11() {
+  name="caseK11: a resume after upstream merges fetches only the new tip, not the merged history"
+  fx="$work/k11-fx"; h="$work/k11-home"; scratch="$work/k11-scratch"; bin="$work/k11-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  advance_github_fixture "$fx" m1 merge
+  advance_github_fixture "$fx" m2 merge
+  advance_github_fixture "$fx" m3 merge
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "setup: no marked clone after the first install: $(install_problems)"
+    return
+  fi
+  if [ "$(git -C "$co" rev-parse --is-shallow-repository)" != true ]; then
+    bad "$name" "setup: the first install is not a shallow clone, so the resume proves nothing about depth"
+    return
+  fi
+  if [ "$(git -C "$fx/bare.git" rev-list --merges --count main)" -lt 3 ]; then
+    bad "$name" "FIXTURE main has fewer than 3 merges, so the history is not merge-based"
+    return
+  fi
+
+  advance_github_fixture "$fx" m4 merge
+  advance_github_fixture "$fx" m5 merge
+  want=$(fixture_sha "$fx")
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the resume: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "after the resume HEAD is $(git -C "$co" rev-parse HEAD), want the new main $want"
+  else
+    n=$(git -C "$co" rev-list --count HEAD)
+    if [ "$n" -gt 2 ]; then
+      bad "$name" "the clone holds $n commits reachable from main after the resume: the resume fetched history, not the new tip"
+    else
+      ok "$name"
+    fi
+  fi
+}
+
+# The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
+# session_start.sh cases) gets the same redirect as every other case.
+default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
 
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
@@ -2804,6 +3273,8 @@ run caseF3
 run caseF4
 run caseF5
 run caseF6
+run caseF7
+run caseF8
 run caseG1
 run caseG2
 run caseG3
@@ -2831,6 +3302,17 @@ run guardset2
 run win_sh1
 run win_sh2
 run win_sh3
+run caseK1
+run caseK2
+run caseK3
+run caseK4
+run caseK5
+run caseK6
+run caseK7
+run caseK8
+run caseK9
+run caseK10
+run caseK11
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
