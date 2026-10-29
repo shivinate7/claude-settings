@@ -394,7 +394,7 @@ export function questionRefusal(agents, tasks, started = 0) {
   const why = []
   if (agents || tasks) why.push([agents ? plural(agents, 'agent') : '', tasks ? plural(tasks, 'background task') : ''].filter(Boolean).join(' and ') + ' of this session still run')
   if (started) why.push(`this session started ${plural(started, 'session')}, which may wait on it`)
-  return `Question box refused: ${why.join(', and ')}. A box stops the session until the owner answers. Ask in your reply and on the waiting page instead, then keep working on what does not depend on the answer (rule questions-go-to-owner).`
+  return `Question box refused: ${why.join(', and ')}. A box stops the session until the owner answers. Ask in your reply instead; if the owner has not answered in 5 minutes, send the question to the waiting page's writer. Then keep working on what does not depend on the answer (rule questions-go-to-owner).`
 }
 
 // /safe-stop. The text goes to the session as a prompt. The handoff hook's own prompt file holds

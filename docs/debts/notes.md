@@ -640,5 +640,7 @@
 - task-names-check-partial-str-replace: a str_replace that removes only the label or only the text after it passes (hooks/guard.py task_check_hit; decision task-names-its-check)
 - task-names-check-old-task-update: a whole-item update of a task written before the rule is refused when its context has no Why yours line; a status-only update closes it (hooks/guard.py task_check_hit; decision task-names-its-check)
 - task-names-check-file-path-no-cwd-join: `file_path` data is read with no cwd join, and an unreadable file passes (hooks/guard.py _write_data; decision task-names-its-check)
+- open-box-no-wake-to-page: a session in an open question box with nothing running gets no wake, so its question reaches the page only once the owner answers. Decision: questions-go-to-owner
+- pick-words-anywhere-in-item: the 5-minute check reads "5 minutes" and "waiting page" anywhere in the Input Needed item, so "A: change the waiting page 5 minutes rule, B: keep it" passes with no wait offered (lint/report_guard.py names_five_minutes). Decision: decisions-reach-a-clickable-pick
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
