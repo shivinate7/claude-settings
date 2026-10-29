@@ -231,6 +231,13 @@
         "test": "actions/ci-done-comment/test_comment.py::Body.test_failed_job_is_named"
       }
     },
+    "git-no-merge-during-batch-ci": {
+      "mechanism": {
+        "kind": "check",
+        "ref": "merge/merge.py",
+        "test": "merge/test_merge.py::BatchBrake.test_confirm_refuses_while_another_ready_pr_has_a_required_check_pending"
+      }
+    },
     "git-never-discard-output": {
       "mechanism": {
         "kind": "guard",
