@@ -2584,11 +2584,13 @@ def widens_pick_hit(data) -> str:
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
     options, pick = data.get("options"), data.get("pick")
-    if not isinstance(pick, list):
+    if isinstance(pick, str):
         pick = [pick]
-    if not isinstance(options, list):
-        return ""
-    if any(isinstance(o, dict) and o.get("key") in pick and o.get("widens") is True for o in options):
+    if not isinstance(pick, list) or not isinstance(options, list):
+        return ""  # an absent or null pick picks nothing, so it never matches a keyless option
+    keys = {p for p in pick if isinstance(p, str)}
+    if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
+           and o.get("widens") is True for o in options):
         return "pick names a widening option"
     return ""
 

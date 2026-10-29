@@ -206,10 +206,13 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 
 .ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
 .ready.on { color: var(--good); font-weight: 600; }
-/* A multi item names its picks, so its line may wrap. It always holds the lines its longest text needs (a ranked item with four titles of 28 characters), so the tail is never cut and the cards never move. Measured: 6 lines at 390px wide, 4 lines from 701px. */
-.ready.multi { white-space: normal; min-height: 9.3em; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
-@media (min-width: 701px) { .ready.multi { min-height: 6.2em; -webkit-line-clamp: 4; } }
-.ready.on::before { content: "\2713  "; }
+/* A multi item names its picks, so its line may wrap. Hidden copies of its longest possible lines share the live line's grid cell,
+   so the cell is always as tall as the longest line at the current width: the tail is never cut and the cards never move. */
+.readybox { display: grid; }
+.readybox > * { grid-area: 1 / 1; min-width: 0; }
+.ready.multi, .readyfit { white-space: normal; overflow: visible; }
+.readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
+.ready.on::before, .readyfit::before { content: "\2713  "; }
 /* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
 .alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .alts .sp { flex: 1 1 0; }
@@ -597,7 +600,10 @@ function choose(it, key) {
 // A multi item's choice is the list of ticked keys. A new tick goes last, an untick closes the gap, and a ranked item's order is the list's order.
 const tickList = (it) => { const c = (eff(it) || {}).choice; return Array.isArray(c) ? c : []; };
 function toggle(it, key) {
-  const cur = tickList(it), next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+  // A ranked item adds a new tick last. An unranked item has no order, so its ticks stay in option order.
+  const cur = tickList(it), on = !cur.includes(key);
+  const next = it.ranked === true ? (on ? [...cur, key] : cur.filter((k) => k !== key))
+    : (it.options || []).map((o) => o.key).filter((k) => k === key ? on : cur.includes(k));
   const patch = { choice: next.length ? next : null, auto: false };
   if (!next.length && stoodNow(it)) patch.unstood = true;
   if ((eff(it) || {}).choice === NONE) patch.note = "";
@@ -630,6 +636,11 @@ function readyText(it) {
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (d.auto ? ", my pick." : it.ranked === true ? ", your order." : ", your choice.") : "";
   return "Ready to send: " + pickName(it, d.choice) + (d.auto ? ", my pick." : ", your choice.");
+}
+// The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
+function readyFits(it) {
+  const all = "Ready to send: " + namesOf(it, (it.options || []).map((o) => o.key));
+  return [all + (it.ranked === true ? ", your order." : ", your choice."), all + ", my pick.", "Ready to send: none of these, with your note.", "My pick goes with your next Send."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
 function sparkle() {
@@ -758,12 +769,13 @@ function buildCard(it) {
   // Take my pick hides whenever the ticks equal the pick, ranked or not: nothing is left for it to do. It is not shown at all when the pick is not valid.
   const multi = isMulti(it), pk = pickKeys(it);
   const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
+  const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
   if (it.kind === "decision") {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
     const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : "") + (it.ranked === true ? " ranked" : ""), role: multi ? "group" : "radiogroup", "aria-label": "Options for No. " + it.n, "aria-describedby": multi ? "mh-" + it.id : null, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
-    if (multi) card.append(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then put them in order, best first." : "Tick any that apply."));
-    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), ready,
+    if (multi) card.append(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
+    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
