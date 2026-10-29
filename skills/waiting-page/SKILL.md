@@ -47,7 +47,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
     an allow-list entry or a per-repo exception. Its card shows "Goes against your uniform ruling (t18)": a repo
-    that differs from a shared format changes to match it. `pick` never names such an option. The writer refuses
+    that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
@@ -135,6 +135,8 @@ into `meta/page`.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
      and a one-sentence `why`. Set `group` on both items.
    - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
+     Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
+     The page hides "Take my pick" when the ticks equal `pick`, and shows none when `pick` is not valid.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
@@ -185,7 +187,7 @@ relays an answer. An answer typed in the chat counts the same.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
   later than the item's `added`. Its `choice` is the `key` of one of the item's `options`. On a `multi` item,
   `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
-  A list on a pick-one item, or a string on a `multi` item, is not clear.
+  A list on a pick-one item, or a string other than `none` on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
@@ -203,7 +205,7 @@ once as a note on its step (the item's home), never held for the lane.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Then delete `answers/<id>`, so the answer cannot count for a later item.
 3. If the answer is `none`, write new `options`, `pick` and `why` from the
-   owner's note, and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
+   owner's note (a `multi` item's new `pick` is a list), and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If the note is not
    enough to write them, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to

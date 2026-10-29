@@ -2586,7 +2586,7 @@ def widens_pick_hit(data) -> str:
     options, pick = data.get("options"), data.get("pick")
     if not isinstance(pick, list):
         pick = [pick]
-    if not isinstance(options, list) or not all(isinstance(k, str) for k in pick):
+    if not isinstance(options, list):
         return ""
     if any(isinstance(o, dict) and o.get("key") in pick and o.get("widens") is True for o in options):
         return "pick names a widening option"

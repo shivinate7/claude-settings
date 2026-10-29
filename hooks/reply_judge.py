@@ -88,7 +88,7 @@ INSTRUCTIONS = (
     "and only links to them, such as a link to a folder, a repo or a file; each option needs its own picture or design in the item. "
     "A reply that points to the waiting-page item that carries the designs is fine; never flag it. "
     "Also flag a pick-one question whose options could combine, options that can all be done together; "
-    "say to ask it as a multi-select item (multi: true), and never flag options that exclude each other, such as now or later. "
+    "say to ask it as a multi item (multi: true), and never flag options that exclude each other, such as now or later. "
     "Also flag a reply that marks work blocked on, or an Input Needed item as blocking, a question about a port or redesign "
     "of an existing app; the existing app's behaviour answers it, so the session reads it and cites file and symbol. "
     "Also flag such a port or redesign question that has no \"Departs from:\" line. "

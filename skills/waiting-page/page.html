@@ -187,11 +187,11 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
 .opt.sel .tick { background: var(--acc); border-color: var(--acc); }
 .opt.sel .tick.mark::before { content: ""; width: 6px; height: 12px; border: solid var(--on-acc); border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
-/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down and View sit above the label. */
+/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down, View and the marked rows sit above the label. */
 .opt.ranked { cursor: default; }
 .opt.ranked > label.head { cursor: pointer; }
-.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); }
-.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 1; }
+.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); z-index: 1; }
+.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 2; }
 .opts.ranked .opt { grid-template-rows: auto auto 1fr auto auto; }
 .opts.ranked.pics .opt { grid-template-rows: auto auto auto 1fr auto auto; }
 @supports (grid-template-rows: subgrid) { .opts.ranked .opt { grid-row: span 5; grid-template-rows: subgrid; } .opts.ranked.pics .opt { grid-row: span 6; } }
@@ -200,14 +200,15 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .btn.mv { position: relative; min-height: 44px; min-width: 44px; padding: 8px 12px; background: var(--surface); color: var(--acc); }
 .btn.mv svg { flex: none; }
 /* At an end of the order the button stays in place and focusable. It is marked off by a dashed border, and the reason shows on hover and focus. */
-.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--line); color: var(--muted); cursor: default; }
+.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
 .btn.mv[aria-disabled="true"] svg { opacity: .5; }
 .btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
 
 .ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
 .ready.on { color: var(--good); font-weight: 600; }
-/* A multi item names its picks, so its line may wrap. It always holds two lines, so the cards never move. */
-.ready.multi { white-space: normal; min-height: 3.1em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* A multi item names its picks, so its line may wrap. It always holds the lines its longest text needs (a ranked item with four titles of 28 characters), so the tail is never cut and the cards never move. Measured: 6 lines at 390px wide, 4 lines from 701px. */
+.ready.multi { white-space: normal; min-height: 9.3em; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
+@media (min-width: 701px) { .ready.multi { min-height: 6.2em; -webkit-line-clamp: 4; } }
 .ready.on::before { content: "\2713  "; }
 /* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
 .alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -754,7 +755,7 @@ function buildCard(it) {
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
   const noteShown = !!(state.noteOpen[it.id] || d.choice === NONE || d.note);
   const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
-  // On a ranked item Take my pick stays after it is taken: the same order ticked by hand is still the owner's choice, and the button records it as my pick.
+  // Take my pick hides whenever the ticks equal the pick, ranked or not: nothing is left for it to do. It is not shown at all when the pick is not valid.
   const multi = isMulti(it), pk = pickKeys(it);
   const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   if (it.kind === "decision") {
@@ -767,7 +768,7 @@ function buildCard(it) {
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
         multi ? h("span", { class: "sp" }) : null,
-        pk ? h("button", { class: "btn alt takepick" + ((multi ? it.ranked !== true && sameList(d.choice, it.pick) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
+        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, it.pick) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
