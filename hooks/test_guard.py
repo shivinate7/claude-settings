@@ -11684,6 +11684,30 @@ pl("press Save after editing settings.json is allowed", "allow",
    pl_item(options=[pl_opt("Keep going", "Press Save after you edit settings.json."), PL_KEEP_OPT]))
 pl("marking the decision ready once the PR is open is allowed", "allow",
    pl_item(options=[pl_opt("Keep going", "Mark the decision ready once the PR is open."), PL_KEEP_OPT]))
+# Task steps are judged joined: the page named in one step and the press in the next is still a press.
+pl("task steps that open home#374 on GitHub, then press Merge, with no link, are denied", "deny",
+   pl_task(["Open home#374 on GitHub.", "Press Merge."]))
+pl("task steps that open the PR on GitHub, then click Merge, with no link, are denied", "deny",
+   pl_task(["Open the PR on GitHub.", "Click Merge."]))
+pl("a task titled Merge home#374 with a step that presses Merge, with no link, is denied", "deny",
+   pl_task(["Press Merge."]))
+pl("the task steps with a link to /pull/374 are allowed", "allow",
+   pl_task(["Open home#374 on GitHub.", "Press Merge."], links=PL_LINK))
+pl("an option that says then you merge home#374, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "Then you merge home#374."), PL_KEEP_OPT]))
+pl("an option that says you approve the PR on GitHub, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "You approve the PR on GitHub."), PL_KEEP_OPT]))
+pl("an option that says mark it ready for review on home#374, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "Mark it ready for review on home#374."), PL_KEEP_OPT]))
+# The page's own buttons and item numbers are not web-app presses.
+pl("task steps that press Send when the PR is merged are allowed", "allow",
+   pl_task(["Check the PR is merged.", "Press Send when the PR is merged."]))
+pl("an option that answers item #47, then presses Send, is allowed", "allow",
+   pl_item(options=[pl_opt("Go ahead", "Answer item #47, then press Send."), PL_KEEP_OPT]))
+pl("a step that taps Mark done after step #2 is allowed", "allow",
+   pl_task(["Tap Mark done after step #2."]))
+pl("a step that takes my pick, then presses Send, is allowed", "allow",
+   pl_task(["Take my pick, then press Send."]))
 
 
 # --------------------------------------------------------------------------- a task step never sends the owner to a file for a command
