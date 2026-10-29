@@ -44,6 +44,14 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - "... you should really be messaging triage for this part to save context, etc, it's a learning experience for me."
   - The line names the session's own tier, the right tier, and why, such as saving context.
   - The session then still handles the message, or routes it.
+- **Triage feeds the lanes** (owner, 2026-10-29 13:45 CDT): "a role that's whole job is to be pushing stuff from triage into more lanes to work ie identify parallelism opportunities and push to you to start them ie a flywheel of sorts".
+  - At each wake and each check-in, triage sends the coordinator a ready list. A step is ready when every question it has is answered and its files do not clash with a running lane.
+  - The list also names each step that waits only on order, and what it waits on.
+  - The coordinator starts each ready step in the same turn.
+- **No owner step for work he signed off** (owner, 2026-10-29 13:44 CDT): "I shouldn't be expected to be around to do something I'd already signed off for".
+  - Triage asks nothing that a past ruling answers. The coordinator does the act, or finds who can.
+- **Opus grants live on the roadmap step** (owner, 2026-10-29 13:44 CDT, pick a): "Grants living in roadmap actually does make a lot of sense -- i lean towards that route."
+  - Triage writes each Opus grant on the step it covers, with the owner's words and time. A lane's guard reads the grant of its own step. Lane opus-grant-on-step builds this; decision agent-model-cap gets the lift when it lands.
 
 ## Why
 
