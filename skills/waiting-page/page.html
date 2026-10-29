@@ -201,7 +201,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .note.need label { color: var(--due); font-weight: 600; }
 .note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
 .note.need textarea { border-color: var(--due); }
-ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 .dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
 .status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
@@ -1106,8 +1106,8 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
     const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
     const ht = c ? c.h : (!focus && size ? size.h : 200);
     const bw = box ? Math.max(box.w, 1) : DW, sc = Math.min(maxScale || 1, ww / bw, maxH ? Math.max(maxH / Math.max(box ? box.h : ht, 1), MIN_PIC / bw) : Infinity);
-    // A box more than 4 times as tall as it is wide would pass maxH. It keeps its scale and scrolls in a maxH box.
-    const scroll = !!maxH && Math.ceil(Math.max(box ? box.h : ht, 1) * sc) > maxH;
+    // A box more than 4 times as tall as it is wide would pass maxH. It keeps its scale and scrolls in a maxH box. A pass of 1px or less counts as fitting.
+    const scroll = !!maxH && Math.ceil(Math.max(box ? box.h : ht, 1) * sc) > maxH + 1;
     if (maxH) wrap.classList.toggle("scroll", scroll);
     const g = scroll && wrap.isConnected ? Math.max(wrap.offsetWidth - wrap.clientWidth - 2, 0) : 0; // the scrollbar's gutter, plus any border past 1px; the box grows by it so the scrollbar takes none of the picture's width
     if (maxH) {
@@ -1119,11 +1119,11 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
     if (scroll) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = maxH + "px"; }
-    else if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px"; }
+    else if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.min(maxH || Infinity, Math.ceil((box ? box.h : ht) * sc)) + "px"; }
     else {
       // Declared size only: the height follows the width by aspect ratio, so the first paint is already the right height.
       const dw = focus ? size.w : DW;
-      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.ceil(size.h * (maxScale || 1)) + "px";
+      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.min(maxH || Infinity, Math.ceil(size.h * (maxScale || 1))) + "px";
     }
     if (scroll) picEdges(wrap);
   };
