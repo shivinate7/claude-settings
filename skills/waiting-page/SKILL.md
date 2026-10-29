@@ -69,7 +69,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
   a note with no `done`. "Take my pick", and a pick that
   stands, write `choice` equal to `pick`, with the note `accepted pick`. On a `multi` item `choice` is a
-  list of option keys, in rank order when `ranked` and in option order otherwise, and "Take my pick" writes the whole `pick` list in that order. "None of these" writes
+  list of option keys, in rank order when `ranked` and in option order otherwise. "Take my pick" writes the whole `pick` list in that order. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
