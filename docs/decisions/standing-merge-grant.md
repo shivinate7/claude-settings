@@ -2,14 +2,14 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10 and 2026-10-29 16:47 CDT: the coordinator holds a standing merge grant in claude-settings and in the owner's other repos. The other repos are banchi, q_max, home, degen, mailaudit, ios-adblock and joyous (the coordinator's list, 2026-10-29). In claude-settings, the orchestrating session holds standing merge authority too (owner, 2026-10-10). The grant holds "for now", until the owner withdraws it in chat. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
+Owner rulings, 2026-10-10 and 2026-10-29 16:47 CDT: the coordinator holds a standing merge grant in claude-settings and in the owner's other repos. The other repos are banchi, q_max, home, degen, mailaudit, ios-adblock and joyous (the coordinator's list, 2026-10-29). Each build has one holder. In a build with a coordinator, the coordinator holds the grant. A solo session with no coordinator in claude-settings holds the 2026-10-10 grant there. A lane session never merges. The grant holds "for now", until the owner withdraws it in chat. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
 
 The owner's words, 2026-10-29 16:47 CDT, in web chat:
 
 - "Coordinator just keep it known u will have perpetual standing merge authority that i will withdraw when i decide so no need to ask about merging"
 - "on the other repos too for now"
 
-- The coordinator merges by pull request with the merge tool of each repo, on green checks and a done review. It never asks the owner to merge.
+- The coordinator merges by pull request with the merge tool of each repo, on green checks and a done review where one is required. It never asks the owner to merge.
 - The batch runner still builds the batches. It may run the merge tool under the coordinator's grant. It holds no grant of its own.
 - The grant covers the merge act only. It lifts no check. These limits still apply:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).

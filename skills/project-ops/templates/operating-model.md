@@ -21,7 +21,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  runs each merge under the coordinator's grant and asks the owner for no merge. Each merge it
+  runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
   runs names `frozen at <sha>`. It prints the merge output on the terminal, never
   to a log only. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
@@ -74,7 +74,8 @@ parent, or miss a message while busy.
 - A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
   A lane never rebases onto main and never merges.
 - Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
-  standing merge grant, the coordinator or the batch runner gives the merge go. The owner is not asked.
+  standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
+  runs the merge tool on it. The owner is not asked.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
