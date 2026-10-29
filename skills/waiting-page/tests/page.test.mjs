@@ -2637,9 +2637,9 @@ test("Undo puts a list pick back as a draft, in its order", async (t) => {
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
 });
 
-// The first option is in no pick, so a fix that focuses the first box of the card fails. The ranked pick starts with C, so a fix that reads option order fails.
+// The first option is in no pick, so a fix that focuses the first box of the card fails. An unranked pick shows in option order, so ["c","b"] starts with B: a fix that reads it.pick[0] fails. The ranked pick starts with C, so a fix that reads option order fails.
 test("Enter on Take my pick puts focus on the first key of the pick, on a multi card", async (t) => {
-  const it = multi("take-focus-multi", 41, { pick: ["b", "c"] });
+  const it = multi("take-focus-multi", 41, { pick: ["c", "b"] });
   const page = await open(t, { items: [it] }); if (!page) return;
   await needBoxes(page, it, 3);
   const at = await enterTakePick(page, it);
