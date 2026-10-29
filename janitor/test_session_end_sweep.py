@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -933,11 +934,11 @@ HOLDERS = []
 
 
 def kill_holder(pid):
-    """Stop one holder this suite started, when it still runs. The pid is the shell's `$!`, so the
-    kill runs in the shell's own pid space: os.kill from this Python would read it as a Windows pid
-    on Windows, and could stop an unrelated process."""
-    if still_running(pid):
-        run_capped(["sh", "-c", 'kill "$1"; true', "sh", str(pid)], timeout=10)
+    """Stop one holder this suite started. It needs no ps: a `kill` that finds no process does nothing,
+    so a holder that already ended is fine. The pid is the shell's `$!`, so the kill runs in the shell's
+    own pid space: os.kill from this Python would read it as a Windows pid and could stop an unrelated
+    process."""
+    run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
 
 
 def spawn_orphan(cwd, env_entries=()):
@@ -975,12 +976,12 @@ def still_running(pid):
 
 
 def stop_holders():
-    """At exit, stop each holder still running. Never raises: the suite is over."""
+    """At exit, stop each holder. Never raises, but a failed stop is printed, not hidden."""
     for pid in HOLDERS:
         try:
             kill_holder(pid)
-        except Exception:
-            pass
+        except Exception as exc:
+            print("stop_holders: could not stop holder %d: %r" % (pid, exc), file=sys.stderr)
 
 
 atexit.register(stop_holders)
@@ -1084,27 +1085,126 @@ class SkippedCaseLeavesNoHolder(unittest.TestCase):
         self.assertFalse(still_running(pid), "the holder of a skipped case still runs (pid %d)" % pid)
 
 
+class SweepGetsNoPipes(unittest.TestCase):
+    """handle() hands the sweep no pipe: stdin, stdout and stderr are DEVNULL, and nothing is captured. A
+    pipe a grandchild inherits is what held the session open on Windows after a timeout kill."""
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+
+    def test_the_sweep_gets_devnull_streams_and_no_capture(self):
+        repo = os.path.join(ROOT, "no_pipes_repo")
+        make_repo(repo)
+        calls = []
+        real_run = self.mod.subprocess.run
+
+        def record_call(*args, **kwargs):
+            argv = args[0] if args else kwargs.get("args")
+            if isinstance(argv, list) and self.mod.SWEEP_PATH in argv:
+                calls.append(kwargs)
+                return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+            return real_run(*args, **kwargs)
+
+        self.mod.subprocess.run = record_call
+        try:
+            self.mod.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=0)
+        finally:
+            self.mod.subprocess.run = real_run
+        self.assertEqual(len(calls), 1, "handle must start the sweep once")
+        for name in ("stdin", "stdout", "stderr"):
+            self.assertEqual(calls[0].get(name), subprocess.DEVNULL,
+                             "the sweep's %s must be DEVNULL, not a pipe" % name)
+        self.assertFalse(calls[0].get("capture_output"), "the sweep's output must not be captured")
+
+
+def kill_sweep(pid_path):
+    """Stop the fake sweep named in `pid_path`, by the pid it wrote there. A missing or stale file is no sweep."""
+    try:
+        with open(pid_path, encoding="utf-8") as handle:
+            pid = int(handle.read().strip())
+        os.kill(pid, signal.SIGTERM)
+    except (OSError, ValueError):
+        pass
+
+
 class HookRunIsCapped(unittest.TestCase):
     """A hook run past its cap fails by name. Before, the call raised TimeoutExpired, which reads as a
     crash of the harness. On Windows the same call also waited on the pipes after the kill."""
 
+    def assert_sweep_stopped(self, beat_path):
+        """Passes once the sweep's heartbeat has stopped. Reads no pid and needs no ps."""
+        def beat():
+            try:
+                with open(beat_path, encoding="utf-8") as handle:
+                    return handle.read()
+            except OSError:
+                return None
+        first = beat()
+        self.assertIsNotNone(first, "the sweep never wrote a heartbeat, so the cap was not exercised")
+        time.sleep(1.0)
+        self.assertEqual(first, beat(), "the sweep the hook started still runs after its case")
+
     def test_a_hook_run_past_its_cap_is_a_named_fail(self):
         repo = os.path.join(ROOT, "capped_repo")
         make_repo(repo)
-        # A sweep that exits when its hook (its parent) is killed, so a failed run leaves nothing behind.
-        patient = os.path.join(ROOT, "fake_sweep_waits_for_its_parent.py")
+        # The sweep writes its pid and a heartbeat, and does not watch its parent: on Windows the dead
+        # hook's pid stays in getppid(), so a parent check would run the full 600 s.
+        pid_path = os.path.join(ROOT, "capped_sweep.pid")
+        patient = os.path.join(ROOT, "fake_sweep_outlives_its_hook.py")
         write(patient, textwrap.dedent("""\
             import os
             import time
-            parent = os.getppid()
+            with open(os.environ["FAKE_SWEEP_PID"], "w", encoding="utf-8") as handle:
+                handle.write(str(os.getpid()))
             end = time.time() + 600
-            while time.time() < end and os.getppid() == parent:
+            while time.time() < end:
+                with open(os.environ["FAKE_SWEEP_PID"] + ".beat", "w", encoding="utf-8") as handle:
+                    handle.write(repr(time.time()))
                 time.sleep(0.1)
         """))
+        self.addCleanup(self.assert_sweep_stopped, pid_path + ".beat")  # runs last
+        self.addCleanup(kill_sweep, pid_path)  # runs first: the sweep this case started, by its own pid
         with self.assertRaises(AssertionError) as caught:
             run_hook({"hook_event_name": "SessionEnd", "cwd": repo},
-                     env_extra={"JANITOR_SWEEP_PATH": patient, "JANITOR_SWEEP_TIMEOUT": "60"}, timeout=2)
+                     env_extra={"JANITOR_SWEEP_PATH": patient, "JANITOR_SWEEP_TIMEOUT": "60",
+                                "FAKE_SWEEP_PID": pid_path}, timeout=4)
         self.assertIn("hang guard", str(caught.exception))
+
+
+def alive_without_ps(pid):
+    """True while `pid` runs and is not a zombie, read without ps: /proc where it exists, else `kill -0`."""
+    stat_path = "/proc/%d/stat" % pid
+    if os.path.isdir("/proc"):
+        try:
+            with open(stat_path, encoding="utf-8") as handle:
+                state = handle.read().rsplit(")", 1)[1].split()[0]
+        except (OSError, IndexError):
+            return False
+        return state != "Z"
+    return run_capped(["sh", "-c", 'kill -0 "$1" 2>/dev/null', "sh", str(pid)], timeout=5).returncode == 0
+
+
+class NoPsHostLeavesNoHolder(unittest.TestCase):
+    """On a host without `ps`, a holder's case skips and nothing is left running. Before, the ps read
+    raised FileNotFoundError, the case errored, and the holder ran until the suite exited."""
+
+    def test_a_host_without_ps_skips_and_leaves_no_holder(self):
+        bin_dir = tempfile.mkdtemp(prefix="sh_only_", dir=ROOT)
+        os.symlink(shutil.which("sh"), os.path.join(bin_dir, "sh"))  # sh only: no ps on this PATH
+        saved = os.environ["PATH"]
+        os.environ["PATH"] = bin_dir
+        try:
+            result = spawn_orphan(os.path.join(ROOT, "scratch_no_ps"), [TAG + "=sess-no-ps"])
+        finally:
+            os.environ["PATH"] = saved
+        pid = HOLDERS[-1]
+        self.addCleanup(kill_holder, pid)
+        self.assertIsNone(result, "a host without ps must give the skip, not a pid")
+        deadline = time.time() + 5
+        while alive_without_ps(pid) and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(alive_without_ps(pid), "the holder of a case on a host without ps still runs (pid %d)" % pid)
 
 
 if __name__ == "__main__":
