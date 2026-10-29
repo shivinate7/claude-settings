@@ -43,6 +43,14 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 
+# Cloud sessions only (the CLAUDE_CODE_REMOTE read install.sh makes): tell the session how to find its
+# tier (decision session-tiers). The hook cannot read the tier itself: get_session and list_sessions are
+# MCP tools only, and a hook never calls the sessions API with a token. Cost: one env read, no network,
+# no new process, no timer, no file written.
+if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a live session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo; if one is found, coordinate with it, else proceed.'
+fi
+
 # core.worktree in the SHARED config re-points every checkout of the clone at one tree. A child
 # `git init` that inherits GIT_DIR and GIT_WORK_TREE writes it.
 # Warns only, never fixes: the value may be someone's live work. Both git calls are bounded, so a
