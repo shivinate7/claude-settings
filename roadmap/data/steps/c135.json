@@ -1,9 +1,9 @@
 {
   "title": "A waiting-page question can take several answers, not only one",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33848,
   "why": "Your gripe, Oct 27 11:57 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh22hFCVAnYvJQAELYVZs8BrM): every question is pick-one, so item 31, where you wanted a mix of the options, had no way to say so.",
-  "note": "Next cloud lane: skills/waiting-page gains a multi-select item kind (checkboxes, with an optional \"rank them\" mode), and the page saves a list of picks in its answer; the skill tells sessions to use it whenever options are not mutually exclusive; the reply check flags a pick-one question whose options could combine. Absorbs c122's item 5 (combined answers such as A+B). Red first on item 31's shape: options that can coexist, asked as pick-one. Due after: c186 merges (same skill files; triage's waiting-page order, Oct 28: c139, c186, c135, c136). Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of d9's successors and right after c126 (triage, Oct 27): a gripe that every waiting-page question shows. Marked doing Oct 29 13:45 CDT (coordinator message). Built Oct 29 16:44 CDT (coordinator): #817, round 3 code review passed, design review failed on one state; joins batch 21.",
-  "updatedAt": "2026-10-29T21:55:00Z"
+  "note": "Next cloud lane: skills/waiting-page gains a multi-select item kind (checkboxes, with an optional \"rank them\" mode), and the page saves a list of picks in its answer; the skill tells sessions to use it whenever options are not mutually exclusive; the reply check flags a pick-one question whose options could combine. Absorbs c122's item 5 (combined answers such as A+B). Red first on item 31's shape: options that can coexist, asked as pick-one. Due after: c186 merges (same skill files; triage's waiting-page order, Oct 28: c139, c186, c135, c136). Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of d9's successors and right after c126 (triage, Oct 27): a gripe that every waiting-page question shows. Marked doing Oct 29 13:45 CDT (coordinator message). Built Oct 29 16:44 CDT (coordinator): #817, round 3 code review passed, design review failed on one state; joins batch 21. Done: batch 21 #821 merged Oct 29 18:42 CDT as main 1ce1fcb7 (#817).",
+  "updatedAt": "2026-10-30T00:02:00Z"
 }
