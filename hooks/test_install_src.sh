@@ -2335,7 +2335,9 @@ make_guard_clone() {
 # shim does three things. Before the second guard landing of an install whose SWAP_PAUSE is set, it
 # logs "paused" to $SWAP_EVENTS and sleeps $SWAP_PAUSE seconds, once: install.sh retries a failed mv,
 # and the retry must not pause again. It runs the real mv. After the landing it logs
-# "landed <epoch seconds> <build>". Before put_file's rename (its source ends in .cs-new) it logs
+# "landed <epoch seconds> <build>". When SWAP_INSTALL_LOG is set, each stamped guard file (guard.py,
+# guard_*.py) also logs "install.sh: landed id=<id>" to it; shared_names.py and git_reads.py carry no stamp
+# and are not logged. Before put_file's rename (its source ends in .cs-new) it logs
 # "premv <dest> <present|absent> <bytes of the new file>" to $SWAP_EVENTS, whatever the dest. Every other
 # mv passes straight through.
 make_swap_bin() {
@@ -2358,7 +2360,13 @@ esac
 "$real_mv" "\$@" || exit \$?
 case "\$dest" in
   */hooks/guard*.py)
-    printf 'landed %s %s\n' "\$(date +%s)" "\$(sed -n 's/^# build //p' "\$dest" | head -n1)" >> "\$SWAP_EVENTS" ;;
+    printf 'landed %s %s\n' "\$(date +%s)" "\$(sed -n 's/^# build //p' "\$dest" | head -n1)" >> "\$SWAP_EVENTS"
+    case "\$(basename "\$dest")" in
+      guard.py|guard_*.py)
+        if [ -n "\${SWAP_INSTALL_LOG:-}" ]; then
+          printf '%s install.sh: landed id=%s\n' "\$(date +%Y-%m-%dT%H:%M:%S)" "\$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "\$dest" | head -n1)" >> "\$SWAP_INSTALL_LOG"
+        fi ;;
+    esac ;;
 esac
 EOF
   chmod +x "$1/mv"
@@ -2368,7 +2376,7 @@ EOF
 # when given, is the stall in seconds before the second guard landing. The caller sets $h (home) and
 # $swap_bin (the shim folder). Run it in the background to overlap two installs.
 run_cloud() {
-  ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$2" SWAP_EVENTS="$3" ${4:+SWAP_PAUSE="$4"} \
+  ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$2" SWAP_EVENTS="$3" ${4:+SWAP_PAUSE="$4"} ${5:+SWAP_INSTALL_LOG="$5"} \
       PATH="$swap_bin:$PATH" $TMO bash ./install.sh --cloud )
 }
 
@@ -2427,6 +2435,40 @@ swap1sh() {
   rm -rf "$h"
 }
 
+# The install-log span check for lock1sh. A guard landing is logged "install.sh: landed id=<id>", where <id>
+# is the INSTALL_ID that put_file stamped into the landed guard file, so it names its install. Prints
+# "bad <problem>" for each landing with no id or outside the start and end lines of its own id, then
+# "in A <n>" and "in B <n>": the tagged landings inside the first and the second install's span.
+landing_span_report() {
+  awk '
+    /install\.sh: (start|end|landed)/ {
+      if ($0 ~ /install\.sh: start/) kind = "start"
+      else if ($0 ~ /install\.sh: end/) kind = "end"
+      else kind = "landed"
+      id = ""
+      if (match($0, /id=[^ ]*/)) id = substr($0, RSTART + 3, RLENGTH - 3)
+      if (kind == "start") { if (!(id in s)) order[++m] = id; s[id] = NR }
+      else if (kind == "end") e[id] = NR
+      else lands[NR] = id
+    }
+    END {
+      for (n = 1; n <= NR; n++) {
+        if (!(n in lands)) continue
+        id = lands[n]
+        if (id == "") { print "bad guard landing at install log line " n " carries no install id"; continue }
+        if (!(id in s) || !(id in e) || s[id] > n || e[id] < n) {
+          print "bad guard landing of install " id " at install log line " n " is outside its own start and end"
+          continue
+        }
+        if (id == order[1]) a++
+        else if (id == order[2]) b++
+      }
+      print "in A " (a + 0)
+      print "in B " (b + 0)
+    }
+  ' "$1"
+}
+
 # ---- lock1sh: a second install waits for the first, or refuses with one clear line ----------------
 lock1sh() {
   name="lock1sh: a second copy-mode install started while the first is stalled lands no guard file before the first exits, or exits with one lock line"
@@ -2436,11 +2478,11 @@ lock1sh() {
   make_guard_clone "$work/lock1sh-one" A
   make_guard_clone "$work/lock1sh-two" B
   evA="$work/lock1sh-evA"; evB="$work/lock1sh-evB"; : > "$evA"; : > "$evB"
-  run_cloud "$work/lock1sh-one" "$cfg" "$evA" 6 > "$work/lock1sh-runA" 2>&1 &
+  run_cloud "$work/lock1sh-one" "$cfg" "$evA" 6 "$cfg/claude-settings-install.log" > "$work/lock1sh-runA" 2>&1 &
   pA=$!
   sleep 0.3
   alive=no; kill -0 "$pA" 2>/dev/null && alive=yes
-  run_cloud "$work/lock1sh-two" "$cfg" "$evB" > "$work/lock1sh-runB" 2>&1 &
+  run_cloud "$work/lock1sh-two" "$cfg" "$evB" "" "$cfg/claude-settings-install.log" > "$work/lock1sh-runB" 2>&1 &
   pB=$!
   # Bounded wait: both installs end, at most 3000 polls. The order comes from the install log, never from a
   # clock. install.sh appends "start" after it takes the lock and "end" before it releases it, both to one log,
@@ -2455,12 +2497,22 @@ lock1sh() {
   order=$(grep -E -o 'install\.sh: (start|end)' "$cfg/claude-settings-install.log" 2>/dev/null | sed 's/install\.sh: //' | tr '\n' ' ')
   bFirst=$(sed -n 's/^landed \([0-9][0-9]*\) .*/\1/p' "$evB" | head -n1)
   lockLines=$(grep -ciE 'lock|another install|already running|waiting' "$work/lock1sh-runB")
+  span=$(landing_span_report "$cfg/claude-settings-install.log")
+  spanBad=$(printf '%s\n' "$span" | sed -n 's/^bad //p' | head -n1)
+  inA=$(printf '%s\n' "$span" | sed -n 's/^in A //p')
+  inB=$(printf '%s\n' "$span" | sed -n 's/^in B //p')
 
   if [ "$alive" != yes ]; then bad "$name" "precondition: install A had already exited when install B started, so the case proves nothing"
   elif [ "$(grep -c '^paused' "$evA")" -lt 1 ]; then
     bad "$name" "precondition: install A never stalled, so the case proves nothing; A events [$(tr '\n' ' ' < "$evA")], A output [$(tail -n 3 "$work/lock1sh-runA" | tr '\n' ' ')]"
   elif [ "$order" != "start end " ] && [ "$order" != "start end start end " ]; then
     bad "$name" "install B took the install lock before install A ended, while A was stalled: install log order [$order], want A's start and end before B's start"
+  elif [ -n "$bFirst" ] && [ "$order" != "start end start end " ]; then
+    bad "$name" "install B landed guard files without taking the install lock: install log order [$order], want A's start and end, then B's start and end"
+  elif [ -n "$spanBad" ]; then bad "$name" "$spanBad"
+  elif [ "${inA:-0}" -lt 1 ]; then bad "$name" "precondition: no guard landing of install A is logged inside its own start and end, so the case proves nothing"
+  elif [ -n "$bFirst" ] && [ "${inB:-0}" -lt 1 ]; then
+    bad "$name" "install B landed guard files, but none is logged inside its own start and end"
   elif [ -z "$bFirst" ] && [ "$lockLines" != 1 ]; then
     bad "$name" "install B landed no guard file and printed $lockLines lock line(s), want one clear line"
   elif [ "$rcA" -ne 0 ]; then bad "$name" "install A exit $rcA: $(cat "$work/lock1sh-runA")"

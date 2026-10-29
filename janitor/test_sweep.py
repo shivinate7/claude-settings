@@ -3520,10 +3520,11 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
             with self.subTest(writers=writers):
                 self.run_writers(writers, 120)
 
-    # The Windows branch of _log_lock, forced on this host. msvcrt.locking(LK_LOCK) retries for about ten
-    # seconds and then raises. This stand-in tries three times, 0.2 s apart, so it gives up inside the
-    # holder's hold below. It takes the real flock, so the holder's lock is the one it waits on. Only the
-    # module's own `sys` reference reports win32.
+    # The Windows branch of _log_lock, forced on this host. msvcrt.locking(LK_LOCK) gives up after about ten
+    # seconds on its own, the path before the deadline fix. This stand-in tries it three times, 0.2 s apart,
+    # so it gives up inside the holder's hold, which keeps the test red on that code. The current code polls
+    # LK_NBLCK, which fails at once, so the stand-in tries it once per call. It takes the real flock, so the
+    # holder's lock is the one it waits on. Only the module's own `sys` reference reports win32.
     LOCK_GIVE_UP_PRELUDE = (
         "import fcntl as _fcntl\n"
         "import time as _time\n"
@@ -3554,8 +3555,8 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
     )
 
     # The second drop path on Windows: os.replace refuses the temp file while a reader holds the
-    # destination. log() tries five times, 50 ms apart, and then drops the row. This refuses the first
-    # six calls in each writer, so the first row's five tries all fail.
+    # destination. Before the deadline fix, log() tried the replace five times, 50 ms apart, then dropped
+    # the row. This refuses the first six calls in each writer, one more than those five tries.
     REPLACE_REFUSED_PRELUDE = (
         "_real_replace = os.replace\n"
         "_refusals = [6]\n"
@@ -3567,49 +3568,128 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         "os.replace = _refuse_then_replace\n"
     )
 
-    # Holds the payload log's real lock until 5 s after `attempt` appears, so a writer that asks for
-    # the lock meets it held. Its own pid is the only one it touches.
+    # Takes the payload log's real lock, then says so in `ready`. With a `release` path it holds the lock
+    # until that file appears (60 s at most). Without one it holds 5 s after `attempt` appears, so a writer
+    # that asks for the lock meets it held. Its own pid is the only one it touches.
     HOLDER = (
         "import fcntl, os, sys, time\n"
         "lock, ready, attempt = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+        "release = sys.argv[4] if len(sys.argv) > 4 else ''\n"
         "handle = open(lock, 'a+')\n"
         "fcntl.flock(handle, fcntl.LOCK_EX)\n"
         "open(ready, 'w').close()\n"
         "end = time.time() + 60\n"
+        "if release:\n"
+        "    while not os.path.exists(release) and time.time() < end:\n"
+        "        time.sleep(0.02)\n"
+        "    sys.exit(0)\n"
         "while not os.path.exists(attempt) and time.time() < end:\n"
         "    time.sleep(0.02)\n"
         "time.sleep(5)\n"
     )
 
+    def start_holder(self, folder, attempt, release=None):
+        """Start a process that holds the payload log's real lock in `folder`, and return it once it holds
+        the lock. The caller stops it with stop_holder."""
+        state = os.path.join(folder, "state")
+        os.makedirs(state, exist_ok=True)
+        ready = os.path.join(folder, "lock-held")
+        argv = [sys.executable, "-c", self.HOLDER,
+                os.path.join(state, "agent-end-payloads.jsonl.lock"), ready, attempt]
+        if release is not None:
+            argv.append(release)
+        holder = subprocess.Popen(argv)
+        deadline = time.time() + 30
+        while not os.path.exists(ready):
+            if holder.poll() is not None or time.time() > deadline:
+                self.stop_holder(holder)
+                self.fail("the holder never took the payload log lock")
+            time.sleep(0.02)
+        return holder
+
+    @staticmethod
+    def stop_holder(holder):
+        if holder.poll() is None:  # the holder this test started, by its own handle
+            holder.kill()
+        holder.wait(timeout=30)
+
     def test_a_lock_wait_that_gives_up_loses_no_row(self):
         """The Windows lock wait, forced: a give-up must not drop a row. The holder keeps the real lock
-        for 5 s after the first writer asks for it. The stand-in gives up in about 0.6 s, so the writer
-        must keep waiting and land its row once the holder lets go."""
+        for 5 s after the first writer asks for it. The stand-in fails each try at once, so the writer
+        must keep retrying and land its row once the holder lets go."""
         folder = tempfile.mkdtemp(prefix="reap_lock_", dir=ROOT)
         self.addCleanup(shutil.rmtree, folder, True)
-        state = os.path.join(folder, "state")
-        os.makedirs(state)
-        ready = os.path.join(folder, "lock-held")
         attempt = os.path.join(folder, "writer-attempted")
-        holder = subprocess.Popen([sys.executable, "-c", self.HOLDER,
-                                   os.path.join(state, "agent-end-payloads.jsonl.lock"), ready, attempt])
+        holder = self.start_holder(folder, attempt)
         try:
-            deadline = time.time() + 30
-            while not os.path.exists(ready):
-                if holder.poll() is not None or time.time() > deadline:
-                    self.fail("the holder never took the payload log lock")
-                time.sleep(0.02)
             self.run_writers(3, 12, prelude=self.LOCK_GIVE_UP_PRELUDE, folder=folder,
                              env_extra={"WRITER_ATTEMPT_MARK": attempt})
         finally:
-            if holder.poll() is None:  # the holder this test started, by its own handle
-                holder.kill()
-            holder.wait(timeout=30)
+            self.stop_holder(holder)
 
-    def test_a_replace_that_stays_refused_loses_no_row(self):
-        """The Windows replace, forced: os.replace refuses each writer's first five tries. A refusal
-        that outlasts log()'s tries must not drop the row."""
+    def test_a_replace_refused_past_five_tries_loses_no_row(self):
+        """The Windows replace, forced: os.replace refuses each writer's first six calls, one more than
+        the five tries log() once made. Those refusals must not drop the row."""
         self.run_writers(3, 12, prelude=self.REPLACE_REFUSED_PRELUDE)
+
+    # The hook, run as its own process with the three waits set small. main() times itself, so interpreter
+    # start-up and host load stay out of the number. The Windows branch of _log_lock is forced: on POSIX the
+    # lock wait has no deadline, and the per-call waits this case bounds live on the Windows branch. The names
+    # are assigned, not patched: a build with no such name gets an unused one, so its waits run at full
+    # length and the case goes red.
+    HOOK_BOUND_CHILD = (
+        "import os, sys, time\n"
+        "sys.path.insert(0, __JANITOR__)\n"
+        "import agent_end_reap\n"
+        "__PRELUDE__"
+        "agent_end_reap.LOG_WAIT_SECONDS = __WAIT__\n"
+        "agent_end_reap.HOOK_BUDGET = __BUDGET__\n"
+        "agent_end_reap.LOG_DONE_BY = __DONE_BY__\n"
+        "started = time.monotonic()\n"
+        "code = agent_end_reap.main()\n"
+        "print('ELAPSED %.3f' % (time.monotonic() - started))\n"
+        "sys.exit(code)\n"
+    ).replace("__JANITOR__", repr(os.path.dirname(os.path.abspath(__file__)))  # repr: Windows backslashes
+          ).replace("__PRELUDE__", LOCK_GIVE_UP_PRELUDE
+          ).replace("__WAIT__", "3.0").replace("__BUDGET__", "1.0").replace("__DONE_BY__", "2.0")
+
+    def test_a_held_log_lock_keeps_the_hook_inside_its_bound(self):
+        """The hook's bound with the payload log lock held for the whole run, on the forced Windows branch of
+        _log_lock, where the per-call waits live. Scaled from the real
+        numbers (done row by 58 s, hook limit 60 s) to a 2.0 s done deadline. The hook must end near that
+        deadline, exit 0, name the dropped write on stderr, and lose only its own run's rows. Rows from other
+        runs, written before the holder takes the lock, must all survive."""
+        folder = tempfile.mkdtemp(prefix="reap_bound_", dir=ROOT)
+        self.addCleanup(shutil.rmtree, folder, True)
+        state = os.path.join(folder, "state")
+        os.makedirs(state)
+        seeds = ["seed-%d" % n for n in range(3)]
+        with open(os.path.join(state, "agent-end-payloads.jsonl"), "w", encoding="utf-8") as handle:
+            for run in seeds:
+                handle.write(json.dumps({"raw": "{}", "run": run, "state": "done"}) + "\n")
+        release = os.path.join(folder, "release")
+        attempt = os.path.join(folder, "writer-attempted")
+        holder = self.start_holder(folder, attempt, release=release)
+        try:
+            proc = subprocess.run([sys.executable, "-c", self.HOOK_BOUND_CHILD], input="{}",
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                  env=dict(os.environ, CLAUDE_CONFIG_DIR=folder, WRITER_ATTEMPT_MARK=attempt),
+                                  timeout=120)
+        finally:
+            with open(release, "w", encoding="utf-8"):
+                pass  # the holder lets go; the file is this test's own
+            self.stop_holder(holder)
+        marks = [line.split() for line in proc.stdout.splitlines() if line.startswith("ELAPSED ")]
+        self.assertTrue(marks, "the hook printed no ELAPSED line: %s" % proc.stderr)
+        elapsed = float(marks[-1][1])
+        # Timing first. The done row gives up at its 2.0 s deadline; the old per-call waits take about 6 s.
+        self.assertLess(elapsed, 2.0 + 1.0, "the hook ran %.2f s, past its 2.0 s done deadline" % elapsed)
+        self.assertGreater(elapsed, 2.0 - 0.2, "the hook ended %.2f s in, before its lock wait ran out" % elapsed)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("LogWaitTimeout", proc.stderr)
+        with open(os.path.join(state, "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
+            runs = [json.loads(line).get("run") for line in handle.read().splitlines()]
+        self.assertEqual(runs, seeds, "the hook lost rows that were not its own: %s" % runs)
 
 
 class AgentEndReapBatchTests(unittest.TestCase):
