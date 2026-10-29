@@ -73,7 +73,8 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
     only "done", "of" and "organize", which are data.
 13. The status part reads its box. Its 640 and 1000 breakpoints are container queries on its
     wrapper, not the media queries of the roadmap page (`ux-component-reads-its-box`).
-14. The waiting part is main's, with no change. Card details that other lanes change now are not drawn.
+14. The waiting part is main's, with no change. The order in each tier is the writer's `rank`, then
+    age, as main's `sorted()` gives it. Card details that other lanes change now are not drawn.
 
 ## Build constraints
 
