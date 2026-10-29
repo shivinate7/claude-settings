@@ -53,6 +53,21 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
 - **Opus grants live on the roadmap step** (owner, 2026-10-29 13:44 CDT, pick a): "Grants living in roadmap actually does make a lot of sense -- i lean towards that route."
   - Triage writes each Opus grant on the step it covers, with the owner's words and time. A lane's guard reads the grant of its own step. Lane opus-grant-on-step builds this; decision agent-model-cap gets the lift when it lands.
 
+## How it works
+
+Mechanics that carry out the rulings above. They are not owner rulings.
+
+- **Tier tags** (coordinator, 2026-10-28). Each session the coordinator starts carries these two tags, beside any others such as `cs-step:<step>`.
+  - `cs-build:<tier>`, one of `coordinator`, `triage`, `batch-runner`, `lane`.
+  - `cs-repo:<owner>/<name>`, the repo it builds.
+- **Live-coordinator check.** A session that would act as coordinator reads every page of `list_sessions`. It looks for one session with both tags whose `session_status` is not archived. That session is the active coordinator.
+  - The `tags` filter of `list_sessions` errors inside a session, so the check filters the rows itself.
+  - `list_sessions` leaves out runs a scheduled task started. The check misses a coordinator started that way.
+- **Session start** (lane L3). In a cloud session (`CLAUDE_CODE_REMOTE=true`), `hooks/session_start.sh` prints one fixed line, in any working folder, git or not. The line tells the session to read its own record with `get_session`, and gives the check above.
+  - The hook cannot read the tier itself. `get_session` and `list_sessions` are MCP tools only, and a hook never calls the sessions API with a token.
+  - Outside the cloud the hook prints no line. The gate is that one env value.
+  - Cost: one env read in the hook already running. No network, no new process, no timer, no file written. `hooks/test_session_start.py` proves the line prints once in cloud, in a git folder or not, and never outside the cloud.
+
 ## Why
 
 - Coordinators share a scarce machine by talking to each other (14:59).
