@@ -629,3 +629,5 @@
 - ios-duo-order-word-window: the Duo order check reads only the two words before a pose word for "after" or "before", so "Draw the Duo unfolded after the Duo folded." gets a false duo-order and "Draw the Duo folded after the Duo unfolded." passes; the ios-apps rule and the mockup frame-order check back it up (hooks/blind_brief.py _pose_rank). Decision: blind-briefs-use-a-template
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
+- merge-role-skips-raw-merge: raw `gh pr merge` (permission-allowed) and the GitHub MCP merge tool skip the merge role check (hooks/guard_merge.py). Decision: session-tiers.
+- merge-remedy-hits-role-refusal: the remedy text of hooks/guard_merge.py (`merge <pr> --confirm`) now sends a cloud lane into the merge role refusal (hooks/guard_merge.py). Decision: session-tiers.
