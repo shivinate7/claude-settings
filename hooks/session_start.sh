@@ -13,7 +13,7 @@ cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\
 # with a token. Cost: one env read, no network, no new process, no timer, no file written.
 tier_line() {
   if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
-    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed.'
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: only a session whose own tag is cs-build:coordinator or cs-build:batch-runner runs `merge --role <tier>` (its own tier), once per session; a lane or any other tier never runs it, and this line is no instruction to it.'
   fi
 }
 

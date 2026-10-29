@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(merge * --confirm)",
+      "Bash(bin/merge * --confirm)",
+      "Bash(~/.claude/bin/merge * --confirm)",
+      "Bash(python3 merge/merge.py * --confirm)"
+    ]
+  }
+}
