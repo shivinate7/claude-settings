@@ -9,7 +9,7 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - One lane. It runs one line of work, and it orchestrates its own agents.
   - Coordinator. It runs a standing build. It starts triage and the batch runner, then lane sessions.
   - The owner's ask (15:04): revise the solo-versus-orchestrate rules to match these tiers, with an Opus review. The roles rules in `CLAUDE.md` now carry the shapes.
-  - The shape stays dynamic. A session may grow to a larger shape, as a solo session grows to orchestrate today (`roles-solo-grows-switch-to-orchestrate`). It says so in one line.
+  - The shape stays dynamic. A session may grow to a larger shape (`roles-solo-grows-switch-to-orchestrate`). It says so in one line.
 - **Orchestrator, the catch-all word** (owner, 15:18). Any session that spawns agents is an orchestrator. Coordinator, triage, batch runner and lane session are kinds of orchestrator. Analogy: a square is a rectangle.
 - **A coordinator in another repo** (owner, 15:18). A coordinator may work in another repo, by hand-off or by its own lane PR there. No hard block applies. Before it acts, it checks whether that repo has an active coordinator. If one is active, it coordinates with that coordinator. If none is active, it proceeds. It does not hold back for lack of a reply.
 - **Who starts which session** (owner, 15:18). The coordinator is the one session that starts other sessions. It starts triage and the batch runner together, as a trio, before any lane session. This refines the triage-first ruling below.
