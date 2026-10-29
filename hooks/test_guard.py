@@ -14173,6 +14173,43 @@ def session_home_spawn_cost_case():
     return True, "the record write, the refused write and a non-writing shell call add no git spawn"
 
 
+def session_home_non_isolated_agent_case():
+    """An agent with no worktree of its own (no agent-home record, cwd in the primary checkout) is
+    not refused as session-home while the session's record is lost. Rule session-home judges only a
+    call with no agent_id: an agent shares its session's id, so the session's lost record must not
+    refuse a non-isolated agent's write into the primary. The session's own write is refused, which
+    shows the record is live."""
+    primary = sh_new_primary("nonisolated")
+    lane, branch = sh_add_lane(primary, "lane-nonisolated")
+    session = sh_session()
+    agent = "shomenonisolated01"  # an agent id in the shape AGENT_ID accepts, with no worktree
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the session's own primary Write (control)", got, reason,
+                                    primary, lane)
+    got, reason = _decide_full("Write", primary, session=session, agent_id=agent, file_path=src,
+                               content="x")
+    if got != "allow":
+        problems.append("a non-isolated agent's Write into the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, agent_id=agent,
+                               command="echo x > f.txt")
+    if got != "allow":
+        problems.append("a non-isolated agent's shell write into the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a non-isolated agent writes into the primary while the session's record is lost"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a non-isolated agent, with no record of its own, writes into the "
+                         "primary checkout while the session's record is lost",
+                         session_home_non_isolated_agent_case))
 LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree is gone is refused a write into the "
                          "primary checkout, by each write tool and a shell write, naming EnterWorktree "
                          "and no path", session_home_lost_refuses_case))
