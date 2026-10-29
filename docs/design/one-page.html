@@ -339,6 +339,7 @@ body.sheet-open { overflow: hidden; }
 /* The roadmap's layout, scoped under .sv and drawn in this page's tokens. Class names that page.html already
    uses (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) get new names here. */
 .tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
 .lonely { margin-top: 18px; }
 .svwrap { container-type: inline-size; padding-block: 18px 40px; }
 .sv { display: grid; gap: 16px; min-width: 0; }
@@ -666,14 +667,14 @@ function screen(s, theme, lab) {
   const onStatus = s === "status" || s === "no-status", empty = s === "empty";
   const tabs = `<nav class="in tabs" id="tabs" aria-label="Page"><a href="#" id="tabQ" data-go="main"${onStatus ? "" : ' aria-current="page"'}>Questions <span class="cnt" data-new="open count">${empty ? 0 : OPEN}</span></a><a href="#" id="tabS" data-go="${s === "no-status" ? "no-status" : "status"}"${onStatus ? ' aria-current="page"' : ""} data-new="Status tab, always second">Status</a></nav>`;
   let body;
-  if (empty) body = `<div class="in lonely"><div class="empty" data-new="one line; a new card takes its slot">Nothing on this page waits on you.</div></div>`;
+  if (empty) body = `<div class="in lonely"><div class="empty" data-new="one line; a new card takes its slot">Nothing on this page waits on you. Sessions add an item here when they need your word.</div></div>`;
   else if (onStatus) body = status(s);
   else body = `<div class="in main" id="qView" data-today="questions as on main">${rail()}${list()}</div>`;
   const bar = empty
     ? `<div class="bar" id="bar"><div class="in"><span class="st"></span><button class="btn send" type="button" disabled>Send answers</button></div></div>`
     : `<div class="bar" id="bar"${onStatus ? ' data-new="bar stays on the Status tab"' : ""}><div class="in"><span class="st"><b>${READY}</b> ready (${READY} where my pick stands). <b>${OPEN - READY}</b> stay open.</span><button class="btn send" type="button">Send ${READY} answer${READY === 1 ? "" : "s"}</button></div></div>`;
-  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sample-repo: ${onStatus ? "Status" : "waiting on you"}</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
-<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo"${onStatus ? ' data-new="no &quot;waiting on you&quot; on Status"' : ""}>sample-repo</h1>${onStatus ? "" : '<span class="sub">waiting on you</span>'}</div></div></header>
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sample-repo: ${onStatus ? "Status" : "Questions"}</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo" data-new="repo name only; the title names the tab">sample-repo</h1></div></div></header>
 ${tabs}${body}${bar}
 <script>document.addEventListener("click",function(e){var a=e.target.closest("[data-go]");if(a){e.preventDefault();parent.postMessage({oneState:a.dataset.go},"*");}});<\/script></body></html>`;
 }

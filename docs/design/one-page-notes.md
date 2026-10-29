@@ -36,21 +36,27 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
      he presses.
 2. The tab row always shows: "Questions" with its open count, then "Status", then "Designs" when an
    item has a design. Gain: Status never moves, the count shows what waits from either tab, and an
-   item that arrives moves no tab. Loss: main hides the row when no item has a design.
+   item that arrives moves no tab: the count has a fixed box (`min-width: 3.5ch`, tabular digits).
+   Measured: the Status tab stays at one place for the counts 0, 9, 10 and 100. Loss: main hides
+   the row when no item has a design.
 3. Status shows only behind its tab, on every load and in every state. Ruling: orchestrator, round 2.
    Nothing waits (`#s=empty`): the tab row shows "Questions 0", and the Questions tab shows one
-   line. When an item arrives, its card takes the line's slot. Nothing else moves
-   (`ux-press-moves-nothing`). The page has one layout.
-4. The empty line is one sentence: "Nothing on this page waits on you." A thread that asks in its
+   line. When an item arrives, the content above the line does not move
+   (`ux-press-moves-nothing`). At 390 and 800, the overview rail and the card take the line's slot,
+   the rail above the card. At 1280, the rail takes its column and the card takes the list column.
+   The page has one layout.
+4. The empty line: "Nothing on this page waits on you. Sessions add an item here when they need
+   your word." A thread that asks in its
    own chat has no item on this page, and Live work names it "asking in its chat", so both stay
    true (`ux-statements-are-true`). Departs from: page.html `renderList`, which says "Nothing is
    waiting on you right now."
 5. A load always opens Questions. The page does not keep the tab choice. The roadmap's own view
    memory (`rm-view`) stays for Plan, Changes, Reference and Records. Gain: what waits is first,
    each time. Loss: the owner who reads status first presses once on each load.
-6. The status part has one name: "Status". The tab and the document title use it. On the Status
-   tab the header shows the repo name only, with no "waiting on you". On Questions the header and
-   title are as on main.
+6. Each part has one name, the name of its tab: "Questions" and "Status". The document title is
+   "<repo>: Questions" or "<repo>: Status". The tab row always shows, so the header shows the repo
+   name only, with no "waiting on you" line. Ruling: reviewer's pick, taken by the orchestrator,
+   round 3. Departs from: page.html `applyIdentity`, which titles the page "<repo>: waiting on you".
 7. The answer bar stays on the Status tab. Gain: a pick is never left behind, nothing moves at a
    tab change, and the bar says how many items wait. Loss: the bar shows under status, which it
    does not change.
@@ -132,5 +138,8 @@ Each part below is kept as it is today, with no change. The mockup does not draw
 9. The roadmap's class names that page.html also uses are scoped or renamed: `.bar`, `.rail`,
    `.card`, `.tabs`, `.steps`, `.g`, `.top`, `.big`, `.sub`, `.empty`. The page loads no font for
    status.
-10. Status is read only, as the baked roadmap is today. The step mark is not a control, and the
+10. The Status tab hides `#qView` and never removes it, so a typed note draft survives a tab switch
+    (`ux-keep-what-was-made`). The builder's test: type a note, open Status, open Questions, and
+    check that the note is there.
+11. Status is read only, as the baked roadmap is today. The step mark is not a control, and the
     hint says "Read only".
