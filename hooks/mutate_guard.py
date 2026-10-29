@@ -793,7 +793,7 @@ MUTATIONS = [
      'STEP_UP_MARKER = re.compile(r"(?im)^',
      'STEP_UP_MARKER = re.compile(r"(?i)^', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
     ("step-up: the first-line marker search is dropped, so a Round 3 of 3 behind a role word on line one asks",
-     '    return found + FIRST_LINE_MARKER.findall(first)',
+     '    return found + ([lead.groups()] if lead else [])',
      '    return found', "guard",
      'first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed'),
     ("step-up: round 3 accepts only sonnet, so an opus reviewer is refused",
