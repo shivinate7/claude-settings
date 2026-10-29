@@ -345,7 +345,6 @@ html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
 @supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
 /* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box.
    The text keeps today's .links look: 15px, --acc, underlined, then the arrow. */
-.opt .links { gap: 0 16px; }                                                              /* Today .links gap 12px */
 .opt .links a { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }  /* Today inline, about 23px high */
 
 /* ---------- Options shown for the owner's cull (harness only) ---------- */
@@ -410,7 +409,7 @@ function optCard(it, o, chosen, mode) {
   const sfx = it.n + "-" + o.key, sel = chosen === o.key;
   const lk = mode === "none" ? "" : linksRow(it, o, mode === "plain");
   const tr = `<div class="tr" id="t-${sfx}"><div class="gain"><span class="s" aria-label="You gain">+</span><span>${esc(o.gain)}</span></div><div class="lose"><span class="s" aria-label="You lose">−</span><span>${esc(o.lose)}</span></div></div>`;
-  return `<label class="opt${sel ? " sel" : ""}" for="o-${sfx}"><input type="radio" name="g-${it.n}" id="o-${sfx}" value="${o.key}"${sel ? " checked" : ""} aria-labelledby="l-${sfx}" aria-describedby="h-${sfx} t-${sfx}${it.pick === o.key ? " p-" + sfx : ""}"><span class="head"><span class="key">${o.key}</span><span class="lab" id="l-${sfx}">${esc(o.label)}</span></span><p class="how" id="h-${sfx}">${esc(o.how)}</p>${mode === "atend" ? tr + lk : lk + tr}${it.pick === o.key ? `<div class="pick" id="p-${sfx}">${SPARK}<span>${esc(it.why)}</span></div>` : '<span class="nopick"></span>'}</label>`;
+  return `<label class="opt${sel ? " sel" : ""}" for="o-${sfx}"${mode !== "none" && o.key === "b" ? lab("today", "option card") : ""}><input type="radio" name="g-${it.n}" id="o-${sfx}" value="${o.key}"${sel ? " checked" : ""} aria-labelledby="l-${sfx}" aria-describedby="h-${sfx} t-${sfx}${it.pick === o.key ? " p-" + sfx : ""}"><span class="head"><span class="key">${o.key}</span><span class="lab" id="l-${sfx}">${esc(o.label)}</span></span><p class="how" id="h-${sfx}">${esc(o.how)}</p>${mode === "atend" ? tr + lk : lk + tr}${it.pick === o.key ? `<div class="pick" id="p-${sfx}">${SPARK}<span>${esc(it.why)}</span></div>` : '<span class="nopick"></span>'}</label>`;
 }
 function openCard(it, chosen, mode) {
   const c = it.opts.find((o) => o.key === chosen), pk = it.opts.find((o) => o.key === it.pick);
