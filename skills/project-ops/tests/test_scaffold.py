@@ -106,7 +106,7 @@ class Scaffold(unittest.TestCase):
         flat = " ".join(section.group(1).split())
         self.assertIn("The URL of each page this role owns", flat)
         self.assertInOrder(flat, (
-            "old thread stopped watching each one at that time",
+            "old session stopped watching each one at that time",
             "answered each comment still open at that time",
             "wrote this file",
             "successor watches each one at once",
@@ -114,20 +114,42 @@ class Scaffold(unittest.TestCase):
 
     def test_handoff_rule_moves_page_watches(self):
         text = tree(SKILL)["templates/operating-model.md"]
-        rule = re.search(r"## Hand-off rule.*?(?=\n## )", text, re.S).group(0)
+        rule = re.search(r"## Rotation of standing sessions.*?(?=\n## )", text, re.S).group(0)
         flat = " ".join(rule.split())
         self.assertInOrder(flat, (
-            "old thread stops watching each page its role owns",
+            "old session stops watching each page its role owns",
             "It notes the time",
             "answers each comment still open at that time",
+            "It drains its work in flight",
             "writes the hand-off file",
             "with that time",
+            "each wait it handed over",
+            "coordinator archives the old session",
             "coordinator starts the successor from the hand-off file",
             "successor watches each page at once",
             "reads each page's comments since the time in the hand-off file"))
-        self.assertIn("The coordinator sends no broadcast. Threads read the roster.", flat)
+        self.assertIn("The coordinator sends no broadcast. Sessions read the roster.", flat)
         self.assertEqual(flat.count("coordinator starts the successor from"), 1,
                          "one hand-off, one bullet")
+        self.assertIn("external_metadata.context_usage", flat)
+        self.assertIn("<triage limit>", flat)
+        self.assertIn("<batch runner limit>", flat)
+        self.assertIn("The coordinator never hands its own sessions to a successor", flat)
+
+    def test_tiers_start_as_a_trio(self):
+        text = tree(SKILL)["templates/operating-model.md"]
+        tiers = re.search(r"## Session tiers.*?(?=\n## )", text, re.S).group(0)
+        flat = " ".join(tiers.split())
+        self.assertIn("starts triage and the batch runner together, as a trio, before any lane session", flat)
+        self.assertIn("checks whether that repo has an active coordinator", flat)
+        self.assertIn("It does not wait for a reply.", flat)
+        self.assertIn("tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`", flat)
+        self.assertIn("a live session tagged both `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`", flat)
+        self.assertIn("filters the tags itself", flat)
+
+    def test_brief_carries_repo_tag(self):
+        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
+        self.assertIn("tags `cs-repo:<owner>/<name>` and `cs-build:lane`", flat)
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")

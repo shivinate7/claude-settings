@@ -28,6 +28,7 @@ Override the module under test with the env var BLIND_BRIEF_UNDER_TEST.
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("BLIND_BRIEF_UNDER_TEST") or os.path.join(HERE, "blind_brief.py")
 TEMPLATE = os.path.join(HERE, "..", "skills", "design-explore", "blind-brief.md")
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 
 
 def load():
@@ -549,6 +553,154 @@ class Hook(unittest.TestCase):
         self.spawn(brief(job=JOB + "\nKeep the current layout."))
         with open(os.path.join(self.config.name, "guard.log"), encoding="utf-8") as handle:
             self.assertIn("blind-brief", handle.read())
+
+
+IOS_DEVICE = (
+    "Two poses of the iPhone Duo, drawn in this order. First, iPhone Duo, folded: a tent on a desk, one "
+    "screen up. Then iPhone Duo, unfolded: open as a book, both screens side by side. Touch only. Follow "
+    "skill ios-apps and the Apple Human Interface Guidelines. Use native controls, lists and sheets. Respect "
+    "the safe-area insets. Use the system font and Dynamic Type for all text. Use 44 pt touch targets. Each "
+    "pose gets its own layout, never a stretched phone.")
+IOS_DEVICE_NO_SKILL = IOS_DEVICE.replace("Follow skill ios-apps and the Apple", "Follow the Apple")
+
+
+def app_repo(kind):
+    """A repo folder under the run folder whose extras file names its app kind, as lint/layout.py reads it."""
+    root = tempfile.mkdtemp(dir=RUN_FOLDER)
+    os.makedirs(os.path.join(root, ".claude"))
+    with open(os.path.join(root, ".claude", "layout-extras.json"), "w", encoding="utf-8") as handle:
+        json.dump({"kinds": {}, "kind": kind}, handle)
+    return root
+
+
+def fault_codes(stdout):
+    """The fault codes the CLI printed: the first word of each line, without its summary line."""
+    return {line.split(":", 1)[0] for line in stdout.splitlines() if line and not line.startswith("blind_brief:")}
+
+
+def check_run(texts, root=None):
+    """The CLI's verdict on one explore run of briefs, as (exit code, fault codes, stdout)."""
+    folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+    for index, text in enumerate(texts):
+        with open(os.path.join(folder, "lane-%d.md" % (index + 1)), "w", encoding="utf-8") as handle:
+            handle.write(text)
+    done = run_cli("--run", folder, *(["--root", root] if root else []))
+    return done.returncode, fault_codes(done.stdout), done.stdout
+
+
+def spawn_in(root, prompt, role="designer", tool="Agent"):
+    """The hook's stdout for one spawn whose cwd is `root`. Its config folder is under the run folder."""
+    config = tempfile.mkdtemp(dir=RUN_FOLDER)
+    payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": "s1", "cwd": root,
+               "tool_input": {"subagent_type": role, "prompt": prompt, "description": "lane"}}
+    done = subprocess.run([sys.executable, MODULE], input=json.dumps(payload), capture_output=True, text=True,
+                          env=dict(os.environ, CLAUDE_CONFIG_DIR=config), timeout=60)
+    if done.returncode != 0:
+        raise AssertionError(done.stderr)
+    return done.stdout.strip()
+
+
+def reason_of(out):
+    return json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+class IosApps(unittest.TestCase):
+    """An iOS app repo (app kind `ios`, roadmap step c192) draws the Duo fold first and names skill ios-apps.
+    The CLI reads the repo from --root, and the hook from the spawn's cwd."""
+    @classmethod
+    def setUpClass(cls):
+        cls.ios = app_repo("ios")
+        cls.web = app_repo("web")
+
+    def test_device_naming_only_unfolded_is_refused_first(self):
+        code, found, out = check_run([brief(device="iPhone Duo, unfolded.")], self.ios)
+        self.assertEqual(code, 1, out)
+        self.assertIn("device-first", found, out)
+
+    def test_folded_named_without_unfolded_gets_duo_unfolded(self):
+        device = "A folding phone. Draw the iPhone Duo, folded: a tent on a desk. Touch only."
+        code, found, out = check_run([brief(device=device)], self.ios)
+        self.assertIn("duo-unfolded", found, out)
+
+    def test_unfolded_named_before_folded_gets_duo_order(self):
+        device = ("A folding phone. Draw the iPhone Duo, unfolded, open as a book; then the iPhone Duo, folded, "
+                  "a tent on a desk. Touch only.")
+        code, found, out = check_run([brief(device=device)], self.ios)
+        self.assertIn("duo-order", found, out)
+
+    def test_unfolded_named_after_folded_gets_no_duo_order(self):
+        device = "iPhone Duo, unfolded, drawn after the folded pose."
+        code, found, out = check_run([brief(device=device)], self.ios)
+        self.assertNotIn("duo-order", found, out)
+
+    def test_blind_brief_that_never_names_ios_apps_gets_ios_skill(self):
+        code, found, out = check_run([brief(device=IOS_DEVICE_NO_SKILL)], self.ios)
+        self.assertIn("ios-skill", found, out)
+
+    def test_blind_spawn_that_never_names_ios_apps_is_refused_with_ios_skill(self):
+        out = spawn_in(self.ios, brief(device=IOS_DEVICE_NO_SKILL))
+        self.assertTrue(out, "want a refusal, got no output")
+        self.assertIn("ios-skill", reason_of(out))
+
+    def test_informed_spawn_without_ios_apps_gets_ios_skill(self):
+        prompt = "Lane kind: informed\nBlind lanes: 2\n\nDraw the packages screens: the iPhone Duo, folded, then unfolded."
+        out = spawn_in(self.ios, prompt)
+        self.assertTrue(out, "want a refusal, got no output")
+        self.assertIn("ios-skill", reason_of(out))
+
+    def test_informed_spawn_still_needs_its_blind_lanes_line(self):
+        prompt = "Lane kind: informed\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
+        self.assertIn("Blind lanes", reason_of(spawn_in(self.ios, prompt)))
+
+    def test_informed_spawn_with_blind_lanes_and_ios_apps_passes(self):
+        prompt = "Lane kind: informed\nBlind lanes: 2\n\nFollow skill ios-apps. Draw the iPhone Duo, folded, then unfolded."
+        self.assertEqual(spawn_in(self.ios, prompt), "")
+
+    def test_valid_ios_blind_brief_has_zero_faults(self):
+        code, found, out = check_run([brief(device=IOS_DEVICE)], self.ios)
+        self.assertEqual((code, found), (0, set()), out)
+
+    def test_web_blind_brief_is_unchanged_and_green(self):
+        device = "Phone width first, then desktop width. Touch on the phone, a mouse on the desktop."
+        code, found, out = check_run([brief(device=device)], self.web)
+        self.assertEqual((code, found), (0, set()), out)
+
+    def test_blind_brief_with_no_kind_line_in_an_ios_repo_passes(self):
+        self.assertEqual(spawn_in(self.ios, "Draw the packages screens for the iPhone Duo. Touch only."), "")
+
+    def device_codes(self, device):
+        """(fault codes, stdout) of one blind brief whose Device section is `device`, in the ios repo. The Job
+        names skill ios-apps, so the Device section is the only part of the brief that can fault."""
+        code, found, out = check_run([brief(job=JOB + "\nFollow skill ios-apps.", device=device)], self.ios)
+        return found, out
+
+    def test_short_form_unfolded_then_folded_gets_duo_order(self):
+        found, out = self.device_codes("Draw iPhone Duo unfolded, then folded.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_short_form_unfolded_first_then_the_folded_pose_gets_duo_order(self):
+        found, out = self.device_codes("Duo unfolded first, then the Duo in folded pose.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_short_form_unfolded_pose_and_folded_pose_gets_duo_order(self):
+        found, out = self.device_codes("Duo unfolded pose and folded pose.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_short_form_folded_first_then_unfolded_gets_no_duo_order(self):
+        found, out = self.device_codes("Folded Duo first, then unfolded Duo.")
+        self.assertEqual(found, set(), out)
+
+    def test_short_form_folded_then_unfolded_in_parentheses_gets_no_duo_order(self):
+        found, out = self.device_codes("Duo (folded) on one hand, Duo (unfolded) on two hands.")
+        self.assertEqual(found, set(), out)
+
+    def test_full_form_folded_then_unfolded_gets_no_duo_order(self):
+        found, out = self.device_codes("iPhone Duo, folded, then iPhone Duo, unfolded.")
+        self.assertEqual(found, set(), out)
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":

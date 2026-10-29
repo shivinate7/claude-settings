@@ -13,7 +13,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `outcomes-judge-by-outcome` | Judge every rule, check, and design by the outcome for the person the software serves. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-decision-is-argument` | Treat a recorded decision as an argument, not a law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-stale-decision-protocol` | When a decision looks stale, name the record and the sentence. | [`CLAUDE.md`](../CLAUDE.md) |
-| `outcomes-tests-are-statements` | A failing test is a statement, not law. | [`CLAUDE.md`](../CLAUDE.md) |
+| `outcomes-tests-are-statements` | A failing test is a claim, not law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-grant-covers-named-act` | My grant covers the act it names, never a variant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-mechanize-rules` | Once ready, turn each rule below into a hook or check. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-pick-mode-from-request` | Pick the session's shape from my request: solo, one lane, or coordinator (`session-tiers`, the session shapes). | [`CLAUDE.md`](../CLAUDE.md) |
@@ -23,19 +23,19 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `roles-orchestrator-never-builds` | Every session that spawns agents is an orchestrator. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-agent` | Each agent is one role: builder, reviewer, designer, design reviewer, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-default` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, and a builder's round 3 (`roles-third-round-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, and a builder's third try (`roles-third-round-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-shaped-say-so` | When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour autonomous work), say so in one line before you dispatch, name why, and offer the switch. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-opus-override-guarded` | Owner raises Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-brief-contents` | A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-statements`, and the check that proves the task done—in the fewest words. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-each-layer-proves-once` | Each layer proves a change once. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-review-cap-three` | A change gets at most three review rounds. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-findings-are-debts-or-notes` | A finding is a debt only if Claude is likely to hit it in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-third-round-steps-up` | Third round: Opus. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-findings-are-debts-or-notes` | A known gap is a debt only if Claude is likely to hit it in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-third-round-steps-up` | Third try: Opus. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-resume-by-name` | Resume a dead agent by name, never fresh. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-each-own-checkout` | Fan tasks out to agents now, each in its own checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-own-lane-orchestrator` | A read-only workflow agent shares the caller's checkout. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-no-mid-task-talk` | Never let lanes talk mid-task. | [`CLAUDE.md`](../CLAUDE.md) |
-| `parallelism-argue-max-parallelism` | Argue "at max parallelism" by naming the open lanes, never by assuming the statement. | [`CLAUDE.md`](../CLAUDE.md) |
+| `parallelism-argue-max-parallelism` | Argue "at max parallelism" by naming the open lanes, never by assuming the claim. | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-no-guessed-lane-cap` | A brief or plan never caps lanes on its own, by a guessed number such as "one or two at a time" or "at most N lanes". | [`CLAUDE.md`](../CLAUDE.md) |
 | `parallelism-keep-going` | When a lane ends, start in the same turn each queued item the owner asked for whose questions are all answered. | [`CLAUDE.md`](../CLAUDE.md) |
 | `shared-trees-no-destructive-git` | No destructive git. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -48,6 +48,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shared-trees-delete-names-absolute-path` | A delete names its target as an absolute or quoted-variable path, never after a cd. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge failing CI. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-no-merge-during-batch-ci` | While a batch's integration PR has a CI run in progress, nothing merges to main, by any session or by me. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-wait-checks-in` | A session that waits on CI sets a timed check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep command output. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -68,7 +69,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verification-never-dry-run-refusal-list` | Never dry-run a refusal list. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-newest-that-passes` | Take the newest version that passes its checks. | [`CLAUDE.md`](../CLAUDE.md) |
 | `verification-checked-reader-for-numbers` | If this repo lints markdown, give every published number and path a checked reader. | [`CLAUDE.md`](../CLAUDE.md) |
-| `verification-report-unknown-reads` | Verify a statement before you rely on it, a document's own statements too. | [`CLAUDE.md`](../CLAUDE.md) |
+| `verification-report-unknown-reads` | Verify a claim before you rely on it, a document's own claims too. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-never-load-whole-doc` | Never load a long document whole. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-verdict-not-stream` | A verification command's answer is its verdict, not its stream. | [`CLAUDE.md`](../CLAUDE.md) |
 | `tokens-run-through-verdict` | Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -94,7 +95,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `speak-rewrite-superseded-in-place` | Rewrite superseded text in place. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-write-in-ste` | Write plainly: short sentences, one term per meaning, no filler. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-never-paste-passing-output` | Rules for replies to me, and not to agents, live in the `shiv-stylisms` output style. | [`CLAUDE.md`](../CLAUDE.md) |
-| `output-bring-decisions-as-question` | Bring my decisions as a question with options and a recommendation. | [`CLAUDE.md`](../CLAUDE.md) |
+| `output-bring-decisions-as-question` | Bring my choices as a question with options and a recommendation. | [`CLAUDE.md`](../CLAUDE.md) |
 | `output-answer-has-a-home` | An answer to a question I bring is a ruling. | [`CLAUDE.md`](../CLAUDE.md) |
 | `questions-go-to-owner` | Bring each question to me. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-order-of-labels` | Done, Deviations, Input Needed, Next. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -175,6 +176,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`, with `autoUpdate` set to true. | [`docs/decisions/mods-install-via-marketplace.md`](../docs/decisions/mods-install-via-marketplace.md) |
 | `mods-no-cli-key-headless` | No CLI API key for headless runs. | [`docs/decisions/mods-no-cli-key-headless.md`](../docs/decisions/mods-no-cli-key-headless.md) |
 | `mutation-report-scores-suites` | `hooks/mutate_guard.py --report` scores the suites of other verdict-deciding files with mechanical mutants, on demand. | [`docs/decisions/mutation-report-scores-suites.md`](../docs/decisions/mutation-report-scores-suites.md) |
+| `no-merge-during-batch-ci` | The owner ruled on Oct 28 at 13:36 CDT: no one merges to main while a batch's CI runs. | [`docs/decisions/no-merge-during-batch-ci.md`](../docs/decisions/no-merge-during-batch-ci.md) |
 | `no-merge-onto-red-main` | The red-main check: the merge tool refuses `merge <pr> --confirm` while the base branch's latest completed run has a red job. | [`docs/decisions/no-merge-onto-red-main.md`](../docs/decisions/no-merge-onto-red-main.md) |
 | `one-layout-every-repo` | Every repo keeps each kind of file in the same place. | [`docs/decisions/one-layout-every-repo.md`](../docs/decisions/one-layout-every-repo.md) |
 | `one-shared-record-stamp` | One shared parser in claude-settings handles every repo's record format. | [`docs/decisions/one-shared-record-stamp.md`](../docs/decisions/one-shared-record-stamp.md) |

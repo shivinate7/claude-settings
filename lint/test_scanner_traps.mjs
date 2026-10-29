@@ -123,12 +123,28 @@ const asAddedLines = (text) => text.split("\n").map((l) => "+" + l).join("\n");
 const GHP = "gh" + "p_" + "A".repeat(36); // a fake token, built so no scanner reads it as live
 const secretFlagged = (text) => looksSecret(asAddedLines(text));
 
+// ---- scanner 5, ios-mockup: the page's font, safe-area and duo frames (lint/check_ios_mockup.py). The check is
+// Python, so node runs it on the page text from stdin. The page is whole (font, inset, both frames), so a trap
+// alone finds nothing. The defect is an unfolded frame ahead of the folded one, which the check flags.
+const IOS_CHECK = join(ROOT, "lint", "check_ios_mockup.py");
+const IOS_LOAD = "import importlib.util, json, sys\nspec = importlib.util.spec_from_file_location('m', sys.argv[1])\n"
+  + "m = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(m)\n"
+  + "print(json.dumps([code for code, _ in m.faults(sys.stdin.read())]))";
+const iosPage = (body) => `<!doctype html><html><head><style>body { font-family: -apple-system, sans-serif; `
+  + `padding: env(safe-area-inset-top); }</style></head><body>${body}`
+  + `<div data-device="iphone-duo-folded"></div><div data-device="iphone-duo-unfolded"></div></body></html>`;
+const iosCodes = (html) => {
+  try { return JSON.parse(execFileSync("python3", ["-c", IOS_LOAD, IOS_CHECK], { input: html, encoding: "utf8" })); }
+  catch (e) { throw new Error(String(e.stderr || e.message).trim().split("\n").pop()); }
+};
+
 // ---- the registry. A new scanner joins here with one entry: its name, its defect, and a flags(text) check.
 const SCANNERS = [
   { name: "decision-watch machinePaths", defect: 'const p = "D:/work/x"', flags: (t) => machinePaths(t).length > 0 },
   { name: "decision-watch codeNouns", defect: "typeof $.fs.mkdir", flags: (t) => codeNouns(t).length > 0 },
   { name: "stamp near-miss", defect: "D`one`, a gloss.", flags: (t) => stampNearMiss(t).length > 0 },
   { name: "plain-diff looksSecret", defect: 'const k = "' + GHP + '"', flags: secretFlagged },
+  { name: "ios-mockup duo frames", defect: '<div data-device="iphone-duo-unfolded"></div>', flags: (t) => iosCodes(iosPage(t)).length > 0 },
 ];
 
 // ---- the shared table: every scanner, every trap. A trap alone is clean; a trap then the defect is flagged.

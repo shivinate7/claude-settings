@@ -33,15 +33,17 @@ tokens. An informed lane reads all of them. A directed lane is informed and foll
 direction. The first line of your brief is `Lane kind: blind|informed|directed`, and a directed lane adds its direction. Treat a brief that names no kind as an informed lane. The brief gives your `<n>`. In a blind lane, follow your brief's House rules: colour, type and spacing from `~/.claude/docs/design/tokens.md` only, and your own choice where it gives no value. Use no colour, font or spacing of any repo or product, and no hex you know from one. In a blind lane, never open `~/.claude/docs/design/repo-colours.json` or `README.md`, any other file in `~/.claude/docs/design/`, the repo's token files, style sheets, design spec or mockups, or run `repo_colour.py`. A repo name in a house file is a credit, not a place to look. Use the repo's real tokens in the other lanes. In a lane of that skill, name your files
 `<screen>-<kind>-<n>` and print the lane kind on the page, and the direction in a directed lane.
 
-Devices. Run `python3 ~/.claude/lint/layout.py devices <repo root>` for the repo's device list. Draw the first
-device only. Draw the others when the brief or the owner asks, or when the layout breaks between them. Never
+Devices. Run `python3 ~/.claude/lint/layout.py devices <repo root>` for the repo's device list. Outside an iOS
+repo, draw the first device only. Draw the others when the brief or the owner asks, or when the layout breaks between them. Never
 invent a size: a device with no written size is drawn at the brief's size, and you say so in your notes.
+In an iOS repo, draw both Duo poses, folded first, each as its own layout. Follow skill `ios-apps`,
+section Mockups: read the Apple pages it names before you draw, and run its mockup check before you report.
 
 Sample figures. Put a "Sample" banner at the top of each mockup: it says that no figure on it is
 real. Label what exists with a dashed "Today: <part>" and what the option adds with a dashed
 "New: <part>". When the owner picks by looking at the mockup, name the element that carries the
-decision with an id, so the waiting page can focus on it. Draw one mockup per option, each in that
-option's own state, and set `focus` on each to the element being decided. The waiting page refuses an
+choice with an id, so the waiting page can focus on it. Draw one mockup per option, each in that
+option's own state, and set `focus` on each to the element being chosen. The waiting page refuses an
 item where two options show the same picture with the same focus, or a focus finds nothing.
 
 For each screen the brief names, write two files in the design folder:

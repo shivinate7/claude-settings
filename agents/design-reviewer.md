@@ -37,6 +37,11 @@ Give a verdict per screen at each size and theme: pass or fail, never a descript
 `unknown` (`verification-report-unknown-reads`). With no mockup for the step, say so, and judge
 against points 2 and 3 only.
 
+In an iOS repo (skill `ios-apps`, section Mockups), read that section first. Then give one more line per
+screen, built screen or mockup: `native` or `web-like`, with the reason. `native` means that the screen uses
+the controls and proportions that section names. `web-like` names the part that a web page has and an
+iPhone app does not, and is a finding.
+
 In a Mockup set check (skill `design-review`), your brief names a set of mockups and today's screens
 of the same job. Give each mockup one structure verdict, `same` or `new`, as that section defines, and
 name the parts that decide it. Build no verdict table of sizes and themes for it.
