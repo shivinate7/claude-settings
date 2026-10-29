@@ -89,7 +89,7 @@ figcaption { font: 600 13px/18px var(--font); color: var(--text-2); }
 
 /* "New:" marks. Annotation only, not part of the app. */
 .nw { outline: 2px dashed var(--note); outline-offset: -2px; position: relative; }
-.nw.in::after { top: 2px; }
+.nw.in::after { top: 48px; }
 .nw::after { content: attr(data-new); position: absolute; top: -8px; right: 6px; z-index: 5; font: 600 11px/13px var(--font); color: var(--note); background: var(--surface); border: 1px dashed var(--note); border-radius: 4px; padding: 2px 4px; pointer-events: none; }
 .nolabels .nw { outline: none; }
 .nolabels .nw::after { display: none; }
@@ -132,6 +132,13 @@ figcaption { font: 600 13px/18px var(--font); color: var(--text-2); }
 .btn.p { background: var(--accent); color: var(--on-accent); }
 .btn.s { background: var(--accent-soft); color: var(--accent); }
 .btn.q { background: none; color: var(--accent); }
+.btn.o { background: var(--surface); color: var(--accent); box-shadow: inset 0 0 0 1px var(--line); }
+/* A row the person is answering: selected look, with its answers inside it. */
+.pick { display: flex; flex-direction: column; background: var(--accent-soft); border-bottom: 1px solid var(--line); box-shadow: inset 4px 0 0 var(--accent); }
+.pick > .row { border-bottom: 0; }
+.pick-acts { padding: 0 var(--space-4) var(--space-3); }
+/* A dimmed last read: the bars dim, the text keeps its contrast. */
+.dimbars .bar2 { opacity: .5; }
 .btn.off { opacity: .45; }
 .btn.sm { min-height: 44px; font-size: 15px; }
 .btn.wide { width: 100%; }
@@ -419,13 +426,12 @@ details.disc summary::-webkit-details-marker { display: none; }
             </div>
             <div class="fill">
               <div class="list">
-                <div class="row"><span class="slot">44</span><div class="main"><span class="hl ell">Quiet Lantern</span><span class="fn mut ell">AX1 103 · NM · Japanese</span></div><div class="end"><span class="bd num">$0.80</span><i class="st draft" title="draft"></i></div></div>
                 <div class="row"><span class="slot">45</span><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn why ell">Price far from recent sales</span></div><div class="end"><span class="bd num">$12.50</span><i class="st chk" title="check"></i></div></div>
                 <div class="row"><span class="slot">46–48</span><div class="main"><span class="hl ell">Marsh Strider ×3</span><span class="fn mut ell">AX1 151 · NM · English</span></div><div class="end"><span class="bd num">$0.25</span><i class="st draft" title="draft"></i></div></div>
                 <div class="row"><span class="slot">49</span><div class="main"><span class="hl ell">Saltwind Courier</span><span class="fn why ell">Two printings match</span></div><div class="end"><span class="bd num">$0.40</span><i class="st chk" title="check"></i></div></div>
               </div>
             </div>
-            <div class="dock"><button class="btn p wide nw" id="c1-list" data-new="New: one press lists the stack" type="button">List 184 cards</button></div>
+            <div class="dock"><button class="btn p wide nw" id="c1-list" data-new="New: one press lists the stack" type="button">List 184 cards</button><p class="fn mut">The 2 to check stay as drafts.</p></div>
             <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
           </div>
           <div class="ins-r"><span>trailing inset 84 pt</span></div>
@@ -443,7 +449,7 @@ details.disc summary::-webkit-details-marker { display: none; }
               <div class="row sel"><i class="st chk"></i><div class="main"><span class="bd">To check</span><span class="fn mut">Stay as drafts until you pick</span></div><span class="bd num mut">2</span><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
             </div>
             <div class="fill"></div>
-            <div class="dock"><button class="btn p wide" type="button">List 184 cards</button></div>
+            <div class="dock"><button class="btn p wide" type="button">List 184 cards</button><p class="fn mut">The 2 to check stay as drafts.</p></div>
             <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
           </div>
           <div class="fold"><span>fold 40 pt</span></div>
@@ -451,11 +457,13 @@ details.disc summary::-webkit-details-marker { display: none; }
             <div class="bar"><span></span><span class="hl">2 cards</span><button class="nb" type="button">Show all</button></div>
             <div class="colhead cols"><span>Slot</span><span></span><span>Card</span><span>Cond.</span><span style="text-align:end">Price</span></div>
             <div class="list">
-              <div class="row cols"><span class="slot">45</span><i class="st chk" title="check"></i><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · Foil · English · Game A</span><span class="fn why">Price far from recent sales ($3.80 to $4.40)</span></div><span class="sh">NM</span><span class="bd num" style="text-align:end">$12.50</span></div>
+              <div class="pick" aria-current="true">
+                <div class="row cols"><span class="slot">45</span><i class="st chk" title="check"></i><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · Foil · English · Game A</span><span class="fn why">Price far from recent sales ($3.80 to $4.40)</span></div><span class="sh">NM</span><span class="bd num" style="text-align:end">$12.50</span></div>
+                <div class="duo pick-acts"><button class="btn o sm" type="button">Use recent $4.10</button><button class="btn o sm" type="button">Keep $12.50</button></div>
+              </div>
               <div class="row cols"><span class="slot">49</span><i class="st chk" title="check"></i><div class="main"><span class="hl ell">Saltwind Courier</span><span class="fn mut ell">AX1 162 or P07 · English · Game A</span><span class="fn why">Two printings match</span></div><span class="sh">NM</span><span class="bd num" style="text-align:end">$0.40</span></div>
             </div>
             <div class="fill"></div>
-            <div class="dock"><div class="duo"><button class="btn s" type="button">Use recent $4.10</button><button class="btn s" type="button">Keep $12.50</button></div><p class="fn mut">Hollow Crown, slot 45</p></div>
           </div>
         </div>
         <figcaption>iPhone Duo, unfolded</figcaption>
@@ -757,7 +765,7 @@ details.disc summary::-webkit-details-marker { display: none; }
                 <div class="row"><span class="slot">226</span><div class="main"><span class="hl ell">Glass Fox</span><span class="fn mut ell">AX1 088 · NM · English</span></div><span class="bd num">$1.40</span></div>
               </div>
             </div>
-            <div class="dock"><button class="btn p wide" type="button">List 186 cards</button></div>
+            <div class="dock"><button class="btn p wide" type="button">List 186 cards</button><p class="fn mut">Lists the stack in Box 3.</p></div>
             <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
           </div>
           <div class="ins-r"><span>trailing inset 84 pt</span></div>
@@ -793,7 +801,7 @@ details.disc summary::-webkit-details-marker { display: none; }
               <div class="row"><span class="slot">45</span><i class="st draft"></i><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · NM · Foil · English</span></div><span class="bd num">$12.50</span></div>
             </div>
             <div class="fill"></div>
-            <div class="dock"><button class="btn p wide" type="button">List 186 cards</button></div>
+            <div class="dock"><button class="btn p wide" type="button">List 186 cards</button><p class="fn mut">Lists the stack in Box 3.</p></div>
           </div>
         </div>
         <figcaption>iPhone Duo, unfolded</figcaption>
@@ -817,8 +825,8 @@ details.disc summary::-webkit-details-marker { display: none; }
                 <details class="disc"><summary>What the server said <svg class="ic sm"><use href="#i-chev"/></svg></summary><p class="fn mut">Request timed out (sample)</p></details>
               </div>
             </div>
-            <div class="fill" style="padding-top:12px;opacity:.6">
-              <div class="shelf nw" data-new="New: last read, dimmed, never shown as empty">
+            <div class="fill" style="padding-top:12px">
+              <div class="shelf dimbars nw" data-new="New: last read, dimmed, never shown as empty">
                 <div class="bx"><div class="lab"><span class="hl">Box 1</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 30%, var(--sold) 30% 31%, var(--live) 31% 100%)"></div></div></div>
                 <div class="bx"><div class="lab"><span class="hl">Box 2</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:var(--live)"></div></div></div>
                 <div class="bx"><div class="lab"><span class="hl">Box 3</span><span class="fn mut num">40 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 16%, transparent 16%)"></div></div></div>
@@ -849,7 +857,7 @@ details.disc summary::-webkit-details-marker { display: none; }
           <div class="fold"><span>fold 40 pt</span></div>
           <div class="pane pr">
             <div class="bar"><span></span><span class="hl">Last read · 7:40 PM</span><span></span></div>
-            <div class="shelf" style="opacity:.6;padding-top:8px">
+            <div class="shelf dimbars" style="padding-top:8px">
               <div class="bx"><div class="lab"><span class="hl">Box 1</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 30%, var(--sold) 30% 31%, var(--live) 31% 100%)"></div></div></div>
               <div class="bx"><div class="lab"><span class="hl">Box 2</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:var(--live)"></div></div></div>
               <div class="bx"><div class="lab"><span class="hl">Box 3</span><span class="fn mut num">40 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 16%, transparent 16%)"></div></div></div>
