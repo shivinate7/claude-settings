@@ -16,9 +16,11 @@ Verdict, one line per page, then a total line:
   unknown  the page was not read: another account, a missing file, an empty file
 Exit 0 only when every page is current. A behind or unknown page exits 1: an unread page is never
 counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
-page, and the text around it may hold only a document skeleton (doctype, html, head, meta, title
-and body tags, white space). Any other text or code around it makes the page behind. Batch mode
-reads page.html beside this script, and needs no hooks/ folder.
+page. The text before it may hold only a document skeleton (doctype, html, head, meta, title and
+body tags, white space) and style elements inside the leading head, before body opens. The text
+after it may hold only closing body and html tags and white space. Any other text or code around
+it makes the page behind, a style or script after body opens too. Batch mode reads page.html
+beside this script, and needs no hooks/ folder.
 
 Single-page mode (the writer, at each wake and before each republish):
 
@@ -51,10 +53,14 @@ DESIGN = re.compile(r'(<script type="application/json" id="designData">).*?(</sc
 DESIGN_BODY = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 TEMPLATE_IN_GIT = "skills/waiting-page/page.html"
 GIT_TIMEOUT = 30
-# What may surround the template: document skeleton tags (no event-handler attributes) and white space.
+# One piece of the text before the template: white space or a document skeleton tag (no event-handler
+# attributes). A style piece counts only inside the leading head; skeleton_before() keeps that state.
 ATTRS = r'(?:\s+(?!on)[a-z][\w:-]*(?:\s*=\s*(?:"[^"<>]*"|\'[^\'<>]*\'|[^\s"\'<>=]+))?)*'
-SKELETON = re.compile(r'(?:\s|<!doctype[^<>]*>|</?(?:html|head|body)%s\s*>|<meta%s\s*/?>|<title%s\s*>[^<>]*</title\s*>)*'
-                      % (ATTRS, ATTRS, ATTRS), re.I)
+PIECE = re.compile(r'\s+|<!doctype[^<>]*>|<(?P<close>/?)(?P<tag>html|head|body)%s\s*>|<meta%s\s*/?>'
+                   r'|<title%s\s*>[^<>]*</title\s*>|(?P<style><style%s\s*>.*?</style\s*>)'
+                   % (ATTRS, ATTRS, ATTRS, ATTRS), re.I | re.S)
+# The text after the template: closing body and html tags and white space only.
+TAIL = re.compile(r'(?:\s|</(?:body|html)\s*>)*', re.I)
 
 
 def normal(text):
@@ -62,11 +68,29 @@ def normal(text):
     return " ".join(DESIGN.sub(r"\1\2", text).split())
 
 
+def skeleton_before(text):
+    """True when `text` holds only PIECE pieces, with each style inside the first head, before body opens."""
+    at, in_head, seen_head, seen_body = 0, False, False, False
+    while at < len(text):
+        piece = PIECE.match(text, at)
+        if not piece:
+            return False
+        tag = (piece.group("tag") or "").lower()
+        if piece.group("style") and not in_head:
+            return False
+        if tag == "body" or (tag == "head" and piece.group("close")):
+            in_head, seen_body = False, seen_body or tag == "body"
+        elif tag == "head":
+            in_head, seen_head = not seen_head and not seen_body, True
+        at = piece.end()
+    return True
+
+
 def matches(template, live):
-    """True when the live text is the template, with nothing around it but a document skeleton."""
+    """True when the live text is the template, with only a document skeleton before it and closing tags after it."""
     want, got = normal(template), normal(live)
     at = got.find(want)
-    return at >= 0 and SKELETON.fullmatch(got[:at] + " " + got[at + len(want):]) is not None
+    return at >= 0 and skeleton_before(got[:at]) and TAIL.fullmatch(got[at + len(want):]) is not None
 
 
 def page_id(url):
@@ -111,7 +135,7 @@ def checkout_of(folder):
 def pointer_checkout():
     """The checkout that an `@<path>` line in ~/.claude/CLAUDE.md names, or None. Reads one file, runs no git."""
     try:
-        with open(os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md"), encoding="utf-8") as f:
+        with open(os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md"), encoding="utf-8", errors="replace") as f:
             lines = f.read().splitlines()
     except OSError:
         return None
