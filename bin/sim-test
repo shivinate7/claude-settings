@@ -4,6 +4,7 @@
 # iPhone 18 Pro, tests, then shuts that simulator down. It never shuts down a simulator it did not boot.
 # Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
 # names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool.
+# It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
 # The exit code is otherwise xcodebuild's. The tool takes no lock and waits for no load.
 # macOS only. It runs under /bin/bash 3.2.
 CAP=2 # guard.SIM_BOOT_CAP: bash cannot import it; hooks/test_guard.py checks the two are equal
@@ -29,5 +30,7 @@ if [ -z "$udid" ]; then
   booted_by_me=1
 fi
 echo "sim-test: using $udid"
-xcodebuild test "$@" -destination "platform=iOS Simulator,id=$udid"
+diag=(-collect-test-diagnostics never)
+for arg in "$@"; do [ "$arg" = -collect-test-diagnostics ] && diag=(); done
+xcodebuild test "$@" "${diag[@]}" -destination "platform=iOS Simulator,id=$udid"
 exit $?
