@@ -324,9 +324,11 @@
 - verdict-log-truncation: a child that truncates verdict's log then writes more can hide a marker; no known runner does this; upgrade is a pipe verdict owns Decision: none
 - stash-stack-kind-build-plan-only: stash-stack-is-a-shared-subject is Kind: build with plan sections that only name CI jobs; the guard rule is built, so Kind: process with Home hooks/guard_shared_tree.py may fit (owner call)
 - precompact-digest-60k-loses-detail: the digest keeps the last 60,000 characters, so a long talk-heavy gap since the last checkpoint can lose detail after compaction
-- precompact-compaction-before-checkpoint-small-model: the hook reads autoCompactWindow from settings.json but cannot see the model's own window, so a smaller model can compact before a checkpoint
+- precompact-compaction-before-checkpoint-small-model: the hook reads the window from env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow in settings.json, then the default. It cannot see the model's own window, so a smaller model can compact before a checkpoint.
 - precompact-stop-block-skips-other-guards: the reply after a checkpoint block runs with stop_hook_active set so other Stop guards skip it, and when another Stop hook refuses first the checkpoint fires one stop later
 - precompact-rewrite-vs-append-unchecked: nothing checks that a session rewrote the handoff and did not append; the prompt asks and the owner reads the result
+- precompact-env-window-loop: checkpoints() in hooks/precompact_handoff.py loops window/150k times, so a huge CLAUDE_CODE_AUTO_COMPACT_WINDOW could slow or hang the Stop hook; the env var is a new route to a large window. Not measured.
+- precompact-model-tag-mapping: unverified whether Claude Code maps a transcript model `X[1m]` to modelSettings key `X`; the hook strips the tag either way (hooks/precompact_handoff.py _model_key)
 - silent-undo-history-window-60: the --history audit misses a reversal older than --window (default 60 commits); --window 0 reads all history
 - silent-undo-git-utf8-replace: git() decodes output as UTF-8 with errors=replace, so two lines that differ only in bad bytes compare equal
 - silent-undo-unread-shapes: a binary file is not read, a resolver half-rewritten line passes, and a reversal that also rewrites a line reads as a new edit
