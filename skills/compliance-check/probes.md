@@ -100,7 +100,7 @@ Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
 | ci runner | each macOS image a workflow names, matrix values too, is the pinned image (`IOS_RUNNER`) or a larger runner of it, never `macos-latest` |
 | ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app |
 | slow tests | no workflow runs `xcodebuild test`, `make ui-test`, `make native-check` or `sim-test`; UI tests run once per batch on the Mac |
-| test diagnostics | each `xcodebuild test` or `test-without-building` run in a workflow, the Makefile or a tracked `*.sh` sets `-collect-test-diagnostics never`, so a failed test starts no `simctl diagnose` of up to 10 minutes. `sim-test` adds it; `build-for-testing` is no run |
+| test diagnostics | each `xcodebuild test` or `test-without-building` run in a workflow, the Makefile or a tracked `*.sh` sets `-collect-test-diagnostics never`, so a failed test starts no `simctl diagnose` of up to 10 minutes. `sim-test` adds it; `build-for-testing` is no run. Named incident, landed 2026-10-29: Restyle and Duo each patched it alone |
 | account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `bin/ios-ship` in `tools/ios-ship.json` is an allowed override: `partial` |
 
 The lowest iOS, the tokens and the test style are read by hand in a repo visit.
