@@ -182,10 +182,37 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
 .opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
 .opt .nopick { align-self: end; }
+/* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
+.multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
+.tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
+.opt.sel .tick { background: var(--acc); border-color: var(--acc); }
+.opt.sel .tick.mark::before { content: ""; width: 6px; height: 12px; border: solid var(--on-acc); border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
+/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down, View and the marked rows sit above the label. */
+.opt.ranked { cursor: default; }
+.opt.ranked > label.head { cursor: pointer; }
+.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); z-index: 1; }
+.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 2; }
+.opts.ranked .opt { grid-template-rows: auto auto 1fr auto auto; }
+.opts.ranked.pics .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked .opt { grid-row: span 5; grid-template-rows: subgrid; } .opts.ranked.pics .opt { grid-row: span 6; } }
+.opt .rank { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.opt .rank.gone { visibility: hidden; }
+.btn.mv { position: relative; min-height: 44px; min-width: 44px; padding: 8px 12px; background: var(--surface); color: var(--acc); }
+.btn.mv svg { flex: none; }
+/* At an end of the order the button stays in place and focusable. It is marked off by a dashed border, and the reason shows on hover and focus. */
+.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
+.btn.mv[aria-disabled="true"] svg { opacity: .5; }
+.btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
 
 .ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
 .ready.on { color: var(--good); font-weight: 600; }
-.ready.on::before { content: "\2713  "; }
+/* A multi item names its picks, so its line may wrap. Hidden copies of its longest possible lines share the live line's grid cell,
+   so the cell is always as tall as the longest line at the current width: the tail is never cut and the cards never move. */
+.readybox { display: grid; }
+.readybox > * { grid-area: 1 / 1; min-width: 0; }
+.ready.multi, .readyfit { white-space: normal; overflow: visible; }
+.readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
+.ready.on::before, .readyfit::before { content: "\2713  "; }
 /* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
 .alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .alts .sp { flex: 1 1 0; }
@@ -217,6 +244,12 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
 .receipt .line b { overflow-wrap: anywhere; color: var(--good); }
 .receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* A multi answer lists each pick with its letter and title, in order. */
+.receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
+.receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
+.receipt ol.picks li { grid-template-columns: 2ch auto minmax(0, 1fr); }
+.receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
+.receipt .picks .key { color: var(--ink); }
 .card.answered { border-left: 6px solid var(--good); }
 .ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
 .ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
@@ -324,11 +357,21 @@ const state = { items: [], answers: {}, meta: null, groups: {}, receipts: {}, dr
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
-const choiceText = (k) => (k === NONE ? "none of these" : k);
+const choiceText = (k) => (k === NONE ? "none of these" : Array.isArray(k) ? k.join("+") : k);
 // The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
 const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
 const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
 const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o ? shorten(String(o.label), 28) : ""; };
+// A multi item takes a list of option keys: `multi`, or `ranked`, which also orders them. A list is valid when it holds distinct keys of the item's options.
+const isMulti = (it) => it.kind === "decision" && (it.multi === true || it.ranked === true);
+const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size === l.length && l.every((k) => (it.options || []).some((o) => o.key === k));
+// The keys of my pick, or null when the pick does not fit the kind of item: a pick-one pick is one key, a multi pick is a valid list.
+const pickKeys = (it) => (isMulti(it) ? (validKeys(it, it.pick) ? it.pick : null) : typeof it.pick === "string" && (it.options || []).some((o) => o.key === it.pick) ? [it.pick] : null);
+const pickChoice = (it) => (isMulti(it) ? it.pick.slice() : it.pick);
+// "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
+const namesOf = (it, l) => { const n = l.map((k) => pickName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
+const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]);
+const sameList = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((k, i) => k === b[i]);
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v === true) n.setAttribute(k, ""); else if (v !== false && v != null) n.setAttribute(k, v); }
@@ -457,7 +500,7 @@ const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" },
 const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
 const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
 // A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
-const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && (it.options || []).some((o) => o.key === it.pick);
+const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && !!pickKeys(it);
 const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by && validT(it.by) ? "due" : "calm");
 const mates = (it) => (it.group ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
@@ -485,14 +528,14 @@ const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
 const stoodNow = (it) => standsOk(it) && !state.answers[it.id];
 const eff = (it) => {
   const d = state.draft[it.id];
-  if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: it.pick, auto: true, stood: true };
-  return d || (stoodNow(it) ? { choice: it.pick, auto: true, stood: true } : undefined);
+  if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: pickChoice(it), auto: true, stood: true };
+  return d || (stoodNow(it) ? { choice: pickChoice(it), auto: true, stood: true } : undefined);
 };
 function draftReady(it) {
   const d = eff(it); if (!d || blocked(it)) return false;
   if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
-  return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
+  return isMulti(it) ? validKeys(it, d.choice) : (it.options || []).some((o) => o.key === d.choice);
 }
 // An option's picture must show that option's own difference. Two options whose card pictures are one slug, or one mockup, with one focus, show the same thing.
 // A focus that finds nothing in its mockup shows nothing of what is being decided. A missing mockup is warned in the frame, so it is not flagged here.
@@ -554,6 +597,24 @@ function choose(it, key) {
   edited(); setDraft(it, patch); repaint(it);
   if (key === NONE) { const t = $("n-" + it.id); if (t) t.focus(); }
 }
+// A multi item's choice is the list of ticked keys. A new tick goes last, an untick closes the gap, and a ranked item's order is the list's order.
+const tickList = (it) => { const c = (eff(it) || {}).choice; return Array.isArray(c) ? c : []; };
+function toggle(it, key) {
+  // A ranked item adds a new tick last. An unranked item has no order, so its ticks stay in option order.
+  const cur = tickList(it), on = !cur.includes(key);
+  const next = it.ranked === true ? (on ? [...cur, key] : cur.filter((k) => k !== key))
+    : (it.options || []).map((o) => o.key).filter((k) => k === key ? on : cur.includes(k));
+  const patch = { choice: next.length ? next : null, auto: false };
+  if (!next.length && stoodNow(it)) patch.unstood = true;
+  if ((eff(it) || {}).choice === NONE) patch.note = "";
+  edited(); setDraft(it, patch); repaint(it);
+}
+function move(it, key, dir) {
+  const cur = tickList(it).slice(), i = cur.indexOf(key), j = dir === "up" ? i - 1 : i + 1;
+  if (i < 0 || j < 0 || j >= cur.length) return;
+  [cur[i], cur[j]] = [cur[j], cur[i]];
+  edited(); setDraft(it, { choice: cur, auto: false }); repaint(it);
+}
 function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
@@ -565,6 +626,7 @@ const edited = () => { state.barNote = ""; state.copyOffer = false; };
 /* ---------- Cards ---------- */
 const glyph = (k) => h("span", { class: "g " + k, "aria-hidden": "true" });
 function linkIcon() { const d = document.createElement("span"); d.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>'; return d.firstChild; }
+function arrow(dir) { const d = document.createElement("span"); d.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="' + (dir === "up" ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M5 12l7 7 7-7") + '"/></svg>'; return d.firstChild; }
 function readyText(it) {
   const d = eff(it) || {};
   if (blocked(it)) return "This item cannot be sent.";
@@ -572,7 +634,13 @@ function readyText(it) {
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
+  if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (d.auto ? ", my pick." : it.ranked === true ? ", your order." : ", your choice.") : "";
   return "Ready to send: " + pickName(it, d.choice) + (d.auto ? ", my pick." : ", your choice.");
+}
+// The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
+function readyFits(it) {
+  const all = "Ready to send: " + namesOf(it, (it.options || []).map((o) => o.key));
+  return [all + (it.ranked === true ? ", your order." : ", your choice."), all + ", my pick.", "Ready to send: none of these, with your note.", "My pick goes with your next Send."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
 function sparkle() {
@@ -610,14 +678,29 @@ const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) 
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key, m = marks(it, o), on = (f) => m.includes(f);
   const mark = (f) => on(f) ? [sr()] : [], tail = (f) => on(f) ? [ne()] : [];
-  return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
-    hasPics(it) ? optPic(it, o, on("picture")) : null,
-    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": "h-" + sfx + " t-" + sfx + (o.key === it.pick ? " p-" + sfx : ""), checked: chosen === o.key, onchange: () => choose(it, o.key),
-      onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
-    h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab", id: "l-" + sfx }, o.label)),
+  const multi = isMulti(it), ranked = it.ranked === true, list = multi && Array.isArray(chosen) ? chosen : [], at = list.indexOf(o.key), sel = multi ? at >= 0 : chosen === o.key;
+  const pk = pickKeys(it), pi = pk ? pk.indexOf(o.key) : -1;
+  const desc = (ranked ? "r-" + sfx + " " : "") + "h-" + sfx + " t-" + sfx + (pi >= 0 ? " p-" + sfx : "");
+  const pic = hasPics(it) ? optPic(it, o, on("picture")) : null;
+  const input = multi
+    ? h("input", { type: "checkbox", id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => toggle(it, o.key) })
+    : h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => choose(it, o.key),
+      onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } });
+  const key = h("span", { class: "key" }, letterOf(it, o.key)), lab = h("span", { class: "lab", id: "l-" + sfx }, o.label);
+  // On a ranked item the tick box holds the rank number.
+  const headKids = multi ? [h("span", { class: "tick" + (ranked ? "" : " mark"), "aria-hidden": "true" }, ranked && sel ? String(at + 1) : ""), key, lab] : [key, lab];
+  const body = [
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your uniform ruling (t18)")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
-    o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
+    pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" })];
+  if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
+  const n = list.length;
+  const mv = (dir) => {
+    const off = dir === "up" ? at === 0 : at === n - 1, why = dir === "up" ? "Already first" : "Already last";
+    return h("button", { class: "btn alt mv", type: "button", id: "mv-" + sfx + "-" + dir, "aria-label": "Move " + o.label + " " + dir, "aria-disabled": off ? "true" : null, "data-why": off ? why : null, title: off ? why : null, onclick: () => { if (!off) move(it, o.key, dir); } }, arrow(dir), dir === "up" ? "Up" : "Down");
+  };
+  const rank = h("div", { class: "rank" + (sel ? "" : " gone") }, h("span", { class: "sr", id: "r-" + sfx }, sel ? ordinal(at + 1) + " of " + n : "Not in your order"), mv("up"), mv("down"));
+  return h("div", { class: "opt ranked" + (sel ? " sel" : "") }, pic, input, h("label", { class: "head", for: id }, ...headKids), ...body, rank);
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 // A receipt from an earlier answer says nothing about a changed one, so only a receipt at or after the answer counts.
@@ -629,14 +712,19 @@ function rcOf(it) {
 }
 function receipt(it) {
   const sv = state.answers[it.id], rc = rcOf(it);
-  let what;
+  let what, picks = null;
   if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
   else if (sv.choice === NONE) what = "None of these";
+  else if (isMulti(it) && validKeys(it, sv.choice)) {
+    what = it.ranked === true ? "You chose, in order:" : "You chose:";
+    picks = h(it.ranked === true ? "ol" : "ul", { class: "picks", "aria-label": "Your picks" }, sv.choice.map((k) => h("li", {}, h("span", { class: "key" }, letterOf(it, k)), h("span", {}, it.options.find((x) => x.key === k).label))));
+  }
   else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
   return h("div", { class: "receipt" },
-    h("div", { class: "line" }, glyph("done"), h("b", {}, what + "."),
+    h("div", { class: "line" }, glyph("done"), h("b", {}, picks ? what : what + "."),
       rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
-      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+    picks,
     sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
 }
 function designPreview(it) {
@@ -678,16 +766,21 @@ function buildCard(it) {
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
   const noteShown = !!(state.noteOpen[it.id] || d.choice === NONE || d.note);
   const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
-  const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
+  // Take my pick hides whenever the ticks equal the pick, ranked or not: nothing is left for it to do. It is not shown at all when the pick is not valid.
+  const multi = isMulti(it), pk = pickKeys(it);
+  const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
+  const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
   if (it.kind === "decision") {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
-    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
+    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : "") + (it.ranked === true ? " ranked" : ""), role: multi ? "group" : "radiogroup", "aria-label": "Options for No. " + it.n, "aria-describedby": multi ? "mh-" + it.id : null, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
-    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), ready,
+    if (multi) card.append(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
+    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
-        h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + pickName(it, it.pick) + ")")));
+        multi ? h("span", { class: "sp" }) : null,
+        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, it.pick) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
@@ -709,7 +802,7 @@ function buildCard(it) {
     nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
     card.append(nb);
   }
-  if (blocked(it)) card.querySelectorAll(".opts input, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
+  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
@@ -1179,7 +1272,7 @@ document.addEventListener("keydown", (e) => {
   const it = byId(fc ? fc.id.replace("item-", "") : hoverItem);
   if (!it || isSaved(it) || it.kind !== "decision") return;
   const k = e.key.toLowerCase();
-  if ((it.options || []).some((o) => o.key === k)) { e.preventDefault(); choose(it, k); const r = $("o-" + it.id + "-" + k); if (r) r.focus({ preventScroll: true }); }
+  if ((it.options || []).some((o) => o.key === k)) { e.preventDefault(); if (isMulti(it)) toggle(it, k); else choose(it, k); const r = $("o-" + it.id + "-" + k); if (r) r.focus({ preventScroll: true }); }
 });
 
 function render() {
