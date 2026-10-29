@@ -2645,11 +2645,11 @@ def _flat_text(value) -> str:
 
 def _press_field_ok(text, links, context="") -> bool:
     """True when this field asks for no web press, or `links` holds a link to the exact page. The
-    press verb is read in `text`; the page, and each `#N` that needs a url with /pull/N or
-    /issues/N at a number boundary, in `text` and `context` together."""
+    press verb is read in `text`. The page, and each `#N` that needs a url with /pull/N or
+    /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
     if not PRESS_VERB.search(text):
         return True
-    page = text + "\n" + context
+    page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
     urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
@@ -2675,8 +2675,9 @@ def press_link_hit(op, data) -> str:
             if not _press_field_ok(text, o.get("links")):
                 return "option presses in a web app with no link to the page"
     if isinstance(steps, list) and (op == "set" or "links" in data):
-        # the steps are one text, as command-in-item reads them: the page may sit in one step, or
-        # in the title, and the press in another; a title alone never makes a press
+        # the steps are one text, as command-in-item reads them: the page may sit in one step and
+        # the press in another. The title names the page only when the steps name none, and a
+        # title alone never makes a press.
         joined = "\n".join(_flat_text(s) for s in steps)
         if not _press_field_ok(joined, data.get("links"), _flat_text(data.get("title"))):
             return "step presses in a web app with no link to the page"
