@@ -32,7 +32,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
 <div class="sample" id="sampleBanner">Sample. No item, number, name or time on this page is real.</div>
 <header class="tool">
   <h1>Waiting page c204: a tall option picture scrolls inside its 480px box</h1>
-  <div class="row" id="rowS"><span>State</span><button data-s="long" data-state="long">Tall, no focus</button><button data-s="long-end" data-state="long-end">Tall, at the end</button><button data-s="focus-in" data-state="focus-in">1A: tall focus scrolls the focus (pick)</button><button data-s="focus-whole" data-state="focus-whole">1B: tall focus scrolls the whole mockup</button><button data-s="fits" data-state="fits">Fits: as today</button><button data-s="keys" data-state="keys">Keyboard</button><button data-s="wide" data-state="wide">5B: scroll picture 221.8 wide</button><button class="hide" data-hide="focus-whole" data-name="1B (whole mockup)">Hide 1B (whole mockup)</button><button class="hide" data-hide="wide" data-name="5B (wider)">Hide 5B (wider)</button></div>
+  <div class="row" id="rowS"><span>State</span><button data-s="long" data-state="long">Tall, no focus</button><button data-s="long-end" data-state="long-end">Tall, at the end</button><button data-s="focus-in" data-state="focus-in">1A: tall focus scrolls the focus (pick)</button><button data-s="focus-whole" data-state="focus-whole">1B: tall focus scrolls the whole mockup</button><button data-s="fits" data-state="fits">Fits: as today</button><button data-s="keys" data-state="keys">Keyboard</button><button data-s="wide" data-state="wide">5B: scroll picture 221.8 wide</button><button class="hide" data-hide="focus-in" data-name="1A (focus only)">Hide 1A (focus only)</button><button class="hide" data-hide="focus-whole" data-name="1B (whole mockup)">Hide 1B (whole mockup)</button><button class="hide" data-hide="wide" data-name="5B (wider)">Hide 5B (wider)</button></div>
   <div class="row" id="rowW"><span>Size</span>
     <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button><button data-w="2200">Very wide 2200</button>
   </div>
@@ -40,7 +40,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button id="labBtn">Labels on</button><button id="rmBtn">Reduced motion off</button>
   </div>
-  <p>Deep links: <code>#s=long|long-end|focus-in|focus-whole|fits|keys|wide</code>, <code>&amp;w=all|390|1280|2200</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;rm=1</code>, <code>&amp;hide=focus-whole,wide</code>. The pictures in the frames are live: scroll them with a wheel, a drag or the scrollbar. A press on the picture opens View; a press on its scrollbar does not.</p>
+  <p>Deep links: <code>#s=long|long-end|focus-in|focus-whole|fits|keys|wide</code>, <code>&amp;w=all|390|1280|2200</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;rm=1</code>, <code>&amp;hide=focus-whole,wide</code>. The pictures in the frames are live: scroll them with a wheel, a drag or the scrollbar. A press on the picture opens View; a press on its scrollbar does not. 5A (today's scale, 120 wide) has no hide control: it is the scale in every state but <code>wide</code>. In <code>long</code>, picture C is marked as what sets its option apart (3px left border).</p>
 </header>
 <main id="stage"></main>
 
@@ -329,7 +329,7 @@ body.sheet-open { overflow: hidden; }
 /* ---------- New (c204): a capped option picture that would pass 480px scrolls inside a 480px box. ---------- */
 /* The scale does not change: sc = min(1, W / w, max(480 / h, 120 / w)), as today. The picture scrolls only when h x sc > 480.
    That is a box more than 4 times as tall as it is wide, such as a 390-wide mockup taller than 1560px. A picture that fits draws as today. */
-:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }   /* New. The frame is #fff in both themes, so the cue keeps one pair. Pill on #fff: 17.9:1 */
+:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }   /* New. The frame is #fff in both themes, so the cue keeps one pair. Pill on #fff: 17.3:1, measured */
 .dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }   /* New. The scaled area: w x sc by h x sc. Its overflow is hidden, so the frame's transformed box adds no scroll range */
 .dfitwrap .dtop, .dfitwrap .dcue { display: none; }                          /* New. Shown only in the scroll case */
 .dfitwrap.scroll { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; }   /* Today: overflow hidden, and the box grows past 480. JS sets height 480 and width w x sc + 2 + gutter */
@@ -473,7 +473,8 @@ function screen(s) {
     opts, pick: "A", why: "One place to read is the job.", chosen: "",
     pic: (o) => {
       const m = MOCKS[o.mock], b = m.focus;
-      return `<span class="opic" role="button" tabindex="0" aria-label="View ${esc(o.label)} full screen" data-lab="${esc(o.label)}"><span class="dfitwrap inert" aria-hidden="true" data-h="${m.H}"${b ? ` data-box="${b.x},${b.y},${b.w},${b.h}"` : ""} data-mode="${mode}"><span class="dtop" aria-hidden="true"></span><span class="dsizer"><span class="phone" aria-hidden="true" style="height:${m.H}px">${m.html()}</span></span><span class="dcue" aria-hidden="true"><span class="dmore">↓ More</span></span></span><span class="view" aria-hidden="true">View</span></span>`;
+      const dif = s === "long" && o.key === "C";   // a picture marked as what sets the option apart: its 3px left border is in the gutter sum
+      return `<span class="opic${dif ? " dif" : ""}" role="button" tabindex="0" aria-label="View ${esc(o.label)} full screen${dif ? ". Its picture sets this option apart" : ""}" data-lab="${esc(o.label)}${dif ? ". Its picture sets this option apart" : ""}"><span class="dfitwrap inert" aria-hidden="true" id="pic-${o.key.toLowerCase()}" data-h="${m.H}"${b ? ` data-box="${b.x},${b.y},${b.w},${b.h}"` : ""} data-mode="${mode}"><span class="dtop" aria-hidden="true"></span><span class="dsizer"><span class="phone" aria-hidden="true" style="height:${m.H}px">${m.html()}</span></span><span class="dcue" aria-hidden="true"><span class="dmore">↓ More</span></span></span><span class="view" aria-hidden="true">${dif ? '<span class="ne" aria-hidden="true">≠</span>' : ""}View</span></span>`;
     },
   };
   const r = rail({ tiers: { due: [{ n: 4, title: it.title }, { n: 5, title: "Name the record home for the stamp motion ruling" }], calm: [{ n: 9, title: "Keep each lane's own commit in the batch" }] } });
@@ -491,7 +492,7 @@ function layout(wrap) {
   wrap.classList.toggle("scroll", scroll);
   if (scroll) {
     wrap.tabIndex = -1;                                    // a scroller in a role=button is not a tab stop of its own; aria-hidden, as the View sheet holds the same mockup
-    const g = wrap.offsetWidth - wrap.clientWidth - 2;     // the gutter, measured with .scroll on: 0 for overlay scrollbars
+    const g = wrap.offsetWidth - wrap.clientWidth - 2;     // the gutter plus any border past 1px (a .dif picture's 3px left border), read with .scroll on; the gutter is 0 for overlay scrollbars
     // 5B: the width a 390 x 844 phone picture gets, inside the column less the gutter. The column is floored, so the box never passes it.
     const room = Math.floor(wrap.parentElement.getBoundingClientRect().width) - 2 - g;
     if (mode === "wide") sc = Math.min(1, room / bw, PHONE_W / bw);
