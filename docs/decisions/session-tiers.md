@@ -10,10 +10,10 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Coordinator. It runs a standing build. It starts triage and the batch runner, then lane sessions.
   - The owner's ask (15:04): revise the solo-versus-orchestrate rules to match these tiers, with an Opus review. The roles rules in `CLAUDE.md` now carry the shapes.
   - The shape stays dynamic. A session may grow to a larger shape (`roles-solo-grows-switch-to-orchestrate`). It says so in one line.
-- **Orchestrator, the catch-all word** (owner, 15:18). Any session that spawns agents is an orchestrator. Coordinator, triage, batch runner and lane session are kinds of orchestrator. Analogy: a square is a rectangle.
+- **Orchestrator, the catch-all word** (owner, 15:18). Any session that spawns agents is an orchestrator. Coordinator, triage, batch runner, arbiter and lane session are kinds of orchestrator. Analogy: a square is a rectangle.
 - **A coordinator in another repo** (owner, 15:18). A coordinator may work in another repo, by hand-off or by its own lane PR there. No hard block applies. Before it acts, it checks whether that repo has an active coordinator. If one is active, it coordinates with that coordinator. If none is active, it proceeds. It does not hold back for lack of a reply.
 - **Who starts which session** (owner, 15:18). The coordinator is the one session that starts other sessions. It starts triage and the batch runner together, as a trio, before any lane session. This refines the triage-first ruling below.
-- **Rotation of standing sessions** (owner, 15:23). Triage and the batch runner each report a tally of their own use, in turns or context, to the coordinator. When a tally nears its limit, the coordinator has that session write its handoff, archives it, and starts a fresh one from the handoff. The coordinator writes its own handoffs and compacts as today.
+- **Rotation of standing sessions** (owner, 15:23; the arbiter joins them, owner, 2026-10-29 16:42 CDT, waiting item 81, pick a). Triage, the batch runner and the arbiter each report a tally of their own use, in turns or context, to the coordinator. When a tally nears its limit, the coordinator has that session write its handoff, archives it, and starts a fresh one from the handoff. The coordinator writes its own handoffs and compacts as today.
   - MEASURED (coordinator, 2026-10-28; the second reading at 17:53 CDT, the first's time not given): `get_session` on a child session returns `external_metadata.context_usage` (`used_tokens`, `max_tokens`) and `autocompact_state` (`threshold`, `effective_window`). The q_max lane read 171216 of 500000, threshold 384000. A lane in the owner's environment "lane test" read `max_tokens` 200000, so a per-environment context window works for a cloud lane.
   - So the coordinator can read each standing session's tally itself. Dropping the self-report needs the owner's grant.
 - **No coordinator succession** (owner, 15:24). Handing children to a new coordinator failed in the owner's runs, in two ways.
@@ -40,8 +40,11 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   The coordinator holds only lane state and talks with the owner.
 - **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. The coordinator starts it, only on demand (see "On demand" below). The arbiter holds the ruling voice. The coordinator holds only lane state and talks with the owner.
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
-  - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the coordinator starts the arbiter when the owner tells it "spawn arbiter". It is for long runs the owner does not want to sit through.
+  - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the arbiter does not start with triage and the batch runner. It starts later, when the owner tells the coordinator "spawn arbiter". It is for long runs the owner does not want to sit through.
   - Effort (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): by default the arbiter runs at high effort for its model.
+  - Ruling (same item): an arbiter's answer counts as a ruling inside its own repo. It ranks below the owner, and the owner can overrule it.
+  - Which repos (same item): not every repo gets an arbiter, only a repo that asks. Today that is q_max.
+  - Kind (same item): the arbiter is a standing session and an orchestrator, and runs Opus. It is rotated before it goes stale, like triage.
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
   - "... and want it so that u push back on me somehow being like by the way, im coordinator ..."
