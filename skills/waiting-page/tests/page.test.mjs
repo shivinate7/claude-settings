@@ -2321,6 +2321,26 @@ test("the ready line names the picks by title, shortened, never by letter, a ran
   assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, your order\.$/);
 });
 
+// An unranked multi item has no order to keep: its ticks stay in option order, whatever order they were ticked in (ruling of 15:55 CDT, c135 round 3).
+test("an unranked multi item keeps its ticks in option order: C then A equals my pick a+c, hides Take my pick, and the answer and the notice read a+c", async (t) => {
+  const it = multi("un-order", 61, { pick: ["a", "c"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  await tick(page, it, "c");
+  assert.equal(await takeShown(page, it), true, "Take my pick is hidden while only C is ticked");
+  await tick(page, it, "a");
+  assert.deepEqual(await ticked(page, it), ["a", "c"]);
+  assert.equal(await takeShown(page, it), false, "Take my pick is not hidden after C then A, the same set as my pick");
+  assert.match(await card(page, it).locator(".ready").textContent(), /^Ready to send: Red and Green, your choice\.$/, "the ready line does not name the ticks in option order");
+  await send(page);
+  await told(page, "Claude was told");
+  const a = (await answers(page))[it.id];
+  assert.deepEqual([a.choice, a.note], [["a", "c"], ""], "the answer is not in option order");
+  const s = await sent(page);
+  assert.equal(s.length, 1);
+  assert.match(s[0].text, /(?<!\d)61 a\+c(?![+\w])/, "the notice does not read a+c: " + s[0].text);
+});
+
 const LONGER = [opt("a", "Open items older than a week, listed oldest first"), opt("b", "Picks that stood since the last digest went out"), opt("c", "Answers that failed to save and need a second chance"), opt("d", "A fourth title that is long enough to wrap")];
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
   test(`no card moves when a box is ticked or Up and Down are pressed, at ${viewport.width} wide`, async (t) => {
@@ -2344,6 +2364,76 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 
     await takePick(page, items[1]); await same("Take my pick on a ranked item");
   });
 }
+
+// The ready line's box against the height its text needs. `need` comes from a probe in the same card with the line's own font and width and no clamp,
+// so it does not depend on how the page reserves the space. `clip` is above 0 when the line cuts its text.
+const readyFit = (page, it) => page.evaluate((id) => {
+  const el = document.querySelector(`#item-${id} .ready`), cs = getComputedStyle(el);
+  const mark = getComputedStyle(el, "::before").content.replace(/^["']|["']$/g, "");
+  const probe = document.createElement("div");
+  for (const p of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing", "wordSpacing", "lineHeight", "wordBreak", "overflowWrap", "hyphens"]) probe.style[p] = cs[p];
+  probe.style.cssText += `;position:absolute;visibility:hidden;white-space:normal;width:${el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)}px`;
+  probe.textContent = (mark === "none" || mark === "normal" ? "" : mark) + el.textContent;
+  el.parentNode.append(probe);
+  const need = probe.getBoundingClientRect().height;
+  probe.remove();
+  return { box: el.getBoundingClientRect().height, need, clip: el.scrollHeight - el.clientHeight, line: parseFloat(cs.lineHeight) || 0, text: el.textContent };
+}, it.id);
+// Titles of exactly 28 characters, the longest a title is named at, so the ready line of n picks is as long as it gets. The first six are plain words.
+const T28 = ["Open items older than a week", "Lost answers waiting a retry", "Picks that stood since a run", "Notes that have no owner yet", "Tasks a lane left undone now", "Questions older than one day", "Reconciliation notifications", "Infrastructure documentation", "Troubleshooting instructions", "Authentication notifications"];
+const titles28 = (n) => T28.slice(0, n).map((l, i) => opt("abcdefghij"[i], l));
+for (const viewport of [{ width: 390, height: 800 }, { width: 1280, height: 900 }]) {
+  test(`a multi item's ready line reserves exactly the height of its longest line, no more and never less, at ${viewport.width} wide`, async (t) => {
+    const it = multi("rl-short", 62, { options: COLOURS.slice(0, 3) });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await noAnchor(page);
+    await needBoxes(page, it, 3);
+    const base = await geo(page), none = await readyFit(page, it);
+    for (const k of ["a", "b", "c"]) await tick(page, it, k);
+    const all = await readyFit(page, it);
+    assert.equal(all.text, "Ready to send: Red, Blue and Green, your choice.");
+    assert.ok(Math.abs(all.box - none.box) <= 1, `the ready line is ${none.box}px with nothing ticked and ${all.box}px with all ticked`);
+    assert.ok(Math.abs(all.box - all.need) <= 1, `the ready line is ${all.box}px, and its longest text needs ${all.need}px`);
+    assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
+  });
+
+  test(`a multi item of six 28-character titles shows the tail of its ready line, your choice or my pick, and no card moves, at ${viewport.width} wide`, async (t) => {
+    assert.ok(T28.every((l) => l.length === 28), "a title is not 28 characters");
+    const six = titles28(6), it = multi("rl-six", 63, { options: six, pick: six.map((o) => o.key) });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await noAnchor(page);
+    await needBoxes(page, it, 6);
+    const base = await geo(page), none = await readyFit(page, it);
+    for (const o of six) await tick(page, it, o.key);
+    const all = await readyFit(page, it);
+    assert.match(all.text, /^Ready to send: .+, your choice\.$/);
+    assert.ok(all.clip <= 0, `the ready line cuts its text: its content is ${all.clip}px taller than its box`);
+    assert.ok(all.need <= all.box + 1, `the ready line is ${all.box}px, and its text needs ${all.need}px, so its tail is cut`);
+    assert.ok(Math.abs(all.box - none.box) <= 1 && Math.abs(all.box - all.need) <= 1, `the ready line is ${none.box}px with nothing ticked, ${all.box}px with all ticked, and needs ${all.need}px`);
+    assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
+    await tick(page, it, "f"); await takePick(page, it);
+    const mine = await readyFit(page, it);
+    assert.match(mine.text, /^Ready to send: .+, my pick\.$/);
+    assert.ok(mine.clip <= 0 && mine.need <= mine.box + 1, `the ready line cuts the tail ", my pick." (box ${mine.box}px, text needs ${mine.need}px)`);
+    assert.deepEqual(await geo(page), base, "a card moved on Take my pick");
+  });
+}
+
+// The ruling has no line clamp: a line of ten long titles grows the box to hold it all, at the width the page has now. Head clamps at 6 lines at 390 wide.
+test("a multi item's ready line is never clamped: ten 28-character titles show their whole line at 390 wide", async (t) => {
+  const ten = titles28(10), it = multi("rl-ten", 64, { options: ten });
+  const page = await open(t, { items: [it], viewport: { width: 390, height: 800 } }); if (!page) return;
+  await noAnchor(page);
+  await needBoxes(page, it, 10);
+  const base = await geo(page);
+  for (const o of ten) await tick(page, it, o.key);
+  const all = await readyFit(page, it);
+  assert.match(all.text, /^Ready to send: .+, your choice\.$/);
+  assert.ok(all.line > 0 && all.need >= 7 * all.line - 1, `the line needs ${all.need}px, under 7 lines of ${all.line}px, so it cannot show a clamp of 6`);
+  assert.ok(all.clip <= 0 && all.need <= all.box + 1, `the ready line is ${all.box}px and cuts its text, which needs ${all.need}px`);
+  assert.ok(Math.abs(all.box - all.need) <= 1, `the ready line is ${all.box}px, and its text needs ${all.need}px`);
+  assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
+});
 
 test("Up and Down are 44px targets on each ticked card, in the Tab order, and work from the keyboard", async (t) => {
   const it = ranked("rk-keyboard", 32);

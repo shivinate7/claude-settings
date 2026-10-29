@@ -11577,6 +11577,15 @@ up("a multi item whose list pick holds the widening key and a null is denied", "
    up_item(multi=True, options=UP_THREE, pick=["a", None]))
 up("a multi item whose list pick holds a number and a widening key is denied", "deny",
    up_item(multi=True, options=[dict(UP_WIDE, key="w"), UP_MATCH, UP_THIRD], pick=[1, "w"]))
+# A widening option with no key is named by no pick. An item with no pick, or a null pick, picks nothing, so
+# the missing pick never reads as the key None.
+UP_KEYLESS = {k: v for k, v in UP_WIDE.items() if k != "key"}
+up("a widening option with no key and an item with no pick is allowed", "allow",
+   up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+up("a widening option with no key and an item with a null pick is allowed", "allow",
+   dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+up("a widening option with no key and a multi item with no pick is allowed", "allow",
+   up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
 add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
     "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
