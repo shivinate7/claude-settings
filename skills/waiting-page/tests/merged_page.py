@@ -14,7 +14,6 @@ import argparse
 import os
 import pathlib
 import shutil
-import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -22,6 +21,8 @@ ROOT = HERE.parent.parent.parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "skills" / "roadmap"))
 sys.path.insert(1, str(ROOT / "lint"))
+sys.path.insert(2, str(ROOT / "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import _test_temp  # noqa: E402
 import test_build  # noqa: E402
 
@@ -32,7 +33,7 @@ BAKED_PHASES = {"cleanup": {"metrics": [{"label": "Baked phase tile zebra", "val
 
 
 def run(argv, what):
-    done = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8")
+    done = _nowindow.run(argv, capture_output=True, text=True, encoding="utf-8")
     if done.returncode != 0:
         sys.stderr.write("%s failed (exit %d): %s\n%s%s" % (what, done.returncode, " ".join(argv), done.stdout, done.stderr))
         raise SystemExit(1)

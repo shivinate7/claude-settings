@@ -436,7 +436,7 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    assert.equal(await page.title(), "Agent Q: waiting on you");
+    assert.equal(await page.title(), "Agent Q: Questions"); // one-page notes, choice 6: the title names the open tab
   });
 }
 
