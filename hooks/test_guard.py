@@ -12339,6 +12339,17 @@ add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 
 add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 of 3 later, is allowed",
     "allow", tool="Agent", subagent_type="reviewer",
     prompt="Round 1 of 3: check that Round 3 of 3 logic works")
+# A first line that already starts with a marker, in any case or spelling, is read by that start alone.
+# A first line whose leftmost marker-shaped text is the old spelling adds nothing either. A later
+# marker on the line is prose in both.
+for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("lowercase at the start", "round 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("the old spelling after a role word", "Builder, Try 2 of 3. Round 3 of 3 later.")):
+    add("first-line marker: builder on opus with %s and a later Round 3 of 3 asks" % _label, "ask", CEILING,
+        tool="Agent", prompt=_first, model="opus", subagent_type="builder")
+add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="round 1 of 3: check Round 2 of 3 logic")
 # Text that only names opus is no model.
 add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
     tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",
