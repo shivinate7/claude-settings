@@ -125,9 +125,12 @@ make_checkout() {
 
 # A curl stub for the fetch-fallback path: writes minimal fixtures instead of hitting
 # GitHub. Installed at $1/curl.
+# $2 = fail-tarball: the tarball URL exits 1, so a case can prove a path never fetched it. Every fetch
+# that carries an output file is logged to $stub_bin/calls.
 make_curl_stub() {
   stub_bin="$1"
   mkdir -p "$stub_bin"
+  if [ "${2:-}" = fail-tarball ]; then : > "$stub_bin/fail-tarball"; fi
   # $work is captured at generation time (unquoted heredoc marker); everything else is
   # escaped so it stays a literal to be evaluated when the stub itself runs.
   cat > "$stub_bin/curl" <<EOF
@@ -140,8 +143,9 @@ for a in "\$@"; do
   prev="\$a"
 done
 [ -n "\$out" ] || exit 1
+printf '%s\n' "\$*" >> "$stub_bin/calls"
 case "\$*" in
-  *.tar.gz*) cp "$work/repo.tar.gz" "\$out" ;;
+  *.tar.gz*) [ -e "$stub_bin/fail-tarball" ] && exit 1; cp "$work/repo.tar.gz" "\$out" ;;
   *CLAUDE.md*) printf '# fallback mirror CLAUDE.md\n' > "\$out" ;;
   *settings.json*) printf '{}\n' > "\$out" ;;
   *) printf '# stub\n' > "\$out" ;;
@@ -2740,6 +2744,215 @@ win_sh1() { win_sh_case win_sh1 MINGW64_NT-10.0-26200; }
 win_sh2() { win_sh_case win_sh2 MSYS_NT-10.0-26200; }
 win_sh3() { win_sh_case win_sh3 CYGWIN_NT-10.0-26200; }
 
+# ---- cloud fetch: a clone of the repo at main, refreshed on resume, the tarball only when the clone fails ----
+# The GitHub repo is a bare repo built here from this repo's own tarball. HOME's .gitconfig redirects the
+# GitHub URLs to it (git's insteadOf), so git clone and git fetch never reach the network. Any other
+# github.com URL goes to a folder that does not exist: a URL the redirect misses fails, it does not leak.
+make_github_fixture() {
+  mkdir -p "$1/src"
+  tar -xzf "$work/repo.tar.gz" --strip-components=1 -C "$1/src"
+  git init -q -b main "$1/src"
+  git -C "$1/src" add -A
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "fixture main"
+  git clone -q --bare "$1/src" "$1/bare.git"
+}
+# Commit one change, named $2, to the fixture's main and push it to the bare repo.
+advance_github_fixture() {
+  printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"
+  git -C "$1/src" add RESUME.txt
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "advance $2"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
+}
+fixture_sha() { git -C "$1/bare.git" rev-parse refs/heads/main; }
+# write_redirect HOME BARE: HOME's .gitconfig sends the GitHub repo, with or without ".git", to BARE.
+# Caution: `git remote get-url origin` shows the rewritten path, not the GitHub URL. install.sh's origin
+# check reads get-url, so under this redirect it rejects a clone of this repo. K3 and K4 need that clone
+# recognised as this repo's checkout, so they fail on an install.sh that reads origin through get-url.
+write_redirect() {
+  {
+    printf '[url "file://%s"]\n' "$2"
+    printf '\tinsteadOf = https://github.com/shivinate7/claude-settings.git\n'
+    printf '\tinsteadOf = https://github.com/shivinate7/claude-settings\n'
+    printf '[url "file://%s/no-network/"]\n' "$work"
+    printf '\tinsteadOf = https://github.com/\n'
+  } > "$1/.gitconfig"
+}
+# One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
+# stub folder $3. Sets rc and out.
+cloud_install() {
+  out=$(cd "$2" && env -i PATH="$3:$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" \
+        GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+}
+# The WARN, ERROR and fatal lines of the last install: a failure message names the problem, not the whole log.
+install_problems() { printf '%s\n' "$out" | grep -E 'WARN|ERROR|fatal' | head -n 3; }
+
+# ---- caseK1: a fresh cloud install clones the repo at main, sets the marker, and never fetches the tarball ----
+caseK1() {
+  name="caseK1: a fresh cloud install clones the repo at main, sets the cloudMirror marker, and never fetches the tarball"
+  fx="$work/k1-fx"; h="$work/k1-home"; scratch="$work/k1-scratch"; bin="$work/k1-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  co="$h/claude-settings"
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$h/.claude-cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$pointer" in "~"/*) pointer="$h${pointer#\~}";; esac
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
+    bad "$name" "install.sh fetched the tarball; the clone path did not run"
+  elif [ ! -d "$co/.git" ]; then
+    bad "$name" "no clone at $co/.git: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want"
+  elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
+    bad "$name" "clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
+  elif [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/shivinate7/claude-settings.git" ]; then
+    bad "$name" "clone origin is $(git -C "$co" config --get remote.origin.url)"
+  elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
+    bad "$name" "clone has no claude-settings.cloudMirror marker"
+  elif [ "$(normalize_path "$pointer")" != "$(normalize_path "$co")" ]; then
+    bad "$name" "pointer target [$pointer] != clone [$co]"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK2: an old tarball copy (no .git) at the clone path is replaced by a clone at main ----
+caseK2() {
+  name="caseK2: an old tarball copy with no .git at the clone path is replaced by a clone at main"
+  fx="$work/k2-fx"; h="$work/k2-home"; scratch="$work/k2-scratch"; bin="$work/k2-bin"
+  co="$h/claude-settings"
+  mkdir -p "$co" "$scratch"
+  tar -xzf "$work/repo.tar.gz" --strip-components=1 -C "$co"
+  printf 'only in the old copy\n' > "$co/OLD-TARBALL-ONLY.txt"
+  make_github_fixture "$fx"; want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ ! -d "$co/.git" ]; then
+    bad "$name" "the old copy at $co still has no .git: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want"
+  elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
+    bad "$name" "clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
+  elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
+    bad "$name" "clone has no claude-settings.cloudMirror marker"
+  elif [ -e "$co/OLD-TARBALL-ONLY.txt" ]; then
+    bad "$name" "a file only the old copy had survived, so the copy was patched, not replaced"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK3: a cloud install on a marked clone refreshes it in place: HEAD moves to the new main commit ----
+caseK3() {
+  name="caseK3: a cloud install on a marked clone refreshes it in place: HEAD moves to the new main commit"
+  fx="$work/k3-fx"; h="$work/k3-home"; scratch="$work/k3-scratch"; bin="$work/k3-bin"
+  co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; first=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" != "$first" ] \
+     || [ "$(git -C "$co" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "the first install did not leave a marked clone at $first, so there was nothing to resume: $(install_problems)"
+    return
+  fi
+
+  # A file inside .git that only a refresh in place keeps: a clone that is replaced loses it.
+  : > "$co/.git/caseK3-sentinel"
+  advance_github_fixture "$fx" second; want=$(fixture_sha "$fx")
+  if [ "$want" = "$first" ]; then
+    bad "$name" "setup: the fixture main did not move, so the resume has nothing new to fetch"
+    return
+  fi
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the resume: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "after the resume HEAD is $(git -C "$co" rev-parse HEAD), want the new main $want (the first install was $first)"
+  elif [ ! -e "$co/.git/caseK3-sentinel" ]; then
+    bad "$name" "the clone was replaced by a new one, not refreshed in place"
+  elif [ "$(git -C "$co" symbolic-ref -q HEAD)" != refs/heads/main ]; then
+    bad "$name" "after the resume the clone is not on branch main: $(git -C "$co" symbolic-ref -q HEAD)"
+  elif [ "$(git -C "$co" config --get claude-settings.cloudMirror)" != true ]; then
+    bad "$name" "the resume dropped the cloudMirror marker"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK4: an unmarked clone at the clone path is never moved, even when main has a new commit ----
+caseK4() {
+  name="caseK4: an unmarked clone of the repo at the clone path stays on its commit when main moves"
+  fx="$work/k4-fx"; h="$work/k4-home"; scratch="$work/k4-scratch"; bin="$work/k4-bin"
+  co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; first=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  setup_err=$(env -i PATH="$PATH" HOME="$h" git clone -q --depth 1 --branch main \
+    https://github.com/shivinate7/claude-settings.git "$co" 2>&1)
+  if [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" != "$first" ] \
+     || [ "$(git -C "$co" config --get remote.origin.url)" != "https://github.com/shivinate7/claude-settings.git" ]; then
+    bad "$name" "setup: no unmarked clone at $first with the GitHub origin: $setup_err"
+    return
+  fi
+
+  advance_github_fixture "$fx" second
+  if [ "$(fixture_sha "$fx")" = "$first" ]; then
+    bad "$name" "setup: the fixture main did not move, so the case proves nothing about a new commit"
+    return
+  fi
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$first" ]; then
+    bad "$name" "the unmarked clone moved to $(git -C "$co" rev-parse HEAD), want it kept at $first"
+  elif [ -n "$(git -C "$co" config --get claude-settings.cloudMirror)" ]; then
+    bad "$name" "install.sh set the cloudMirror marker on a clone it did not make"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK5: a clone that fails falls back to the tarball, which lands CLAUDE.md, and leaves no clone or stray entry ----
+caseK5() {
+  name="caseK5: a clone that fails falls back to the tarball, which lands CLAUDE.md, and leaves no clone or stray entry"
+  h="$work/k5-home"; scratch="$work/k5-scratch"; bin="$work/k5-bin"
+  co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  write_redirect "$h" "$work/k5-missing.git"   # this path is never created, so the clone fails
+  make_curl_stub "$bin"
+  cloud_install "$h" "$scratch" "$bin"
+  left=$(find "$h" -mindepth 1 -maxdepth 1 ! -name .gitconfig ! -name .claude-cfg ! -name claude-settings | head -n 1)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif ! grep -q 'tar\.gz' "$bin/calls" 2>/dev/null; then
+    bad "$name" "install.sh did not fall back to the tarball after the clone failed"
+  elif ! cmp -s "$co/CLAUDE.md" "$REPO_ROOT/CLAUDE.md"; then
+    bad "$name" "CLAUDE.md at $co is not the repo's CLAUDE.md: the fallback did not land"
+  elif [ -e "$co/.git" ]; then
+    bad "$name" "the fallback copy has a .git: a clone was left behind"
+  elif [ -n "$left" ]; then
+    bad "$name" "a stray entry is left under HOME after the failed clone: $left"
+  else
+    ok "$name"
+  fi
+}
+
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
@@ -2829,6 +3042,11 @@ run guardset2
 run win_sh1
 run win_sh2
 run win_sh3
+run caseK1
+run caseK2
+run caseK3
+run caseK4
+run caseK5
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
