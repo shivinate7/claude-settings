@@ -264,7 +264,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
 .dfitwrap.inert .dframe { pointer-events: none; }
-/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The mockup is white in both themes, so the cue keeps one pair: 17.3:1. */
+/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
 :root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
 .dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }
 .dfitwrap .dtop, .dfitwrap .dcue { display: none; }
@@ -613,9 +613,16 @@ function optPic(it, o, dif) {
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
   const pic = fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480);
-  // A press on the scrollbar fires a click on the button. It opens nothing and picks nothing.
+  // A press on the scrollbar is no press on the picture. The click that follows it, wherever a drag ends, opens nothing and picks nothing.
   const onBar = (e) => { const r = pic.getBoundingClientRect(); return pic.classList.contains("scroll") && e.clientX >= r.left + pic.clientLeft + pic.clientWidth && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
-  return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: (e) => { if (onBar(e)) { e.preventDefault(); e.stopPropagation(); } else open(e); }, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); else picKeys(e, pic); } },
+  pic.addEventListener("pointerdown", (e) => {
+    if (!onBar(e)) return;
+    // The cancel ends with that click, or with the next press when no click follows.
+    const stop = (c) => { c.preventDefault(); c.stopPropagation(); off(); };
+    const off = () => { document.removeEventListener("click", stop, true); document.removeEventListener("pointerdown", off, true); };
+    document.addEventListener("click", stop, true); document.addEventListener("pointerdown", off, true);
+  });
+  return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); else picKeys(e, pic); } },
     pic, h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
 }
 // Designs that no option names show at the front of the item.
