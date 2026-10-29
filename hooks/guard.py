@@ -2590,6 +2590,84 @@ def widens_pick_hit(data) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ the owner acts in place
+#
+# docs/decisions/act-in-place.md, rules `press-link` and `command-in-item`, built against a named
+# incident (incident in the record): an option or step that asks the owner to press in a web app
+# carries a link to that exact page, and a step never sends him to a file for a command. Both are
+# read at the same ArtifactData call.
+PRESS_LINK_REASON = ("An option or step that asks the owner to press in a web app carries a link to "
+                     "that exact page. Put links: [{label, url}] on that option (a task: on the item), "
+                     "with the url of the page where he presses; for a pull request or an issue, the "
+                     "url of that number.")
+COMMAND_REASON = ("A step never sends the owner to a file for a command. Put the command in the item's "
+                  "`command` field, and say \"paste the command below\" in the step.")
+PRESS_VERB = re.compile(r"\b(?:press(?:es|ed|ing)?|click(?:s|ed|ing)?|tap(?:s|ped|ping)?)\b"
+                        r"|\bmark(?:s|ed|ing)?\b[^.\n]*\bready\b", re.I)
+WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|\bsettings\b|[\w.-]+#\d+", re.I)
+PRESS_REF = re.compile(r"#(\d+)")
+COMMAND_FILE = re.compile(r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
+                          r"|\b(?:plans|docs|notes)/[\w./-]+", re.I)
+COMMAND_PHRASE = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b"
+                            r"|\bits\s+commands?\b|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
+
+
+def _flat_text(value) -> str:
+    """One string from a step or option field: a string as is, a dict's string values joined."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(v for v in value.values() if isinstance(v, str))
+    return ""
+
+
+def _press_field_ok(text, links) -> bool:
+    """True when this field asks for no web press, or `links` holds a link to the exact page. A
+    `#N` in the field needs a url with /pull/N or /issues/N at a number boundary."""
+    if not (PRESS_VERB.search(text) and WEB_MARKER.search(text)):
+        return True
+    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    if not urls:
+        return False
+    return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
+               for n in PRESS_REF.findall(text))
+
+
+def press_link_hit(op, data) -> str:
+    """The matched text when this write names a press in a web app with no link to the exact page.
+    The link sits on the option that presses, or on the task. An update of `steps` with no `links`
+    cannot see the stored links and passes."""
+    if not isinstance(data, dict) or data.get("kind", "decision") not in ("decision", "task"):
+        return ""
+    options, steps = data.get("options"), data.get("steps")
+    if isinstance(options, list):
+        for o in options:
+            if not isinstance(o, dict):
+                continue
+            for field in ("label", "how"):
+                if not _press_field_ok(_flat_text(o.get(field)), o.get("links")):
+                    return "option presses in a web app with no link to the page"
+    if isinstance(steps, list) and (op == "set" or "links" in data):
+        for step in steps:
+            if not _press_field_ok(_flat_text(step), data.get("links")):
+                return "step presses in a web app with no link to the page"
+    return ""
+
+
+def command_in_item_hit(data) -> str:
+    """The matched text when a task's steps, joined, send the owner to a file for a command. A set
+    whose item carries a `command` is not judged: the command is in the item."""
+    if not isinstance(data, dict) or data.get("kind", "task") != "task":
+        return ""
+    steps = data.get("steps")
+    if not isinstance(steps, list) or (isinstance(data.get("command"), str) and data["command"].strip()):
+        return ""
+    joined = "\n".join(_flat_text(s) for s in steps)
+    if COMMAND_FILE.search(joined) and COMMAND_PHRASE.search(joined):
+        return "steps send the owner to a file for a command"
+    return ""
+
+
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
@@ -2610,6 +2688,12 @@ def data_tool_hit(tool_input, cwd=""):
         hit = widens_pick_hit(data)
         if hit:
             return "uniform-pick", hit
+        hit = press_link_hit(op, data)
+        if hit:
+            return "press-link", hit
+        hit = command_in_item_hit(data)
+        if hit:
+            return "command-in-item", hit
     return "", ""
 
 
@@ -2962,6 +3046,10 @@ def judge(payload) -> None:
             refuse(tool, "deny", "port-question", PORT_REASON, matched)
         if rule == "uniform-pick":
             refuse(tool, "deny", "uniform-pick", WIDENS_REASON, matched)
+        if rule == "press-link":
+            refuse(tool, "deny", "press-link", PRESS_LINK_REASON, matched)
+        if rule == "command-in-item":
+            refuse(tool, "deny", "command-in-item", COMMAND_REASON, matched)
         return
 
     if tool in SHELL_TOOLS:
