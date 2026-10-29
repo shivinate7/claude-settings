@@ -116,6 +116,6 @@ AskUserQuestion is refused while an agent, a background command or a workflow of
 
 - Agents come from the host's agent list, read once per box. Background commands and workflows are the ones the mod saw start and not yet end. A monitor does not count. The engine's list at each turn end resets them.
 - A start is a desktop `start_session` or cloud `create_session` call that answers without error. A start inside an agent counts too; a Routine does not. The count lives in the store key `started:<id>`, so it survives a mod reload and a restart or resume under the same id. A `/clear` carries it; an in-process resume takes the resumed session's own count.
-- The refusal says to ask in the reply and on the waiting page, then keep working.
+- The refusal says to ask in the reply, send the question to the waiting page's writer after 5 minutes unanswered, and keep working.
 - An unreadable agent list lets the box through, and the debug log and `guard.log` say unknown.
 - Each refusal writes one `guard.log` line through `hooks/guard_core.py`, rule `question-box-while-work`.
