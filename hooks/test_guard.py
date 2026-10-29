@@ -14306,6 +14306,106 @@ LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused
 LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
                          "refused; reads, fetch, branch, worktree add and a live -C commit pass",
                          session_home_git_verbs_case))
+
+
+def session_home_agent_tree_inspect_case():
+    """Rule session-home: a top-level call (no agent_id) whose cwd sits in an agent's worktree,
+    `.claude/worktrees/agent-<id>`, is an orchestrator inspecting that tree. It writes no session
+    record. Once that tree is removed, the primary checkout stays writable, and so does a git commit
+    made there."""
+    primary = sh_new_primary("inspect")
+    tree, branch = sh_add_lane(primary, "agent-" + SH_AGENT)
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Bash", tree, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the inspecting call: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("a top-level call inside an agent's worktree wrote a session record")
+    sh_lose_lane(primary, tree, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after the agent tree is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command=VCS + " commit -m x")
+    if got != "allow":
+        problems.append("the primary git commit after the agent tree is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an inspecting call writes no record; the primary write and commit pass after removal"
+
+
+def session_home_exit_live_from_primary_case():
+    """Rule session-home: an ExitWorktree from the primary checkout clears a record that names a live
+    worktree. A record that names a lost worktree is kept, and the primary write stays refused."""
+    primary = sh_new_primary("exitlive")
+    live, live_branch = sh_add_lane(primary, "lane-exitlive")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", live, session=session, command="echo hi")
+    if not sh_holds(primary, session, live):
+        problems.append("the live lane call wrote no session record naming the lane")
+    got, reason = _decide_full("ExitWorktree", primary, session=session)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("an ExitWorktree from the primary left the record naming a live worktree")
+    sh_lose_lane(primary, live, live_branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after the live lane is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    lost, lost_branch = sh_add_lane(primary, "lane-exitlost")
+    other = sh_session()
+    _decide_full("Bash", lost, session=other, command="echo hi")
+    if not sh_holds(primary, other, lost):
+        problems.append("the lane call that is lost next wrote no session record naming the lane")
+    sh_lose_lane(primary, lost, lost_branch)
+    got, reason = _decide_full("ExitWorktree", primary, session=other)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary, lost record: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if not sh_holds(primary, other, lost):
+        problems.append("an ExitWorktree from the primary cleared a lost session's record")
+    got, reason = _decide_full("Write", primary, session=other, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write for the lost session", got, reason,
+                                    primary, lost)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an ExitWorktree from the primary clears a live record and keeps a lost one"
+
+
+def session_home_variable_folder_commit_case():
+    """Rule session-home: while the record is lost, a git commit whose folder is a shell variable
+    passes, both as `cd "$WT" && git commit` and as `git -C "$WT" commit`. The folder is unknown, and
+    an unknown folder is no hit."""
+    primary = sh_new_primary("varcommit")
+    lane, branch = sh_add_lane(primary, "lane-varcommit")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    for command in ('cd "$WT" && ' + VCS + " commit -m x", VCS + ' -C "$WT" commit -m x'):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a commit whose folder is a variable passes, by cd and by -C"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a top-level call inside an agent's worktree writes no session "
+                         "record, and the primary write and commit pass once that tree is removed",
+                         session_home_agent_tree_inspect_case))
+LOG_CHECKS_EXTRA.append(("session-home: an ExitWorktree from the primary clears a record that names a "
+                         "live worktree, and keeps a lost one", session_home_exit_live_from_primary_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a commit whose folder is a shell variable passes, "
+                         "by cd and by -C", session_home_variable_folder_commit_case))
 LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree is gone is refused a write into the "
                          "primary checkout, by each write tool and a shell write, naming EnterWorktree "
                          "and no path", session_home_lost_refuses_case))
