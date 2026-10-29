@@ -26,11 +26,14 @@ with open(TEMPLATE, encoding="utf-8") as f:
     PAGE = f.read()
 URL = "https://claude.ai/artifact/%s"
 
-# Fixtures, all derived from page.html at run time. A live page holds < escapes in its mockups.
+# Fixtures, all derived from page.html at run time. A live page holds backslash-u escapes in its mockups.
 BLOCK = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 ALTERED = PAGE.replace("<title>", "<title>Altered ", 1)  # differs outside designData only
-STALE_BODY = r'{"a": "<p>mock</p>", "b": "<i>raw</i>"}'
-MOCK_BODY = r'{"a": "<p>mockup</p>", "b": "<i>raw</i>"}'
+BS = chr(92)  # one backslash: a live page's mockups hold backslash-u-003c escapes
+STALE_BODY = '{"a": "' + BS + 'u003cp>mock' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
+MOCK_BODY = '{"a": "' + BS + 'u003cp>mockup' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
+SKELETON_OPEN = '<!doctype html><html><head><meta charset="utf-8"></head><body>\n'
+SKELETON_CLOSE = '\n</body></html>'
 VERDICT = re.compile(r"\b(current|behind|unknown)\b")
 
 
@@ -46,10 +49,11 @@ def write_text(path, text):
     return path
 
 
-def link_repo_dirs(claude):
-    """A fake ~/.claude gets this repo's lint and hooks folders, as a real install has both."""
+def link_repo_dirs(claude, hooks=True):
+    """A fake ~/.claude gets this repo's lint folder, and its hooks folder unless `hooks` is False."""
     os.symlink(LINT, os.path.join(claude, "lint"))
-    os.symlink(HOOKS, os.path.join(claude, "hooks"))
+    if hooks:
+        os.symlink(HOOKS, os.path.join(claude, "hooks"))
 
 
 def git(cwd, *args):
@@ -154,14 +158,27 @@ class Stale(unittest.TestCase):
         self.assertEqual({k: after[k] for k in before if k in after}, before, "an existing file changed")
         self.assertEqual(set(after) - set(before), set(new))
 
-    def assert_source_run(self, page, home, script, code, word, source):
-        """One run under a fake HOME: the exit code, the verdict, and the one template source it names."""
+    def assert_origin_run(self, page, home, script, code, word):
+        """One run under a fake HOME: the exit code and the verdict, with origin/main the one source named."""
         r = self.page_run(page, home=home, script=script)
         self.assertEqual(r.returncode, code, r.stdout + r.stderr)
         got, line = self.verdict(r)
         self.assertEqual(got, word, line)
-        self.assertIn(source, line)
-        self.assertNotIn("installed copy" if source == "origin/main" else "origin/main", line)
+        self.assertIn("origin/main", line)
+        self.assertNotIn("installed copy", line)
+
+    def assert_unknown_run(self, page, home, script):
+        """Main unreadable: exit 2 and unknown, naming the installed copy or main. No file, even with --write, and no traceback."""
+        out = os.path.join(self.tmp.name, "unknown-out.html")
+        before = self.snapshot()
+        r = self.page_run(page, "--write", out, home=home, script=script)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        word, line = self.verdict(r)
+        self.assertEqual(word, "unknown", line)
+        self.assertRegex(line, r"installed copy|main unreadable")
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(out))
+        self.assert_only_new(before, set())
 
     def make_clone(self, name, files):
         """A git clone of `files` whose origin/main is its HEAD, as a fetched remote leaves it."""
@@ -220,7 +237,7 @@ class Stale(unittest.TestCase):
                 self.assertFalse(os.path.exists(out))
                 self.assert_only_new(before, set())
 
-    def test_template_source_is_named_and_the_pointer_chooses_it(self):
+    def test_only_origin_main_proves_current_or_behind(self):
         clone = self.make_clone("clone", {"skills/waiting-page/page.html": PAGE, "CLAUDE.md": "# claude-settings\n"})
         home = os.path.join(self.tmp.name, "home")
         claude = os.path.join(home, ".claude")
@@ -232,23 +249,23 @@ class Stale(unittest.TestCase):
         shutil.copy2(CMD, os.path.join(installed, "stale_pages.py"))
         write_text(os.path.join(installed, "page.html"), ALTERED)
         link_repo_dirs(claude)
-        pointer =write_text(os.path.join(claude, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone)
+        pointer = write_text(os.path.join(claude, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone)
         script = os.path.join(installed, "stale_pages.py")
         same = write_text(os.path.join(self.fetched, "same.html"), PAGE)  # equals origin/main
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)  # equals the installed copy
         with self.subTest("pointer: origin/main page is current"):
-            self.assert_source_run(same, home, script, 0, "current", "origin/main")
-        with self.subTest("pointer: installed page is behind origin/main"):
-            self.assert_source_run(old, home, script, 1, "behind", "origin/main")
+            self.assert_origin_run(same, home, script, 0, "current")
+        with self.subTest("pointer: older page is behind origin/main"):
+            self.assert_origin_run(old, home, script, 1, "behind")
         write_text(pointer, "# no pointer here\n")
-        with self.subTest("no pointer: installed page is current"):
-            self.assert_source_run(old, home, script, 0, "current", "installed copy")
-        with self.subTest("no pointer: origin/main page is behind the installed copy"):
-            self.assert_source_run(same, home, script, 1, "behind", "installed copy")
+        with self.subTest("no pointer: main unreadable, so unknown"):
+            self.assert_unknown_run(old, home, script)
+        with self.subTest("no pointer: origin/main page is still unknown"):
+            self.assert_unknown_run(same, home, script)
         plain = write_text(os.path.join(self.tmp.name, "plain", "CLAUDE.md"), "# not a checkout\n")
         write_text(pointer, "@%s\n" % plain)
-        with self.subTest("pointer to a folder with no git read: installed copy"):
-            self.assert_source_run(old, home, script, 0, "current", "installed copy")
+        with self.subTest("pointer to a folder with no git read: unknown"):
+            self.assert_unknown_run(old, home, script)
 
     def test_script_run_from_inside_a_checkout_reads_that_checkouts_origin_main(self):
         with open(CMD, encoding="utf-8") as f:
@@ -258,14 +275,69 @@ class Stale(unittest.TestCase):
         home = os.path.join(self.tmp.name, "home")
         os.makedirs(os.path.join(home, ".claude", "skills", "waiting-page"))
         link_repo_dirs(os.path.join(home, ".claude"))
-        script =os.path.join(home, ".claude", "skills", "waiting-page", "stale_pages.py")
+        script = os.path.join(home, ".claude", "skills", "waiting-page", "stale_pages.py")
         os.symlink(os.path.join(clone, "skills", "waiting-page", "stale_pages.py"), script)
         same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)
         with self.subTest("origin/main page is current"):
-            self.assert_source_run(same, home, script, 0, "current", "origin/main")
+            self.assert_origin_run(same, home, script, 0, "current")
         with self.subTest("older page is behind origin/main"):
-            self.assert_source_run(old, home, script, 1, "behind", "origin/main")
+            self.assert_origin_run(old, home, script, 1, "behind")
+
+    def test_extra_code_outside_the_template_is_behind(self):
+        cases = {
+            "appended script": PAGE + "<script>window.extra = 1;</script>",
+            "prepended style": "<style>p { color: red; }</style>" + PAGE,
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                page = write_text(os.path.join(self.fetched, label.replace(" ", "-") + ".html"), text)
+                r = self.page_run(page, "--main", TEMPLATE)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertEqual(self.verdict(r)[0], "behind")
+
+    def test_document_skeleton_around_the_template_is_current(self):
+        page = write_text(os.path.join(self.fetched, "skeleton.html"), SKELETON_OPEN + PAGE + SKELETON_CLOSE)
+        r = self.page_run(page, "--main", TEMPLATE)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.verdict(r)[0], "current")
+
+    def test_batch_mode_appended_code_is_behind(self):
+        root = self.repo("appended", "GGG")
+        self.fetch("GGG", PAGE + "<script>window.extra = 1;</script>")
+        code, out = self.run_cmd(root)
+        self.assertEqual(code, 1, out)
+        self.assertIn("behind: appended", out)
+        self.assertNotIn("current: appended", out)
+
+    def test_write_to_an_unwritable_path_is_unknown_without_traceback(self):
+        stale = write_text(os.path.join(self.fetched, "unwritable.html"), set_body(ALTERED, STALE_BODY))
+        blocker = write_text(os.path.join(self.tmp.name, "blocker"), "a regular file\n")
+        targets = {
+            "under a regular file": os.path.join(blocker, "out.html"),
+            "parent folder missing": os.path.join(self.tmp.name, "no-such-folder", "out.html"),
+        }
+        for label, out in targets.items():
+            with self.subTest(label):
+                before = self.snapshot()
+                r = self.page_run(stale, "--main", TEMPLATE, "--write", out)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertEqual(self.verdict(r)[0], "unknown")
+                self.assertNotIn("Traceback", r.stdout + r.stderr)
+                self.assertFalse(os.path.exists(out))
+                self.assert_only_new(before, set())
+
+    def test_no_hooks_reachable_is_unknown_without_traceback(self):
+        home = os.path.join(self.tmp.name, "home")
+        claude = os.path.join(home, ".claude")
+        installed = os.path.join(claude, "skills", "waiting-page")
+        os.makedirs(installed)
+        script = os.path.join(installed, "stale_pages.py")
+        shutil.copy2(CMD, script)
+        write_text(os.path.join(installed, "page.html"), ALTERED)
+        link_repo_dirs(claude, hooks=False)
+        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
+        self.assert_unknown_run(same, home, script)
 
     def test_check_mode_writes_no_file_and_write_mode_writes_exactly_one(self):
         stale = write_text(os.path.join(self.fetched, "cost.html"), set_body(ALTERED, STALE_BODY))
