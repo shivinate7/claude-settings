@@ -17,6 +17,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
 CMD = os.environ.get("STALE_PAGES_UNDER_TEST") or os.path.join(HERE, "stale_pages.py")
+SPLICE = os.environ.get("SPLICE_UNDER_TEST") or os.path.join(HERE, "splice.py")  # the same seam as test_splice.py
+DESIGN_BLOCK = re.compile(r'<script type="application/json" id="designData">.*?</script>', re.S)
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
 URL = "https://claude.ai/artifact/%s"
@@ -116,6 +118,26 @@ class Stale(unittest.TestCase):
                 code, out = self.run_cmd(root)
                 self.assertEqual(code, 1, out)
                 self.assertIn("behind: changed", out)
+
+    def test_a_carry_reads_current_and_keeps_the_live_designs(self):
+        # stale_pages empties designData on both sides, so "current" cannot show a loss of the live mockups.
+        # A republish of plain page.html reads current with designData empty; only the carry keeps them.
+        live = self.live_with_both_blocks()
+        self.assertNotEqual(DESIGN_BLOCK.findall(live), DESIGN_BLOCK.findall(PAGE), "the template holds the live designs")
+        live_path = os.path.join(self.tmp.name, "live.html")
+        carried_path = os.path.join(self.tmp.name, "carried.html")
+        with open(live_path, "w", encoding="utf-8", newline="") as f:
+            f.write(live)
+        r = subprocess.run([sys.executable, SPLICE, "--page", os.path.join(HERE, "page.html"), "--carry", live_path,
+                            "--out", carried_path], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(carried_path, encoding="utf-8", newline="") as f:
+            carried = f.read()
+        self.assertEqual(DESIGN_BLOCK.findall(carried), DESIGN_BLOCK.findall(live), "the carry lost the live designData")
+        self.fetch("III", carried)
+        code, out = self.run_cmd(self.repo("carried", "III"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("current: carried", out)
 
     def test_page_with_no_fetched_file_is_unknown_never_current(self):
         code, out = self.run_cmd(self.repo("unfetched", "EEE"))

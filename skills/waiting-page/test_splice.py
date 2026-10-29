@@ -7,6 +7,12 @@ It replaces the roadmap block of the live page (the block between `<!-- roadmap:
 designData block among them. A page with no roadmap block is refused. A marker that sits inside a
 <script>, as text of a JS string or template literal, is not a block marker.
 
+    python3 splice.py --page TEMPLATE.html --carry LIVE.html --out OUT.html
+
+The carry mode puts the live page's designData block and roadmap block, byte for byte, into the
+template, for a republish of a changed template. It refuses, and writes nothing, when either block is
+missing from either file.
+
 SPLICE_UNDER_TEST names the command to run (default: splice.py beside this file), so the same
 cases run red against a checkout that lacks it. Temp files: the run folder of lint/_test_temp.py,
 whose sweep lint/test_find_copies.py proves (decision test-temp-standard).
@@ -45,12 +51,13 @@ NEW_BLOCK = (OPEN + '\n<script>window.ROADMAP_DATA = {"steps": {"c1": {"note": "
 OTHER_BLOCK = OPEN + '\n<script>window.ROADMAP_DATA = null; window.ROADMAP_BUILD = {"repo": "other"};</script>\n' + CLOSE + "\n"
 
 
-def live_page(block=OLD_BLOCK, decoys=True):
-    """A live page: the roadmap block (or none) between a lone-quote text and the designData block."""
+def live_page(block=OLD_BLOCK, decoys=True, design=DESIGN, extra=""):
+    """A page: the roadmap block (or none) between a lone-quote text and the designData block (or none).
+    `extra` is one more line of markup, for a template that changed."""
     return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>x: Questions</title></head><body>\n"
-            "<p>Don't split here</p>\n" + (DECOY_STRING + "\n" if decoys else "") +
-            (block + "\n" if block else "") + DESIGN + "\n" + (DECOY_TEMPLATE + "\n" if decoys else "") +
-            "</body></html>\n")
+            "<p>Don't split here</p>\n" + (extra + "\n" if extra else "") + (DECOY_STRING + "\n" if decoys else "") +
+            (block + "\n" if block else "") + (design + "\n" if design else "") +
+            (DECOY_TEMPLATE + "\n" if decoys else "") + "</body></html>\n")
 
 
 def setUpModule():
@@ -62,7 +69,7 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
-class Splice(unittest.TestCase):
+class Folder(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
@@ -79,6 +86,8 @@ class Splice(unittest.TestCase):
         with open(self.path(name), encoding="utf-8", newline="") as f:
             return f.read()
 
+
+class Splice(Folder):
     def splice(self, page, block, out="out.html"):
         r = subprocess.run([sys.executable, CMD, "--page", self.write("live.html", page), "--block",
                             self.write("block.html", block), "--out", self.path(out)], capture_output=True, text=True)
@@ -146,6 +155,75 @@ class Splice(unittest.TestCase):
 
     def test_page_whose_only_markers_sit_inside_scripts_is_refused(self):
         self.refused(live_page(block=None, decoys=True), "markers only in script text")
+
+
+EMPTY_BLOCK = OPEN + "\n" + CLOSE
+EMPTY_DESIGN = '<script type="application/json" id="designData">{}</script>'
+CHANGED_LINE = "<p>The template changed this line.</p>"
+# A JS string that holds a designData slot, ahead of the real one: not a block.
+DECOY_SLOT = "<script>\nconst SLOT = '<script type=\"application/json\" id=\"designData\">{\"decoy\": 1}<\\/script>';\n</script>"
+
+
+class Carry(Folder):
+    """--carry LIVE: a republish of a changed template keeps the live page's two data blocks, the
+    designData block and the roadmap block, byte for byte (build constraint 6: replace only the
+    block you change, keep the other)."""
+
+    def carry(self, template, live, out="out.html"):
+        r = subprocess.run([sys.executable, CMD, "--page", self.write("template.html", template), "--carry",
+                            self.write("live.html", live), "--out", self.path(out)], capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    def carried(self, template, live):
+        code, said = self.carry(template, live)
+        self.assertEqual(code, 0, said)
+        return self.read("out.html")
+
+    def test_both_live_blocks_land_in_a_changed_template_byte_for_byte(self):
+        block = NEW_BLOCK.strip()
+        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, extra=DECOY_SLOT + "\n" + CHANGED_LINE)
+        live = live_page(block=block, design=DESIGN, extra=DECOY_SLOT)
+        out = self.carried(template, live)
+        self.assertIn(CHANGED_LINE, out, "the template's change is gone")
+        self.assertEqual(out.count(DESIGN), 1, "the live designData block is not kept byte for byte")
+        self.assertEqual(out.count(block), 1, "the live roadmap block is not kept byte for byte")
+        self.assertNotIn(EMPTY_DESIGN, out)
+        self.assertNotIn(EMPTY_BLOCK, out)
+        # Nothing else of the template changed: the template with the two live blocks swapped in, and no more.
+        self.assertEqual(out, live_page(block=block, design=DESIGN, extra=DECOY_SLOT + "\n" + CHANGED_LINE))
+        self.assertEqual(self.read("live.html"), live, "the live page changed")
+
+    def test_a_second_carry_gives_the_same_page(self):
+        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, extra=CHANGED_LINE)
+        first = self.carried(template, live_page())
+        self.assertEqual(self.carried(template, first), first)
+
+    def refused(self, template, live, word, why):
+        """The same command carries a good pair, so a refusal here is the carry's own."""
+        code, said = self.carry(live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN), live_page())
+        self.assertEqual(code, 0, "the carry does not run on a good pair: " + said)
+        os.remove(self.path("out.html"))
+        code, said = self.carry(template, live)
+        self.assertNotEqual(code, 0, why + ": the carry wrote a page")
+        self.assertRegex(said, "(?i)" + word, why + ": the message does not name the missing block")
+        self.assertFalse(os.path.exists(self.path("out.html")), why + ": an output file was left")
+        self.assertEqual((self.read("template.html"), self.read("live.html")), (template, live), why + ": an input changed")
+
+    def test_a_template_or_live_page_missing_a_block_is_refused(self):
+        good_template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN)
+        cases = [
+            ("template with no designData slot", live_page(block=EMPTY_BLOCK, design=""), live_page(), "designData"),
+            ("template with no roadmap markers", live_page(block=None, design=EMPTY_DESIGN, decoys=False), live_page(), "roadmap"),
+            ("template with markers only in script text", live_page(block=None, design=EMPTY_DESIGN), live_page(), "roadmap"),
+            ("template with an unclosed roadmap block", live_page(block=OPEN, design=EMPTY_DESIGN, decoys=False), live_page(), "roadmap"),
+            ("live page with no designData slot", good_template, live_page(design=""), "designData"),
+            ("live page with no roadmap markers", good_template, live_page(block=None, decoys=False), "roadmap"),
+            ("live page with markers only in script text", good_template, live_page(block=None), "roadmap"),
+            ("live page with an unclosed roadmap block", good_template, live_page(block=OPEN, decoys=False), "roadmap"),
+        ]
+        for why, template, live, word in cases:
+            with self.subTest(why):
+                self.refused(template, live, word, why)
 
 
 if __name__ == "__main__":
