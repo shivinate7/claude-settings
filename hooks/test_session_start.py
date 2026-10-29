@@ -34,6 +34,14 @@ def hook_tier_line():
     return found[0]
 
 
+def merge_role_sentence(line):
+    """The sentence of the tier line that holds `merge --role`: from the ". " before it to the ". " after it, or to the line's ends."""
+    at = line.index("merge --role")
+    start = line.rfind(". ", 0, at)
+    end = line.find(". ", at)
+    return line[0 if start < 0 else start + 2:len(line) if end < 0 else end + 1]
+
+
 def sh_exe():
     """Git's own sh.exe on Windows, by full path. A bare `sh` can resolve to the WSL stub."""
     if os.name != "nt":
@@ -210,6 +218,20 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         for tier in ("coordinator", "batch-runner"):
             with self.subTest(tier=tier):
                 self.assertIn(tier, line)
+
+    def test_the_tier_line_says_the_role_is_recorded_again_after_a_resume(self):
+        # A resumed session keeps its id, but the role file may be gone (a fresh container): the line must not say the call is a one-time act.
+        sentence = merge_role_sentence(hook_tier_line())
+        self.assertIn("resume", sentence.lower(), sentence)
+
+    def test_the_tier_line_does_not_say_once(self):
+        self.assertNotRegex(hook_tier_line(), r"(?i)\bonce\b")
+
+    def test_the_merge_role_sentence_is_found_by_its_edges(self):
+        # The helper cuts at ". ": from the one before `merge --role` to the one after it, or to the line's ends.
+        self.assertEqual(merge_role_sentence("A one. B runs `merge --role x` now. C two."), "B runs `merge --role x` now.")
+        self.assertEqual(merge_role_sentence("merge --role x. C two."), "merge --role x.")
+        self.assertEqual(merge_role_sentence("A one. B runs merge --role x"), "B runs merge --role x")
 
 
 if __name__ == "__main__":

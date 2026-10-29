@@ -9231,6 +9231,17 @@ class MergeRoleCheck(Env):
                 self.assert_writer_refused("--role", tier)
                 self.assertEqual(self.role_files(), {})
 
+    def test_the_refusal_of_a_tier_outside_the_merge_set_does_not_list_the_valid_tiers(self):
+        # A lane that asks for a tier must not learn the two that pass. The tiers below hold neither word, so an echo of the
+        # argument cannot make the assertion fail by itself.
+        for tier in ("lane", "triage", "", "solo"):
+            with self.subTest(tier=tier):
+                rc, out, err = self.run_main("--role", tier)
+                self.assertNotEqual(rc, 0, out + err)
+                self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+                for valid in ("coordinator", "batch-runner"):
+                    self.assertNotIn(valid, err)
+
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
         self.put_role("coordinator")
         self.assert_writer_refused("--role", "lane")
@@ -9259,8 +9270,10 @@ class MergeRoleCheck(Env):
 
 REPO_ROOT = os.path.dirname(HERE)
 CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
-CLOUD_ALLOW_RULES = ("Bash(merge * --confirm)", "Bash(bin/merge * --confirm)", "Bash(~/.claude/bin/merge * --confirm)",
-                     "Bash(python3 merge/merge.py * --confirm)")
+# Each shim form twice: `merge <pr> --confirm` and the same with trailing arguments. No rule runs merge/merge.py by path: that runs
+# the working copy's file, which on an old lane branch has no role check.
+CLOUD_ALLOW_SHIMS = ("merge", "bin/merge", "~/.claude/bin/merge")
+CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
 SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
@@ -9338,20 +9351,31 @@ class CloudAllow(unittest.TestCase):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             return json.load(f)["permissions"]["allow"]
 
-    def test_the_rules_file_is_exactly_the_four_confirm_rules(self):
+    def test_the_rules_file_is_exactly_the_six_confirm_rules(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"permissions"})
         self.assertEqual(set(data["permissions"]), {"allow"})
         self.assertEqual(sorted(data["permissions"]["allow"]), sorted(CLOUD_ALLOW_RULES))  # no more, no fewer, no repeat
 
-    def test_every_rule_ends_at_confirm_and_none_is_broad(self):
-        narrow = re.compile(r"Bash\((merge|bin/merge|~/\.claude/bin/merge|python3 merge/merge\.py) \* --confirm\)")
+    def test_no_rule_names_the_script_or_python(self):
         for rule in self.allow():
             with self.subTest(rule=rule):
-                self.assertTrue(rule.endswith("--confirm)"), rule)
+                self.assertNotIn("merge.py", rule)
+                self.assertNotIn("python", rule)
+
+    def test_each_rules_command_word_is_a_shim_form(self):
+        for rule in self.allow():
+            with self.subTest(rule=rule):
+                self.assertTrue(rule.startswith("Bash(") and rule.endswith(")"), rule)
+                self.assertIn(rule[len("Bash("):-1].split(" ", 1)[0], CLOUD_ALLOW_SHIMS)
+
+    def test_every_rule_names_confirm_and_none_is_broad(self):
+        narrow = re.compile(r"Bash\((merge|bin/merge|~/\.claude/bin/merge) \* --confirm( \*)?\)")
+        for rule in self.allow():
+            with self.subTest(rule=rule):
                 self.assertNotEqual(rule, "Bash(*)")
-                # the program, then one `*`, then --confirm: python is allowed only with the script path
+                # the shim, one `*` for the PR, --confirm, then at most one `*` for trailing arguments
                 self.assertTrue(narrow.fullmatch(rule), f"{rule} is not one of the narrow shapes")
 
     def test_install_sh_names_the_rules_file_in_its_cloud_branch(self):
