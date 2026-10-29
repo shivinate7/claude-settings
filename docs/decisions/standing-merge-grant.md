@@ -11,7 +11,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 
 - The coordinator merges by pull request with the merge tool of each repo, on green checks and a done review. It never asks the owner to merge.
 - The batch runner still builds the batches. It may run the merge tool under the coordinator's grant. It holds no grant of its own.
-- The grant lifts the owner's word only. These limits still apply:
+- The grant covers the merge act only. It lifts no check. These limits still apply:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).
   - Nothing merges while a batch's integration PR has a CI run in progress (`git-no-merge-during-batch-ci`: no merge during a batch CI run).
   - A diff that touches a rule's behaviour, a guard's or check's verdict, or program logic merges only after a
