@@ -38,6 +38,9 @@ simulator, iOS 27.1, 2026-10-27). 1 CSS px = 1 pt.
   - The unfolded insets. I drew none.
   - The keyboard heights. Each keyboard fills the frame below the measured content, so its height
     comes from the frame, not from a measurement.
+  - How the system keyboard treats the fold. The unfolded keyboard is drawn across the full 951 pt,
+    so its keys cross the fold strip. The system draws the keyboard; the app does not. Not
+    measured.
 
 ## Apple pages read
 
@@ -60,6 +63,7 @@ page answered 200.
 - lists-and-tables: show text in a list.
 - text-fields: show a label as well as the placeholder, show the keyboard type that fits the
   input, and put a Clear button at the trailing end.
+- The SwiftUI pages for NavigationStack, TabView and List: not read. No value comes from them.
 
 ## The three concepts
 
@@ -74,6 +78,10 @@ page answered 200.
   Unfolded on the table, it is a desk: it shows only the cards the app is not sure of, the orders
   to pull, and a "Where is" field. Each sure card goes live as it is read. First screen: the camera
   when folded, Needs you when unfolded.
+
+For the set check: C1 and C2 move around the same way, with a three-tab bar and push. They differ
+in structure and in first screen. C3 differs in all three: structure, way to move around, and
+first screen.
 
 ## Choices
 
@@ -176,8 +184,10 @@ page answered 200.
 
 13. **Colours.** `tokens.md` gives roles, not values, so the values are my own: a warm neutral
     surface, a deep green-teal accent, and separate role colours for live, sold, check and error.
-    The values are on `:root`, light and dark. Every text pair passes 4.5:1, and status shapes on
-    surfaces pass 3:1 (my contrast check). Spacing is on the 4 px step. Radius is 8 px. The tab bar
+    The values are on `:root`, light and dark. My contrast script checked 27 pairs in each theme:
+    each text colour on each surface that the mockup puts it on, including the glass panels and
+    tags over the camera. Each text pair passes 4.5:1, and the status shapes pass 3:1. One pair
+    fails, secondary text on a dark key (4.06:1), but the mockup draws no secondary text on a key. Spacing is on the 4 px step. Radius is 8 px. The tab bar
     is a capsule because iOS draws it so.
 
 14. **"New:" labels only.** A blind lane sees no current screen, so no part is marked "Today:".
@@ -194,8 +204,11 @@ page answered 200.
 ## Checks
 
 - `check_ios_mockup.py`: exit 0.
-- My layout script, all 18 states in light and dark: no text or control on the fold strip or in
-  the trailing inset, nothing outside its frame, no tap target under 44 pt.
+- My layout script, all 18 states in light: no app text or control on the fold strip or in the
+  trailing inset, nothing outside its frame, no tap target under 44 pt. It skips the drawn
+  keyboards (see Device and sizes). The layout does not change with the theme. I took screenshots
+  of all 18 states in dark too. I checked three of them by eye: `c2-full`, `c3-error` and
+  `c3-order`. The other 15 dark screenshots were not looked at.
 - `label_once.py`, one page per screen: the only repeats are data (a card name, the condition
   "NM").
 - The a11y floor in `a11y.md` was not run. The blind brief forbids reading that file. Result:
