@@ -12,9 +12,13 @@ sections. Union would leave duplicate or stale rows silently. The merge tool reg
 
 The rule takes effect only once it is on main. A lane branched before it merges needs main merged in.
 
-Known cost: when two lanes rewrite or delete the same note, union keeps both versions. No incident
-yet, so no check (rule building-guard-needs-incident). `lint/test_notes_union_merge.py` pins the
-behaviour.
+Known cost: union never removes a line that one side kept. When two lanes rewrite the same note, both
+versions stay. A note that one lane deletes or reverts can come back when another lane appends. No
+incident yet, so no check (rule building-guard-needs-incident). `lint/test_notes_union_merge.py` pins
+the rewrite case.
+
+Scope: this repo only. Another repo with its own notes file adds the same line to its own
+`.gitattributes`.
 
 Unverified: GitHub's own server-side merge. The integration branch is built locally, so it does not
 depend on GitHub's merge.
@@ -25,7 +29,7 @@ seven lanes to merge main in. A census of the remerge diffs of main's merges sin
 real content conflicts in `docs/debts/notes.md`, the most of any file. Next: `docs/records.md` with 11
 and `docs/catalog.md` with 10.
 
-- Risk: measured incident. Landed 2026-10-29.
+- Risk: incident. Landed 2026-10-29.
 
 Kind: process
 Home: .gitattributes
