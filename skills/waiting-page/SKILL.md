@@ -262,8 +262,8 @@ The page refuses an item where they do, or where a `focus` finds nothing.
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Republish the saved copy to the same URL with the same capabilities. The database stays:
-   unmeasured until the step 4 live check of "Update a repo's pages".
+5. Republish the saved copy to the same URL with the same capabilities. Whether the database stays
+   is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
    the orchestrator does (see "Add an item").
@@ -283,11 +283,12 @@ publishes the page file, so the repo has one page and one publisher. The skill r
 3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.
    It replaces the roadmap block, from `<!-- roadmap:data -->` to `<!-- /roadmap:data -->`, and keeps
    every other byte, the `designData` block among them. It refuses a page with no roadmap block or an
-   unclosed one. A page that predates the roadmap block is first updated to the current template
-   ("Update a repo's pages").
+   unclosed one. A page that predates the roadmap block has none: first carry it into the template
+   (`splice.py --page <skill folder>/page.html --carry <live page> --out <carried page>`), then splice
+   the block into `<carried page>`.
 4. Publish `<new page>` to the same URL with the capabilities `db` and `{comments: {}}`. One publish
-   at a time, never with `force`. The database and its saved answers stay: unmeasured until the
-   step 4 live check of "Update a repo's pages".
+   at a time, never with `force`. Whether the database stays is unmeasured until the step 4 live
+   check of "Update a repo's pages".
 5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
    `designData` block of the live page and keeps the roadmap block.
 
@@ -309,13 +310,16 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
    from plain `page.html`:
    `python3 ~/.claude/skills/waiting-page/splice.py --page <skill folder>/page.html --carry <fetched page> --out <new page>`.
-   It puts the live `designData` block and roadmap block into the template, byte for byte, and refuses
-   with nothing written when either is missing in either file. Republish `<new page>` to the same URL
+   It puts the live `designData` block and roadmap block into the template, byte for byte. A live page
+   with no roadmap block is carried like any other: it gives its `designData` block, and the template
+   keeps its empty roadmap block. The carry refuses, with nothing written, when the template lacks
+   either block, when the live page has no `designData` block, and when either file has a broken or
+   doubled block. Republish `<new page>` to the same URL
    with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
    republish of plain `page.html` drops the open items' designs and the Status tab.
    `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
-   reads such a page current. Before you call a page current, check that its `designData` block
-   equals the fetched one.
+   reads such a page current. After the publish, re-read the republished page (`Artifact` action
+   `read`) and check that its `designData` block equals the one in the page you fetched in step 1.
 4. Update one page first, then read its items: they must all still be there. That the database and
    its saved answers survive a republish is unmeasured until this live check is run.
 5. Run the command again. The batch report lists its verdict line, with each `unknown` page and

@@ -93,8 +93,10 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
     - A step row has no "Now" tag and no thread tag. The row's mark and fill show that it is in
       progress, "Doing now" names it, and Live work counts the threads. Departs from: `stepRow`
       (`t-now`) and the live work block's `tag()` in the roadmap page.
-    - `python3 lint/label_once.py` on the 24 rendered files (4 states, 3 sizes, 2 themes) at
-      commit time printed no line and exited 0 (`exit=0`).
+    - `python3 lint/label_once.py` on the built page's 32 renders (4 states, 4 sizes, 2 themes)
+      exits 1. Only the 8 Status renders with roadmap data have hits, four each: "in progress",
+      "note", "status" and "when". Each is a field label of a step row in its closed body, or the
+      phase card's "in progress" count. They are judged data, not repeated labels.
 15. Each disclosure (read-at, Live work, "What the build said") shows an open or closed marker, ▸ or ▾.
 16. The status part reads its box. Its 640 and 1000 breakpoints are container queries on its
     wrapper, not the media queries of the roadmap page (`ux-component-reads-its-box`).

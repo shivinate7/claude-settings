@@ -6,8 +6,11 @@
 
 The first form replaces the roadmap block. The second, --carry, is for a republish of a changed
 template: OUT.html is TEMPLATE.html with the live page's designData block and roadmap block put in,
-byte for byte, in place of the template's own. It refuses, and writes nothing, when either block is
-missing, unclosed or doubled in either file.
+byte for byte, in place of the template's own. A live page with no roadmap marker outside script text
+predates the block: only its designData block goes in, and the template keeps its empty roadmap block.
+It refuses, and writes nothing, when the template lacks either block, when either file has an unclosed,
+doubled or unpaired roadmap block or a doubled designData block, or when the live page has no designData
+block.
 
 In the first form, LIVE.html is the page as Artifact `read` returned it. FILE is the block that
 `skills/roadmap/build.py --block` wrote. OUT.html is LIVE.html with its roadmap block (from
@@ -104,10 +107,16 @@ def design_span(text, what):
 
 
 def carry(template, live):
-    """`template` with the live page's designData block and roadmap block in place of its own, byte for byte."""
+    """`template` with the live page's designData block and roadmap block in place of its own, byte for byte.
+    A live page with no roadmap marker in its markup predates the block: it gives only its designData block,
+    and the template keeps its empty roadmap block."""
     t_design, l_design = design_span(template, "the template"), design_span(live, "the live page")
-    t_block, l_block = block_span(template, "the template"), block_span(live, "the live page")
-    swaps = sorted([(t_design, live[l_design[0]:l_design[1]]), (t_block, live[l_block[0]:l_block[1]])], reverse=True)
+    t_block = block_span(template, "the template")
+    swaps = [(t_design, live[l_design[0]:l_design[1]])]
+    if markers(live):
+        l_block = block_span(live, "the live page")
+        swaps.append((t_block, live[l_block[0]:l_block[1]]))
+    swaps.sort(reverse=True)
     for (start, end), text in swaps:  # the later block first, so the earlier offsets hold
         template = template[:start] + text + template[end:]
     return template

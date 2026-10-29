@@ -355,7 +355,12 @@ body.sheet-open { overflow: hidden; }
 
 /* The view switch sits right above the view it changes. What every view shares sits above the switch. */
 .views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
-.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
+/* Below 340px four equal columns cut "Reference": each column takes its label's width, and the rest is shared. */
+@container (max-width: 339px) {
+  .views { grid-template-columns: repeat(4, auto); }
+  .views button { padding-inline: 4px; font-size: 14px; }
+}
 .views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
 .sview { display: grid; gap: 14px; min-width: 0; }
 
@@ -369,7 +374,10 @@ body.sheet-open { overflow: hidden; }
   .prail { gap: 4px; }
   .prail button { padding: 6px 5px; }
   .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
+  .prail .nm > span:first-child { overflow-wrap: anywhere; }
 }
+/* Below 340px five chips are too narrow for a name and the current-phase dot: the rail wraps to three columns. */
+@container (max-width: 339px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 .cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 @container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
@@ -690,8 +698,9 @@ function setTitle() {
   const name = state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "";
   const part = state.tab === "s" ? "Status" : "Questions";
   document.title = (name ? name + ": " : "") + part;
-  // With no name the header and the title say the same thing, the open tab's name.
+  // With no name the tab row already shows the part's name, so the header shows the mark only; the h1 stays for a screen reader.
   $("repoName").textContent = name || part;
+  $("repoName").classList.toggle("sr", !name);
 }
 
 /* ---------- Time: always US Central, 24-hour, with the zone named ---------- */
