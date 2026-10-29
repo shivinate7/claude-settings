@@ -15688,8 +15688,8 @@ for _label, _check in GS_CHECKS:
     FIXTURELESS_CHECKS.add(_check)
 
 
-# THE LOAD BRAKE ON A LIFTED OPUS SPAWN. A lifted Opus spawn ask exits in refuse() before rule 9d, the
-# machine-load brake, runs, so a full machine would not refuse a spawn that a grant or an override lifted.
+# THE LOAD BRAKE ON A LIFTED OPUS SPAWN. A lifted Opus spawn ask exits in refuse(), so unless rule 9c, the
+# machine-load brake, runs first, a full machine would not refuse a spawn that a grant or an override lifted.
 # The brake applies to every lane start, lifted or not. LB_ALL_HIGH is a full machine: memory and disk both
 # over the full line, and the case's `load` key is that reading.
 def gl_check(name, tool_input, config_name, session_name, typed=None, grant=None, load=None, want="deny"):
