@@ -11589,7 +11589,7 @@ def pl(name, expected, item, **extra):
 
 
 pl("today's item (a press on home#374, no link) is denied", "deny", pl_item())
-pl("the refusal names the link to add", "deny", pl_item(), carries=("link",))
+pl("the refusal names the link to add", "deny", pl_item(), carries=("links", "url"))
 pl("a press option with a link to the exact page is allowed", "allow",
    pl_item(options=[dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT]))
 pl("a link to the wrong number, /pull/375, is denied", "deny",
@@ -11682,7 +11682,8 @@ def ci(name, expected, item, **extra):
 
 
 ci("a step that opens a plan file, then one that says run its command, is denied", "deny", ci_task(CI_STEPS))
-ci("the refusal names the command to add", "deny", ci_task(CI_STEPS), carries=("command",))
+ci("the refusal names the command to add", "deny", ci_task(CI_STEPS),
+   carries=("`command`", "paste the command below"))
 ci("an update that carries those steps is denied", "deny", {"steps": CI_STEPS}, action="update")
 ci("a run-the-command-in-file step is denied", "deny",
    ci_task(["Run the command in plans/c152-stale-branch-deletes.md"]))
