@@ -631,3 +631,4 @@
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
 - merge-role-skips-raw-merge: raw `gh pr merge` (permission-allowed) and the GitHub MCP merge tool skip the merge role check (hooks/guard_merge.py). Decision: session-tiers.
 - merge-remedy-hits-role-refusal: the remedy text of hooks/guard_merge.py (`merge <pr> --confirm`) now sends a cloud lane into the merge role refusal (hooks/guard_merge.py). Decision: session-tiers.
+- merge-role-self-declared: `merge --role` records a tier the session declares itself. The tool cannot read the cs-build tag, so the only backstop for a lane that misreads its tier is the classifier on the `--role` command (unmeasured) (merge/merge.py). Decision: session-tiers.
