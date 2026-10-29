@@ -29,6 +29,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 MODULE = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
+sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 
 FAILED = []
 
@@ -129,8 +132,9 @@ def state_names_path(state, target):
 class Case(object):
     """One temp root with its own repo, config dir and fake `claude` on PATH."""
 
-    def __init__(self, name):
-        self.root = tempfile.mkdtemp(prefix="precompact_%s_" % name)
+    def __init__(self, name, extra_env=None):
+        self.root = tempfile.mkdtemp(prefix="precompact_%s_" % name, dir=RUN_FOLDER)
+        self.extra_env = dict(extra_env or {})
         self.repo = make_repo(os.path.join(self.root, "repo"))
         self.cfg = os.path.join(self.root, "cfg")
         os.makedirs(self.cfg, exist_ok=True)
@@ -144,8 +148,10 @@ class Case(object):
 
     def env(self):
         env = dict(os.environ)
+        env.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)  # each case sets its own window
         env["CLAUDE_CONFIG_DIR"] = self.cfg
         env["PATH"] = self.bin + os.pathsep + env.get("PATH", "")
+        env.update(self.extra_env)
         return env
 
     def run(self, args, payload):
@@ -376,26 +382,26 @@ def case_settings_json():
 # On Stop, `--nudge` blocks once per 150k bucket from 200k up.
 
 
-def usage_line(inp, cc=0, cr=0):
-    return json.dumps({"type": "assistant", "timestamp": "2026-10-07T10:00:00Z",
-                       "message": {"content": [{"type": "text", "text": "hi"}],
-                                   "usage": {"input_tokens": inp,
-                                             "cache_creation_input_tokens": cc,
-                                             "cache_read_input_tokens": cr,
-                                             "output_tokens": 5}}})
+def usage_line(inp, cc=0, cr=0, model=None):
+    msg = {"content": [{"type": "text", "text": "hi"}],
+           "usage": {"input_tokens": inp, "cache_creation_input_tokens": cc,
+                     "cache_read_input_tokens": cr, "output_tokens": 5}}
+    if model is not None:
+        msg["model"] = model
+    return json.dumps({"type": "assistant", "timestamp": "2026-10-07T10:00:00Z", "message": msg})
 
 
 NUDGE_OVERHEAD = 1000  # the first-turn entry the helper prepends: messages = last - this
 
 
-def nudge(c, size, active=False, lines=None, seed=None, overhead=NUDGE_OVERHEAD):
+def nudge(c, size, active=False, lines=None, seed=None, overhead=NUDGE_OVERHEAD, model=None):
     """Run --nudge once. A first-turn entry of `overhead` tokens comes first, so the hook
     reads messages = `size` (default: last entry = size + overhead, split across the three
     input counters). With explicit `lines`, they follow the overhead entry. overhead=None
-    prepends nothing."""
+    prepends nothing. model, when set, names the model of the default entry."""
     tp = os.path.join(c.root, "t.jsonl")
     if lines is None:
-        lines = [usage_line(size + (overhead or 0) - 60000 - 30000, 30000, 60000)]
+        lines = [usage_line(size + (overhead or 0) - 60000 - 30000, 30000, 60000, model=model)]
     if overhead is not None:
         lines = [usage_line(overhead)] + lines
     write_transcript(tp, lines)
@@ -695,6 +701,91 @@ def case_nudge_settings():
     cmds = [h.get("command", "") for g in stop for h in g.get("hooks", [])]
     check("settings: a Stop hook runs precompact_handoff.py with --nudge",
           any("precompact_handoff.py" in x and "--nudge" in x for x in cmds), "Stop: %r" % cmds)
+
+
+# --------------------------------------------------------------------------- window tiers
+# The nudge's window, highest first: env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then
+# modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow, then 500k. A bad
+# value falls to the next tier. Model names are fake. 160k messages blocks only at a 200k window.
+
+A_MODEL = "test-model-a"
+B_MODEL = "test-model-b"
+WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+
+
+def ms(k, v, top=500000):
+    return {"autoCompactWindow": top, "modelSettings": {k: {"autoCompactWindow": v}}}
+
+
+# (name, settings.json as an object or raw text, extra env, transcript model, blocks?)
+WINDOW_ROWS = [
+    ("env wins over both settings tiers", ms(A_MODEL, 500000), {WINDOW_ENV: "200000"},
+     A_MODEL, True),
+    ("env wins with unreadable settings", "{bad", {WINDOW_ENV: "200000"}, A_MODEL, True),
+    ("modelSettings exact key wins over top-level", ms(A_MODEL, 200000), None, A_MODEL, True),
+    ("modelSettings exact key wins over an earlier [1m] key",
+     {"autoCompactWindow": 500000, "modelSettings": {
+         A_MODEL + "[1m]": {"autoCompactWindow": 900000},
+         A_MODEL: {"autoCompactWindow": 200000}}}, None, A_MODEL, True),
+    ("modelSettings matches a dated model", ms(A_MODEL, 200000), None,
+     A_MODEL + "-20260101", True),
+    ("modelSettings matches a [1m] model", ms(A_MODEL, 200000), None, A_MODEL + "[1m]", True),
+    ("modelSettings [1m] key matches plain model", ms(A_MODEL + "[1m]", 200000), None,
+     A_MODEL, True),
+    ("modelSettings for another model is ignored", ms(B_MODEL, 200000), None, A_MODEL, False),
+    ("modelSettings key is not a prefix match", ms("test-model", 200000), None, A_MODEL, False),
+    ("modelSettings key longer than the model is ignored", ms(A_MODEL, 200000), None,
+     "test-model", False),
+    ("top-level fallback", ms(B_MODEL, 900000, top=200000), None, A_MODEL, True),
+    ("bad env 'abc' falls to modelSettings", ms(A_MODEL, 200000), {WINDOW_ENV: "abc"},
+     A_MODEL, True),
+    ("bad env '0' falls through", {"autoCompactWindow": 500000}, {WINDOW_ENV: "0"},
+     A_MODEL, False),
+    ("bad env '-5' falls through", {"autoCompactWindow": 500000}, {WINDOW_ENV: "-5"},
+     A_MODEL, False),
+    ("bad modelSettings value true falls to top-level", ms(A_MODEL, True, top=600000), None,
+     A_MODEL, False),
+    ("bad modelSettings value '1' falls to top-level", ms(A_MODEL, "1", top=600000), None,
+     A_MODEL, False),
+    ("modelSettings entry not a dict falls to top-level",
+     {"autoCompactWindow": 200000, "modelSettings": {A_MODEL: 5}}, None, A_MODEL, True),
+    ("modelSettings not a dict falls to top-level",
+     {"autoCompactWindow": 200000, "modelSettings": []}, None, A_MODEL, True),
+    ("bad top-level falls to default 500k", {"autoCompactWindow": 0}, None, A_MODEL, False),
+    ("settings not an object falls to default", "[1]", None, A_MODEL, False),
+    ("no model in transcript uses top-level", ms(B_MODEL, 900000, top=200000), None, None, True),
+]
+
+
+def case_window_tiers_table():
+    for name, settings, env, model, want in WINDOW_ROWS:
+        c = Case("window", extra_env=env)
+        try:
+            put(os.path.join(c.cfg, "settings.json"),
+                settings if isinstance(settings, str) else json.dumps(settings))
+            p = nudge(c, 160000, model=model)  # 160k messages: blocks only at a 200k window
+            check("window: " + name, is_block(c, p) == want,
+                  "want block=%r, out=%r" % (want, p.stdout))
+        finally:
+            c.cleanup()
+
+
+def case_window_tier_follows_transcript_model():
+    """End to end through --nudge: the window is the one for the model of the last counted
+    entry. A sidechain entry after it, on another model, is not counted."""
+    c = Case("window_e2e")
+    try:
+        put(os.path.join(c.cfg, "settings.json"), json.dumps(
+            {"autoCompactWindow": 500000,
+             "modelSettings": {A_MODEL: {"autoCompactWindow": 200000},
+                               B_MODEL: {"autoCompactWindow": 900000}}}))
+        lines = [usage_line(1000, model=B_MODEL), usage_line(161000, model=A_MODEL),
+                 entry(20000, model=B_MODEL, side=True)]
+        p = nudge(c, 0, overhead=None, lines=lines)
+        check("window e2e: the last counted entry's model picks the 200k window, so it blocks",
+              is_block(c, p), "out=%r" % p.stdout)
+    finally:
+        c.cleanup()
 
 
 def case_handoff_path_not_frozen():
@@ -1152,6 +1243,8 @@ def main() -> int:
     case_nudge_close_checkpoint_dropped_and_bogus_first_entry()
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
+    case_window_tiers_table()
+    case_window_tier_follows_transcript_model()
     case_handoff_path_not_frozen()
     case_handoffs_dir_is_made()
     case_handoffs_dir_keeps_other_sessions()
@@ -1174,4 +1267,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)

@@ -33,8 +33,9 @@ the desktop app has none.
   = size - overhead, at least 0 (a proxy: record hook-inputs-carry-token-counts). Bucket =
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
   messages is 0 (checkpoints(limit - overhead): 200k, +150k while below the top, then the
-  top = room - 50k; limit = autoCompactWindow in <config dir>/settings.json, default
-  500,000). The last checkpoint is at size = limit - 50k. The bucket lives in
+  top = room - 50k; limit = window_limit(model of the last such entry): env
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then
+  autoCompactWindow in <config dir>/settings.json, default 500,000). The last checkpoint is at size = limit - 50k. The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
   than stored prints {"decision": "block", "reason": ...}: rewrite the handoff per the
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
@@ -496,16 +497,42 @@ def checkpoints(limit):
     return cps + [top]
 
 
-def window_limit():
-    # ponytail: the model's own window can be smaller than autoCompactWindow and this
-    # hook cannot see it; nudges then come late. The first one now comes `overhead` tokens
-    # later in total, so a model window smaller than autoCompactWindow can skip it. Upgrade: read the window from the model.
+def _model_key(name):
+    """A model or modelSettings key without a trailing `[...]` tag or `-YYYYMMDD` date."""
+    return re.sub(r"-\d{8}$", "", re.sub(r"\[[^\]]*\]$", "", name))
+
+
+def window_limit(model=None):
+    """The session's auto-compact window: env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then
+    modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow in
+    <config dir>/settings.json, then DEFAULT_WINDOW. A bad value falls to the next tier."""
+    # shortcut: the model's own window is not read, so a model window smaller than every
+    # tier makes nudges late and can skip the first one. Upgrade when hook input carries it.
+    def ok(v):
+        return isinstance(v, int) and not isinstance(v, bool) and v > 0
+    try:
+        v = int(os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", ""))
+        if v > 0:
+            return v
+    except ValueError:
+        pass
     try:
         with open(os.path.join(config_dir(), "settings.json"), "r", encoding="utf-8") as f:
-            v = json.load(f).get("autoCompactWindow")
-        return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else DEFAULT_WINDOW
+            settings = json.load(f)
     except Exception:
         return DEFAULT_WINDOW
+    if not isinstance(settings, dict):
+        return DEFAULT_WINDOW
+    per_model = settings.get("modelSettings")
+    if isinstance(model, str) and isinstance(per_model, dict):
+        want = _model_key(model)
+        for key in sorted(per_model, key=lambda k: k != model):  # an exact key first
+            entry = per_model[key]
+            if _model_key(key) == want and isinstance(entry, dict) and ok(
+                    entry.get("autoCompactWindow")):
+                return entry["autoCompactWindow"]
+    v = settings.get("autoCompactWindow")
+    return v if ok(v) else DEFAULT_WINDOW
 
 
 def run_nudge(payload):
@@ -517,7 +544,7 @@ def run_nudge(payload):
         return 0
     try:
         session_id = payload.get("session_id", "")
-        size = overhead = None
+        size = overhead = model = None
         with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
             for line in f:
                 try:
@@ -536,6 +563,7 @@ def run_nudge(payload):
                     if overhead is None:
                         overhead = n
                     size = n
+                    model = msg.get("model") or model
         if size is None:
             return 0
         # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
@@ -543,7 +571,7 @@ def run_nudge(payload):
         if messages == 0:
             bucket = -1  # nothing to hand off, even when the room left is zero or negative
         else:
-            bucket = sum(1 for c in checkpoints(window_limit() - overhead)
+            bucket = sum(1 for c in checkpoints(window_limit(model) - overhead)
                          if messages >= c) - 1
         path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
         try:
