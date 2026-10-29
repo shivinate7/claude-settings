@@ -20,6 +20,19 @@ Run from any folder:
 The record homes (decisions, debts, debt notes, plans, specs) come from the checkout, at the paths
 `lint/layout.py` gives. A home that is not there reads "unknown", never "none".
 
+## Lane and grants
+
+Two step fields serve the guard, not the page:
+
+- `lane`: `"session_<id>"`, the one lane session bound to the step. The coordinator writes it when it
+  starts the lane. One step per lane.
+- `grants`: a list of step grants, written by triage only. Each is `{"words": "<the owner's exact
+  words>", "at": "<ISO-8601 with offset>", "role": null | "<role>", "by": "triage"}`. A null `role`
+  covers every Opus spawn of the lane, else one role from `OPUS_ROLES` in `hooks/override.py`.
+
+The guard reads them from the lane's local `origin/roadmap`, so a lane fetches it after triage writes a
+grant (decision `agent-model-cap`).
+
 ## Records and health
 
 The Records tab shows Health, then each listed record kind (decisions, debts, plans): its count, as
