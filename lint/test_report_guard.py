@@ -1111,6 +1111,9 @@ class PickGuardTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("Pick guard", out["reason"])
                 self.assertIn("question box", out["reason"])
+                # Catches: the refusal naming the box as allowed only with nothing running.
+                self.assertRegex(out["reason"], r"question box[^.]*only with nothing running|"
+                                                r"only with nothing running[^.]*question box")
 
     def test_pk_red_option_forms_block(self):
         rows = [
@@ -1139,11 +1142,13 @@ class PickGuardTests(unittest.TestCase):
         calls = [("AskUserQuestion", {}, True), ("ArtifactData", self.page_set()[1], True)]
         self.assertIsNotNone(self.verdict(self.PICK, calls))
 
-    def test_pk_red_wrong_collection_or_action_blocks(self):
-        # With no link in the reply, a write to another collection or a get still blocks
-        # (decisions-reach-a-clickable-pick).
-        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(collection="notes")]))
-        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(action="get")]))
+    def test_pk_red_pick_with_no_link_blocks_whatever_the_calls(self):
+        # With no link in the reply, the pick blocks whatever the calls: another collection, a get, or
+        # an items update (decisions-reach-a-clickable-pick).
+        for call in (self.page_set(collection="notes"), self.page_set(action="get"),
+                     self.page_set(action="update")):
+            with self.subTest(call=call):
+                self.assertIsNotNone(self.verdict(self.PICK, [call]))
 
     def test_pk_green_link_passes_whatever_the_calls(self):
         # A reply that holds this repo's waiting page URL passes, whatever ArtifactData calls the
@@ -1237,8 +1242,10 @@ class PickGuardTests(unittest.TestCase):
         self.assert_pick_blocked(reply, repo=nokey)
 
     def test_pk_red_other_minute_counts_block(self):
-        # Catches: "5 min" read inside "15 minutes" or "25 minutes".
-        for n in ("15 minutes", "25 minutes"):
+        # Catches: the five-minute wait read inside a longer number, such as 15, 25 or 35, or a
+        # spelled-out twenty-five or fifty-five.
+        for n in ("15 minutes", "25 minutes", "35 minutes", "twenty-five minutes",
+                  "twenty five minutes", "fifty-five minutes"):
             with self.subTest(n=n):
                 self.assert_pick_blocked(
                     "> **Done** OTHER read the code\n"
