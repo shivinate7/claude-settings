@@ -3,6 +3,7 @@
 <Who runs it: a cloud lane session, or a lane session on a named local machine.> The coordinator
 starts it with the tags `cs-repo:<owner>/<name>` and `cs-build:lane`. Base: <branch and commit>.
 Never rebase onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
+Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before the first Opus spawn and after triage writes a step grant. The guard reads only that local ref. A plain fetch does not write it in a shallow clone.
 
 ## Task
 
