@@ -2442,24 +2442,25 @@ lock1sh() {
   alive=no; kill -0 "$pA" 2>/dev/null && alive=yes
   run_cloud "$work/lock1sh-two" "$cfg" "$evB" > "$work/lock1sh-runB" 2>&1 &
   pB=$!
-  # Bounded sampler: it records the second when install A exits, at most 3000 polls.
-  aExit=""; n=0
+  # Bounded wait: both installs end, at most 3000 polls. The order comes from the install log, never from a
+  # clock. install.sh appends "start" after it takes the lock and "end" before it releases it, both to one log,
+  # so the line order is the order of the lock. A clock here would time when this loop saw A exit, not when A let go.
+  n=0
   while { kill -0 "$pA" 2>/dev/null || kill -0 "$pB" 2>/dev/null; } && [ "$n" -lt 3000 ]; do
     n=$((n + 1))
-    if [ -z "$aExit" ] && ! kill -0 "$pA" 2>/dev/null; then aExit=$(date +%s); fi
     sleep 0.05
   done
   wait "$pA"; rcA=$?
   wait "$pB"; rcB=$?
-  [ -n "$aExit" ] || aExit=$(date +%s)
+  order=$(grep -E -o 'install\.sh: (start|end)' "$cfg/claude-settings-install.log" 2>/dev/null | sed 's/install\.sh: //' | tr '\n' ' ')
   bFirst=$(sed -n 's/^landed \([0-9][0-9]*\) .*/\1/p' "$evB" | head -n1)
   lockLines=$(grep -ciE 'lock|another install|already running|waiting' "$work/lock1sh-runB")
 
   if [ "$alive" != yes ]; then bad "$name" "precondition: install A had already exited when install B started, so the case proves nothing"
   elif [ "$(grep -c '^paused' "$evA")" -lt 1 ]; then
     bad "$name" "precondition: install A never stalled, so the case proves nothing; A events [$(tr '\n' ' ' < "$evA")], A output [$(tail -n 3 "$work/lock1sh-runA" | tr '\n' ' ')]"
-  elif [ -n "$bFirst" ] && [ $((aExit - bFirst)) -ge 2 ]; then
-    bad "$name" "install B landed its first guard file $((aExit - bFirst)) s before install A exited, while A was stalled"
+  elif [ "$order" != "start end " ] && [ "$order" != "start end start end " ]; then
+    bad "$name" "install B took the install lock before install A ended, while A was stalled: install log order [$order], want A's start and end before B's start"
   elif [ -z "$bFirst" ] && [ "$lockLines" != 1 ]; then
     bad "$name" "install B landed no guard file and printed $lockLines lock line(s), want one clear line"
   elif [ "$rcA" -ne 0 ]; then bad "$name" "install A exit $rcA: $(cat "$work/lock1sh-runA")"
