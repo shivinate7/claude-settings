@@ -10,7 +10,7 @@ Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a 
 
 The box passes in every repo. Owner ruling, 2026-10-28 15:10 CDT, under roadmap step c202 (chat first, then the page), added the last two. Each page path needs a waiting page in the repo, so in a repo with none only the box passes.
 
-The refusal is one line: "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, with nothing running, open the question box."
+The refusal is one line: "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only with nothing running, open the question box."
 
 Incident, named: on 2026-10-27 a degen session put "Two ways: A (my pick) ... B ..." under Input Needed as report text only. No control offered a click, and the owner found it late. This guard is the answer to that named incident. It also guards a likely risk: any session ends a report this way.
 
