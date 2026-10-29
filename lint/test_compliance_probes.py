@@ -7,6 +7,9 @@ Each group goes red on the gap it guards, and stays quiet on a repo that is fine
 folder, a vendored screenshot script, a generated token file, a cited cap and an owner-named cap.
 PROBES_UNDER_TEST names the script under test (default: the one beside this file).
 """
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -15,12 +18,16 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROBES = os.path.abspath(os.environ.get("PROBES_UNDER_TEST") or os.path.join(HERE, "compliance_probes.py"))
 sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+import check_glossary  # noqa: E402  the glossary the words group reads; a case patches it in this process
 import layout  # noqa: E402
 
+RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run)
 EXTRAS = layout.layout()["extras"]
 
 
@@ -30,7 +37,7 @@ def kind_path(name):
 
 class Repo:
     def __init__(self, test):
-        self.root = tempfile.mkdtemp(prefix="probes-")
+        self.root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
         test.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", self.root], check=True)
 
@@ -134,7 +141,7 @@ class Layout(unittest.TestCase):
         self.assertIn("folder undeclared/: neither", out)
 
     def test_not_a_git_repo_is_unknown(self):
-        root = tempfile.mkdtemp(prefix="probes-")
+        root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, root, True)
         done = subprocess.run([sys.executable, PROBES, "layout", root], capture_output=True, text=True)
         self.assertEqual(done.returncode, 2, done.stdout)
@@ -420,6 +427,158 @@ class Playwright(unittest.TestCase):
         self.assertEqual((code, out.strip()), (0, "playwright: n/a - no Playwright install"))
 
 
+def load_probes():
+    """The probes module under test, loaded here so a case can patch check_glossary in this process."""
+    spec = importlib.util.spec_from_file_location("probes_under_test", PROBES)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def in_process(root):
+    """(exit code, stdout) of the probes' main on `root`, run in this process."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = load_probes().main(["words", root])
+    return code, out.getvalue()
+
+
+def head(out):
+    return out.partition("\n")[0]
+
+
+# An item line of the words group: `  <word>: <file>:<line> <detail>`. The word may hold spaces; the line is `-` for a path hit.
+ITEM = re.compile(r"^\s+(?:- )?([^:]+?): (\S+?):(\d+|-)(?=\s|$)")
+SPARE = {"claim", "try", "gap"}  # names another lane is restoring: no case plants one
+
+
+def hits(out):
+    """(word, file, line) of each item line."""
+    return [m.groups() for m in map(ITEM.match, out.splitlines()[1:]) if m]
+
+
+def planted(prose=False):
+    """The first "not" name of the live glossary, read on each run, so no case writes one. `prose`
+    takes an everyday name, tagged (prose), in place of a retired one."""
+    table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+    for _, _, names in table:
+        for name in names:
+            tagged = name.endswith(check_glossary.PROSE_TAG)
+            word = name[:-len(check_glossary.PROSE_TAG)] if tagged else name
+            if tagged == prose and word not in SPARE:
+                return word
+    raise AssertionError("the glossary holds no such name")
+
+
+def dropping(word):
+    """check_glossary.rows as it is, with `word` taken out of every "not" cell."""
+    real_rows = check_glossary.rows
+
+    def rows(text):
+        return [(term, homes, [name for name in names if name != word]) for term, homes, names in real_rows(text)]
+    return rows
+
+
+class Words(unittest.TestCase):
+    """The words group reads the glossary's "not" names on each run, and reports each hit in a checked repo."""
+
+    def test_retired_word_in_a_path_is_red(self):
+        word = planted()
+        path = "docs/%s_notes.md" % word.replace(" ", "_")
+        code, out = Repo(self).write(path).run("words")
+        self.assertEqual(code, 1, out)
+        self.assertTrue(head(out).startswith("words: out"), out)
+        self.assertEqual(hits(out), [(word, path, "-")], out)
+
+    def test_retired_word_in_a_rule_anchor_is_red(self):
+        word = planted()
+        repo = Repo(self).write("src/cap.py", "VALUE = 1\n# Keep to rule:%s-cap.\n" % word.replace(" ", "-"))
+        code, out = repo.run("words")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(hits(out), [(word, "src/cap.py", "2")], out)
+
+    def test_retired_word_in_a_backticked_slug_is_red(self):
+        word = planted()
+        hyphen = word.replace(" ", "-")
+        text = "Intro line.\nSee `%s-cap-rule` for the cap.\nNot `%s` here.\n" % (hyphen, hyphen)
+        code, out = Repo(self).write("docs/guide.md", text).run("words")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(hits(out), [(word, "docs/guide.md", "2")], out)
+
+    def test_everyday_word_as_an_identifier_is_not_read(self):
+        # An everyday name is read in a path, an anchor or a slug, never in a code name.
+        word = planted(prose=True)
+        code_text = "%s = 3\n\n\ndef run(%s):\n    return %s\n" % (word, word, word)
+        code, out = Repo(self).write("src/pool.py", code_text).run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        repo = Repo(self).write("src/pool.py", code_text)
+        repo.write("docs/guide.md", "See rule:%s-limit.\n" % word)
+        code, out = repo.run("words")
+        self.assertEqual(hits(out), [(word, "docs/guide.md", "1")], out)
+
+    def test_clean_repo_is_in_shape_and_names_the_glossary_commit(self):
+        repo = Repo(self).write("src/app.py", "def main():\n    return 1\n")
+        repo.write("docs/guide.md", "A %s in prose is fine.\n" % planted())
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertEqual(hits(out), [], out)
+        glossary_commit = subprocess.run(["git", "-C", check_glossary.ROOT, "rev-parse", "HEAD"],
+                                         capture_output=True, text=True, check=True).stdout.strip()
+        self.assertIn(glossary_commit[:7], out)
+
+    def test_the_word_list_is_read_from_the_glossary_not_copied(self):
+        word = planted()
+        path = "docs/%s_notes.md" % word.replace(" ", "_")
+        repo = Repo(self).write(path)
+        code, out = in_process(repo.root)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(hits(out), [(word, path, "-")], out)
+        with mock.patch.object(check_glossary, "rows", dropping(word)):
+            code, out = in_process(repo.root)
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertEqual(hits(out), [], out)
+
+    def test_probe_output_is_a_scorecard_group(self):
+        word = planted()
+        out = Repo(self).write("docs/%s_notes.md" % word.replace(" ", "_")).run("words")[1]
+        group = load_probes().GROUP_LINE.match(head(out))
+        self.assertIsNotNone(group, out)
+        self.assertEqual(group.group(1, 2), ("words", "out"), out)
+        _, body = Scorecard.run_card(self, Repo(self), out)  # the scorecard step, from its one home
+        self.assertIn("| words | out |", body)
+        self.assertIn("| words: %s | finding |" % word, body)
+
+    def test_unreadable_or_empty_glossary_and_unparsable_python_are_unknown(self):
+        root = Repo(self).write("docs/guide.md").root
+        for text in (None, "# Glossary\n\nNo table here.\n"):
+            with self.subTest(glossary=text), mock.patch.object(check_glossary, "read", return_value=text):
+                code, out = in_process(root)
+                self.assertEqual(code, 2, out)
+                self.assertTrue(head(out).startswith("words: unknown"), out)
+        code, out = Repo(self).write("src/broken.py", "def (:\n").run("words")
+        self.assertEqual(code, 2, out)
+        self.assertTrue(head(out).startswith("words: unknown"), out)
+
+    def test_scanners_respect_strings_comments_and_lone_quotes(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        cases = (
+            ("src/app.js", 'const open = "/*";\nconst url = "https://x // y";\nconst %s_count = 2;\n' % under
+             + "// the %s note\n" % word, "3"),
+            ("src/tpl.js", "const text = `\n/* a block\n`;\nconst %s_total = 3;\n" % under, "4"),
+            ("src/view.tsx", "const note = <p>Don't stop</p>;\nconst %s_view = 1;\n" % under, "2"),
+        )
+        for rel, text, line in cases:
+            with self.subTest(rel=rel):
+                code, out = Repo(self).write(rel, text).run("words")
+                self.assertEqual(hits(out), [(word, rel, line)], out)
+
+    def test_registered_in_groups(self):
+        probes = load_probes()
+        self.assertIn("words", probes.GROUPS)
+        self.assertIs(probes.GROUPS["words"], probes.probe_words)
+
+
 class ProbesText(unittest.TestCase):
     """probes.md commands, as a session copies them into a shell."""
 
@@ -564,6 +723,10 @@ class Scorecard(unittest.TestCase):
         row = next(line for line in body.splitlines() if line.startswith("| STE lint on UI files |"))
         self.assertIn("| partial | in shape |", row)
         self.assertIn("known gap", row)
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":

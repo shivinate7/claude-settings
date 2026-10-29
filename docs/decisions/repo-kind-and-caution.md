@@ -18,8 +18,9 @@ one device list.
 - Each level is a set of facts and expected acts. It holds no bypass phrase. `private-solo` says a login to
   the owner's own low-stakes devices works every time, with the credential read by a tool path. Real
   secrets and anything that leaves the machine stay written limits.
-- Agent `designer`, skill `design-explore` and `hooks/blind_brief.py` read the resolved device list. A
-  mockup draws the first device only. `hooks/session_start.sh` prints the caution level once per session.
+- Agent `designer`, skill `design-explore` and `hooks/blind_brief.py` read the resolved device list. Outside an
+  iOS app repo, a mockup draws the first device only. An iOS app repo draws both iPhone Duo poses, the
+  folded pose first (skill `ios-apps`). `hooks/session_start.sh` prints the caution level once per session.
   Skill `compliance-check` lists each repo's own caution rules for the owner to prune.
 
 Why: a session reads a repo's caution from prose it must infer. The same login is refused in one session

@@ -43,7 +43,9 @@ designer.
    A blind lane never reads other files in the design folder, sibling lane mockups included. Point the brief at files; never paste them
    (`tokens-point-brief-at-files`). Write each brief to `<scratchpad>/design-explore/<screen>/<screen>-<kind>-<n>.md`.
    The Device section comes from `python3 ~/.claude/lint/layout.py devices <repo root>`: the repo's devices in
-   order, first device first. Do not type a device list of your own. A mockup draws the first device only; the rest come on request, or when the layout breaks between them.
+   order, first device first. Do not type a device list of your own. Outside an iOS repo, a mockup draws the first device only. On request, or if the layout breaks between them, it draws the rest too.
+   In an iOS repo (skill `ios-apps`, section Mockups), each brief names skill `ios-apps`, and the Device
+   section names both Duo poses, folded first. Each mockup draws both poses.
 2. **Check the briefs.** Run `python3 ~/.claude/hooks/blind_brief.py --run <that folder> --root <repo root>`. Add one
    `--current <view>` per view name of today's product that is not a plain word of the job. If the
    owner asked for no blind lane, add `--owner-asked-none "<words>"`. Exit 0 is clean. On exit 1,
@@ -57,7 +59,9 @@ designer.
    to each other (`parallelism-no-mid-task-talk`).
 5. **Collect.** Read each report, never a transcript. Grep each blind mockup for the repo's own colour
    (`python3 ~/.claude/lint/repo_colour.py <repo root>`). Grep it also for each colour in the repo's token
-   files, as hex, rgb() and hsl(). One hit means that the lane leaked, so redo it. Then run the structure check of skill
+   files, as hex, rgb() and hsl(). One hit means that the lane leaked, so redo it. In an iOS repo, run
+   `python3 ~/.claude/lint/check_ios_mockup.py <mockup>` on each mockup of each lane kind; on exit 1, redo
+   the lane. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
 6. **Gather.** Each lane pushes its own branch. The orchestrator copies every lane's pair onto the
