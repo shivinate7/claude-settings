@@ -1,0 +1,9 @@
+{
+  "title": "A repo's waiting page is rebuilt on the newest page code whenever that code changes on main",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3389991,
+  "why": "shiv, Oct 29 14:47 CDT: the live waiting page ran old page code (a template from before batch 13) because its writer kept the live page's code and only swapped in pictures. \"ensure u and all my other repos know to do that proactively.\"",
+  "note": "Ruling, Oct 29 14:47 CDT (shiv, in chat): the waiting page is rebuilt on the newest code without being asked, in every repo. Fix: the waiting-page skill gives the session that writes a repo's waiting page one step it runs at each wake: compare the live page's code (everything outside designData) with skills/waiting-page/page.html on claude-settings main, and when they differ, republish main's page with the live designData kept. Read on demand inside a wake already running; no timer and no watcher (rule outcomes-mechanize-rules). Red first: a live page built from an older page.html is reported as stale, and a page built from main's is not. Port: yes, the skill installs in every repo. Done by hand Oct 29 14:49 CDT on claude-settings' page (v20, main's page.html at 1b59f3e plus the steps-wrap fix from c204's queue). Needs no answer. Placed ahead of r1 (triage 12, Oct 29): every repo's page drifts until this lands.",
+  "updatedAt": "2026-10-29T19:55:00Z"
+}
