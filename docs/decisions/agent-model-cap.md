@@ -86,8 +86,10 @@ cannot time out, so the guard allows Opus at round 3 and the owner's grant stays
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
 
-**The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` line in
-the brief. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
+**The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
+the brief: a line that starts with it, or the words anywhere in the brief's first non-blank line, such as
+"Builder, Round 3 of 3. Lane ..." (owner ruling 2026-10-29 16:29 CDT: a round-3 builder on Opus just runs,
+with no approval). Case-sensitive on the first line; later lines count only when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
 word. A try 3 builder needs Opus.
 
 **No pin, and the ceiling is an ask.** The variable is a true fallback: it decides only the spawns that name no
@@ -129,7 +131,7 @@ the same container, reads the same order.
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's grant, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role Explore (the
-class-level grant above), the role designer or design-reviewer (the 2026-10-26 grant above), or a builder whose brief has a `Round 3 of 3` line. A reviewer's round 3 is no standing grant, so
+class-level grant above), the role designer or design-reviewer (the 2026-10-26 grant above), or a builder whose brief has the `Round 3 of 3` marker (the step-up above names the forms). A reviewer's round 3 is no standing grant, so
 it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override
 lifts the spawn ask like any other ask (`owner-override`); the ask on a settings write under the same
 id stays outside every override. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was
