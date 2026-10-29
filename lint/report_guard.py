@@ -24,9 +24,11 @@ a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-u
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 
 On any turn whose reply holds an Input Needed item that offers a pick with options, it also blocks
-unless the same main-session turn opened the question box (AskUserQuestion) or wrote the item to the
-repo's waiting page and the reply links that page (`decisions-reach-a-clickable-pick`). This check does
-not wait for a git write: the reply's labels are what it reads.
+unless the same main-session turn opened the question box (AskUserQuestion), or the repo has a
+waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
+waiting page (`decisions-reach-a-clickable-pick`). A main-session write to that page outside its
+`items` collection cancels the link. This check does not wait for a git write: the reply's labels are
+what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
 """
 import json
 import os
@@ -421,9 +423,14 @@ ASK_TOOL = "AskUserQuestion"
 DATA_TOOL = "ArtifactData"
 WAITING_COLLECTION = "items"
 
+# The chat-first wait (questions-go-to-owner, "Chat first, then the page"): 5 minutes, never 15 or 25.
+FIVE_MINUTES_RE = re.compile(r"(?<![\w.])(?:5[ -]?min(?:ute)?s?|five[ -]minutes?)\b", re.I)
+PAGE_WORDS_RE = re.compile(r"\bwaiting[ -]page\b", re.I)
+
 PICK_REFUSAL = (
-    "Pick guard: Input Needed offers a pick with options and gives no way to click it. Open the "
-    "question box, or put the item on the repo's waiting page and link that page in the reply."
+    "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat "
+    "and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or open "
+    "the question box."
 )
 
 
@@ -475,37 +482,40 @@ def repo_root(cwd):
         here = parent
 
 
-def writes_waiting_item(inp):
-    """True when an ArtifactData call sets or updates a document in the waiting collection."""
+def writes_outside_items(inp):
+    """True when an ArtifactData call sets or updates a document outside the waiting collection."""
     if inp.get("action") == "batch":
         return any(isinstance(w, dict) and w.get("op") in ("set", "update")
-                   and w.get("collection") == WAITING_COLLECTION for w in inp.get("writes") or [])
-    return inp.get("action") in ("set", "update") and inp.get("collection") == WAITING_COLLECTION
+                   and w.get("collection") != WAITING_COLLECTION for w in inp.get("writes") or [])
+    return inp.get("action") in ("set", "update") and inp.get("collection") != WAITING_COLLECTION
 
 
 def pick_has_a_control(records, text, cwd):
-    """True when the main session's turn opened the question box, or wrote an item to this repo's
-    waiting page and the reply links it. An agent's own calls (isSidechain) never count."""
-    page = None
+    """True when the main session's turn opened the question box, or this repo has a waiting page
+    and the reply links it or its Input Needed item names the 5-minute wait and the page. A main
+    write to that page outside `items` is a missed item, so it cancels the link. An agent's own
+    calls (isSidechain) never count."""
+    data_calls = []
     for rec in records:
         if rec.get("isSidechain"):
             continue
         for b in tool_uses(rec):
-            name = b.get("name")
-            if name == ASK_TOOL:
+            if b.get("name") == ASK_TOOL:
                 return True
-            if name != DATA_TOOL:
-                continue
-            inp = b.get("input") or {}
-            if not writes_waiting_item(inp):
-                continue
-            if page is None:
-                root = repo_root(cwd)
-                page = layout.waiting_page(root) if root else "unknown"
-            url = str(inp.get("url") or "").rstrip("/")
-            if page != "unknown" and url == page.rstrip("/") and page.rstrip("/") in text:
-                return True
-    return False
+            if b.get("name") == DATA_TOOL:
+                data_calls.append(b.get("input") or {})
+    root = repo_root(cwd)
+    page = layout.waiting_page(root) if root else "unknown"
+    if page == "unknown":
+        return False
+    page = page.rstrip("/")
+    section = input_needed_section(text)
+    if FIVE_MINUTES_RE.search(section) and PAGE_WORDS_RE.search(section):
+        return True
+    if not re.search(re.escape(page) + r"(?![\w-])", text):
+        return False
+    return not any(str(inp.get("url") or "").rstrip("/") == page and writes_outside_items(inp)
+                   for inp in data_calls)
 
 
 def _marker_path(hook):
