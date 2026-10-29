@@ -119,10 +119,13 @@ is main's `page.html` with the live `designData` kept, never the live page's own
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out>`. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
-   read. "installed copy" means main could not be read: say so in the reply.
+   read. Code outside main's page, other than the document skeleton, is `behind`.
 3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
-   `<out>` is main's page with the live `designData` kept.
-4. `unknown`: republish nothing, and say the line in the reply.
+   `<out>` is main's page with the live `designData` kept. When you also add a design, do it in
+   `<out>` first and republish once ("Add a design").
+4. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
+   could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
+   `origin/main` in it). Only main proves a page current; the installed copy never does.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
 one short read-only git process, with no fetch. It writes `<out>` only, and no file without
