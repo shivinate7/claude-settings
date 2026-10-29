@@ -61,7 +61,12 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
-REPLACE_TRIES = 5  # tries at the log replace, 50 ms apart
+LOG_WAIT_SECONDS = 30  # one log() call waits this long, in all, for the lock and the replace; the hook's own limit is 60
+LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock or the replace
+
+
+class LogWaitTimeout(OSError):
+    """A log() call waited past LOG_WAIT_SECONDS for the lock or the replace."""
 
 
 def log_path() -> str:
@@ -69,14 +74,23 @@ def log_path() -> str:
 
 
 @contextlib.contextmanager
-def _log_lock(path: str):
+def _log_lock(path: str, deadline: float):
     """Hold an exclusive lock on `<log>.lock` so parallel hook runs take turns. `fcntl.flock`
-    on POSIX, `msvcrt.locking` on Windows (blocks up to about 10 s, then raises)."""
+    on POSIX. On Windows `msvcrt.locking` with LK_NBLCK, tried every LOG_RETRY_SECONDS until
+    DEADLINE (a `time.monotonic` time), then LogWaitTimeout: LK_LOCK gives up after about 10 s, and
+    the body never runs without the lock."""
     with open(path + ".lock", "a+") as handle:
         if sys.platform.startswith("win"):
             import msvcrt
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            while True:
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:  # held by another run
+                    if time.monotonic() >= deadline:
+                        raise LogWaitTimeout("payload log lock not taken in %d s" % LOG_WAIT_SECONDS)
+                    time.sleep(LOG_RETRY_SECONDS)
             try:
                 yield
             finally:
@@ -96,15 +110,17 @@ def log(record: dict, replace_run=None):
     fields the docs leave open (docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
     Parallel runs take turns on a lock file, because writers lost rows without it. The temp name
     carries the pid. On Windows the replace can raise PermissionError while the destination is
-    held for a moment, so it retries a few times.
+    held, so it retries until LOG_WAIT_SECONDS (the lock wait counts toward the same limit).
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
-    A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
+    A write that cannot finish in LOG_WAIT_SECONDS raises LogWaitTimeout, the only way a row is
+    dropped for waiting. A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
+    deadline = time.monotonic() + LOG_WAIT_SECONDS
     path = log_path()
     line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with _log_lock(path):
+        with _log_lock(path, deadline):
             try:
                 with open(path, encoding="utf-8") as handle:
                     kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
@@ -115,14 +131,14 @@ def log(record: dict, replace_run=None):
             temp = "%s.%d.tmp" % (path, os.getpid())
             with open(temp, "w", encoding="utf-8") as handle:
                 handle.writelines(kept + [line])
-            for attempt in range(REPLACE_TRIES):
+            while True:
                 try:
                     os.replace(temp, path)  # a reader never sees an empty or half-written file
                     break
-                except PermissionError:  # Windows: the destination is held a moment
-                    if attempt == REPLACE_TRIES - 1:
-                        raise
-                    time.sleep(0.05)
+                except PermissionError as exc:  # Windows: the destination is held a moment
+                    if time.monotonic() >= deadline:
+                        raise LogWaitTimeout("payload log replace refused for %d s: %r" % (LOG_WAIT_SECONDS, exc))
+                    time.sleep(LOG_RETRY_SECONDS)
     except Exception as exc:
         print("agent_end_reap: payload log write failed: %r" % exc, file=sys.stderr)
 
