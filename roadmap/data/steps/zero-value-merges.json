@@ -1,0 +1,9 @@
+{
+  "title": "After round 3, a change with zero net safety value merges on green; only negative is held",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33756,
+  "why": "Incident, Oct 29 (coordinator, 15:07 CDT): #807, c202's follow-up, passed round 3 but was parked because its only lifts came from shiv's chat-first ruling, not a typed override, so it scored zero. That made him rule on a change his own ruling had asked for (item 79).",
+  "note": "Ruling, Oct 29 16:33 CDT (shiv, chat, item 79 a): zero or positive net value after round 3 merges on green; only negative is held. Home: decision hold-unsafe-after-round-3 and rule roles-review-cap-three, which the lane rewrites. Lane started 16:33 CDT (coordinator). #807 joins batch 21 under the same pick. Needs no answer. Port: the rule loads in every repo. Placed after round3-marker-match (triage 12, Oct 29).",
+  "updatedAt": "2026-10-29T21:36:00Z"
+}
