@@ -318,16 +318,18 @@ cloud_git() {
 }
 
 # Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
-# person's own and is never moved. A failed fetch keeps the clone as it was, and so does a local
-# main commit that origin lacks: moving main would drop it. The fetch has no --depth: a depth-1 fetch
-# cuts the new tip's parents, so the ancestor test below could never pass. In a shallow clone this
-# fetches only the commits since the last sync.
+# person's own and is never moved. mirrorSha is the sha this script last set main to: a main that
+# differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
+# unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
+# new tip only, never the history under it. A failed fetch keeps the clone as it was.
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
-  if ! cloud_git -C "$SRC" fetch -q origin "$REF"; then
-    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
-  elif ! git -C "$SRC" merge-base --is-ancestor main FETCH_HEAD 2>/dev/null; then
+  mirror_sha=$(git -C "$SRC" config --get claude-settings.mirrorSha 2>/dev/null)
+  if [ -n "$mirror_sha" ] && [ "$(git -C "$SRC" rev-parse -q --verify main 2>/dev/null)" != "$mirror_sha" ]; then
     log "WARN: the clone $SRC has local commits on main that $REF lacks; keeping it as it is"
-  elif git -C "$SRC" checkout -q -B main FETCH_HEAD; then
+  elif ! cloud_git -C "$SRC" fetch -q --depth 1 origin "$REF"; then
+    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
+  elif git -C "$SRC" checkout -q -B main FETCH_HEAD \
+       && git -C "$SRC" config claude-settings.mirrorSha "$(git -C "$SRC" rev-parse main)"; then
     log "refreshed the clone $SRC to $REF"
   else
     log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
@@ -345,6 +347,8 @@ if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; t
   if cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
      && git -C "$clone_tmp" checkout -q -B main \
      && git -C "$clone_tmp" config claude-settings.cloudMirror true \
+     && clone_sha=$(git -C "$clone_tmp" rev-parse main) \
+     && git -C "$clone_tmp" config claude-settings.mirrorSha "$clone_sha" \
      && [ -f "$clone_tmp/CLAUDE.md" ] && [ -f "$clone_tmp/settings.json" ]; then
     old_copy="$HOME/claude-settings.old.$$"
     rm -rf "$old_copy"
