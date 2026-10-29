@@ -6,8 +6,8 @@
 keeps both sides' lines with no conflict. The batch runner builds the integration branch with a local
 `git merge`, so it gets this.
 
-Not union: `docs/records.md` and `docs/catalog.md`. They are generated tables with sections. Union
-would leave duplicate or stale rows silently. The merge tool regenerates `docs/records.md`
+`docs/records.md` and `docs/catalog.md` keep the default merge. They are generated tables with
+sections. Union would leave duplicate or stale rows silently. The merge tool regenerates `docs/records.md`
 (decision records-index-at-merge, one records index page rebuilt at merge time).
 
 The rule takes effect only once it is on main. A lane branched before it merges needs main merged in.
