@@ -47,6 +47,7 @@ one name for each thing, and a list of names to avoid.
 | coordinator | The one standing session that runs a repo's build. It starts triage and the batch runner, then the lane sessions, and talks with the owner. | `docs/decisions/session-tiers.md` | — |
 | triage | The standing session that a coordinator starts first, with the batch runner. It is the only writer of the roadmap and the waiting page. | `docs/decisions/session-tiers.md` | — |
 | batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving finished lanes. | `docs/decisions/session-tiers.md` | `branch manager` |
+| arbiter | A separate role that holds a repo's ruling voice. Batch checks go to the batch runner, not to it. | `docs/decisions/session-tiers.md` | — |
 | lane session | A one-lane session that a coordinator starts to run one lane. It spawns its own agents and reports up to the coordinator. | `docs/decisions/session-tiers.md` | `lane lead` |
 | task | What one brief asks one agent to do. | `rule:roles-brief-contents` | — |
 | builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
