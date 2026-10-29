@@ -237,9 +237,9 @@ while True:
         )
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
-            PUSH_DENY_REASON, SESSION_ID_RE, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
+            PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
-            in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
