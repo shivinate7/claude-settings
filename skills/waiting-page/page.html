@@ -780,7 +780,7 @@ function buildCard(it) {
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
         multi ? h("span", { class: "sp" }) : null,
-        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
+        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); const r = $("o-" + it.id + "-" + pk[0]); if (r) r.focus({ preventScroll: true }); } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
