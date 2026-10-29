@@ -40,6 +40,12 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
+sys.path.insert(2, os.path.join(HERE, "..", "..", "hooks"))
+sys.path.insert(3, os.path.join(os.path.expanduser("~"), ".claude", "hooks"))
+try:  # the one home of a no-window child start (hooks/_nowindow.py)
+    import _nowindow
+except ImportError:  # an installed copy with no hooks/ beside it (the test fixture builds one): a plain start
+    _nowindow = None
 
 TEMPLATE = os.path.join(HERE, "page.html")
 DESIGN = re.compile(r'(<script type="application/json" id="designData">).*?(</script>)', re.S)
@@ -112,7 +118,7 @@ def read_origin_main(checkout):
     """(page text, short sha) of page.html at origin/main in `checkout`, or None. One git process, read only."""
     want = ("origin/main\norigin/main:%s\n" % TEMPLATE_IN_GIT).encode()
     try:
-        done = subprocess.run(["git", "-C", checkout, "cat-file", "--batch"], input=want,
+        done = (_nowindow.run if _nowindow else subprocess.run)(["git", "-C", checkout, "cat-file", "--batch"], input=want,
                               capture_output=True, timeout=GIT_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
         return None
