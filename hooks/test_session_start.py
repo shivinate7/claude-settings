@@ -21,6 +21,17 @@ VCS = "g" + "it"  # assembled so this file cannot itself look like the command i
 IDENT = ["-c", "user.email=session-start-cases@example.invalid", "-c", "user.name=session-start-cases"]
 LIMIT = 50  # the notice starts above this many agent worktrees
 NOTICE = re.compile(r"agent[ -]worktree", re.IGNORECASE)
+# The one printed line whose text starts "session tier: ", quoted in the hook's printf call.
+TIER_PRINTF = re.compile(r"'(session tier: .*)'[ \t]*$", re.MULTILINE)
+
+
+def hook_tier_line():
+    """The tier line's text as the hook file holds it, so a wording change in the hook edits no test."""
+    with open(HOOK, encoding="utf-8") as handle:
+        found = TIER_PRINTF.findall(handle.read())
+    if len(found) != 1:
+        sys.exit("fixture setup failed: expected one session tier line in %s, found %d" % (HOOK, len(found)))
+    return found[0]
 
 
 def sh_exe():
@@ -70,20 +81,23 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             path = os.path.join(self.primary, ".claude", "worktrees", "agent-s%03d" % self.made)
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
-    def run_hook(self, remote=None, fetch_timeout="30"):
-        """The hook's stdout lines, with the primary checkout as the session cwd.
+    def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None):
+        """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
+        session_cwd: the session's cwd, in the payload and as the process cwd; None means the primary checkout.
         """
+        where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
-        payload = json.dumps({"cwd": self.primary.replace("\\", "/"), "session_id": "session-start-cases"})
+        payload = json.dumps({"cwd": where.replace("\\", "/"), "session_id": "session-start-cases"})
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT=fetch_timeout)
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
         answer = subprocess.run([sh_exe(), HOOK], input=payload, capture_output=True, text=True,
-                                env=env, cwd=self.root, timeout=120)
+                                env=env, cwd=where, timeout=120)
+        self.last_stderr = answer.stderr
         self.assertEqual(answer.returncode, 0, "the hook exited %d" % answer.returncode)
         return answer.stdout.splitlines()
 
@@ -144,35 +158,43 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
     # The 51-worktree case builds 51 worktrees; this class does not repeat it.
     test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
 
-    TIER_LINE = (
-        "session tier: read your own record with get_session (no session_id). A parent_session_id means"
-        " you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick"
-        " solo, one lane or coordinator from the request. Before you act as coordinator, read every page"
-        " of list_sessions for a live session tagged both cs-build:coordinator and cs-repo:<owner>/<name>"
-        " for this repo; if one is found, coordinate with it, else proceed."
-    )
-
     def tier_lines(self, lines):
         return [line for line in lines if line.startswith("session tier:")]
 
     def test_cloud_prints_the_tier_line_once_right_after_the_checkout_line(self):
+        expected = hook_tier_line()
         lines = self.run_hook(remote="true")
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [self.TIER_LINE])
-        self.assertEqual(lines.index(self.TIER_LINE), 1, "the tier line is not after the checkout line: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [expected])
+        self.assertEqual(lines.index(expected), 1, "the tier line is not after the checkout line: %r" % lines)
 
     def test_no_tier_line_unless_the_variable_is_exactly_true(self):
+        expected = hook_tier_line()
         # None is a runner that never sets it; the rest are values the hook must not treat as cloud.
         for remote in (None, "", "false", "1", "TRUE"):
             with self.subTest(remote=remote):
                 lines = self.run_hook(remote=remote)
                 self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line: %r" % lines)
                 self.assertEqual(self.tier_lines(lines), [])
+                self.assertNotIn(expected, lines)
 
     def test_the_tier_line_prints_with_no_remote_and_a_tiny_fetch_timeout(self):
         # The line needs no network, so a fetch bound too short for the bounded git calls still leaves it.
         lines = self.run_hook(remote="true", fetch_timeout="0.01")
-        self.assertEqual(self.tier_lines(lines), [self.TIER_LINE])
+        self.assertEqual(self.tier_lines(lines), [hook_tier_line()])
+
+    def test_cloud_prints_the_tier_line_once_outside_any_git_tree(self):
+        # The line needs no git, so a cloud session whose cwd is no checkout still gets it, with no stderr.
+        outside = os.path.join(self.root, "outside")
+        os.makedirs(outside)
+        probe = subprocess.run([VCS, "-C", outside, "rev-parse", "--show-toplevel"], capture_output=True,
+                               text=True, timeout=60)
+        self.assertNotEqual(probe.returncode, 0, "the folder is inside a git tree, so the case tests nothing: %r"
+                            % outside)
+        expected = hook_tier_line()
+        lines = self.run_hook(remote="true", session_cwd=outside)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.tier_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
 
 
 if __name__ == "__main__":
