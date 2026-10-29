@@ -142,7 +142,7 @@ replaces the whole rule, so it drops any field you leave out. (Decision main-bra
 
 ## Docs
 
-CI statements in README or docs go stale too. See the `fresh-prose` skill.
+CI claims in README or docs go stale too. See the `fresh-prose` skill.
 
 ## Opt-in templates
 

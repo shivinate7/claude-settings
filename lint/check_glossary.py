@@ -3,7 +3,8 @@
 
 GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, not. Three tests:
 
-- Each row's home is an existing file, or `rule:<id>` that names a rule marker in RULE_FILES.
+- Each row's home is an existing file, or `rule:<id>` that names a rule marker in RULE_FILES, and
+  each tagged "not" name uses the one tag, `(this sense)`.
 - Each file the change adds (against origin/main, renames counted as adds) has no path segment
   that holds a name from a row's "not" cell. A name matches whole lowercase words inside one
   segment. Words split on any character that is not a letter or a digit, and the segment is read
@@ -21,9 +22,10 @@ GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, n
 Comments, docstrings and every other string are prose, and a reviewer reads prose. A sentence that
 names a "not" word passes. A "not" word inside its own term, plural too (`hole` in `safety_holes`),
 is the term. A line that holds `glossary-ok` is skipped, with its reason beside it.
-A "not" name written `word (prose)` is an everyday word (`block`, `entry`): it is read in paths,
-anchors and slugs, never in identifiers, strings or hook messages. Claude Code's own names stay
-(PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
+A "not" name written `word (this sense)` retires one sense of an everyday word (`block`, `issue`):
+it is read in paths, anchors and slugs, never in identifiers, strings or hook messages, where code
+may use the other sense. Any other parenthesised tag on a "not" name fails. Claude Code's own names
+stay (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
 checked or renamed.
 
     python3 lint/check_glossary.py [file ...]
@@ -43,7 +45,8 @@ ROOT = os.path.dirname(HERE)
 GLOSSARY = "GLOSSARY.md"
 SECTION = "## Terms"
 NONE = ("", "-", "—")  # a "not" cell that lists no name
-PROSE_TAG = " (prose)"  # `gap (prose)`: an everyday word, read in paths, anchors and slugs, not in code names
+THIS_SENSE = " (this sense)"  # `issue (this sense)`: read in paths, anchors and slugs, not in code names
+TAG_RE = re.compile(r"[^()]+ \(this sense\)")  # the one allowed form of a tagged "not" name
 WORD_RE = re.compile(r"[^a-z0-9]+")
 CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")  # batchBranch reads as batch branch
 SKIP_CODE = ("GLOSSARY.md", "docs/records.md", "lint/test_retired_names.py", "lint/test_check_glossary.py",
@@ -138,6 +141,12 @@ def home_problems(term, homes, ids):
     return out
 
 
+def tag_problems(term, names):
+    """One problem per "not" name with a parenthesised tag other than (this sense)."""
+    return ["row '%s': not name '%s' has an unknown tag; the one tag is%s" % (term, n, THIS_SENSE)
+            for n in names if ("(" in n or ")" in n) and not TAG_RE.fullmatch(n)]
+
+
 def same(got, name):
     """Whole words equal, with a plural `s` or `es` allowed on the last word."""
     return got[:-1] == name[:-1] and got[-1] in (name[-1], name[-1] + "s", name[-1] + "es")
@@ -147,16 +156,16 @@ def name_problems(where, text, table, plain=False):
     """One problem per "not" name that the whole words of `text` hold.
 
     `plain` is a name of code that a person may spell for another sense (`block`, `entry`): a
-    "not" name tagged (prose) is then left to the reviewer."""
+    "not" name tagged (this sense) is then left to the reviewer."""
     out = []
     # Read with and without case steps: HandOver may mean handover or hand over.
     forms = [words(text), words(text, camel=True)]
     for term, _homes, names in table:
         spelled = words(term)  # a "not" word inside its own term, such as `hole` in `safety hole`, is the term
         for name in names:
-            if plain and name.endswith(PROSE_TAG):
+            if plain and name.endswith(THIS_SENSE):
                 continue
-            name = name[:-len(PROSE_TAG)] if name.endswith(PROSE_TAG) else name
+            name = name[:-len(THIS_SENSE)] if name.endswith(THIS_SENSE) else name
             n = words(name)
             if n and any(same(w[i:i + len(n)], n) and not inside(w, i, len(n), spelled)
                          for w in forms for i in range(len(w) - len(n) + 1)):
@@ -501,7 +510,7 @@ def main(args):
         print("check_glossary: FAIL: %s has no rows under '%s'" % (GLOSSARY, SECTION))
         return 1
     ids = {i for rel in RULE_FILES for i in ANCHOR_RE.findall(read(rel) or "")}
-    bad = [p for term, homes, _names in table for p in home_problems(term, homes, ids)]
+    bad = [p for term, homes, names in table for p in home_problems(term, homes, ids) + tag_problems(term, names)]
     paths = [p for p in (args or added()) if p]
     for path in paths:
         bad += path_problems(path, table)
