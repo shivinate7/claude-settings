@@ -107,6 +107,27 @@ into `meta/page`.
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item.
 
+- The writer keeps the page on main's code (see "Keep the page on main's code").
+
+## Keep the page on main's code
+
+The writer runs this at each wake and before each republish. A lane never runs it. Every republish
+is main's `page.html` with the live `designData` kept, never the live page's own code (owner,
+2026-10-29 14:47 CDT; decision `questions-go-to-owner`).
+
+1. Read the page with `Artifact` action `read`. Save the text to a file in the scratchpad.
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out>`. It
+   compares the page's code outside `designData` with `skills/waiting-page/page.html` on
+   claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
+   read. "installed copy" means main could not be read: say so in the reply.
+3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+   `<out>` is main's page with the live `designData` kept.
+4. `unknown`: republish nothing, and say the line in the reply.
+
+Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
+one short read-only git process, with no fetch. It writes `<out>` only, and no file without
+`--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
+
 ## Add an item
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
@@ -240,8 +261,9 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
    Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
-   JSON in `<script type="application/json" id="designData">`.
+3. Build the new page as "Keep the page on main's code" steps 1 and 2 say, with `--write <out>`.
+   In `<out>`, add `"slug": "<html string>"` to the JSON in
+   `<script type="application/json" id="designData">`. Never edit the live page's own code.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element whole, scaled to fit the card, so the part being decided is in frame.
@@ -260,7 +282,7 @@ The page refuses an item where they do, or where a `focus` finds nothing.
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Republish the page to the same URL with the same capabilities. The database stays.
+5. Republish `<out>` to the same URL with the same capabilities. The database stays.
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
    the orchestrator does (see "Add an item").
@@ -279,9 +301,9 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    raw HTML, or that does not name this account a writer, is unreadable too.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
-3. For each `behind` page, republish `page.html` to the same URL with the capabilities `db` and
-   `{comments: {}}`. Keep the page's `designData` block for the items still open. A republish with
-   less drops the saved items or the wake.
+3. For each `behind` page, run `stale_pages.py --page <folder>/<artifact id>.html --write <out>`, and
+   republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`. `<out>` keeps
+   the page's `designData` block. A republish with less drops the saved items or the wake.
 4. Update one page first, then read its items: they must all still be there. That the database
    survives a republish is unmeasured.
 5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
