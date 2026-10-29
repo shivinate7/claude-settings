@@ -42,7 +42,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
   - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the arbiter does not start with triage and the batch runner. It starts later, when the owner tells the coordinator "spawn arbiter". It is for long runs the owner does not want to sit through.
   - Effort (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): by default the arbiter runs at high effort for its model.
-  - Ruling (same item): an arbiter's answer counts as a ruling inside its own repo. It ranks below the owner, and the owner can overrule it.
+  - Ruling (same item): an arbiter's answer counts as a ruling inside its own repo. It ranks below the owner, and the owner can overrule it. It lands where an owner's ruling would: its question's record in that repo (rule `output-answer-has-a-home`).
   - Which repos (same item): not every repo gets an arbiter, only a repo that asks. Today that is q_max.
   - Kind (same item): the arbiter is a standing session and an orchestrator, and runs Opus. It is rotated before it goes stale, like triage.
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).

@@ -141,6 +141,14 @@ Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'}
 `start_session` on Opus. The static scan of a Workflow script reads only the Haiku floor and the step-up, and a model set
 through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).
 
+A step grant also lifts the Opus spawn ask (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
+Triage writes the owner's grant in the `grants` field of the lane's roadmap step. The step names its
+lane in the field `lane`. `take()` in `hooks/override.py` reads it only on an Opus spawn ask that no Opus
+override lifted. It reads the local ref `origin/roadmap` in the call's cwd and never fetches. Cost: one
+`git grep` for the lane id, and one `git show` for each hit. Freshness: the lane sees a grant only after
+it fetches `origin/roadmap`; until then the ask stays. Kind of risk: likely. Landed 2026-10-29. Incident:
+the Opus reviewer spawn of step c202, ask-in-chat-first, waited about 2 hours on the ask.
+
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `agent-model-cap`.
 
