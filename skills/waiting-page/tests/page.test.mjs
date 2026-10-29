@@ -104,8 +104,10 @@ const answers = (page) => page.evaluate(() => window.__answers());
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
 const takePick = (page, it) => card(page, it).getByRole("button", { name: /Take my pick/ }).click();
 // The keyboard way to take a pick: focus the button and press Enter. Resolves to what holds focus one frame later, so a fix that focuses in a frame still counts.
-const enterTakePick = async (page, it) => {
+// `place` is an optional step that scrolls the page between the focus and the key press.
+const enterTakePick = async (page, it, place) => {
   await page.locator(`#b-take-${it.id}`).focus();
+  if (place) await place();
   await page.keyboard.press("Enter");
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
   return page.evaluate(() => ({ tag: document.activeElement.tagName, id: document.activeElement.id }));
@@ -2656,6 +2658,31 @@ test("Enter on Take my pick puts focus on the first key of the pick, in rank ord
   assert.match(await rankText(page, it, "c"), rank("1st", 3), "the pick's first key is not ranked 1st");
   assertFocusOnFirstPick(at, it, "c");
 });
+
+// At 390 wide a card is taller than the screen and Take my pick sits below its options, so the focused option can end under the sticky header (.hdr) or the fixed bar (.bar).
+// The pick starts with A in both cards: the option is far above the button, and the page must show it whole.
+const SPOTS = {
+  "just above the bar": (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.bottom - (document.querySelector(".bar").getBoundingClientRect().top - 8)); },
+  centred: (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.top + b.height / 2 - innerHeight / 2); },
+};
+const FILL = [mk("take-fill-1", 50), mk("take-fill-2", 51), mk("take-fill-3", 52)];
+const TAKE_CARDS = {
+  "pick-one": () => mk("take-clear", 43, { options: COLOURS, pick: "a" }),
+  "multi A and D": () => multi("take-clear-multi", 44, { options: COLOURS, pick: ["a", "d"] }),
+};
+for (const [kind, build] of Object.entries(TAKE_CARDS)) for (const [spot, scrollTo] of Object.entries(SPOTS)) {
+  test(`Enter on Take my pick keeps the focused option clear of the header and the bar, ${kind}, button ${spot}, at 390 wide`, async (t) => {
+    const it = build();
+    const page = await open(t, { items: [it, ...FILL], viewport: { width: 390, height: 800 } }); if (!page) return;
+    const at = await enterTakePick(page, it, () => page.evaluate(scrollTo, it.id));
+    assertFocusOnFirstPick(at, it, "a");
+    const m = await page.evaluate(() => {
+      const o = document.activeElement.closest(".opt"), r = o && o.getBoundingClientRect();
+      return { top: r && Math.round(r.top), bottom: r && Math.round(r.bottom), hdr: Math.round(document.querySelector(".hdr").getBoundingClientRect().bottom), bar: Math.round(document.querySelector(".bar").getBoundingClientRect().top) };
+    });
+    assert.ok(m.top !== null && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A is not between the header and the bar: ${JSON.stringify(m)}`);
+  });
+}
 
 test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
   const it = { ...picItem("multi-pics", 33), multi: true, pick: ["a", "c"] };
