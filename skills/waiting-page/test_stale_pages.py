@@ -16,6 +16,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 CMD = os.environ.get("STALE_PAGES_UNDER_TEST") or os.path.join(HERE, "stale_pages.py")
 LINT = os.path.realpath(os.path.join(HERE, "..", "..", "lint"))
+HOOKS = os.path.realpath(os.path.join(HERE, "..", "..", "hooks"))
 sys.path.insert(0, LINT)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
@@ -43,6 +44,12 @@ def write_text(path, text):
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(text)
     return path
+
+
+def link_repo_dirs(claude):
+    """A fake ~/.claude gets this repo's lint and hooks folders, as a real install has both."""
+    os.symlink(LINT, os.path.join(claude, "lint"))
+    os.symlink(HOOKS, os.path.join(claude, "hooks"))
 
 
 def git(cwd, *args):
@@ -224,8 +231,8 @@ class Stale(unittest.TestCase):
         self.assertNotEqual(probe.returncode, 0, "the temp folder is inside a git checkout, so the script finds that")
         shutil.copy2(CMD, os.path.join(installed, "stale_pages.py"))
         write_text(os.path.join(installed, "page.html"), ALTERED)
-        os.symlink(LINT, os.path.join(claude, "lint"))
-        pointer = write_text(os.path.join(claude, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone)
+        link_repo_dirs(claude)
+        pointer =write_text(os.path.join(claude, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone)
         script = os.path.join(installed, "stale_pages.py")
         same = write_text(os.path.join(self.fetched, "same.html"), PAGE)  # equals origin/main
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)  # equals the installed copy
@@ -250,8 +257,8 @@ class Stale(unittest.TestCase):
                                         "skills/waiting-page/stale_pages.py": script_text})
         home = os.path.join(self.tmp.name, "home")
         os.makedirs(os.path.join(home, ".claude", "skills", "waiting-page"))
-        os.symlink(LINT, os.path.join(home, ".claude", "lint"))
-        script = os.path.join(home, ".claude", "skills", "waiting-page", "stale_pages.py")
+        link_repo_dirs(os.path.join(home, ".claude"))
+        script =os.path.join(home, ".claude", "skills", "waiting-page", "stale_pages.py")
         os.symlink(os.path.join(clone, "skills", "waiting-page", "stale_pages.py"), script)
         same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)
