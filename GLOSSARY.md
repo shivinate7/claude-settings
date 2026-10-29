@@ -41,7 +41,11 @@ one name for each thing, and a list of names to avoid.
 | owner | The person who owns these repos. Only the owner makes a ruling or a grant. `CLAUDE.md` speaks as the owner. | `rule:outcomes-grant-covers-named-act` | — |
 | override | A prompt from the owner that starts with `override`, or `opus` and a length. The guard then lets a refusal or an ask through, once or for a set time. An Opus override lifts only the Opus spawn ask. | `docs/decisions/owner-override.md` | `override pass` |
 | grant | The owner's leave to do one act, once or standing. It covers the act it names, never a variant. A merge grant is one kind. Claude Code's own approve button is the platform's word, not a grant. | `rule:outcomes-grant-covers-named-act` | `owner word`, `approval` |
-| orchestrator | The session that plans, briefs, verifies and reports. It builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds` | — |
+| orchestrator | Any session that spawns agents. Coordinator, triage, batch runner and lane session are kinds of orchestrator. Every orchestrator but a solo session builds only a change that cannot move a verdict. | `rule:roles-orchestrator-never-builds`, `docs/decisions/session-tiers.md` | — |
+| coordinator | The one standing session that runs a repo's build. It starts triage and the batch runner, then the lane sessions, and talks with the owner. | `docs/decisions/session-tiers.md` | — |
+| triage | The standing session that a coordinator starts first, with the batch runner. It is the only writer of the roadmap and the waiting page. | `docs/decisions/session-tiers.md` | — |
+| batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving finished lanes. | `docs/decisions/session-tiers.md` | `branch manager` |
+| lane session | A one-lane session that a coordinator starts to run one lane. It spawns its own agents and reports up to the coordinator. | `docs/decisions/session-tiers.md` | `lane lead` |
 | task | What one brief asks one agent to do. | `rule:roles-brief-contents` | — |
 | builder | An agent that does one briefed task in its own worktree and runs the check that proves the task done. A builder never reviews its own work. | `agents/builder.md` | — |
 | test-author | An agent that writes the new cases first and shows them red on the old code, before a builder changes product code. | `agents/test-author.md` | — |
