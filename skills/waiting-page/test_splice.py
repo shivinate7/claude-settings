@@ -10,8 +10,10 @@ designData block among them. A page with no roadmap block is refused. A marker t
     python3 splice.py --page TEMPLATE.html --carry LIVE.html --out OUT.html
 
 The carry mode puts the live page's designData block and roadmap block, byte for byte, into the
-template, for a republish of a changed template. It refuses, and writes nothing, when either block is
-missing from either file.
+template, for a republish of a changed template. A live page with no roadmap marker at all (it
+predates the block) gives only its designData block; the template keeps its empty roadmap block. It
+refuses, and writes nothing, when the template lacks either block, when either file has an unclosed
+or doubled block or a doubled designData slot, or when the live page has no designData slot.
 
 SPLICE_UNDER_TEST names the command to run (default: splice.py beside this file), so the same
 cases run red against a checkout that lacks it. Temp files: the run folder of lint/_test_temp.py,
@@ -167,7 +169,8 @@ DECOY_SLOT = "<script>\nconst SLOT = '<script type=\"application/json\" id=\"des
 class Carry(Folder):
     """--carry LIVE: a republish of a changed template keeps the live page's two data blocks, the
     designData block and the roadmap block, byte for byte (build constraint 6: replace only the
-    block you change, keep the other)."""
+    block you change, keep the other). A live page with no roadmap marker yet keeps the template's
+    empty roadmap block."""
 
     def carry(self, template, live, out="out.html"):
         r = subprocess.run([sys.executable, CMD, "--page", self.write("template.html", template), "--carry",
@@ -209,17 +212,33 @@ class Carry(Folder):
         self.assertFalse(os.path.exists(self.path("out.html")), why + ": an output file was left")
         self.assertEqual((self.read("template.html"), self.read("live.html")), (template, live), why + ": an input changed")
 
-    def test_a_template_or_live_page_missing_a_block_is_refused(self):
+    def test_a_live_page_from_before_the_roadmap_block_carries_its_designs_and_keeps_the_templates_empty_block(self):
+        # Every live page predates the roadmap block on the first batch (build constraint 6: keep what exists).
+        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, extra=CHANGED_LINE)
+        cases = {"no marker at all": live_page(block=None, decoys=False),
+                 "markers only in script text": live_page(block=None, decoys=True)}
+        for why, live in cases.items():
+            with self.subTest(why):
+                out = self.carried(template, live)
+                self.assertEqual(out, live_page(block=EMPTY_BLOCK, design=DESIGN, extra=CHANGED_LINE),
+                                 "the live designData block, the template's empty roadmap block and nothing else")
+                self.assertEqual(self.read("live.html"), live, "the live page changed")
+
+    def test_a_template_missing_a_block_or_a_live_page_with_a_broken_block_is_refused(self):
         good_template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN)
+        twice = lambda text: text + "\n" + text
         cases = [
             ("template with no designData slot", live_page(block=EMPTY_BLOCK, design=""), live_page(), "designData"),
             ("template with no roadmap markers", live_page(block=None, design=EMPTY_DESIGN, decoys=False), live_page(), "roadmap"),
             ("template with markers only in script text", live_page(block=None, design=EMPTY_DESIGN), live_page(), "roadmap"),
             ("template with an unclosed roadmap block", live_page(block=OPEN, design=EMPTY_DESIGN, decoys=False), live_page(), "roadmap"),
+            ("template with two designData slots", live_page(block=EMPTY_BLOCK, design=twice(EMPTY_DESIGN)), live_page(), "designData"),
+            ("template with two roadmap blocks", live_page(block=twice(EMPTY_BLOCK), design=EMPTY_DESIGN), live_page(), "roadmap"),
             ("live page with no designData slot", good_template, live_page(design=""), "designData"),
-            ("live page with no roadmap markers", good_template, live_page(block=None, decoys=False), "roadmap"),
-            ("live page with markers only in script text", good_template, live_page(block=None), "roadmap"),
+            ("live page with two designData slots", good_template, live_page(design=twice(DESIGN)), "designData"),
             ("live page with an unclosed roadmap block", good_template, live_page(block=OPEN, decoys=False), "roadmap"),
+            ("live page with a closing marker and no opening one", good_template, live_page(block=CLOSE, decoys=False), "roadmap"),
+            ("live page with two roadmap blocks", good_template, live_page(block=twice(OLD_BLOCK)), "roadmap"),
         ]
         for why, template, live, word in cases:
             with self.subTest(why):
