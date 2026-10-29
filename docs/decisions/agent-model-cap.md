@@ -146,7 +146,7 @@ lane in the field `lane`. `take()` in `hooks/override.py` reads it only on an Op
 override lifted. It reads the local ref `origin/roadmap` in the call's cwd and never fetches. Cost: one
 `git grep` for the lane id, and one `git show` for each hit. Freshness: the lane sees a grant only after
 it fetches `origin/roadmap`; until then the ask stays. Kind of risk: likely. Landed 2026-10-29. Incident:
-the Opus reviewer spawn of lane c202 waited about 2 hours on the ask.
+the Opus reviewer spawn of step c202, ask-in-chat-first, waited about 2 hours on the ask.
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `agent-model-cap`.

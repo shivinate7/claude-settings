@@ -150,7 +150,8 @@ The matched text goes to the log, so a person can still see what fired.
 An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
-only the Opus spawn ask. No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
+only the Opus spawn ask, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
+No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
 `agent-model-floor`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
@@ -2923,19 +2924,20 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9c. The Opus ceiling: a spawn on Opus with no standing grant asks. An override or an Opus
-    # pass for the spawn's role lifts it. A spawn with no role runs general-purpose.
-    opus_model = opus_spawn_hit(tool, tool_input)
-    if opus_model:
-        refuse(tool, "ask", "agent-model-cap", OPUS_SPAWN_REASON, opus_model,
-               spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
-
-    # 9d. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
         load_reason, load_matched = running_lane_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
+
+    # 9d. The Opus ceiling: a spawn on Opus with no standing grant asks. An override, an Opus
+    # pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
+    opus_model = opus_spawn_hit(tool, tool_input)
+    if opus_model:
+        refuse(tool, "ask", "agent-model-cap", OPUS_SPAWN_REASON, opus_model,
+               spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
