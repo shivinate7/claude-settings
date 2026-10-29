@@ -2,10 +2,9 @@
 
 ## The ruling
 
-Roadmap step c118 (clickable pick), 2026-10-27. When the last reply's Input Needed item offers a pick with options, the stop passes only if one of these holds for the same main-session turn.
+Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a pick with options, the stop passes only if one of these holds for the same main-session turn.
 
 - It called `AskUserQuestion`, the question box. The guard does not re-check that nothing runs. `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs, and the guard does not repeat that.
-- It called `ArtifactData` with a `set` or `update`, or a `batch` holding such a write, on collection `items`. The URL is the one `layout.waiting_page` gives for this repo, and the reply text holds that URL.
 - The reply text holds the repo's waiting page URL, from `layout.waiting_page`. No page write is needed.
 - The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page".
 
