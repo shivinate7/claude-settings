@@ -12285,12 +12285,12 @@ for _role, _brief in (
         ("builder", "Plan: Try 3 of 3 later, after the review.")):
     add("ceiling: Agent %s on opus with the brief %r asks" % (_role, _brief[:24]), "ask", CEILING,
         tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
-# A builder's brief may open with a role word before the marker ("Builder, Round 3 of 3. Lane ..."),
-# or wrap the marker in markup. The first non-blank line counts when it holds the marker anywhere,
-# word-bounded. A later line counts only when it starts with the marker, as before. Failure classes:
-# a false ask (a round-3 builder on opus asks because a word or markup sits before the marker),
-# a false allow (a round 2, a near-miss like "of 30", or the marker in later prose earns the grant;
-# a reviewer round 2 behind a role word dodges its step-up).
+# A brief may open with a role word before the marker, or wrap the marker in markup. The first
+# non-blank line counts when it holds the marker anywhere, word-bounded. A later line counts only
+# when it starts with the marker. Failure classes: a false ask (a third-try builder on opus asks
+# because a word or markup sits before the marker), a false allow (a middle-step marker, a near-miss
+# like "of 30", or the marker in later prose earns the grant; a reviewer behind a role word dodges
+# its step-up).
 FIRST_LINE_BRIEF = "Builder, Round 3 of 3. Lane c204 fix the marker scan.\nFiles: hooks/guard.py."
 add("first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed",
     "allow", tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
