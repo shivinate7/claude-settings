@@ -819,6 +819,42 @@ test("a press on the scrollbar gutter opens nothing and picks nothing, and a pre
   assert.equal(await page.locator("#dsheet").isVisible(), true, "a press on the picture did not open View");
 });
 
+test("a right-button press on the scrollbar, then Escape, leaves Enter working on Add a note, at 1280 wide", async (t) => {
+  const it = picItem("stale-right", 43);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "right" });
+  await page.keyboard.press("Escape");
+  await card(page, it).getByRole("button", { name: "Add a note" }).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, "the note did not open: a right press on the scrollbar left a stale state");
+});
+
+test("a middle press on the scrollbar leaves Space working on an option, at 1280 wide", async (t) => {
+  const it = picItem("stale-middle", 44);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "middle" });
+  await page.locator(`#o-${it.id}-b`).focus();
+  await page.keyboard.press("Space");
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Space did not pick option b: a middle press on the scrollbar left a stale state");
+});
+
+test("a press on the picture released on the scrollbar gutter opens nothing and picks nothing, at 1280 wide", async (t) => {
+  const it = picItem("press-out", 45);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.move(r.x + 20, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 4, r.y + 160, { steps: 10 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the picture released on the gutter opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the picture released on the gutter picked the option");
+});
+
 test("the picture is one tab stop: its arrow, page and end keys scroll it, Home goes back, and Enter opens View, at 390 wide", async (t) => {
   const it = picItem("keys", 40);
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
@@ -925,7 +961,7 @@ test("a tall picture adds no sideways scroll to the page at 390 wide, even scrol
 
 // A 60-character URL has no break point, so the step must wrap inside the card rather than widen it.
 const LONG_URL = "https://waiting.test/" + "a".repeat(60 - "https://waiting.test/".length);
-for (const width of [390, 360]) {
+for (const width of [430, 390, 360]) {
   test(`a task step with an unbroken 60-character URL stays inside the card and the page, at ${width} wide`, async (t) => {
     const it = { ...TASK, id: "long-url-task", n: 60, steps: [LONG_URL] };
     const page = await open(t, { items: [it], viewport: { width, height: 900 } }); if (!page) return;
