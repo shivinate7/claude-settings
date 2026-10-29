@@ -706,7 +706,7 @@ function cmdBlock(it) {
       box.classList.add("copied"); say.replaceChildren("Command", h("span", { class: "sr" }, " Copied."));
       timer = setTimeout(() => { box.classList.remove("copied"); say.textContent = "Command"; }, 2000);
     } else {
-      box.classList.add("failed"); say.textContent = "Not copied. Copy the selected text by hand.";
+      box.classList.add("failed"); say.textContent = "Not copied. The text is selected; copy it by hand.";
       more.open = true;
       const r = document.createRange(); r.selectNodeContents(pre.firstChild);
       const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
