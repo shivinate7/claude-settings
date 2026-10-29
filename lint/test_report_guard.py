@@ -1134,16 +1134,24 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNotNone(self.verdict(self.PICK, [self.page_set()]))
 
     def test_pk_red_agent_calls_do_not_count(self):
-        # Ruling 2026-10-28 15:10 CDT (chat first, then the page): a reply that links the page passes
-        # with no main write, so this case leaves the link out. An agent's box and write do not count.
+        # An agent's box and write do not count. With no link in the reply, the pick still blocks
+        # (decisions-reach-a-clickable-pick).
         calls = [("AskUserQuestion", {}, True), ("ArtifactData", self.page_set()[1], True)]
         self.assertIsNotNone(self.verdict(self.PICK, calls))
 
     def test_pk_red_wrong_collection_or_action_blocks(self):
-        # Catches: a write to another collection, with the link. A get is no write (ruling 2026-10-28
-        # 15:10 CDT), so the get case is kept only without the link.
-        self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set(collection="notes")]))
+        # With no link in the reply, a write to another collection or a get still blocks
+        # (decisions-reach-a-clickable-pick).
+        self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(collection="notes")]))
         self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(action="get")]))
+
+    def test_pk_green_link_passes_whatever_the_calls(self):
+        # A reply that holds this repo's waiting page URL passes, whatever ArtifactData calls the
+        # turn made (decisions-reach-a-clickable-pick).
+        reply = self.PICK + "\n" + self.PAGE
+        for calls in ([], [self.page_set(collection="notes")], [self.page_set(action="get")]):
+            with self.subTest(calls=calls):
+                self.assertIsNone(self.verdict(reply, calls))
 
     def test_pk_red_unknown_page_only_the_box_passes(self):
         bare = os.path.join(self.tmp.name, "bare")
@@ -1159,7 +1167,8 @@ class PickGuardTests(unittest.TestCase):
         reply = self.PICK + "\n" + self.PAGE
         self.assertIsNone(self.verdict(reply, [self.page_set(action="update")]))
         self.assertIsNone(self.verdict(reply, [batch]))
-        self.assertIsNotNone(self.verdict(reply, [other]))
+        self.assertIsNone(self.verdict(reply, [other]))
+        self.assertIsNotNone(self.verdict(self.PICK, [other]))
 
     def test_pk_green_controls_pass(self):
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)]))
@@ -1172,12 +1181,13 @@ class PickGuardTests(unittest.TestCase):
         self.assertIn("Pick guard", out["reason"])
 
     def test_pk_green_reply_links_this_repos_page_with_no_write_passes(self):
-        # Ruling 2026-10-28 15:10 CDT: the session asks in chat and sends the question to the page's
-        # writer, so its reply links the page and it writes nothing itself.
+        # Chat first, then the page (questions-go-to-owner): the session sends the question to the
+        # page's writer, so its reply links the page and it writes nothing itself.
         self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE))
 
     def test_pk_green_five_minute_wait_names_the_page_with_no_box_passes(self):
-        # Ruling 2026-10-28 15:10 CDT: after 5 minutes unanswered in chat, the question goes to the page.
+        # Chat first, then the page (questions-go-to-owner): after 5 minutes unanswered in chat, the
+        # question goes to the page.
         for phrase in ("5 min", "5 minutes", "5-minute", "five minutes"):
             with self.subTest(phrase=phrase):
                 reply = ("> **Done** OTHER read the code\n"
