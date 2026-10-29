@@ -80,7 +80,8 @@ checkout_at() {
   [ -n "$cand" ] || return 1
   top=$(git -C "$cand" rev-parse --show-toplevel 2>/dev/null) || return 1
   [ -n "$top" ] || return 1
-  origin=$(git -C "$top" remote get-url origin 2>/dev/null) || return 1
+  # The config value, not `remote get-url`: get-url applies insteadOf, which rewrites the GitHub URL.
+  origin=$(git -C "$top" config --get remote.origin.url 2>/dev/null) || return 1
   origin_matches_repo "$origin" || return 1
   [ -f "$top/CLAUDE.md" ] || return 1
   [ -f "$top/settings.json" ] || return 1
@@ -302,6 +303,45 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
     SRC="$PIN"
   else
     log "WARN: $SRC has no branch named main; the links follow the clone's checked-out branch"
+  fi
+fi
+
+# Cloud only: git over the cloud proxy reaches repos that are out of the session's scope; the tarball
+# URL gets a 403 there, and a tarball copy has no .git. cloud_git bounds a stalled transfer at 10 s.
+cloud_git() { GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"; }
+
+# Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
+# person's own and is never moved. A failed fetch keeps the clone as it was.
+if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
+  if cloud_git -C "$SRC" fetch -q --depth 1 origin "$REF" && git -C "$SRC" checkout -q -B main FETCH_HEAD; then
+    log "refreshed the clone $SRC to $REF"
+  else
+    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
+  fi
+fi
+
+# No checkout found: clone into a sibling folder, then swap it in, so a failed clone leaves the old
+# copy. A .git at the clone path that checkout_at refused is not ours: it is never removed.
+if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; then
+  clone_tmp="$HOME/claude-settings.clone.$$"
+  rm -rf "$clone_tmp"
+  if cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+     && git -C "$clone_tmp" checkout -q -B main \
+     && git -C "$clone_tmp" config claude-settings.cloudMirror true; then
+    old_copy="$HOME/claude-settings.old.$$"
+    rm -rf "$old_copy"
+    if { [ ! -e "$HOME/claude-settings" ] || mv "$HOME/claude-settings" "$old_copy"; } && mv "$clone_tmp" "$HOME/claude-settings"; then
+      rm -rf "$old_copy"
+      SRC="$HOME/claude-settings"
+      log "cloned $REPO at $REF into $SRC"
+    else
+      [ ! -e "$old_copy" ] || [ -e "$HOME/claude-settings" ] || mv "$old_copy" "$HOME/claude-settings"
+      rm -rf "$clone_tmp"
+      log "WARN: could not swap in the clone; falling back to the tarball"
+    fi
+  else
+    rm -rf "$clone_tmp"
+    log "WARN: could not clone $REPO at $REF; falling back to the tarball"
   fi
 fi
 
