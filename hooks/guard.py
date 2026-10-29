@@ -2917,6 +2917,13 @@ def session_home_place(cwd: str):
         folder = parent
 
 
+def session_home_agent_tree(lane: str) -> bool:
+    """True when LANE has an agent worktree's shape, `.claude/worktrees/agent-<agent_id>` (rule
+    worktree-home). A top-level call there is the session inspecting an agent's tree, not its home."""
+    name = os.path.basename(lane)
+    return name.startswith("agent-") and bool(AGENT_ID.match(name[len("agent-"):]))
+
+
 def session_home_record(payload, primary: str):
     """The record's path for this session, or '' when the call carries no valid session id."""
     sid = payload.get("session_id") if isinstance(payload, dict) else None
@@ -2942,12 +2949,12 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
         except OSError:
             held = ""
         if tool == "ExitWorktree":
-            # Only an exit from the recorded worktree, still standing, ends the record. From the
-            # primary, or from another folder, the record stays and the guard keeps judging.
-            if lane and held and os.path.isdir(held) and os.path.realpath(held) == lane:
+            # An exit ends a record whose worktree still stands, from any cwd. A record whose
+            # worktree is gone stays, and the guard keeps judging.
+            if held and os.path.isdir(held):
                 os.remove(record)
             return
-        if not lane or held == lane:
+        if not lane or held == lane or session_home_agent_tree(lane):
             return
         import tempfile   # lazy: only a first or changed record reaches here
         folder = os.path.dirname(record)
@@ -2977,7 +2984,7 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
         verbs = [(verb, args) for verb, args in git_calls(segment) if verb in SESSION_HOME_GIT_VERBS]
         if not verbs:
             continue
-        folder = dir_before_segment(segments, number, where, ends) or where
+        folder = dir_before_segment(segments, number, where, ends)
         tokens = segment_tokens(segment)
         named = _segment_git_c_target(tokens) if tokens else None
         if named is not None:
