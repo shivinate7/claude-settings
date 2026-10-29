@@ -30,6 +30,7 @@ import textwrap
 import time
 import unittest
 import uuid
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -71,8 +72,36 @@ sweep_run_folders(TEMP_ROOT, ROOT)
 atexit.register(shutil.rmtree, ROOT, True)
 
 
+def run_capped(argv, timeout, input_text="", cwd=None, env=None):
+    """Run `argv`; return a CompletedProcess with its text output. Its output goes to files in ROOT,
+    never to pipes, and the wait has a cap that fails by name.
+
+    Why: on Windows, subprocess.run reads its pipes with no cap after a timeout kill. A grandchild that
+    inherited a pipe keeps that read open for as long as the grandchild lives, so the call waits. A
+    file has no such read. A process still running at `timeout` is killed, and the run raises
+    AssertionError naming it, so a hang reads as a FAIL and never as a skip.
+    """
+    stem = os.path.join(ROOT, uuid.uuid4().hex)
+    stdin_path, out_path, err_path = stem + ".in", stem + ".out", stem + ".err"
+    write(stdin_path, input_text)
+    with open(stdin_path, encoding="utf-8") as stdin, \
+            open(out_path, "w+", encoding="utf-8", errors="replace") as out, \
+            open(err_path, "w+", encoding="utf-8", errors="replace") as err:
+        proc = subprocess.Popen(argv, stdin=stdin, stdout=out, stderr=err, cwd=cwd, env=env)
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=30)
+            raise AssertionError("%s did not finish in %s s, so it was killed (a hang guard)"
+                                 % (argv[0], timeout))
+        out.seek(0)
+        err.seek(0)
+        return subprocess.CompletedProcess(argv, code, out.read(), err.read())
+
+
 def run_vcs(where, *args):
-    return subprocess.run([VCS, "-C", where, *args], capture_output=True, text=True, timeout=120)
+    return run_capped([VCS, "-C", where, *args], timeout=120)
 
 
 def write(path, text):
@@ -111,10 +140,10 @@ def run_hook(hook_payload, env_extra=None, cwd=None, timeout=120):
     env = dict(os.environ)
     if env_extra:
         env.update(env_extra)
-    return subprocess.run(
+    return run_capped(
         [sys.executable, HOOK],
-        input=json.dumps(hook_payload) if hook_payload is not None else "",
-        capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env,
+        input_text=json.dumps(hook_payload) if hook_payload is not None else "",
+        timeout=timeout, cwd=cwd, env=env,
     )
 
 
@@ -125,10 +154,7 @@ class BadInputFailsOpen(unittest.TestCase):
         # Rows: not JSON at all; empty stdin (json.loads("") raises); a JSON array, not an object.
         for stdin in ("{not json at all", "", "[1, 2, 3]"):
             with self.subTest(stdin=stdin):
-                result = subprocess.run(
-                    [sys.executable, HOOK], input=stdin, capture_output=True, text=True,
-                    timeout=15,
-                )
+                result = run_capped([sys.executable, HOOK], input_text=stdin, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
 
@@ -416,13 +442,12 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
         shell = shutil.which("sh")
         if not shell:
             self.skipTest("no sh on this host")
-        with tempfile.TemporaryDirectory() as cfg, tempfile.TemporaryDirectory() as empty:
+        with tempfile.TemporaryDirectory(dir=ROOT) as cfg, tempfile.TemporaryDirectory(dir=ROOT) as empty:
             if with_guard:
                 os.makedirs(os.path.join(cfg, "hooks"))
                 open(os.path.join(cfg, "hooks", "guard.py"), "w").close()
             env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, PATH=empty if path is None else path)
-            return subprocess.run([shell, "-c", self.guard_launcher()], input="{}", capture_output=True,
-                                  text=True, env=env, timeout=60)
+            return run_capped([shell, "-c", self.guard_launcher()], input_text="{}", env=env, timeout=60)
 
     def test_the_guard_launcher_blocks_when_guard_py_is_missing(self):
         r = self.run_launcher(False, None)
@@ -442,8 +467,7 @@ class PermissionsDenyCarriesTheStateFreeGuardRules(unittest.TestCase):
                 env.pop("PYTHONPATH", None)
                 env.pop("CLAUDE_CODE_SESSION_ID", None)
                 payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": work})
-                r = subprocess.run([sys.executable, guard], input=payload, capture_output=True, text=True,
-                                   env=env, timeout=120)
+                r = run_capped([sys.executable, guard], input_text=payload, env=env, timeout=120)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 out = json.loads(r.stdout)["hookSpecificOutput"]
                 self.assertEqual(out["permissionDecision"], "deny", r.stdout)
@@ -876,8 +900,7 @@ class HookLoadsNoGuardModule(unittest.TestCase):
                 "print(json.dumps(sorted(set(sys.modules) & set(%r))))" % (HERE, steps, family))
         env = dict(os.environ)
         env.update(env_extra or {})
-        done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
-                              timeout=60, env=env)
+        done = run_capped([sys.executable, "-I", "-c", code], timeout=60, env=env)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout.strip().splitlines()[-1])
 
@@ -910,38 +933,54 @@ HOLDER = "import time; time.sleep(300)"
 HOLDERS = []
 
 
+def kill_holder(pid):
+    """Stop one holder this suite started, when it still runs. The pid is the shell's `$!`, so the
+    kill runs in the shell's own pid space: os.kill from this Python would read it as a Windows pid
+    on Windows, and could stop an unrelated process."""
+    if still_running(pid):
+        run_capped(["sh", "-c", 'kill "$1"; true', "sh", str(pid)], timeout=10)
+
+
 def spawn_orphan(cwd, env_entries=()):
     """A holder in `cwd` with `env_entries` (NAME=value) in its environment, the inherited tag
-    removed first. Returns its pid, or None when it is not a PPID-1 orphan on this host."""
+    removed first. Returns its pid, or None when it is not a PPID-1 orphan on this host. A holder
+    that is not an orphan is stopped before this returns."""
     env = {key: value for key, value in os.environ.items() if key != TAG}
     env.update(entry.split("=", 1) for entry in env_entries)
     os.makedirs(cwd, exist_ok=True)
+    pidfile = os.path.join(ROOT, uuid.uuid4().hex + ".pid")
     try:
-        answer = subprocess.run(
-            ["sh", "-c", '"$@" </dev/null >/dev/null 2>&1 & echo $!', "sh", sys.executable, "-c",
-             HOLDER],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=20)
-        pid = int(answer.stdout.strip())
-        HOLDERS.append(pid)
-        parent = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
-                                text=True, timeout=5).stdout.strip()
-    except (OSError, ValueError, subprocess.SubprocessError):
+        # The shell's stdio is files and the holder's is /dev/null, so no pipe reaches the holder. Its
+        # pid comes back in a file.
+        run_capped(["sh", "-c", '"$@" </dev/null >/dev/null 2>&1 & echo $! > "$0"', pidfile,
+                    sys.executable, "-c", HOLDER], cwd=cwd, env=env, timeout=20)
+        with open(pidfile, encoding="utf-8") as handle:
+            pid = int(handle.read().strip())
+    except (OSError, ValueError):
         return None
-    return pid if parent == "1" else None
+    HOLDERS.append(pid)  # before the ppid check, so the holder is stopped even when the case skips
+    try:
+        parent = run_capped(["ps", "-o", "ppid=", "-p", str(pid)], timeout=5).stdout.strip()
+    except OSError:
+        parent = ""
+    if parent == "1":
+        return pid
+    kill_holder(pid)  # this case skips, so its holder must not outlive it
+    return None
 
 
 def still_running(pid):
     """True while `pid` is alive and not a zombie. A reaped process has no `ps` line at all."""
-    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
-                           timeout=5).stdout.strip()
+    state = run_capped(["ps", "-o", "stat=", "-p", str(pid)], timeout=5).stdout.strip()
     return bool(state) and not state.startswith("Z")
 
 
 def stop_holders():
+    """At exit, stop each holder still running. Never raises: the suite is over."""
     for pid in HOLDERS:
         try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
+            kill_holder(pid)
+        except Exception:
             pass
 
 
@@ -961,6 +1000,7 @@ class ScratchpadReap(unittest.TestCase):
         pid = spawn_orphan(cwd, env_entries)
         if pid is None:
             self.skipTest("needs a PPID-1 orphan from ps, which this host does not give")
+        self.addCleanup(kill_holder, pid)  # the holder ends with its own case
         return pid
 
     def session_end(self, session, cwd, scratchpad):
@@ -1021,6 +1061,51 @@ class ScratchpadReap(unittest.TestCase):
         result = self.session_end("sess-reap-f", self.make_dir("plain_f"), None)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(still_running(pid), "the hook stopped a process with no scratchpad named")
+
+
+class SkippedCaseLeavesNoHolder(unittest.TestCase):
+    """A holder whose ppid check fails is stopped before spawn_orphan returns. Before, it ran until the
+    suite exited, and on Windows the exit-time stop could not reach it, so it outlived the job."""
+
+    def test_the_holder_is_stopped_when_the_ppid_check_fails(self):
+        real = run_capped
+
+        def ps_says_not_an_orphan(argv, timeout, **kwargs):
+            if list(argv[:1]) == ["ps"] and "ppid=" in argv:
+                return subprocess.CompletedProcess(argv, 0, "4242\n", "")
+            return real(argv, timeout, **kwargs)
+
+        scratch = os.path.join(ROOT, "scratch_not_an_orphan")
+        with mock.patch.object(sys.modules[__name__], "run_capped", ps_says_not_an_orphan):
+            self.assertIsNone(spawn_orphan(scratch, [TAG + "=sess-not-an-orphan"]))
+        pid = HOLDERS[-1]
+        deadline = time.time() + 5
+        while still_running(pid) and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(still_running(pid), "the holder of a skipped case still runs (pid %d)" % pid)
+
+
+class HookRunIsCapped(unittest.TestCase):
+    """A hook run past its cap fails by name. Before, the call raised TimeoutExpired, which reads as a
+    crash of the harness. On Windows the same call also waited on the pipes after the kill."""
+
+    def test_a_hook_run_past_its_cap_is_a_named_fail(self):
+        repo = os.path.join(ROOT, "capped_repo")
+        make_repo(repo)
+        # A sweep that exits when its hook (its parent) is killed, so a failed run leaves nothing behind.
+        patient = os.path.join(ROOT, "fake_sweep_waits_for_its_parent.py")
+        write(patient, textwrap.dedent("""\
+            import os
+            import time
+            parent = os.getppid()
+            end = time.time() + 600
+            while time.time() < end and os.getppid() == parent:
+                time.sleep(0.1)
+        """))
+        with self.assertRaises(AssertionError) as caught:
+            run_hook({"hook_event_name": "SessionEnd", "cwd": repo},
+                     env_extra={"JANITOR_SWEEP_PATH": patient, "JANITOR_SWEEP_TIMEOUT": "60"}, timeout=2)
+        self.assertIn("hang guard", str(caught.exception))
 
 
 if __name__ == "__main__":
