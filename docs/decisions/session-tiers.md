@@ -38,7 +38,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - the merge tool runs,
   - archiving finished lanes.
   The coordinator holds only lane state and talks with the owner.
-- **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. The coordinator starts it, only on demand (see "On demand" below). The arbiter holds the ruling voice. The coordinator holds only lane state and talks with the owner.
+- **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. The coordinator starts it, only on demand (see "On demand" below). The coordinator holds only lane state and talks with the owner.
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
   - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the arbiter does not start with triage and the batch runner. It starts later, when the owner tells the coordinator "spawn arbiter". It is for long runs the owner does not want to sit through.
   - Effort (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): by default the arbiter runs at high effort for its model.
@@ -65,7 +65,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
 Mechanics that carry out the rulings above. They are not owner rulings.
 
 - **Tier tags** (coordinator, 2026-10-28). Each session the coordinator starts carries these two tags, beside any others such as `cs-step:<step>`.
-  - `cs-build:<tier>`, one of `coordinator`, `triage`, `batch-runner`, `lane`.
+  - `cs-build:<tier>`, one of `coordinator`, `triage`, `batch-runner`, `arbiter`, `lane`.
   - `cs-repo:<owner>/<name>`, the repo it builds.
 - **Live-coordinator check.** A session that would act as coordinator reads every page of `list_sessions`. It looks for one session with both tags whose `session_status` is not archived. That session is the active coordinator.
   - The `tags` filter of `list_sessions` errors inside a session, so the check filters the rows itself.
