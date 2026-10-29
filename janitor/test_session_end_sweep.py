@@ -1080,9 +1080,9 @@ class SkippedCaseLeavesNoHolder(unittest.TestCase):
             self.assertIsNone(spawn_orphan(scratch, [TAG + "=sess-not-an-orphan"]))
         pid = HOLDERS[-1]
         deadline = time.time() + 5
-        while still_running(pid) and time.time() < deadline:
+        while alive_without_ps(pid) and time.time() < deadline:
             time.sleep(0.1)
-        self.assertFalse(still_running(pid), "the holder of a skipped case still runs (pid %d)" % pid)
+        self.assertFalse(alive_without_ps(pid), "the holder of a skipped case still runs (pid %d)" % pid)
 
 
 class SweepGetsNoPipes(unittest.TestCase):
