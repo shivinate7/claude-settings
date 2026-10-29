@@ -628,4 +628,7 @@
 - press-link-unnumbered: an unnumbered press passes with any link; the exact-page check runs only on a `#N`, to avoid false alarms (hooks/guard.py _press_field_ok). Decision: act-in-place
 - command-in-item-tasks-only: a decision option that points at a file's command is not judged; the step scoped the rule to tasks (hooks/guard.py command_in_item_hit). Decision: act-in-place
 - press-link-own-acts: a decision option that is Claude's own merge, such as "Merge the lane PRs into one batch.", is refused until it carries a link; one retry (hooks/guard.py PRESS_VERB). Decision: act-in-place
-- command-in-item-broad: with no `command` on the item, any file step plus "run/paste ... command" is refused; one retry. "Paste the script from plans/x.md" passes (hooks/guard.py command_in_item_hit). Decision: act-in-place
+- command-in-item-broad: with no `command` on the item, any file step plus "run/paste ... command" is refused; one retry. "Run the /doctor command" after a file step is refused too; "Paste the script from plans/x.md" passes (hooks/guard.py command_in_item_hit). Decision: act-in-place
+- press-link-title-context: when the steps name no page, the task title is the page; a title that names a PR then makes "Press Copy" or "Click OK" a press, refused until a link is added; one retry (hooks/guard.py press_link_hit). Decision: act-in-place
+- press-link-unlabelled-link: the guard counts a link with a url and no label, which the page does not draw (hooks/guard.py press_link_hit, skills/waiting-page/page.html isLink). Decision: act-in-place
+- press-link-links-not-list: `links` set to true or a number makes the guard fail open and log a crash line (hooks/guard.py press_link_hit). Decision: act-in-place
