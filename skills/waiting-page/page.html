@@ -228,7 +228,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .note.need label { color: var(--due); font-weight: 600; }
 .note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
 .note.need textarea { border-color: var(--due); }
-ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 .dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
 .status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
@@ -297,6 +297,17 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
 .dfitwrap.inert .dframe { pointer-events: none; }
+/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
+:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
+.dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }
+.dfitwrap .dtop, .dfitwrap .dcue { display: none; }
+.dfitwrap.scroll { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; }
+.dfitwrap.scroll .dtop { display: block; position: sticky; top: 0; z-index: 1; height: 12px; margin-bottom: -12px; background: linear-gradient(rgb(22 27 34 / 0.28), rgb(22 27 34 / 0)); opacity: 0; pointer-events: none; }
+.dfitwrap.scroll.scrolled .dtop { opacity: 1; }
+.dfitwrap.scroll .dcue { display: flex; position: sticky; bottom: 0; z-index: 1; height: 40px; margin-top: -40px; align-items: flex-end; justify-content: center; padding-bottom: 8px; background: linear-gradient(rgb(22 27 34 / 0), rgb(22 27 34 / 0.28)); pointer-events: none; }
+.dfitwrap.scroll.at-end .dcue { opacity: 0; }
+.dfitwrap .dmore { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--pic-cue); color: var(--on-pic-cue); box-shadow: 0 0 0 1px var(--on-pic-cue); font: 600 12px/1 var(--body); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
 .dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
 .dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
@@ -669,8 +680,19 @@ function optPic(it, o, dif) {
   if (!has && !it.look) return h("span", { class: "opic" });
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
-  return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
-    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480), h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
+  const pic = fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480);
+  // A press on the scrollbar is no press on the picture. The click that follows it, wherever a drag ends, opens nothing and picks nothing.
+  const onBar = (e) => { const r = pic.getBoundingClientRect(); return pic.classList.contains("scroll") && e.clientX >= r.left + pic.clientLeft + pic.clientWidth && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
+  pic.addEventListener("pointerdown", (e) => {
+    // Only the main button fires a click, so another button arms nothing.
+    if (e.button !== 0 || !onBar(e)) return;
+    // The cancel ends with the next pointer click, or with the next press when no click follows. A keyboard click (detail 0) passes.
+    const stop = (c) => { if (c.detail === 0) return; c.preventDefault(); c.stopPropagation(); off(); };
+    const off = () => { document.removeEventListener("click", stop, true); document.removeEventListener("pointerdown", off, true); };
+    document.addEventListener("click", stop, true); document.addEventListener("pointerdown", off, true);
+  });
+  return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: (e) => { if (onBar(e)) { e.preventDefault(); e.stopPropagation(); } else open(e); }, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); else picKeys(e, pic); } },
+    pic, h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
 }
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
@@ -864,7 +886,7 @@ function syncOpts(old, nu) {
   copyAttrs(old, nu);
   [...old.children].forEach((ol, i) => {
     const nl = nu.children[i];
-    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic"), (o, n) => { copyAttrs(o, n); const v = o.querySelector(".view"), nv = n.querySelector(".view"); if (v && nv) v.replaceWith(nv); }]], nl);
+    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic"), (o, n) => { copyAttrs(o, n); picHint(o); const v = o.querySelector(".view"), nv = n.querySelector(".view"); if (v && nv) v.replaceWith(nv); }]], nl);
   });
 }
 function patch(old, nu) {
@@ -1179,7 +1201,10 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
   const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
   f.srcdoc = withState(DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>", state) + fitScript(focus);
   f.style.width = DW + "px";
-  const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
+  // A capped picture draws in a sizer, so a taller one scrolls inside its box. Its wrap is no tab stop of its own; the button round it is.
+  const sizer = maxH ? h("div", { class: "dsizer" }, f) : null;
+  const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : ""), ...(maxH ? { tabindex: "-1", "aria-hidden": "true" } : {}) }, ...(maxH ? [h("div", { class: "dtop" }), sizer, h("div", { class: "dcue" }, h("span", { class: "dmore" }, "↓ More"))] : [f]));
+  if (maxH) { f.inert = true; wrap.addEventListener("scroll", () => picEdges(wrap), { passive: true }); }
   let po;
   const fit = () => {
     if (head) head();
@@ -1187,19 +1212,44 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
     const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
     const ht = c ? c.h : (!focus && size ? size.h : 200);
     const bw = box ? Math.max(box.w, 1) : DW, sc = Math.min(maxScale || 1, ww / bw, maxH ? Math.max(maxH / Math.max(box ? box.h : ht, 1), MIN_PIC / bw) : Infinity);
-    if (maxH) { wrap.style.width = Math.ceil(bw * sc) + 2 + "px"; if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); } }
+    // A box more than 4 times as tall as it is wide would pass maxH. It keeps its scale and scrolls in a maxH box. A pass of 1px or less counts as fitting.
+    const scroll = !!maxH && Math.ceil(Math.max(box ? box.h : ht, 1) * sc) > maxH + 1;
+    if (maxH) wrap.classList.toggle("scroll", scroll);
+    const g = scroll && wrap.isConnected ? Math.max(wrap.offsetWidth - wrap.clientWidth - 2, 0) : 0; // the scrollbar's gutter, plus any border past 1px; the box grows by it so the scrollbar takes none of the picture's width
+    if (maxH) {
+      wrap.style.width = Math.ceil(bw * sc) + 2 + g + "px";
+      sizer.style.width = Math.ceil(bw * sc) + "px"; sizer.style.height = Math.ceil((box ? box.h : ht) * sc) + "px";
+      const o = wrap.closest(".opic"); if (o) picHint(o, scroll);
+      if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
+    }
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
-    if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px"; }
+    if (scroll) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = maxH + "px"; }
+    else if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.min(maxH || Infinity, Math.ceil((box ? box.h : ht) * sc)) + "px"; }
     else {
       // Declared size only: the height follows the width by aspect ratio, so the first paint is already the right height.
       const dw = focus ? size.w : DW;
-      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.ceil(size.h * (maxScale || 1)) + "px";
+      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.min(maxH || Infinity, Math.ceil(size.h * (maxScale || 1))) + "px";
     }
+    if (scroll) picEdges(wrap);
   };
   FITS.push({ f, key, fit });
   if (window.ResizeObserver) { const ro = new ResizeObserver(fit); ro.observe(wrap); if (head) ro.observe($("dTitle")); }
   fit(); return wrap;
+}
+const SCROLL_HINT = ". Arrow keys scroll its picture";
+// A picture that scrolls says so in its button's name. A repaint copies the plain name back, so it is set again.
+function picHint(o, on = !!o.querySelector(".dfitwrap.scroll")) { const l = (o.getAttribute("aria-label") || "").replace(SCROLL_HINT, "") + (on ? SCROLL_HINT : ""); if (l !== o.getAttribute("aria-label")) o.setAttribute("aria-label", l); }
+// The shade at the top shows once the picture is scrolled, and the cue goes at its end.
+function picEdges(w) { w.classList.toggle("scrolled", w.scrollTop > 0); w.classList.toggle("at-end", w.scrollTop + w.clientHeight >= w.scrollHeight - 1); }
+// While the picture's button has focus, the arrow, page and end keys scroll a picture that scrolls. At an end the key is left to the page.
+function picKeys(e, w) {
+  if (!w.classList.contains("scroll")) return;
+  const st = w.scrollTop, pg = w.clientHeight - 40;
+  const to = { ArrowDown: st + 40, ArrowUp: st - 40, PageDown: st + pg, PageUp: st - pg, Home: 0, End: w.scrollHeight }[e.key];
+  if (to === undefined) return;
+  w.scrollTop = to;
+  if (w.scrollTop !== st) e.preventDefault();
 }
 window.addEventListener("message", (e) => {
   const d = e.data; if (!d || d.dfit !== 1 || typeof d.h !== "number") return;
