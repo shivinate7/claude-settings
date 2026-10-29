@@ -9160,6 +9160,9 @@ class MergeRoleCheck(Env):
         # git-remedy-never-names-target: the text never names the command it refused
         self.assertNotIn("--confirm", err)
         self.assertNotRegex(err, r"\bmerge\s+[<\d]")
+        # A session without a role must not learn which role to claim: the text names the batch runner only as the one to hand the PR to.
+        self.assertNotIn("coordinator", err.lower())
+        self.assertNotIn("batch-runner", err.lower())
 
     # ---- the role check lets through
     def test_a_coordinator_session_merges(self):
@@ -9270,9 +9273,9 @@ class MergeRoleCheck(Env):
 
 REPO_ROOT = os.path.dirname(HERE)
 CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
-# Each shim form twice: `merge <pr> --confirm` and the same with trailing arguments. No rule runs merge/merge.py by path: that runs
-# the working copy's file, which on an old lane branch has no role check.
-CLOUD_ALLOW_SHIMS = ("merge", "bin/merge", "~/.claude/bin/merge")
+# The one shim form, plain and with trailing arguments. Bare `merge` is not on a cloud session's PATH, and `bin/merge` would allow any
+# repo's own bin/merge. No rule runs merge/merge.py by path: that runs the working copy's file, which on an old lane branch has no role check.
+CLOUD_ALLOW_SHIMS = ("~/.claude/bin/merge",)
 CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
@@ -9351,7 +9354,7 @@ class CloudAllow(unittest.TestCase):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             return json.load(f)["permissions"]["allow"]
 
-    def test_the_rules_file_is_exactly_the_six_confirm_rules(self):
+    def test_the_rules_file_is_exactly_the_two_confirm_rules_of_the_home_shim(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"permissions"})
@@ -9364,14 +9367,20 @@ class CloudAllow(unittest.TestCase):
                 self.assertNotIn("merge.py", rule)
                 self.assertNotIn("python", rule)
 
-    def test_each_rules_command_word_is_a_shim_form(self):
+    def test_each_rules_command_word_is_the_home_shim(self):
         for rule in self.allow():
             with self.subTest(rule=rule):
                 self.assertTrue(rule.startswith("Bash(") and rule.endswith(")"), rule)
                 self.assertIn(rule[len("Bash("):-1].split(" ", 1)[0], CLOUD_ALLOW_SHIMS)
 
+    def test_no_rule_has_merge_or_bin_merge_as_its_command_word(self):
+        # `merge` is not on a cloud PATH (measured: `command -v merge` is empty); `bin/merge` is the cwd's file, any repo's own.
+        for rule in self.allow():
+            with self.subTest(rule=rule):
+                self.assertNotIn(rule[len("Bash("):].split(" ", 1)[0], ("merge", "bin/merge"))
+
     def test_every_rule_names_confirm_and_none_is_broad(self):
-        narrow = re.compile(r"Bash\((merge|bin/merge|~/\.claude/bin/merge) \* --confirm( \*)?\)")
+        narrow = re.compile(r"Bash\(~/\.claude/bin/merge \* --confirm( \*)?\)")
         for rule in self.allow():
             with self.subTest(rule=rule):
                 self.assertNotEqual(rule, "Bash(*)")

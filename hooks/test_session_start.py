@@ -213,6 +213,10 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     def test_the_tier_line_names_the_role_writer(self):
         self.assertIn("merge --role", hook_tier_line())
 
+    def test_the_merge_role_sentence_names_the_command_by_its_home_path(self):
+        # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
+        self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_tier_line()))
+
     def test_the_tier_line_names_both_merge_tiers(self):
         line = hook_tier_line()
         for tier in ("coordinator", "batch-runner"):
