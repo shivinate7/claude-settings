@@ -101,7 +101,8 @@ project with a triage thread, it is triage. The page's name for it is `writer` i
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`.
 
-- Every other session and every lane sends its question to the writer. The writer writes the item.
+- Every other session sends its question to the writer, which writes the item. A lane's question
+  reaches the writer through its orchestrator's report ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -109,16 +110,20 @@ into `meta/page`.
 
 ## Chat first
 
-A session that talks with the owner asks in chat first: in the reply, or in the box where step 3 of
-"Add an item" allows one (decision questions-go-to-owner, "Chat first, then the page").
+A session that talks with the owner asks in chat first. The chat ask is the reply, or, with nothing
+running, the terminal question box (decision questions-go-to-owner, "Chat first, then the page"). It
+gives no page URL: no item exists yet.
 
-- No answer in chat after 5 minutes: send the question to the writer, who adds the item.
+- No answer in chat after 5 minutes: send the question to the writer, who adds the item. Then
+  "Add an item" step 3 tells the owner where it is.
 - No timer counts the 5 minutes. At each wake, check the age of each chat question still open.
-- An answer in chat: still send the question and the answer, with its time, to the writer. On a
-  question with no item, the writer writes the item with `status: "closed"`, the answer and its
-  time in `context`, and `receipts/<id>`. On a question with an item, route it as "Route and close"
-  says. So every question and answer ends on the page.
-- A lane has no chat with the owner. Its question still goes in its report.
+- A chat answer: still send the question and the answer, with its time, to the writer.
+  - No item yet: the writer writes the item closed (`status: "closed"`), with the answer and its
+    time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
+    close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
+  - An open item: the owning session routes it as "Route and close" says. Either way, every
+    question and answer ends in the page's record.
+- A lane has no chat with the owner. Its question goes in its report.
 
 ## Add an item
 
@@ -146,15 +151,11 @@ A session that talks with the owner asks in chat first: in the reply, or in the 
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
      open: choosing another option is the only way out. A question that touches a rule starts blank.
-3. Ask the owner where the item is seen (ruling 3a, narrowed by ruling 3b):
-   - While an agent, a lane or a background command of this session runs, or starts in the same
-     response, open no question box. Put the question
-     and the page URL in the reply, and keep orchestrating. A box stops the session until the owner
-     answers, and what runs goes on with no one to brake it. You may end the turn: each agent's end
-     wakes the session.
-   - With nothing running, ask in the terminal question box too, and put the page URL in the box.
-   - A question the owner already saw in chat and left 5 minutes needs no new ask: name the item
-     and the page URL in one line.
+3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
+   item and give its page URL in one line, in the reply. The owner already saw the question in
+   chat, so open no new question box. A box stops the session until the owner answers. Running
+   work continues with no one to brake it. You may end the turn: each agent's end wakes the
+   session.
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
@@ -163,7 +164,8 @@ A save on the page sends a comment to Claude when the page allows it. The commen
 sessions that watch the page. Only the owning session reads, routes and closes its items. It reads
 the answers at each wake, and at the start of each turn while it has an item open:
 `ArtifactData list answers`. That read is the fallback when no wake comes. Another session never
-relays an answer. An answer typed in the chat counts the same.
+relays an answer. An answer typed in the chat counts the same. A chat answer to an open item takes
+the same route. Nothing is written to `answers/`, so step 2 of "Route and close" skips its delete.
 
 - A session that adds an item watches the page: `ArtifactComments` action `watch` with the page
   URL. It stops watching when it has no open item: `ArtifactComments` action `watch` with `on: false` and the page URL.
@@ -208,6 +210,7 @@ once as a note on its step (the item's home), never held for the lane.
    home) says. When it is there, update the receipt with `filed` set to now.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Then delete `answers/<id>`, so the answer cannot count for a later item.
+   With no `answers/<id>` (a chat answer), skip the delete.
 3. If the answer is `none`, write new `options`, `pick` and `why` from the
    owner's note, and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If the note is not
