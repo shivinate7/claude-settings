@@ -2117,3 +2117,135 @@ test("a decision card with no differs mark shows no stray null or undefined text
   }, DECISION.id);
   assert.deepEqual(stray, [], "stray text in the decision card");
 });
+
+// ---------------------------------------------------------------- c190: links on an option card, and a task's command
+// Each link row and command block id follows the item's id, as the option radios do.
+const LINK = { label: "Merge sample-repo#374 on GitHub", url: "https://github.example.test/sample-repo/pull/374" };
+// Option a has a link and option b none, so one card holds the links row and the other a nolinks span.
+const LINKED = mk("linked-pick", 29, {
+  options: [
+    { key: "a", label: "Merge it", how: "Mark it ready and press Merge.", gain: "g", lose: "l", links: [LINK] },
+    { key: "b", label: "Wait", how: "Leave it open.", gain: "g", lose: "l" },
+  ],
+  pick: "a", why: "It lands now.",
+});
+const PLAIN = mk("plain-pick", 30); // no option has a link
+const CMD = "cd ~/sample-repo\n\necho \"a < b & 'c'\"\n  git status --short";
+const CMD_LINES = CMD.split("\n").map((l) => l.trim()).filter(Boolean);
+const RUN = { ...TASK, id: "run-the-command", n: 31, title: "Run the command", steps: ["Open a terminal", "Paste the command and run it"], command: CMD, links: [{ label: "Sample repo on GitHub", url: "https://github.example.test/sample-repo" }] };
+const WIDE_RUN = { ...RUN, id: "wide-command", n: 32, title: "Deploy the release", command: "npm run deploy -- --environment production --region us-east-1 --confirm --message 'a line that runs past the width of a phone and must wrap, not scroll'\n" + CMD };
+const STATUS_REFUSED = "Not copied. The text is selected; copy it by hand.";
+// A missing element fails with its own message, not as a locator timeout.
+const need = async (loc, msg) => assert.equal(await loc.count(), 1, msg);
+const boxHeight = async (loc) => (await loc.boundingBox())?.height ?? 0;
+// A link's accessible name: its label, then the hidden words. Chromium puts a space before the comma; that is accepted.
+const linkName = (label) => new RegExp("^" + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*, opens in a new tab$");
+// Waits up to 3 s for a page condition; a miss returns false, so the assert names it.
+const holds = (page, fn, arg = null) => page.waitForFunction(fn, arg, { timeout: 3000 }).then(() => true, () => false);
+// The clipboard either takes the text into window.__copied or refuses it, as a frame without permission does.
+const stubClipboard = (page, refuse) => page.evaluate((no) => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { if (no) throw new Error("denied"); window.__copied = s; } } }); }, refuse);
+
+test("a decision option's link sits between its how text and its timing rows, names where it opens, and a card with no link keeps its rows", async (t) => {
+  const page = await open(t, { items: [LINKED, PLAIN] }); if (!page) return;
+  const row = card(page, LINKED).locator(`#k-${LINKED.id}-a`);
+  await need(row, "no links row on option a");
+  const place = await row.evaluate((e) => ({ inOpt: !!e.closest("label.opt"), afterHow: !!e.previousElementSibling?.classList.contains("how"), beforeTr: !!e.nextElementSibling?.classList.contains("tr") }));
+  assert.deepEqual(place, { inOpt: true, afterHow: true, beforeTr: true }, "the links row is not between the how text and the timing rows");
+  const link = row.locator("a");
+  await need(link, "the links row holds no link");
+  const got = await link.evaluate((a) => ({ href: a.getAttribute("href"), target: a.getAttribute("target"), rel: a.getAttribute("rel"), text: a.textContent, arrow: a.querySelector('span[aria-hidden="true"]')?.textContent, sr: a.querySelector("span.sr")?.textContent }));
+  assert.equal(got.href, LINK.url);
+  assert.equal(got.target, "_blank");
+  assert.equal(got.rel, "noopener");
+  assert.ok(got.text.startsWith(LINK.label), "the link text is not its label");
+  assert.equal(got.arrow, "↗", "the arrow is not in a span hidden from screen readers");
+  assert.equal(got.sr, ", opens in a new tab", "no screen-reader words say where the link opens");
+  assert.equal(await page.getByRole("link", { name: linkName(LINK.label) }).count(), 1, "the link is not named for where it opens");
+  assert.equal(await card(page, LINKED).locator(".opts.olinks").count(), 1, "the options do not take the olinks class");
+  assert.equal(await card(page, LINKED).locator(`label[for="o-${LINKED.id}-b"] span.nolinks`).count(), 1, "an option with no link has no nolinks span");
+  assert.equal(await card(page, PLAIN).locator(".opts.olinks").count(), 0, "a card with no link took the olinks class");
+  assert.equal(await card(page, PLAIN).locator(".opts a, .opts .links").count(), 0, "a card with no link shows a link");
+});
+
+test("a tap on an option's link opens it in a new tab and leaves the radio unchecked; a tap on the card still picks", async (t) => {
+  const page = await open(t, { items: [LINKED] }); if (!page) return;
+  const link = card(page, LINKED).locator(`#k-${LINKED.id}-a a`);
+  await need(link, "no link on option a");
+  await page.context().route("**/*", (r) => r.abort()); // the new tab loads nothing
+  const [tab] = await Promise.all([page.context().waitForEvent("page", { timeout: 5000 }), link.click()]);
+  await tab.close();
+  assert.equal(await page.isChecked(`#o-${LINKED.id}-a`), false, "a tap on the link checked the option");
+  assert.equal(await card(page, LINKED).locator(".opt.sel").count(), 0, "a tap on the link selected the card");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a tap on the link made an answer");
+  await card(page, LINKED).locator(`label[for="o-${LINKED.id}-a"] .how`).click();
+  assert.equal(await page.isChecked(`#o-${LINKED.id}-a`), true, "a tap on the card did not pick the option");
+});
+
+test("a task's link has the same screen-reader name as an option's link", async (t) => {
+  const page = await open(t, { items: [RUN] }); if (!page) return;
+  assert.equal(await page.getByRole("link", { name: linkName("Sample repo on GitHub") }).count(), 1, "the task link is not named for where it opens");
+});
+
+test("a task's command sits after its steps, closed behind Show the command, and Copy writes it exactly while it is closed", async (t) => {
+  const page = await open(t, { items: [RUN] }); if (!page) return;
+  const box = card(page, RUN).locator(".cmd");
+  await need(box, "no command block on a task with a command");
+  const place = await box.evaluate((e) => ({ afterSteps: !!e.previousElementSibling?.classList.contains("steps"), beforeLinks: !!e.nextElementSibling?.classList.contains("links") }));
+  assert.deepEqual(place, { afterSteps: true, beforeLinks: true }, "the command block is not between the steps and the links");
+  const more = box.locator("details");
+  await need(more, "the command is not in a closed disclosure");
+  assert.equal(await more.evaluate((d) => d.open), false, "the disclosure starts open");
+  assert.equal((await more.locator("summary").textContent()).trim(), "Show the command");
+  const copy = box.locator("button.cmd-copy");
+  await need(copy, "no Copy button on the command");
+  assert.equal(await copy.getAttribute("aria-label"), "Copy the command for No. 31");
+  assert.equal(await copy.evaluate((b) => !!b.closest("details")), false, "Copy sits inside the disclosure");
+  assert.equal(await copy.innerText(), "Copy", "Copy does not read Copy at first");
+  assert.ok((await box.textContent()).includes(`echo "a < b & 'c'"`), "the command does not show < and & as written");
+  await stubClipboard(page, false);
+  await copy.click();
+  assert.equal(await holds(page, (id) => !!document.querySelector("#item-" + id + " .cmd.copied"), RUN.id), true, "a copy that worked did not mark the block copied");
+  assert.equal(await page.evaluate(() => window.__copied), CMD, "Copy did not write the command exactly");
+  assert.equal(await copy.innerText(), "Copied", "the button does not say Copied");
+});
+
+test("a copy the browser refuses opens the command, selects its text, and says so in words", async (t) => {
+  const page = await open(t, { items: [RUN] }); if (!page) return;
+  const box = card(page, RUN).locator(".cmd");
+  await need(box, "no command block on a task with a command");
+  await stubClipboard(page, true);
+  await box.locator("button.cmd-copy").click();
+  assert.equal(await holds(page, (id) => !!document.querySelector("#item-" + id + " .cmd.failed"), RUN.id), true, "a refused copy did not mark the block failed");
+  assert.equal(await box.locator("details").evaluate((d) => d.open), true, "a refused copy did not open the command");
+  await need(box.locator("[aria-live]"), "no status line in the command block");
+  assert.equal((await box.locator("[aria-live]").textContent()).trim(), STATUS_REFUSED, "the status does not say the copy failed");
+  const sel = await page.evaluate(() => getSelection().toString());
+  for (const line of CMD_LINES) assert.ok(sel.includes(line), "the command text is not selected: " + line);
+  assert.equal(await box.evaluate((e) => e.classList.contains("copied")), false, "a refused copy marked the block copied");
+  assert.equal(await page.evaluate(() => window.__copied), undefined, "a refused copy wrote something");
+});
+
+test("a task with no command shows no command block, and a task with one shows it", async (t) => {
+  const page = await open(t, { items: [RUN, TASK] }); if (!page) return;
+  assert.equal(await card(page, RUN).locator(".cmd").count(), 1, "the task with a command has no command block");
+  assert.equal(await card(page, TASK).locator(".cmd").count(), 0, "a task with no command shows a command block");
+});
+
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
+  test(`links and Copy are 44px tall or more, and a long command wraps without sideways scroll, at ${width} wide, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [LINKED, WIDE_RUN], scheme, viewport: { width, height: 900 } }); if (!page) return;
+    const link = card(page, LINKED).locator(`#k-${LINKED.id}-a a`);
+    await need(link, "no link on option a");
+    assert.ok((await boxHeight(link)) >= 44, "the option link is under 44px tall");
+    const box = card(page, WIDE_RUN).locator(".cmd");
+    await need(box, "no command block on the wide task");
+    await need(box.locator("summary"), "the command has no disclosure to open");
+    await box.locator("summary").click();
+    const copy = box.locator("button.cmd-copy");
+    await need(copy, "no Copy button on the wide task");
+    assert.ok((await boxHeight(copy)) >= 44, "Copy is under 44px tall");
+    await need(box.locator(".cmd-text"), "no command text in the block");
+    assert.equal(await box.locator(".cmd-text").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, "the command runs past its block");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+  });
+}
