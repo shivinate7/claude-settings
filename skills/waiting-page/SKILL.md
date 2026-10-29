@@ -51,7 +51,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
     asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
-    The writer refuses it otherwise (guard rule `press-link`).
+    The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
+    and an update that sets `steps` carries `links` again: the guard cannot see the stored fields.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),

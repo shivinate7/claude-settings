@@ -188,8 +188,13 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 @supports (grid-template-rows: subgrid) { .opts.olinks .opt { grid-row: span 5; grid-template-rows: subgrid; } }
 .opts.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto; }
 @supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
-/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. */
-.opt .links a { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
+/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. A flex item
+   is a block, and a screen reader puts a space between blocks, so the one span inside the link holds all its text:
+   the arrow's gap sits in CSS and the link's name is the label plus the hidden phrase. */
+.links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a [aria-hidden] { margin-inline-start: 4px; }
+/* A block-level .sr (position: absolute is one) gets a space before it in the link's name, so in a link it stays inline and takes no room. */
+.links a .sr { position: static; display: inline; font-size: 0; }
 
 .ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
 .ready.on { color: var(--good); font-weight: 600; }
@@ -632,8 +637,10 @@ function optPic(it, o, dif) {
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
 // One home for a link on an option card and on a task card. The arrow is hidden from screen readers; a hidden phrase says where it opens.
-const linkEl = (l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ", h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab"));
-const hasOptLinks = (it) => (it.options || []).some((o) => o.links && o.links.length);
+const linkEl = (l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, h("span", {}, l.label, h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab")));
+// `links` counts only as an Array; any other value renders no links row and no error.
+const linksOf = (x) => (Array.isArray(x.links) ? x.links : []);
+const hasOptLinks = (it) => (it.options || []).some((o) => linksOf(o).length);
 // An option that widens what a shared tool accepts (`widens`) breaks the owner's uniform ruling, topic t18; its card says so.
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key, m = marks(it, o), on = (f) => m.includes(f);
@@ -644,7 +651,7 @@ function optCard(it, o, chosen) {
       onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
     h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab", id: "l-" + sfx }, o.label)),
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
-    hasOptLinks(it) ? (o.links && o.links.length ? h("div", { class: "links", id: "k-" + sfx }, o.links.map(linkEl)) : h("span", { class: "nolinks" })) : null,
+    hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your uniform ruling (t18)")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
     o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
 }
@@ -743,7 +750,7 @@ function buildCard(it) {
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     if (typeof it.command === "string" && it.command.trim()) card.append(cmdBlock(it));
-    if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map(linkEl)));
+    if (linksOf(it).length) card.append(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     card.append(ready, h("div", { class: "alts" },
       h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),
       addNote));

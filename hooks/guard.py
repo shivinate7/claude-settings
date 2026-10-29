@@ -2602,14 +2602,30 @@ PRESS_LINK_REASON = ("An option or step that asks the owner to press in a web ap
                      "url of that number.")
 COMMAND_REASON = ("A step never sends the owner to a file for a command. Put the command in the item's "
                   "`command` field, and say \"paste the command below\" in the step.")
-PRESS_VERB = re.compile(r"\b(?:press(?:es|ed|ing)?|click(?:s|ed|ing)?|tap(?:s|ped|ping)?)\b"
-                        r"|\bmark(?:s|ed|ing)?\b[^.\n]*\bready\b", re.I)
-WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|\bsettings\b|[\w.-]+#\d+", re.I)
-PRESS_REF = re.compile(r"#(\d+)")
-COMMAND_FILE = re.compile(r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
-                          r"|\b(?:plans|docs|notes)/[\w./-]+", re.I)
-COMMAND_PHRASE = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b"
-                            r"|\bits\s+commands?\b|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
+# A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
+# a clause (a command to the owner, so "the PR merged" and "to merge" pass); mark ... ready with a
+# PR or #N as its object. "press on" is not a press.
+_CLAUSE = r"(?:^|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)"
+PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|ed|ing)?"
+                        r"|click(?:s|ed|ing)?|tap(?:s|ped|ping)?)\b"
+                        r"|" + _CLAUSE + r"(?:approve|merge|hit|turn\s+(?:it\s+)?on)\b"
+                        r"|\bmark(?:s|ed|ing)?\b[^.\n]*?(?:\bprs?\b|pull\s+requests?|#\s*\d+)[^.\n]*?\bready\b",
+                        re.I | re.M)
+# A web page: GitHub, a PR, a pull request, a ref `home#374`, or Settings as a page name (capital S,
+# or "settings page"; never settings.json or claude-settings).
+WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|#\s*\d+"
+                        r"|(?-i:(?<![\w-])Settings\b(?!\.\w))|\bsettings\s+page\b", re.I)
+PRESS_REF = re.compile(r"#\s*(\d+)")
+_FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
+         r"|\b(?:plans|docs|notes)/[\w./-]+")
+COMMAND_FILE = re.compile(_FILE, re.I)
+# "the command in/from <file>" and "its command" (after a file step) point at a file. "run the
+# command" and the like count only with no `command` on the item; "the command below" never does.
+COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
+                             + _FILE + ")", re.I)
+COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
+COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b(?!\s+below)"
+                          r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
 
 
 def _flat_text(value) -> str:
@@ -2644,9 +2660,10 @@ def press_link_hit(op, data) -> str:
         for o in options:
             if not isinstance(o, dict):
                 continue
-            for field in ("label", "how"):
-                if not _press_field_ok(_flat_text(o.get(field)), o.get("links")):
-                    return "option presses in a web app with no link to the page"
+            # label and how are one text: the ref may sit in one and the press in the other
+            text = _flat_text(o.get("label")) + ". " + _flat_text(o.get("how"))
+            if not _press_field_ok(text, o.get("links")):
+                return "option presses in a web app with no link to the page"
     if isinstance(steps, list) and (op == "set" or "links" in data):
         for step in steps:
             if not _press_field_ok(_flat_text(step), data.get("links")):
@@ -2655,15 +2672,18 @@ def press_link_hit(op, data) -> str:
 
 
 def command_in_item_hit(data) -> str:
-    """The matched text when a task's steps, joined, send the owner to a file for a command. A set
-    whose item carries a `command` is not judged: the command is in the item."""
+    """The matched text when a task's steps, joined, send the owner to a file for a command. A
+    `command` on the item does not excuse it: the step still points at the file."""
     if not isinstance(data, dict) or data.get("kind", "task") != "task":
         return ""
     steps = data.get("steps")
-    if not isinstance(steps, list) or (isinstance(data.get("command"), str) and data["command"].strip()):
+    if not isinstance(steps, list):
         return ""
     joined = "\n".join(_flat_text(s) for s in steps)
-    if COMMAND_FILE.search(joined) and COMMAND_PHRASE.search(joined):
+    has_file = COMMAND_FILE.search(joined)
+    has_command = isinstance(data.get("command"), str) and data["command"].strip()
+    if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
+            or (has_file and not has_command and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
     return ""
 
