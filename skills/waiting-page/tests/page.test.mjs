@@ -2684,6 +2684,27 @@ for (const [kind, build] of Object.entries(TAKE_CARDS)) for (const [spot, scroll
   });
 }
 
+// "Nothing on the page moves" (page.html, top comment): an option already between the header and the bar needs no scroll, so Enter on Take my pick leaves scrollY as it was.
+// Option A is placed 100px from the top of the screen, whole and clear of the 64px scroll margin; a scroll that centres it moves the page.
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(TAKE_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, async (t) => {
+    const it = build();
+    const page = await open(t, { items: [it, ...FILL], viewport: { width, height: 800 } }); if (!page) return;
+    let m;
+    const at = await enterTakePick(page, it, async () => {
+      m = await page.evaluate((id) => {
+        const o = document.getElementById(`o-${id}-a`).closest(".opt");
+        scrollBy(0, o.getBoundingClientRect().top - 100);
+        const r = o.getBoundingClientRect();
+        return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), hdr: Math.round(document.querySelector(".hdr").getBoundingClientRect().bottom), bar: Math.round(document.querySelector(".bar").getBoundingClientRect().top) };
+      }, it.id);
+    });
+    assert.ok(m.y > 0 && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A was not placed in view with the page scrolled: ${JSON.stringify(m)}`);
+    assertFocusOnFirstPick(at, it, "a");
+    assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: Enter on Take my pick scrolled the page`);
+  });
+}
+
 test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
   const it = { ...picItem("multi-pics", 33), multi: true, pick: ["a", "c"] };
   const page = await open(t, { items: [it], designData: PICS }); if (!page) return;
