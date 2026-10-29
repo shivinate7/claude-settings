@@ -327,8 +327,8 @@
 - precompact-compaction-before-checkpoint-small-model: the hook reads the window from env CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then top-level autoCompactWindow in settings.json, then the default. It cannot see the model's own window, so a smaller model can compact before a checkpoint.
 - precompact-stop-block-skips-other-guards: the reply after a checkpoint block runs with stop_hook_active set so other Stop guards skip it, and when another Stop hook refuses first the checkpoint fires one stop later
 - precompact-rewrite-vs-append-unchecked: nothing checks that a session rewrote the handoff and did not append; the prompt asks and the owner reads the result
-- precompact-env-window-loop: checkpoints() in hooks/precompact_handoff.py loops window/150k times, so a huge CLAUDE_CODE_AUTO_COMPACT_WINDOW could slow or hang the Stop hook; the env var is a new route to a large window. Not measured.
-- precompact-model-tag-mapping: unverified whether Claude Code maps a transcript model `X[1m]` to modelSettings key `X`; the hook strips the tag either way (hooks/precompact_handoff.py _model_key)
+- precompact-env-parse-narrow: the hook reads CLAUDE_CODE_AUTO_COMPACT_WINDOW as a plain integer. Claude Code also takes `200k` and `1m`, and clamps the value to 100,000..1,000,000. With a suffix, the hook falls back to settings and nudges late (hooks/precompact_handoff.py window_limit)
+- precompact-date-strip-untested: no test row catches a date regex that also strips a version tail, such as `-4-5`, so `claude-opus-4-5` could match key `claude-opus-4-1` (hooks/test_precompact_handoff.py)
 - silent-undo-history-window-60: the --history audit misses a reversal older than --window (default 60 commits); --window 0 reads all history
 - silent-undo-git-utf8-replace: git() decodes output as UTF-8 with errors=replace, so two lines that differ only in bad bytes compare equal
 - silent-undo-unread-shapes: a binary file is not read, a resolver half-rewritten line passes, and a reversal that also rewrites a line reads as a new edit
