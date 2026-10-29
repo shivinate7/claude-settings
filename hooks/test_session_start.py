@@ -70,11 +70,18 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             path = os.path.join(self.primary, ".claude", "worktrees", "agent-s%03d" % self.made)
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
-    def run_hook(self):
-        """The hook's stdout lines, with the primary checkout as the session cwd."""
+    def run_hook(self, remote=None, fetch_timeout="30"):
+        """The hook's stdout lines, with the primary checkout as the session cwd.
+
+        remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
+        """
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
         payload = json.dumps({"cwd": self.primary.replace("\\", "/"), "session_id": "session-start-cases"})
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT="30")
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT=fetch_timeout)
+        # The test runner may itself be a cloud session, so each run sets the variable it means.
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        if remote is not None:
+            env["CLAUDE_CODE_REMOTE"] = remote
         answer = subprocess.run([sh_exe(), HOOK], input=payload, capture_output=True, text=True,
                                 env=env, cwd=self.root, timeout=120)
         self.assertEqual(answer.returncode, 0, "the hook exited %d" % answer.returncode)
@@ -129,6 +136,43 @@ class SessionStartCautionTests(SessionStartAgentWorktreeNoticeTests):
         lines = self.run_hook()
         self.assertIn("repo caution: unknown, the level could not be read", lines)
         self.assertFalse(any(line.startswith("repo caution: public") for line in lines))
+
+
+class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
+    """The cloud session-tier line prints once, after the checkout line, only when CLAUDE_CODE_REMOTE is "true"."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    TIER_LINE = (
+        "session tier: read your own record with get_session (no session_id). A parent_session_id means"
+        " you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick"
+        " solo, one lane or coordinator from the request. Before you act as coordinator, read every page"
+        " of list_sessions for a live session tagged both cs-build:coordinator and cs-repo:<owner>/<name>"
+        " for this repo; if one is found, coordinate with it, else proceed."
+    )
+
+    def tier_lines(self, lines):
+        return [line for line in lines if line.startswith("session tier:")]
+
+    def test_cloud_prints_the_tier_line_once_right_after_the_checkout_line(self):
+        lines = self.run_hook(remote="true")
+        self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [self.TIER_LINE])
+        self.assertEqual(lines.index(self.TIER_LINE), 1, "the tier line is not after the checkout line: %r" % lines)
+
+    def test_no_tier_line_unless_the_variable_is_exactly_true(self):
+        # None is a runner that never sets it; the rest are values the hook must not treat as cloud.
+        for remote in (None, "", "false", "1", "TRUE"):
+            with self.subTest(remote=remote):
+                lines = self.run_hook(remote=remote)
+                self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line: %r" % lines)
+                self.assertEqual(self.tier_lines(lines), [])
+
+    def test_the_tier_line_prints_with_no_remote_and_a_tiny_fetch_timeout(self):
+        # The line needs no network, so a fetch bound too short for the bounded git calls still leaves it.
+        lines = self.run_hook(remote="true", fetch_timeout="0.01")
+        self.assertEqual(self.tier_lines(lines), [self.TIER_LINE])
 
 
 if __name__ == "__main__":
