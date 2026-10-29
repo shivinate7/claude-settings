@@ -169,8 +169,13 @@ def merge_check(selector, repo: str, where: str):
     if module is None:
         return "unknown", "the merge tool's check reader could not be loaded"
     where = os.path.normpath(where) if where else ""   # a `cd` target may carry either separator
+    try:  # the tool's own parser; a bad entry is refused there, so it is unknown here
+        ignore = next((module.ignore_checks(c) for c in _merge_configs(where) if isinstance(c["merge"], dict)), {}) if where else {}
+    except Exception as e:
+        return "unknown", str(e)
     host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
-    return host.head_read(selector, nothing_is_green=not has_workflows(where))
+    # The ignore list reaches only the batch read: this head counts every check, so an ignored red check on it still refuses.
+    return host.head_read(selector, nothing_is_green=not has_workflows(where), batch_ignore=ignore)
 
 
 MERGE_CHECK_REASON = (
