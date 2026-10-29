@@ -12325,6 +12325,20 @@ add("first-line marker: builder on opus with no marker in the brief asks, and sa
 add("first-line marker: reviewer with no model and Round 2 of 3 after a role word on line one is denied",
     "deny", STEP_UP, tool="Agent", prompt="Reviewer, Round 2 of 3. Lane c204 re-check the diff.",
     subagent_type="reviewer")
+# On the first line only the leftmost marker counts. A second marker later on that line is prose
+# about another step, so it never earns the grant, never adds a step-up deny, and never hides the
+# leftmost one.
+TWO_MARKERS = "Builder, Round 2 of 3. Do not jump to Round 3 of 3 yet."
+add("first-line marker: builder on opus with a later marker on line one after Round 2 of 3 asks", "ask",
+    CEILING, tool="Agent", prompt=TWO_MARKERS, model="opus", subagent_type="builder")
+add("first-line marker: the same brief on sonnet is allowed", "allow", tool="Agent",
+    prompt=TWO_MARKERS, model="sonnet", subagent_type="builder")
+add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 3 later asks, no step-up deny",
+    "ask", CEILING, tool="Agent", model="opus", subagent_type="reviewer",
+    prompt="Round 3 of 3. The Round 2 of 3 report found one defect.")
+add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="Round 1 of 3: check that Round 3 of 3 logic works")
 # Text that only names opus is no model.
 add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
     tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",
