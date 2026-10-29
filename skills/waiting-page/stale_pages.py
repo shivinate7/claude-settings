@@ -15,19 +15,22 @@ Verdict, one line per page, then a total line:
   behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
   unknown  the page was not read: another account, a missing file, an empty file
 Exit 0 only when every page is current. A behind or unknown page exits 1: an unread page is never
-counted current. A host wrapper around the page is tolerated: the template must appear inside it.
+counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
+page, and the text around it may hold only a document skeleton (doctype, html, head, meta, title
+and body tags, white space). Any other text or code around it makes the page behind. Batch mode
+reads page.html beside this script, and needs no hooks/ folder.
 
 Single-page mode (the writer, at each wake and before each republish):
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
 
-One verdict line names the template source: `origin/main <short sha>`, the --main path, or
-`installed copy`. Exit 0 current, 1 behind, 2 unknown (the file is missing or empty, or it holds
-no designData block or more than one). --write, on current or behind, saves main's page with the
-live designData body kept; unknown writes nothing. The template is --main; else page.html at
-origin/main of the checkout that holds this script, else of the checkout the `@<path>` line in
-~/.claude/CLAUDE.md names; else page.html beside this script. A checkout whose origin/main cannot
-be read is reported on stderr before the installed copy is used.
+One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
+current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
+or more than one, main's page.html cannot be read, or --write fails. --write, on current or behind,
+saves main's page with the live designData body kept; unknown writes nothing. The template is
+--main; else page.html at origin/main of the checkout that holds this script, else of the checkout
+the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
+start git, the verdict is unknown: the installed copy never stands in for main.
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 file written without --write, no timer, thread or child left running. It never imports `layout`.
 """
@@ -42,18 +45,28 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
 sys.path.insert(2, os.path.join(HERE, "..", "..", "hooks"))
 sys.path.insert(3, os.path.join(os.path.expanduser("~"), ".claude", "hooks"))
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 TEMPLATE = os.path.join(HERE, "page.html")
 DESIGN = re.compile(r'(<script type="application/json" id="designData">).*?(</script>)', re.S)
 DESIGN_BODY = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 TEMPLATE_IN_GIT = "skills/waiting-page/page.html"
 GIT_TIMEOUT = 30
+# What may surround the template: document skeleton tags (no event-handler attributes) and white space.
+ATTRS = r'(?:\s+(?!on)[a-z][\w:-]*(?:\s*=\s*(?:"[^"<>]*"|\'[^\'<>]*\'|[^\s"\'<>=]+))?)*'
+SKELETON = re.compile(r'(?:\s|<!doctype[^<>]*>|</?(?:html|head|body)%s\s*>|<meta%s\s*/?>|<title%s\s*>[^<>]*</title\s*>)*'
+                      % (ATTRS, ATTRS, ATTRS), re.I)
 
 
 def normal(text):
     """The page text with every designData body emptied and white space collapsed."""
     return " ".join(DESIGN.sub(r"\1\2", text).split())
+
+
+def matches(template, live):
+    """True when the live text is the template, with nothing around it but a document skeleton."""
+    want, got = normal(template), normal(live)
+    at = got.find(want)
+    return at >= 0 and SKELETON.fullmatch(got[:at] + " " + got[at + len(want):]) is not None
 
 
 def page_id(url):
@@ -68,10 +81,10 @@ def verdict(url, fetched, template):
     if not os.path.isfile(name + ".html"):
         return "unknown", "no fetched file"
     with open(name + ".html", encoding="utf-8", errors="replace") as f:
-        got = normal(f.read())
-    if not got:
+        live = f.read()
+    if not normal(live):
         return "unknown", "the fetched file is empty"
-    return ("current", "") if normal(template) in got else ("behind", "differs from page.html")
+    return ("current", "") if matches(template, live) else ("behind", "differs from page.html")
 
 
 def default_roots():
@@ -115,9 +128,10 @@ def read_origin_main(checkout):
     """(page text, short sha) of page.html at origin/main in `checkout`, or None. One git process, read only."""
     want = ("origin/main\norigin/main:%s\n" % TEMPLATE_IN_GIT).encode()
     try:
+        import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py); never a raw spawn
         done = _nowindow.run(["git", "-C", checkout, "cat-file", "--batch"], input=want,
-                              capture_output=True, timeout=GIT_TIMEOUT)
-    except (OSError, subprocess.SubprocessError):
+                             capture_output=True, timeout=GIT_TIMEOUT)
+    except (ImportError, OSError, subprocess.SubprocessError):
         return None
     out, objects = done.stdout, []
     for kind in (b"commit", b"blob"):  # each object: "<sha> <type> <size>\n<size bytes>\n"
@@ -132,7 +146,8 @@ def read_origin_main(checkout):
 
 
 def find_template(main_path):
-    """(text, source name) of the template for single-page mode. Raises OSError when it cannot be read."""
+    """(text, source name) of main's page.html for single-page mode, or None when main cannot be read.
+    Raises OSError when --main names a file that cannot be read."""
     if main_path:
         with open(main_path, encoding="utf-8", errors="replace", newline="") as f:
             return f.read(), main_path
@@ -141,9 +156,8 @@ def find_template(main_path):
         got = read_origin_main(checkout)
         if got:
             return got[0], "origin/main %s" % got[1]
-        print("stale_pages: origin/main is not readable in %s; using the installed copy" % checkout, file=sys.stderr)
-    with open(TEMPLATE, encoding="utf-8", errors="replace", newline="") as f:
-        return f.read(), "installed copy %s" % TEMPLATE
+        print("stale_pages: origin/main is not readable in %s" % checkout, file=sys.stderr)
+    return None
 
 
 def single_page(argv):
@@ -167,20 +181,28 @@ def single_page(argv):
         print("unknown: the fetched page has %d designData blocks, want 1" % len(live_blocks))
         return 2
     try:
-        template, source = find_template(args.main)
+        found = find_template(args.main)
     except OSError as err:
-        print("unknown: the template cannot be read (%s)" % (err.strerror or err))
+        print("unknown: main unreadable: the --main file cannot be read (%s)" % (err.strerror or err))
         return 2
+    if not found:
+        print("unknown: main unreadable: no origin/main page.html reached, and the installed copy is not used")
+        return 2
+    template, source = found
     spot = DESIGN_BODY.search(template)
     if not spot or len(DESIGN_BODY.findall(template)) != 1:
         print("unknown: the template has no single designData block (%s)" % source)
         return 2
-    current = normal(template) in normal(live)
+    current = matches(template, live)
     if args.write:
         # Slicing, never re.sub: a mockup body holds < and backslashes that a replacement string would read.
         text = template[:spot.start(2)] + live_blocks[0][1] + template[spot.end(2):]
-        with open(args.write, "w", encoding="utf-8", newline="") as f:
-            f.write(text)
+        try:
+            with open(args.write, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        except OSError as err:
+            print("unknown: the --write file cannot be written (%s)" % (err.strerror or err))
+            return 2
         print("stale_pages: wrote %s" % args.write, file=sys.stderr)
     if current:
         print("current: matches the template (%s)" % source)
