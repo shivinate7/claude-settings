@@ -11,14 +11,6 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - The shape stays dynamic. A session may grow to a larger shape, as a solo session grows to orchestrate today (`roles-solo-grows-switch-to-orchestrate`). It says so in one line.
 - **Orchestrator, the catch-all word** (owner, 15:18). Any session that spawns agents is an orchestrator. Coordinator, triage, batch runner and lane session are kinds of orchestrator. Analogy: a square is a rectangle.
 - **A coordinator in another repo** (owner, 15:18). A coordinator may work in another repo, by hand-off or by its own lane PR there. No hard block applies. Before it acts, it checks whether that repo has an active coordinator. If one is active, it coordinates with that coordinator. If none is active, it proceeds. It does not hold back for lack of a reply.
-- **Tier tags** (coordinator, 2026-10-28). Each session the coordinator starts carries two tags.
-  - `cs-build:<tier>`, one of `coordinator`, `triage`, `batch-runner`, `lane`.
-  - `cs-repo:<owner>/<name>`, the repo it builds.
-  - A live-coordinator check needs both tags on one live session, and reads every page of `list_sessions`. Its `tags` filter errors inside a session, so the check filters the rows itself.
-- **Session start** (lane L3). In a cloud session (`CLAUDE_CODE_REMOTE=true`), `hooks/session_start.sh` prints one fixed line. The line tells the session to read its own record with `get_session`, and gives the tag rule above.
-  - The hook cannot read the tier itself. `get_session` and `list_sessions` are MCP tools only, and a hook never calls the sessions API with a token.
-  - A local session gets no line. It has no such tools.
-  - Cost: one env read in the hook already running. No network, no new process, no timer, no file written. `hooks/test_session_start.py` proves the line prints once in cloud, never outside it, and with no remote.
 - **Who starts which session** (owner, 15:18). The coordinator is the one session that starts other sessions. It starts triage and the batch runner together, as a trio, before any lane session. This refines the triage-first ruling below.
 - **Rotation of standing sessions** (owner, 15:23). Triage and the batch runner each report a tally of their own use, in turns or context, to the coordinator. When a tally nears its limit, the coordinator has that session write its handoff, archives it, and starts a fresh one from the handoff. The coordinator writes its own handoffs and compacts as today.
 - **No coordinator succession** (owner, 15:24). Handing children to a new coordinator failed in the owner's runs, in two ways.
@@ -49,6 +41,21 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - "... you should really be messaging triage for this part to save context, etc, it's a learning experience for me."
   - The line names the session's own tier, the right tier, and why, such as saving context.
   - The session then still handles the message, or routes it.
+
+## How it works
+
+Mechanics that carry out the rulings above. They are not owner rulings.
+
+- **Tier tags** (coordinator, 2026-10-28). Each session the coordinator starts carries two tags.
+  - `cs-build:<tier>`, one of `coordinator`, `triage`, `batch-runner`, `lane`.
+  - `cs-repo:<owner>/<name>`, the repo it builds.
+- **Live-coordinator check.** A session that would act as coordinator reads every page of `list_sessions`. It looks for one session with both tags whose `session_status` is not archived. That session is the active coordinator.
+  - The `tags` filter of `list_sessions` errors inside a session, so the check filters the rows itself.
+  - `list_sessions` leaves out runs a scheduled task started. The check misses a coordinator started that way.
+- **Session start** (lane L3). In a cloud session (`CLAUDE_CODE_REMOTE=true`), `hooks/session_start.sh` prints one fixed line, in any working folder, git or not. The line tells the session to read its own record with `get_session`, and gives the check above.
+  - The hook cannot read the tier itself. `get_session` and `list_sessions` are MCP tools only, and a hook never calls the sessions API with a token.
+  - Outside the cloud the hook prints no line. The gate is that one env value.
+  - Cost: one env read in the hook already running. No network, no new process, no timer, no file written. `hooks/test_session_start.py` proves the line prints once in cloud, never outside it, and with no remote.
 
 ## Why
 
