@@ -57,6 +57,8 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
    "<repo>: Questions" or "<repo>: Status". The tab row always shows, so the header shows the repo
    name only, with no "waiting on you" line. Ruling: reviewer's pick, taken by the orchestrator,
    round 3. Departs from: page.html `applyIdentity`, which titles the page "<repo>: waiting on you".
+   With no repo name, the header shows the mark only, and the h1 holds the tab name for screen
+   readers. Departs from: this mockup, which always shows a name.
 7. The answer bar stays on the Status tab. Gain: a pick is never left behind, nothing moves at a
    tab change, and the bar says how many items wait. Loss: the bar shows under status, which it
    does not change.
@@ -99,7 +101,9 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
       phase card's "in progress" count. They are judged data, not repeated labels.
 15. Each disclosure (read-at, Live work, "What the build said") shows an open or closed marker, ▸ or ▾.
 16. The status part reads its box. Its 340, 640 and 1000 breakpoints are container queries on its
-    wrapper, not the media queries of the roadmap page (`ux-component-reads-its-box`).
+    wrapper, not the media queries of the roadmap page (`ux-component-reads-its-box`). Below 340,
+    each view button is as wide as its label and the phase rail has 3 columns, so no label is cut.
+    Departs from: this mockup, which cuts a label with an ellipsis and keeps 5 columns.
 17. The waiting part is main's, with no change. The order in each tier is the writer's `rank`, then
     age, as main's `sorted()` gives it. Card details that other lanes change now are not drawn.
 
