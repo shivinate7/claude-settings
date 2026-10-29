@@ -2138,6 +2138,8 @@ const STATUS_REFUSED = "Not copied. The text is selected; copy it by hand.";
 // A missing element fails with its own message, not as a locator timeout.
 const need = async (loc, msg) => assert.equal(await loc.count(), 1, msg);
 const boxHeight = async (loc) => (await loc.boundingBox())?.height ?? 0;
+// A link's accessible name: its label, then the hidden words. Chromium puts a space before the comma; that is accepted.
+const linkName = (label) => new RegExp("^" + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*, opens in a new tab$");
 // Waits up to 3 s for a page condition; a miss returns false, so the assert names it.
 const holds = (page, fn, arg = null) => page.waitForFunction(fn, arg, { timeout: 3000 }).then(() => true, () => false);
 // The clipboard either takes the text into window.__copied or refuses it, as a frame without permission does.
@@ -2158,7 +2160,7 @@ test("a decision option's link sits between its how text and its timing rows, na
   assert.ok(got.text.startsWith(LINK.label), "the link text is not its label");
   assert.equal(got.arrow, "↗", "the arrow is not in a span hidden from screen readers");
   assert.equal(got.sr, ", opens in a new tab", "no screen-reader words say where the link opens");
-  assert.equal(await page.getByRole("link", { name: LINK.label + ", opens in a new tab", exact: true }).count(), 1, "the link is not named for where it opens");
+  assert.equal(await page.getByRole("link", { name: linkName(LINK.label) }).count(), 1, "the link is not named for where it opens");
   assert.equal(await card(page, LINKED).locator(".opts.olinks").count(), 1, "the options do not take the olinks class");
   assert.equal(await card(page, LINKED).locator(`label[for="o-${LINKED.id}-b"] span.nolinks`).count(), 1, "an option with no link has no nolinks span");
   assert.equal(await card(page, PLAIN).locator(".opts.olinks").count(), 0, "a card with no link took the olinks class");
@@ -2181,7 +2183,7 @@ test("a tap on an option's link opens it in a new tab and leaves the radio unche
 
 test("a task's link has the same screen-reader name as an option's link", async (t) => {
   const page = await open(t, { items: [RUN] }); if (!page) return;
-  assert.equal(await page.getByRole("link", { name: "Sample repo on GitHub, opens in a new tab", exact: true }).count(), 1, "the task link is not named for where it opens");
+  assert.equal(await page.getByRole("link", { name: linkName("Sample repo on GitHub") }).count(), 1, "the task link is not named for where it opens");
 });
 
 test("a task's command sits after its steps, closed behind Show the command, and Copy writes it exactly while it is closed", async (t) => {
