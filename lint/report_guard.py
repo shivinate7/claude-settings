@@ -420,15 +420,24 @@ OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.
 PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
 ASK_TOOL = "AskUserQuestion"
 
-# The chat-first wait (questions-go-to-owner, "Chat first, then the page"): 5 minutes, never 15 or 25.
-FIVE_MINUTES_RE = re.compile(r"(?<![\w.])(?:5[ -]?min(?:ute)?s?|five[ -]minutes?)\b", re.I)
+# The chat-first wait (questions-go-to-owner, "Chat first, then the page"): 5 minutes, never 15, 25
+# or "twenty-five". A spelled "five" after a tens word is caught in the `tens` group and refused,
+# since a fixed-width lookbehind cannot hold the tens words.
+FIVE_MINUTES_RE = re.compile(
+    r"(?<![\w.-])(?:(?P<tens>(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[ -]+)?"
+    r"five[ -]minutes?|5[ -]?min(?:ute)?s?)\b", re.I)
 PAGE_WORDS_RE = re.compile(r"\bwaiting[ -]page\b", re.I)
 
 PICK_REFUSAL = (
     "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat "
-    "and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or open "
-    "the question box."
+    "and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only "
+    "with nothing running, open the question box."
 )
+
+
+def names_five_minutes(section):
+    """True when `section` names the 5-minute wait, never 15, 25 or twenty-five minutes."""
+    return any(not m.group("tens") for m in FIVE_MINUTES_RE.finditer(section))
 
 
 def input_needed_section(text):
@@ -494,7 +503,7 @@ def pick_has_a_control(records, text, cwd):
         return False
     page = page.rstrip("/")
     section = input_needed_section(text)
-    if FIVE_MINUTES_RE.search(section) and PAGE_WORDS_RE.search(section):
+    if names_five_minutes(section) and PAGE_WORDS_RE.search(section):
         return True
     return bool(re.search(re.escape(page) + r"(?![\w-])", text))
 
