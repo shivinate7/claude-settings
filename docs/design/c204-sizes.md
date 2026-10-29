@@ -1,6 +1,6 @@
 # Waiting page c204: a tall option picture scrolls in its box
 
-Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's value in a comment. Screen: `skills/waiting-page/page.html` at 1cc47f01 (`optPic`, `fitFrame`, `MIN_PIC`, `.dfitwrap`, `.opt .opic`). Owner's word: waiting-page item 55 note, Oct 28 17:50 CDT. The mockup was measured with headless Chromium 153 at 390, 1280 and 2200, light and dark, and at 1065 (the narrowest page with three option columns). Fonts fall back offline.
+Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's value in a comment. Screen: `skills/waiting-page/page.html` at 1cc47f01 (`optPic`, `fitFrame`, `MIN_PIC`, `.dfitwrap`, `.opt .opic`). Owner's grant: waiting-page item 55 note, Oct 28 17:50 CDT. The mockup was measured with headless Chromium 153 at 390, 1280 and 2200, light and dark, and at 1065 (the narrowest page with three option columns). Fonts fall back offline.
 
 1. When a picture scrolls. The scale does not change: sc = min(1, W / w, max(480 / h, 120 / w)), where w × h is the mockup (390 wide) or the focus box. The picture scrolls only when ceil(h × sc) > 480. That is a box more than 4 times as tall as it is wide, such as a 390-wide mockup taller than 1560px. A focus box under 120 wide and over 480 high also scrolls. Every other picture draws as today: the same width, height and transform.
 2. Question 1, a focused card. Pick: 1A.
