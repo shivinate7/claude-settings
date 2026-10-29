@@ -2135,6 +2135,12 @@ const needBoxes = async (page, it, n) => assert.equal(await boxes(page, it).coun
 // A ranked card's label stretches over the whole card, so a press on its text lands on that label: press the label.
 const tick = (page, it, key) => (it.ranked ? page.locator(`label[for="o-${it.id}-${key}"]`).click() : choose(page, it, key));
 const labelOf = (it, key) => it.options.find((o) => o.key === key).label;
+// Take my pick keeps its place when it does not apply (`.gone`, visibility hidden), so a hidden one is still one element in the card.
+const takeShown = async (page, it) => {
+  const b = page.locator(`#b-take-${it.id}`);
+  assert.equal(await b.count(), 1, `${it.id}: Take my pick left its place in the card`);
+  return b.isVisible();
+};
 const rankText = (page, it, key) => page.locator(`#item-${it.id} .opt:has(#o-${it.id}-${key})`).textContent();
 // "2nd of 3". A card's text runs its spans together with no space, so a digit guard stands in for a word boundary.
 const rank = (ord, n) => new RegExp(`(?<!\\d)${ord} of ${n}(?!\\d)`);
@@ -2186,6 +2192,25 @@ test("a ranked item: a new tick goes last and an untick closes the gap", async (
   assert.deepEqual(a.choice, ["c", "d", "b"]);
 });
 
+// Option a's three text rows are marked as what sets it apart. Each text differs from the others', so the page keeps every mark.
+const MARKED = [{ ...opt("a", "Red"), how: "how A", gain: "gain A", lose: "lose A", differs: ["how", "gain", "lose"] }, opt("b", "Blue"), opt("c", "Green")];
+
+test("a press on a marked row ticks its option, on a ranked card as on a plain multi card", async (t) => {
+  const m = multi("dif-m", 34, { options: MARKED }), r = ranked("dif-r", 35, { options: MARKED });
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 3);
+  // The marked row paints above the ranked card's stretched label, so a real press at its centre must still reach the label. `force` keeps a fix that
+  // lays the label above the row from failing on "intercepts pointer events"; the press itself is still a real one at the row's centre.
+  for (const it of [m, r]) for (const row of ["how", "gain", "lose"]) {
+    const mark = page.locator(`#item-${it.id} .opt:has(#o-${it.id}-a) .${row}.dif`);
+    assert.equal(await mark.count(), 1, `${it.id}: the ${row} row is not marked`);
+    await mark.click({ force: true });
+    assert.deepEqual(await ticked(page, it), ["a"], `${it.id}: a press on the marked ${row} row did not tick its option`);
+    await mark.click({ force: true });
+    assert.deepEqual(await ticked(page, it), [], `${it.id}: a second press on the marked ${row} row did not untick it`);
+  }
+});
+
 test("Take my pick on a multi item writes the whole pick list with the note accepted pick, ranked or not", async (t) => {
   const m = digest(), r = ranked("rk-take", 32);
   const page = await open(t, { items: [m, r] }); if (!page) return;
@@ -2196,7 +2221,8 @@ test("Take my pick on a multi item writes the whole pick list with the note acce
   assert.deepEqual(await ticked(page, m), ["a", "c"]);
   assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
   for (const [k, n] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, r, k), rank(n, 3), `rank of ${k}`);
-  assert.equal(await take.isVisible(), false, "Take my pick stays after it was taken");
+  assert.equal(await takeShown(page, m), false, "Take my pick is not hidden after it was taken");
+  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden on a ranked item after it was taken");
   assert.match(await card(page, m).locator(".ready").textContent(), /, my pick\.$/);
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
   await send(page);
@@ -2267,7 +2293,7 @@ test("a saved multi answer lists each pick with its letter and title in order, a
   assert.match(await rankText(page, r, "a"), rank("2nd", 3));
 });
 
-test("the ready line names the picks by title, shortened, never by letter, and a ranked line gives the order", async (t) => {
+test("the ready line names the picks by title, shortened, never by letter, a ranked line gives the order, and Take my pick hides once the ticks equal my pick", async (t) => {
   const m = multi("rd-m", 41, { options: WORDY, pick: ["value", "watch"] }), r = ranked("rd-r", 42, { options: WORDY, pick: ["nothing", "value"] });
   const page = await open(t, { items: [m, r] }); if (!page) return;
   await needBoxes(page, m, 3); await needBoxes(page, r, 3);
@@ -2278,11 +2304,21 @@ test("the ready line names the picks by title, shortened, never by letter, and a
   await tick(page, m, "nothing");
   const three = await ready(m);
   assert.ok(three.indexOf("Value for the card") < three.indexOf("Watch") && three.indexOf("Watch") < three.indexOf("Nothing") && /^Ready to send: /.test(three) && / and /.test(three), "three picks are not named in a list: " + three);
-  await tick(page, r, "nothing"); await tick(page, r, "value");
-  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, your order\.$/);
+  // The same two picks in another order than my pick (nothing, then value): the button stays, and it names my pick by title.
+  await tick(page, r, "value"); await tick(page, r, "nothing");
+  assert.match(await ready(r), /^Ready to send: Value for the card.*…, Nothing, your order\.$/);
+  assert.equal(await takeShown(page, r), true, "Take my pick is hidden while the order differs from my pick");
+  assert.match(await card(page, r).getByRole("button", { name: /Take my pick/ }).textContent(), /^Take my pick \(Nothing.*Value for the card.*…\)$/, "Take my pick does not name the picks by title");
   await takePick(page, r);
   assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, my pick\.$/);
-  assert.match(await card(page, r).getByRole("button", { name: /Take my pick/ }).textContent(), /^Take my pick \(Nothing.*Value for the card.*…\)$/, "Take my pick does not name the picks by title");
+  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden once the ticks equal my pick");
+  // Ticking exactly my pick by hand hides it too, and the line says the order is the owner's.
+  await tick(page, r, "value"); await tick(page, r, "nothing");
+  await tick(page, r, "nothing");
+  assert.equal(await takeShown(page, r), true, "Take my pick is hidden while only part of my pick is ticked");
+  await tick(page, r, "value");
+  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden after the owner ticked exactly my pick");
+  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, your order\.$/);
 });
 
 const LONGER = [opt("a", "Open items older than a week, listed oldest first"), opt("b", "Picks that stood since the last digest went out"), opt("c", "Answers that failed to save and need a second chance"), opt("d", "A fourth title that is long enough to wrap")];

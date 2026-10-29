@@ -11571,6 +11571,12 @@ up("an update that carries options and a non-widening list pick is allowed", "al
    {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
 up("a task with a list pick is not judged", "allow",
    up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"]))
+# A list that holds a non-string member still names its string members. The page reads such a list as
+# not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
+up("a multi item whose list pick holds the widening key and a null is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", None]))
+up("a multi item whose list pick holds a number and a widening key is denied", "deny",
+   up_item(multi=True, options=[dict(UP_WIDE, key="w"), UP_MATCH, UP_THIRD], pick=[1, "w"]))
 add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
     "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
