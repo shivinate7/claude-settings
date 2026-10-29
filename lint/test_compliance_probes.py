@@ -248,11 +248,30 @@ class Ios(unittest.TestCase):
         self.assertIn(line, out)
         return out
 
+    # The `test diagnostics` item: every xcodebuild test run carries `-collect-test-diagnostics never`.
+    # A failed UI test otherwise starts a simctl diagnose of up to 10 minutes. One pass line, one gap line per file list.
+    DIAG_PASS = "  test diagnostics: pass - every xcodebuild test run sets -collect-test-diagnostics never\n"
+
+    @staticmethod
+    def diag_gap(*files):
+        return "  test diagnostics: gap - %s runs xcodebuild test without -collect-test-diagnostics never\n" % ", ".join(files)
+
+    def make_run(self, recipe):
+        """The gold plus a Makefile target `ui-run` that holds `recipe`, one tab-led recipe line per line of it."""
+        body = "".join("\t%s\n" % line for line in recipe.split("\n"))
+        return self.edit(self.gold(), "Makefile", "phone:\n", "ui-run:\n" + body + "\nphone:\n")
+
+    def diag_pass(self, repo):
+        code, out = repo.run("ios")
+        self.assertEqual(code, 0, out)
+        self.assertIn(self.DIAG_PASS, out)
+
     def test_the_starter_tree_is_in_shape(self):
         code, out = self.gold().run("ios")
         self.assertEqual(code, 0, out)
         self.assertTrue(out.startswith("ios: in shape"), out)
-        self.assertEqual(out.count(": pass"), 9, out)
+        self.assertEqual(out.count(": pass"), 10, out)
+        self.assertIn(self.DIAG_PASS, out)  # the gold runs its UI tests through sim-test, which adds the flag
 
     def test_no_ios_app_is_na(self):
         code, out = Repo(self).write("Package.swift", "// swift-tools-version: 6.2\n").write("Makefile").run("ios")
@@ -301,6 +320,60 @@ class Ios(unittest.TestCase):
         repo = self.edit(self.gold(), ".github/workflows/ios.yml", "run: make app-build",
                          "run: xcodebuild test -project native/Tally.xcodeproj -scheme Tally")
         self.red(repo, "slow tests: gap - .github/workflows/ios.yml runs UI tests")
+
+    def test_xcodebuild_test_without_the_flag_in_the_makefile_is_a_gap(self):
+        for run in ("xcodebuild test -scheme X",
+                    "xcodebuild test-without-building -scheme X",
+                    "xcodebuild -project A.xcodeproj -scheme X test",  # the action may follow the flags
+                    "xcodebuild test -scheme X -collect-test-diagnostics on-failure",  # only `never` stops the diagnose
+                    "xcodebuild test -scheme X -collect-test-diagnostics never\nxcodebuild test -scheme Y",  # each run needs it
+                    "xcodebuild test -scheme X && xcodebuild build -scheme Y -collect-test-diagnostics never"):  # another command's flag
+            with self.subTest(run=run):
+                self.red(self.make_run(run), self.diag_gap("Makefile"))
+
+    def test_xcodebuild_test_with_the_flag_in_the_makefile_passes(self):
+        for run in ("xcodebuild test -scheme X -collect-test-diagnostics never",
+                    "xcodebuild test-without-building -scheme X -collect-test-diagnostics never",
+                    "xcodebuild -collect-test-diagnostics never -scheme X test",  # the flag before the action
+                    "xcodebuild test -scheme X \\\n-collect-test-diagnostics never",  # on a backslash continuation line
+                    "sim-test -scheme X",  # sim-test adds the flag itself
+                    "xcodebuild build-for-testing -scheme X",  # compiles, runs no test
+                    "# xcodebuild test -scheme X"):  # a comment is no run
+            with self.subTest(run=run):
+                self.diag_pass(self.make_run(run))
+
+    def test_a_flag_in_a_comment_does_not_count(self):
+        for run in ("xcodebuild test -scheme X # -collect-test-diagnostics never",
+                    "@echo it's slow; xcodebuild test -scheme X # -collect-test-diagnostics never"):  # a lone quote opens no string
+            with self.subTest(run=run):
+                self.red(self.make_run(run), self.diag_gap("Makefile"))
+
+    def test_a_hash_inside_quotes_does_not_cut_the_flag(self):
+        for run in ('xcodebuild test -scheme "a #b" -collect-test-diagnostics never',
+                    "xcodebuild test -scheme 'a #b' -collect-test-diagnostics never",
+                    'xcodebuild test -scheme "a#b" -collect-test-diagnostics never'):
+            with self.subTest(run=run):
+                self.diag_pass(self.make_run(run))
+
+    def test_a_tracked_shell_script_is_read(self):
+        script = "tools/run-tests.sh"
+        self.red(self.gold().write(script, "#!/bin/sh\nset -e\nxcodebuild test -scheme Tally\n"), self.diag_gap(script))
+        self.diag_pass(self.gold().write(script, "#!/bin/sh\nxcodebuild test -scheme Tally -collect-test-diagnostics never\n"))
+        repo = self.make_run("xcodebuild test -scheme X").write(script, "#!/bin/sh\nxcodebuild test -scheme Tally\n")
+        self.red(repo, self.diag_gap("Makefile", script))  # one line, the files in tracked order
+        self.diag_pass(self.gold().write("docs/testing.md", "Run `xcodebuild test -scheme Tally` by hand.\n"))  # prose is no run
+
+    def test_workflow_runs_are_read(self):
+        flow = ".github/workflows/ios.yml"
+        run = "xcodebuild test -project native/Tally.xcodeproj -scheme Tally"
+        self.red(self.edit(self.gold(), flow, "run: make app-build", "run: " + run), self.diag_gap(flow))
+        for step in ("run: %s -collect-test-diagnostics never" % run,
+                     "run: >\n          %s\n          -collect-test-diagnostics never" % run,  # a folded scalar is one command
+                     "run: |\n          %s \\\n            -collect-test-diagnostics never" % run):  # a literal block with a continuation
+            with self.subTest(step=step):
+                _, out = self.edit(self.gold(), flow, "run: make app-build", step).run("ios")  # slow tests is a gap here, by design
+                self.assertIn(self.DIAG_PASS, out)
+                self.assertNotIn("test diagnostics: gap", out)
 
     def test_account_ids_in_the_repo_are_red(self):
         repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')

@@ -11,6 +11,8 @@
 #  - At the cap (2 booted devices of any kind, no iPhone among them): no boot, no xcodebuild, exit non-zero, and
 #    the booted devices and the remedy are printed. Under the cap it boots.
 #  - The exit code is xcodebuild's. The tool takes no lock and runs no top.
+#  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
+#    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -48,7 +50,7 @@ export RUN=$work PATH="$stubs:$PATH"
 SHARED=8787FE1C-48CC-4213-9B5C-8605AFE7F9B3
 OTHER=AAAAAAAA-0000-4000-8000-000000000001
 THIRD=BBBBBBBB-0000-4000-8000-000000000002
-DEST="xcodebuild test -scheme X -destination platform=iOS Simulator,id="
+DEST="xcodebuild test -scheme X -collect-test-diagnostics never -destination platform=iOS Simulator,id="
 
 # xcodebuild: logs its call, then exits $STUB_RC. With STUB_HANG set, it marks a start file and waits for a signal.
 cat > "$stubs/xcodebuild" <<'SH'
@@ -86,8 +88,10 @@ chmod +x "$stubs"/*
 booted() { printf '    %s (%s) (Booted) \n' "$1" "$2" >> "$booted_file"; }
 fresh() { : > "$calls"; : > "$booted_file"; rm -f "$work/topcalls" "$work/mkdir_calls" "$work/started"; }
 # run [VAR=value...]: the tool runs with a temp HOME and its own PATH; out and rc are the result.
+# ARGS holds the tool's own arguments. A case that needs more sets it before run and puts it back after.
 rc=0
-run() { env HOME="$work/home" "$@" "$script" -scheme X > "$work/run.out" 2>&1; rc=$?; }
+ARGS=(-scheme X)
+run() { env HOME="$work/home" "$@" "$script" "${ARGS[@]}" > "$work/run.out" 2>&1; rc=$?; }
 steps() { grep -E '^(simctl (boot|shutdown) |xcodebuild)' "$calls" | awk '{print ($1=="xcodebuild") ? "run" : $2}' | tr '\n' ' '; }
 has_call() { grep -Fxq "$1" "$calls"; }
 rc_is() { [[ $rc -eq $1 ]]; }
@@ -165,6 +169,14 @@ need "exit code" rc_is 0
 need "destination is the booted iPhone" has_call "$DEST$SHARED"
 need "steps are run only" steps_are "run "
 end_case "23 an iPhone and an iPad booted: the iPhone is reused, which is not a boot"
+
+# diag_count: how many times the logged xcodebuild call names -collect-test-diagnostics.
+diag_count() { grep '^xcodebuild' "$calls" | grep -o -e '-collect-test-diagnostics' | wc -l | tr -d ' '; }
+fresh; booted "iPhone 18 Pro" $SHARED; ARGS=(-scheme X -collect-test-diagnostics on-failure); run; ARGS=(-scheme X)
+need "exit code" rc_is 0
+need "the caller's value is kept, once" has_call "xcodebuild test -scheme X -collect-test-diagnostics on-failure -destination platform=iOS Simulator,id=$SHARED"
+need "exactly one -collect-test-diagnostics in the call" test "$(diag_count)" = 1
+end_case "24 a caller's -collect-test-diagnostics value is kept, with no second copy"
 
 # sig_case SIGNAL: the tool boots its own simulator and waits in xcodebuild. A signal to the whole process group
 # (as a terminal sends it) must still shut that simulator down.

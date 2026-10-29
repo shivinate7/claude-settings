@@ -646,3 +646,5 @@
 - waiting-page-gutter-cancel-script-click: a left scrollbar press with no click keeps the cancel armed. Then a scripted or assistive-tech click with `detail` > 0 and no pointerdown is swallowed; a mouse or touch cannot make one (skills/waiting-page/page.html optPic). Spec: docs/design/c204-sizes.md item 4
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
+- ios-probe-diag-false-gap: the `test diagnostics` item gives a false gap on a flag in a Make variable (`$(FLAGS)`) or a quoted `"never"`. An echo or a step name that names `xcodebuild test` also gives one, as in `slow tests` (lint/compliance_probes.py probe_ios).
+- ios-probe-diag-misses: the `test diagnostics` item misses `$(XCODEBUILD) test`, a Makefile in a subfolder and a script with no `.sh` suffix (lint/compliance_probes.py probe_ios).
