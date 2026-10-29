@@ -117,8 +117,8 @@ first screen.
    must say why it is not sure, or the question is noise.
    Pick: the C3 deck, with the reason on each card.
 
-5. **No tab bar in C3; the pose picks the mode.** Owner grant: yes. Departs from: house
-   `tokens.md`, "On a phone, navigation uses a bottom tab bar."
+5. **No tab bar in C3; the pose picks the mode.**
+   Departs from: `tokens.md`, phone navigation uses a bottom tab bar.
    Gain: the brief says the folded phone is held in one hand with a card in the other, and the
    unfolded phone rests on the table. Each pose then gets one job, and nothing on screen is a
    control to switch jobs. Loss: a person who wants the desk while folded must unfold. Apple's
@@ -150,7 +150,8 @@ first screen.
 9. **Errors.**
    - C1 shows the answer where List was pressed, in the dock: "3 cards did not go live" and
      "Try the 3 again" (`ux-answer-at-press`).
-   - C2 shows the shelf from the last read, dimmed, with its time. It never shows an empty shelf
+   - C2 shows the shelf from the last read, with its time. Only the bars are dimmed. The box
+     names and counts keep their full contrast. It never shows an empty shelf
      (`ux-unknown-is-not-empty`).
    - C3 keeps reading. The cards that TCGplayer did not accept wait as drafts, and the count says
      how many.
@@ -162,7 +163,12 @@ first screen.
 10. **Loading.** The long run is getting prices for a stack. It shows "64 of 186", a progress bar
     and a Stop control (`ux-long-run-stops`). Each row's skeleton keeps the size of the loaded row,
     so nothing moves when the data comes (`ux-press-moves-nothing`). List stays in its place,
-    disabled, with "Waits for prices." under it (`ux-control-earns-place`).
+    disabled, with "Waits for prices." under it (`ux-control-earns-place`). The line under List
+    is there in every state, so List does not move when the prices come.
+    Pick: yes.
+
+15. **The answers to a check sit in its row.** In C1 unfolded, the picked row (slot 45) has a
+    selected look, and its two answers are inside the row (`ux-control-beside-area`).
     Pick: yes.
 
 11. **Text fields with the keyboard open.**
