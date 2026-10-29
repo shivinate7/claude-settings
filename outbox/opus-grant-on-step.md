@@ -1,6 +1,5 @@
 # opus-grant-on-step (lane session_013NEJL3EgprbQ7B9yQu3Ms7)
 
-Branch: opus-grant-on-step (not pushed yet). Contract: grant records live on the step
-(`grants`, written by triage). The lane binds by `lane: session_<id>` on the step, which the guard
-reads from local origin/roadmap. The cs-step tag is not readable from a hook (not on disk, no API in hooks).
-State: test-author writing red cases (Oct 29 14:00 CDT). Next: builder, review rounds, draft PR.
+Draft PR #805, branch opus-grant-on-step, head 5332c5db. Review passed in round 2 (round 1 found that a lifted Opus spawn skipped the load brake; fixed). All done-when gates pass on head.
+To use it: the coordinator writes `"lane": "session_<id>"` on the step at lane start. Triage writes `"grants": [{"words", "at", "role", "by": "triage"}]`. The lane fetches `+refs/heads/roadmap:refs/remotes/origin/roadmap` before its first Opus spawn.
+Open notes (owner's call, not blocking): the field name `lane` holds a session id, while the glossary names a lane by its branch slug; `laneSession` would match better. Debt notes: step-grant-revoke-stale, step-grant-one-bad-entry.
