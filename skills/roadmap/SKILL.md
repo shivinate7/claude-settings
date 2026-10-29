@@ -1,12 +1,13 @@
 ---
 name: roadmap
-description: Use when a session builds a repo's roadmap data block, or the user says "build the roadmap", "roadmap page" or "update the status tab". Bakes the steps on the repo's record branch and the record homes in the checkout into the Status tab block of the repo's one page, and prints the upkeep list for triage.
+description: Use when a session builds a repo's roadmap block, or the user says "build the roadmap", "roadmap page" or "update the status tab". Bakes the steps on the repo's record branch and the record homes in the checkout into the roadmap block of the repo's one page, and prints the upkeep list for triage.
 ---
 
 A repo has one page: the waiting page. Its Status tab shows the repo's plan from its homes. This
-skill publishes no page. The build makes one marked data block, and the waiting-page writer splices
-it into the live page (see "Publish the block"). The old roadmap URL retires: it gets no more
-publishes, and the repo's extras key for the roadmap points at the waiting page's URL. The tab stores
+skill publishes no page. The build makes one marked roadmap block, and the waiting-page writer splices
+it into the live page (see "Publish the roadmap block"). The old roadmap URL retires: it gets no more
+publishes. The page's URL is the `waiting-page` key of the layout extras file. The `roadmap` key there
+is the `{map, github}` object the build reads, never a URL. The tab stores
 no copy: each panel prints the commit it read, or "unknown" and why.
 
 ## Build
@@ -15,7 +16,7 @@ Run from any folder:
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch roadmap] --block --out FILE
 
-`--block` writes only the block between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->`. It holds
+`--block` writes only the roadmap block, the text between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->`. It holds
 `window.ROADMAP_DATA` and `window.ROADMAP_BUILD`, and never a database stand-in. With no record branch,
 `ROADMAP_DATA` is null and the Status tab says the plan is unknown. Without `--block` the builder writes
 the whole old read-only page. Nothing publishes it.
@@ -23,16 +24,16 @@ the whole old read-only page. Nothing publishes it.
 - **On the record branch.** The checkout stands on the record branch: the builder reads the working
   tree. Build after each edit to `roadmap/data/`.
 - **Anywhere else.** The builder reads the record branch through the repo history, `origin/<branch>`
-  first. Fetch the branch first, because the block is as old as the fetch.
+  first. Fetch the branch first, because the roadmap block is as old as the fetch.
 - `--block` needs `--out`, on either path.
 
 The record homes (decisions, debts, debt notes, plans, specs) come from the checkout, at the paths
 `lint/layout.py` gives. A home that is not there reads "unknown", never "none".
 
-## Publish the block
+## Publish the roadmap block
 
-The waiting-page writer alone publishes the page (skill waiting-page, "Update the Status block").
-It reads the live page first, splices this block in with `splice.py`, and publishes one at a time,
+The waiting-page writer alone publishes the page (skill waiting-page, "Update the roadmap block").
+It reads the live page first, splices this roadmap block in with `splice.py`, and publishes one at a time,
 never with `force`, with the capabilities `db` and `{comments: {}}`. This skill never calls
 `Artifact` for a page.
 
@@ -66,9 +67,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `pulls`: the repo's open pull requests. `branches`: lane branches with no open pull request.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
-- With no `--live`, with no `threads` or `pulls` list, or with a `readAt` that is not an ISO time, the
-  line or its stamp says it was not read, and why. A local session's state does not show
-  yet: that waits on step o8's option (c), each session writing its own line.
+- With no `--live`, no `threads` or `pulls` list, or a `readAt` that is not an ISO time, the
+  line or its stamp says it was not read, and why. A local session's state does not show yet.
+  That waits on step o8's option (c): each session writing its own line.
 
 ## A merge marks a step
 

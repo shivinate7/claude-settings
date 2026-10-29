@@ -13,7 +13,7 @@ answer back to the lane or its next try.
 
 Every repo's page is the same template. The page is fixed. All content lives in its database,
 through the ArtifactData tool. Two exceptions are stored in the page itself: a design mockup (see
-"Add a design") and the roadmap data block (see "Update the Status block"). Rule `questions-go-to-owner` (questions go to the owner) sends each
+"Add a design") and the roadmap block (see "Update the roadmap block"). Rule `questions-go-to-owner` (questions go to the owner) sends each
 question here. Decision `questions-go-to-owner` holds the rulings.
 
 ## Find the page
@@ -241,8 +241,9 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
    Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
-   JSON in `<script type="application/json" id="designData">`.
+3. Read the page's current file (`Artifact` action `read`) and save it. Work on that saved live copy,
+   never on `page.html`: the copy keeps the roadmap block. Add `"slug": "<html string>"` to the JSON in
+   `<script type="application/json" id="designData">`, and change nothing else in the copy.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element whole, scaled to fit the card, so the part being decided is in frame.
@@ -261,7 +262,8 @@ The page refuses an item where they do, or where a `focus` finds nothing.
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Republish the page to the same URL with the same capabilities. The database stays.
+5. Republish the saved copy to the same URL with the same capabilities. The database stays:
+   unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
    the orchestrator does (see "Add an item").
@@ -269,26 +271,29 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
 
-## Update the Status block
+## Update the roadmap block
 
-The roadmap build makes the Status tab's data. The waiting-page writer alone publishes the page file,
-so the repo has one page and one publisher. The skill roadmap publishes nothing.
+The roadmap build makes the Status tab's data, the roadmap block. The waiting-page writer alone
+publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
 
-1. Build the block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
+1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says).
 2. Read the live page with `Artifact` action `read` and save it. Never build the new page from an
    older copy: the live page holds the designs for the items still open.
 3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.
-   It replaces the block between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->` and keeps every
-   other byte, the `designData` block among them. It refuses a page with no block or an unclosed
-   one. A page that predates the block is first updated to the current template ("Update a repo's pages").
+   It replaces the roadmap block, from `<!-- roadmap:data -->` to `<!-- /roadmap:data -->`, and keeps
+   every other byte, the `designData` block among them. It refuses a page with no roadmap block or an
+   unclosed one. A page that predates the roadmap block is first updated to the current template
+   ("Update a repo's pages").
 4. Publish `<new page>` to the same URL with the capabilities `db` and `{comments: {}}`. One publish
-   at a time, never with `force`. The database and its saved answers stay.
-5. A design republish ("Add a design", step 5) is the same act the other way: it replaces only the
-   `designData` block and keeps the roadmap block.
+   at a time, never with `force`. The database and its saved answers stay: unmeasured until the
+   step 4 live check of "Update a repo's pages".
+5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
+   `designData` block of the live page and keeps the roadmap block.
 
-The old roadmap page retires. The repo's extras key for the roadmap points at this page's URL, and
-the old URL gets no more publishes.
+The old roadmap page retires. The page's URL is the `waiting-page` key of the repo's extras file,
+never the `roadmap` key (a `{map, github}` object that the build reads). The old URL gets no more
+publishes.
 
 ## Update a repo's pages
 
@@ -301,11 +306,17 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    raw HTML, or that does not name this account a writer, is unreadable too.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
-3. For each `behind` page, republish `page.html` to the same URL with the capabilities `db` and
-   `{comments: {}}`. Keep the page's `designData` block for the items still open, and its roadmap
-   block. A republish with less drops the saved items, the wake or the Status tab. `stale_pages.py`
-   compares with both blocks emptied, so a page that differs only in them is current.
-4. Update one page first, then read its items: they must all still be there. That the database
-   survives a republish is unmeasured.
+3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
+   from plain `page.html`:
+   `python3 ~/.claude/skills/waiting-page/splice.py --page <skill folder>/page.html --carry <fetched page> --out <new page>`.
+   It puts the live `designData` block and roadmap block into the template, byte for byte, and refuses
+   with nothing written when either is missing in either file. Republish `<new page>` to the same URL
+   with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
+   republish of plain `page.html` drops the open items' designs and the Status tab.
+   `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
+   reads such a page current. Before you call a page current, check that its `designData` block
+   equals the fetched one.
+4. Update one page first, then read its items: they must all still be there. That the database and
+   its saved answers survive a republish is unmeasured until this live check is run.
 5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
    its owner.

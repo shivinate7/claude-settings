@@ -287,7 +287,7 @@ body.sheet-open { overflow: hidden; }
 .tabs .cnt:empty { display: none; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
 /* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. */
-@media (max-width: 400px) { .tabs a { padding-inline: 9px; gap: 4px; } .tabs .cnt { min-width: 2.5ch; } .tabs, .tabs .tl { gap: 2px; } }
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } }
 .tabs #qCount:empty { display: inline-block; }
 .svwrap { container-type: inline-size; padding-block: 18px 40px; }
 .sv { display: grid; gap: 16px; min-width: 0; }
@@ -315,6 +315,11 @@ body.sheet-open { overflow: hidden; }
 .live ul { list-style: none; margin: 0; padding: 0; }
 .live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
 .live li .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.livenone { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 8px 14px; display: grid; gap: 2px; font-size: 14.5px; }
+.livenone .lh { font-weight: 700; }
+.livenone details { font-size: 14px; color: var(--muted); }
+.livenone summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.livenone pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .live a { color: var(--acc); text-decoration: none; }
 .live a:hover { text-decoration: underline; }
 @container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
@@ -514,12 +519,12 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .sv-tip { position: fixed; z-index: 12; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 4px 7px; border-radius: 4px; max-width: 240px; opacity: 0; transition: opacity .08s; left: 0; top: 0; }
 .sv-tip.on { opacity: 1; }
 .sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
-@media (pointer: coarse) { .now li .tx { min-height: 44px; } }
+@media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
 </style>
 
 <header class="hdr"><div class="in">
   <div class="mark" id="mark" aria-hidden="true"></div>
-  <div class="who"><h1 class="repo" id="repoName">Waiting on you</h1></div>
+  <div class="who"><h1 class="repo" id="repoName">Questions</h1></div>
 </div></header>
 
 <nav class="in tabs" id="tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" id="tabQ" role="tab" aria-selected="true" aria-controls="qView">Questions <span class="cnt" id="qCount"></span></a><a href="#" id="tabStatus" role="tab" aria-selected="false" aria-controls="sPanel" tabindex="-1">Status</a></div><a href="#" id="tabD" role="button" hidden>Designs <span class="cnt" id="dCount"></span></a></nav>
@@ -678,13 +683,15 @@ function applyIdentity() {
     $("mark").classList.remove("icon"); $("mark").style.removeProperty("--tile");
     applyIcon(id.icon);
   }
-  $("repoName").textContent = name || "Waiting on you";
   setTitle();
 }
 // Each part has one name, the name of its tab, and the title names the open one.
 function setTitle() {
   const name = state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "";
-  document.title = (name ? name + ": " : "") + (state.tab === "s" ? "Status" : "Questions");
+  const part = state.tab === "s" ? "Status" : "Questions";
+  document.title = (name ? name + ": " : "") + part;
+  // With no name the header and the title say the same thing, the open tab's name.
+  $("repoName").textContent = name || part;
 }
 
 /* ---------- Time: always US Central, 24-hour, with the zone named ---------- */
@@ -1607,7 +1614,12 @@ function readAt() {
 }
 function liveWork() {
   const w = (B && B.live) || {};
-  if (!Array.isArray(w.threads)) return `<details class="live"><summary><span class="lh">Live work</span><span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${esc(w.read ? reason(w.read) : "this page holds no roadmap build yet")}</span></summary></details>`;
+  if (!Array.isArray(w.threads)) {
+    // Nothing was read and there is no body, so this is a line, not a disclosure. The build's own words sit behind one.
+    const plain = !w.read ? "this page holds no roadmap build yet" : /--live/.test(w.read) ? "the build had no live file" : "the build could not read it";
+    return `<div class="livenone"><p><span class="lh">Live work</span> <span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${plain}</span></p>`
+      + (w.read ? `<details><summary>What the build said</summary><pre>${esc(reason(w.read))}</pre></details>` : "") + "</div>";
+  }
   const day = (iso) => { const d = when(iso); return d ? fmt(d.toISOString()) : ""; };
   const link = (url, text) => (/^https?:\/\//.test(url || "") ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text);
   const open = w.threads.filter((t) => t.state !== "done"), done = w.threads.length - open.length;
@@ -1847,7 +1859,11 @@ function renderRec() {
 }
 
 /* ---------- no roadmap ---------- */
-const ASK = "Start a roadmap for this repo. Make the record branch roadmap with roadmap/data/steps, topics and meta, as the roadmap skill says. Then run its build with --block and have the waiting-page writer splice the block into this page.";
+// The repo's name is the page's identity name (meta/page); with none, "this repo".
+const askText = () => {
+  const id = (state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
+  return "Start a roadmap for " + (name || "this repo") + ", as the roadmap skill says. Then have the waiting-page writer put its roadmap block on this repo's waiting page.";
+};
 function noRoadmap() {
   const steps0 = B && Array.isArray(B.panels) ? B.panels.find((p) => p.name === "Steps") : null;
   const said = steps0 ? reason(steps0.read) : "This page holds no roadmap build yet.";
@@ -1857,7 +1873,7 @@ function noRoadmap() {
     <p>${why}</p>
     <details><summary>What the build said</summary><pre>${esc(said)}</pre></details>
     <button type="button" class="btn alt" data-ask>Copy the ask to start a roadmap</button>
-    <textarea id="svAsk" rows="4" readonly hidden aria-label="The ask to start a roadmap">${esc(ASK)}</textarea></section>`;
+    <textarea id="svAsk" rows="4" readonly hidden aria-label="The ask to start a roadmap"></textarea></section>`;
 }
 
 /* ---------- views ---------- */
@@ -1903,7 +1919,7 @@ function goStep(id) {
 root.addEventListener("click", (e) => {
   const hit = (sel) => e.target.closest(sel);
   let n;
-  if ((n = hit("[data-ask]"))) { copyText(ASK, n, () => { const box = $("svAsk"); box.hidden = false; box.select(); toast("Select the text in the box and copy it."); }); return; }
+  if ((n = hit("[data-ask]"))) { const ask = askText(); copyText(ask, n, () => { const box = $("svAsk"); box.value = ask; box.hidden = false; box.select(); toast("Select the text in the box and copy it."); }); return; }
   if ((n = hit("[data-copy]"))) { copyText(n.dataset.copy, n, () => { const sp = n.previousElementSibling; if (sp) { const r = document.createRange(); r.selectNodeContents(sp); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast("Selected. Copy it with your keyboard."); }); return; }
   if ((n = hit("[data-more]"))) { const id = n.dataset.more, c = n.previousElementSibling, shut = c.classList.toggle("clamp"); shut ? ui.notes.delete(id) : ui.notes.add(id); n.textContent = shut ? "Show all" : "Show less"; return; }
   if ((n = hit("[data-go]"))) { goStep(n.dataset.go); return; }

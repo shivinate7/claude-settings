@@ -133,8 +133,8 @@ Each part below is kept as it is today, with no change. The mockup does not draw
    publish at a time, never with `force`. It keeps the capabilities `db` and `{comments: {}}`.
 7. `stale_pages.py` compares each page with the merged template, with the `designData` block and the
    roadmap block made empty on both sides. A republish of a page that is behind keeps both blocks.
-8. The old roadmap page retires. The roadmap skill publishes no page by itself. The repo's extras
-   key for the roadmap points at the waiting page's URL. The old roadmap URL gets no more publishes.
+8. The old roadmap page retires. The roadmap skill publishes no page by itself. The page's URL is the
+   `waiting-page` key of the repo's extras file, not the `roadmap` key (a `{map, github}` object). The old roadmap URL gets no more publishes.
 9. The roadmap's class names that page.html also uses are scoped or renamed: `.bar`, `.rail`,
    `.card`, `.tabs`, `.steps`, `.g`, `.top`, `.big`, `.sub`, `.empty`. The page loads no font for
    status.
