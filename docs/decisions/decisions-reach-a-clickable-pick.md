@@ -23,7 +23,7 @@ One marker alone is not a pick. "You picked A on Oct 26; I went with it" quotes 
 
 **Which turns.** Any turn whose reply carries the report labels, not only the turns that ran a git write. The incident report had Done, Input Needed and Next, and nothing says its turn landed a commit. A guard limited to landed turns would miss an ask-only turn. On an unlanded turn the guard judges the pick alone and leaves the report shape to the landed-turn rules.
 
-**Whose calls count.** Only the main session's records. A record marked `isSidechain` (an agent's lines) never counts, so a builder's page write cannot clear the main session's pick.
+**Whose calls count.** Only the main session's records. A record marked `isSidechain` (an agent's lines) never counts, so a builder's box cannot clear the main session's pick.
 
 **Failure.** The check fails open on any error, as the rest of the guard does. A rewrite turn (`stop_hook_active`) stays quiet.
 
