@@ -2685,24 +2685,35 @@ for (const [kind, build] of Object.entries(TAKE_CARDS)) for (const [spot, scroll
 }
 
 // "Nothing on the page moves" (page.html, top comment): an option already between the header and the bar needs no scroll, so Enter on Take my pick leaves scrollY as it was.
-// Option A is placed 100px from the top of the screen, whole and clear of the 64px scroll margin; a scroll that centres it moves the page.
-for (const width of [390, 1280]) for (const [kind, build] of Object.entries(TAKE_CARDS)) {
-  test(`Enter on Take my pick does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, async (t) => {
-    const it = build();
-    const page = await open(t, { items: [it, ...FILL], viewport: { width, height: 800 } }); if (!page) return;
-    let m;
-    const at = await enterTakePick(page, it, async () => {
-      m = await page.evaluate((id) => {
-        const o = document.getElementById(`o-${id}-a`).closest(".opt");
-        scrollBy(0, o.getBoundingClientRect().top - 100);
-        const r = o.getBoundingClientRect();
-        return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), hdr: Math.round(document.querySelector(".hdr").getBoundingClientRect().bottom), bar: Math.round(document.querySelector(".bar").getBoundingClientRect().top) };
-      }, it.id);
-    });
-    assert.ok(m.y > 0 && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A was not placed in view with the page scrolled: ${JSON.stringify(m)}`);
-    assertFocusOnFirstPick(at, it, "a");
-    assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: Enter on Take my pick scrolled the page`);
+// `gap` is the px from the header's bottom to option A's top. A scroll that moves the page, even by 10px, fails.
+const stillAfterTake = async (t, it, width, gap, buttonInView) => {
+  const page = await open(t, { items: [it, ...FILL], viewport: { width, height: 800 } }); if (!page) return;
+  let m;
+  const at = await enterTakePick(page, it, async () => {
+    m = await page.evaluate(({ id, gap }) => {
+      const hdr = document.querySelector(".hdr").getBoundingClientRect().bottom, bar = document.querySelector(".bar").getBoundingClientRect().top;
+      const o = document.getElementById(`o-${id}-a`).closest(".opt");
+      scrollBy(0, o.getBoundingClientRect().top - (hdr + gap));
+      const r = o.getBoundingClientRect(), b = document.getElementById("b-take-" + id).getBoundingClientRect();
+      return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), btnTop: Math.round(b.top), btnBottom: Math.round(b.bottom), hdr: Math.round(hdr), bar: Math.round(bar) };
+    }, { id: it.id, gap });
   });
+  assert.ok(m.y > 0 && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A was not placed in view with the page scrolled: ${JSON.stringify(m)}`);
+  if (buttonInView) assert.ok(m.btnTop >= m.hdr && m.btnBottom <= m.bar, `${it.id}: Take my pick was not placed in view: ${JSON.stringify(m)}`);
+  assertFocusOnFirstPick(at, it, "a");
+  assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: Enter on Take my pick scrolled the page`);
+};
+// Option A starts 56px under the 44px header, so 100px from the top of the screen: whole and clear of the 64px scroll margin. A scroll that centres it moves the page.
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(TAKE_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 56, false));
+}
+// Option A is fully visible 10px under the header, inside the 64px scroll margin, and Take my pick is in view too. These cards hold two options, so both fit at 390 wide.
+const NEAR_CARDS = {
+  "pick-one": () => mk("take-near", 45, { pick: "a" }),
+  "multi A and B": () => multi("take-near-multi", 46, { options: COLOURS.slice(0, 2), pick: ["a", "b"] }),
+};
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(NEAR_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option sits 10px under the header, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 10, true));
 }
 
 test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
