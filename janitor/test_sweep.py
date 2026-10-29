@@ -3730,9 +3730,11 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
     ).replace("__JANITOR__", repr(os.path.dirname(os.path.abspath(__file__))))  # repr: Windows backslashes
 
     # The bound case's three waits in seconds, scaled down from agent_end_reap's LOG_WAIT_SECONDS, HOOK_BUDGET
-    # and LOG_DONE_BY. A full wait outlasts the done deadline, which outlasts the start row's budget, so each
-    # clock deadline cuts a wait short before the per-call wait would.
-    BOUND_WAIT, BOUND_BUDGET, BOUND_DONE_BY = 10.0, 1.0, 2.0
+    # and LOG_DONE_BY. The budget is shorter than the done deadline, and one full wait is longer than both
+    # together (WAIT > BUDGET + DONE_BY), so each way a build can break the shared hook clock ends at a
+    # different time: a done row timed from its own call at BUDGET + DONE_BY, a row that ignores the clock at
+    # WAIT or more.
+    BOUND_WAIT, BOUND_BUDGET, BOUND_DONE_BY = 10.0, 2.0, 3.0
 
     @classmethod
     def hook_bound_child(cls, nt=None):
@@ -3758,11 +3760,13 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
     def test_a_held_log_lock_keeps_the_hook_inside_its_bound(self):
         """The hook's bound with the payload log lock held for the whole run, where the per-call waits live:
         the Windows branch of _log_lock. Both log calls share the hook's clock, so the hook ends at its done
-        deadline (LOG_DONE_BY, scaled to BOUND_DONE_BY). A hook that lets either call wait its own full
-        LOG_WAIT_SECONDS (BOUND_WAIT) runs at least that long. The hook must end before the midpoint of the
-        two, which a loaded host cannot cross going up and a broken build cannot stay under. It must exit 0,
-        name the dropped write on stderr, and lose only its own run's rows. Rows from other runs, written
-        before the holder takes the lock, must all survive."""
+        deadline (LOG_DONE_BY, scaled to BOUND_DONE_BY). A done row timed from its own call, after the start
+        row's wait (HOOK_BUDGET, BOUND_BUDGET), ends at BOUND_BUDGET + BOUND_DONE_BY at the earliest. A call
+        that waits its own full LOG_WAIT_SECONDS (BOUND_WAIT) takes at least that. The hook must end before
+        the midpoint between the shared-clock time and the first of those. That leaves half the gap
+        (BOUND_BUDGET / 2 seconds) for host load, and no broken build ends under it. It must exit 0, name
+        the dropped write on stderr, and lose only its own run's rows. Rows from other runs, written before
+        the holder takes the lock, must all survive."""
         folder = tempfile.mkdtemp(prefix="reap_bound_", dir=ROOT)
         self.addCleanup(shutil.rmtree, folder, True)
         state = os.path.join(folder, "state")
@@ -3786,12 +3790,12 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         marks = [line.split() for line in proc.stdout.splitlines() if line.startswith("ELAPSED ")]
         self.assertTrue(marks, "the hook printed no ELAPSED line: %s" % proc.stderr)
         elapsed = float(marks[-1][1])
-        # Timing first. The child's timer starts before main()'s, and the done row waits to its deadline, so
-        # the hook never ends before BOUND_DONE_BY. Two full per-call waits take twice BOUND_WAIT.
-        limit = (self.BOUND_DONE_BY + self.BOUND_WAIT) / 2
-        self.assertLess(elapsed, limit, "the hook ran %.2f s: its done deadline is %.1f s, one full lock wait "
-                        "is %.1f s, and a log call that ignores the hook's clock waits that long"
-                        % (elapsed, self.BOUND_DONE_BY, self.BOUND_WAIT))
+        # Timing first. The child's timer starts before main()'s, and each wait loops until its own deadline,
+        # so a shared-clock hook never ends before BOUND_DONE_BY and a broken one never before its own sum.
+        limit = self.BOUND_DONE_BY + self.BOUND_BUDGET / 2
+        self.assertLess(elapsed, limit, "the hook ran %.2f s: the shared hook clock ends it at %.1f s, a done "
+                        "row timed from its own call at %.1f s, a log call that ignores the clock at %.1f s or more"
+                        % (elapsed, self.BOUND_DONE_BY, self.BOUND_BUDGET + self.BOUND_DONE_BY, self.BOUND_WAIT))
         self.assertGreaterEqual(elapsed, self.BOUND_DONE_BY,
                                 "the hook ended %.2f s in, before its done deadline (%.1f s)"
                                 % (elapsed, self.BOUND_DONE_BY))
