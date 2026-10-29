@@ -1,0 +1,9 @@
+{
+  "title": "A lane's guard reads shiv's Opus grants from the roadmap step",
+  "phase": "organize",
+  "status": "doing",
+  "order": 103.3389992,
+  "why": "A grant typed in one session never reaches a lane that needs it, so the lane blocks until shiv types it again.",
+  "note": "Ruling, Oct 29 13:44 CDT (shiv, in chat, on waiting-page item 67): \"Grants living in roadmap actually does make a lot of sense -- i lean towards that route.\" That is pick a: a grant is recorded on the roadmap step with shiv's words and time, the lane's guard reads it, and the coordinator scans for lanes blocked on a grant. Not b (shiv types it in each lane) and not c (the guard accepts what a brief claims; against uniform ruling t18). Lane started Oct 29 13:45 CDT (coordinator; session_013NEJL3..., tag cs-step:opus-grant-on-step). Placed ahead of c201's remaining parts (triage 12, Oct 29): the coordinator started it now. Item 67 closed on the chat answer.",
+  "updatedAt": "2026-10-29T18:55:00Z"
+}
