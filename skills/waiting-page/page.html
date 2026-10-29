@@ -501,7 +501,7 @@ const eff = (it) => {
 };
 function draftReady(it) {
   const d = eff(it); if (!d || blocked(it)) return false;
-  if (it.kind === "task") return !!d.done;
+  if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
   return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
 }
@@ -568,7 +568,7 @@ function choose(it, key) {
 function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
-  if (it.kind === "decision") body.choice = d.choice || NONE; else body.done = true;
+  if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
   return body;
 }
 const edited = () => { state.barNote = ""; state.copyOffer = false; };
@@ -579,7 +579,7 @@ function linkIcon() { const d = document.createElement("span"); d.innerHTML = '<
 function readyText(it) {
   const d = eff(it) || {};
   if (blocked(it)) return "This item cannot be sent.";
-  if (it.kind === "task") return d.done ? "Ready to send: done." : "";
+  if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
@@ -652,7 +652,7 @@ function rcOf(it) {
 function receipt(it) {
   const sv = state.answers[it.id], rc = rcOf(it);
   let what;
-  if (it.kind === "task") what = "Marked done";
+  if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
   else if (sv.choice === NONE) what = "None of these";
   else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
   return h("div", { class: "receipt" },
@@ -928,7 +928,7 @@ const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]
 const nList = (ns) => { const a = ns.slice().sort((x, y) => x - y).map((n) => "No. " + n); return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; };
 function noticeText(entries, head, tail) {
   const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
-  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : "")); }).join(", ");
+  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
   let text = head + " Owners: " + owners + ". Items: " + line + (tail || ".");
   const enc = new TextEncoder();
   while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
@@ -980,7 +980,7 @@ async function sendAll() {
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from No. " + it.n : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id] });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id]; delete state.noteOpen[it.id];
-      entries.push({ n: it.n, choice: body.choice, note: body.note, owner: it.owner });
+      entries.push({ n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
@@ -1057,7 +1057,12 @@ function answerLine() {
     const a = state.answers[it.id], d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
-    else if (it.kind === "task" && (d.done || (a && a.done))) parts.push(it.n + " done" + (note ? " (" + note + ")" : ""));
+    else if (it.kind === "task") {
+      const live = !!state.draft[it.id] && draftReady(it); // only a draft that would send replaces the saved answer
+      const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : (a && a.note);
+      if (done) parts.push(it.n + " done" + (tnote ? " (" + tnote + ")" : ""));
+      else if ((tnote || "").trim()) parts.push(it.n + " note, not done (" + tnote + ")");
+    }
   });
   return parts.join(", ");
 }
