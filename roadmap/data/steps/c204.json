@@ -1,9 +1,9 @@
 {
- "title": "waiting page: a card's picture scrolls inside its box and opens on the area under review",
- "phase": "cleanup",
- "status": "todo",
- "order": 103.338395,
- "why": "Your word, Oct 28 17:50 CDT (waiting-page item 55 note): if the image to be shown is larger than its container, it should scroll inside that container, and an option's picture can be sized or zoomed to the area that needs review.",
- "note": "Next cloud lane, claude-settings only, in skills/waiting-page. Today a card picture is clipped (overflow hidden, inert) and fitted to its box by fitFrame; a mockup that names a focus element is already zoomed to that element; the View sheet scrolls. Want: when the focused area is bigger than the card box, the card picture scrolls inside the box (with a visible cue), and the picture opens at the area under review. Keep the 480 px cap, the 120 px minimum width and 32 px chips (items 54 to 56, all a). Red first on a mockup taller than its cap whose lower part is unreachable in the card. Scope it with a designer first: the pictures are drawn by the designer agent and the change touches a screen, so a designer before the builder and a design reviewer after. Port: yes, the skill installs everywhere. Needs no answer. Placed ahead of c186 (triage 12, Oct 28).",
- "updatedAt": "2026-10-28T23:25:00Z"
+  "title": "waiting page: a card's picture scrolls inside its box and opens on the area under review",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.338395,
+  "why": "Your word, Oct 28 17:50 CDT (waiting-page item 55 note): if the image to be shown is larger than its container, it should scroll inside that container, and an option's picture can be sized or zoomed to the area that needs review.",
+  "note": "Next cloud lane, claude-settings only, in skills/waiting-page. Today a card picture is clipped (overflow hidden, inert) and fitted to its box by fitFrame; a mockup that names a focus element is already zoomed to that element; the View sheet scrolls. Want: when the focused area is bigger than the card box, the card picture scrolls inside the box (with a visible cue), and the picture opens at the area under review. Keep the 480 px cap, the 120 px minimum width and 32 px chips (items 54 to 56, all a). Red first on a mockup taller than its cap whose lower part is unreachable in the card. Scope it with a designer first: the pictures are drawn by the designer agent and the change touches a screen, so a designer before the builder and a design reviewer after. Port: yes, the skill installs everywhere. Needs no answer. Placed ahead of c186 (triage 12, Oct 28). Lane started Oct 29 13:43 CDT (coordinator message).",
+  "updatedAt": "2026-10-29T18:55:00Z"
 }
