@@ -1,0 +1,9 @@
+{
+  "title": "The batch runner merges with no owner step per session; the merge tool refuses lanes",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33761,
+  "why": "Ruling, Oct 29 16:54 CDT (shiv, chat, via coordinator): the batch runner must merge with no per-session owner step and no widening.",
+  "note": "Fix (coordinator's brief): a narrow allow rule for the merge tool's confirm form, plus a role check inside the merge tool that refuses a lane session. Home: decision session-tiers. Lane merge-role-allow started Oct 29 16:55 CDT (coordinator). Red first: the batch runner's confirm form is stopped today, and a lane's is still refused after. Needs no answer. Port: yes, the merge tool is shared. Placed after coordinator-merge-grant (triage 12, Oct 29).",
+  "updatedAt": "2026-10-29T22:24:00Z"
+}
