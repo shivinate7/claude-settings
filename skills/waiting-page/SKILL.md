@@ -115,11 +115,12 @@ The writer runs this at each wake and before each republish. A lane never runs i
 is main's `page.html` with the live `designData` kept, never the live page's own code (owner,
 2026-10-29 14:47 CDT; decision `questions-go-to-owner`).
 
-1. Read the page with `Artifact` action `read`. Save the text to a file in the scratchpad.
+1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
+   A read that gives a summary, not the raw page, is `unknown`.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out>`. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
-   read. Code outside main's page, other than the document skeleton, is `behind`.
+   read. Code outside main's page, other than the host's document skeleton, is `behind`.
 3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` kept. When you also add a design, do it in
    `<out>` first and republish once ("Add a design").
