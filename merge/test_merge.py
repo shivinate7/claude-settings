@@ -20,7 +20,7 @@ import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 # CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
-# merge-role gate and make a role writer write the live session's role file. A case that needs one sets it (MergeRoleGate.cloud).
+# merge-role check and make a role writer write the live session's role file. A case that needs one sets it (MergeRoleCheck.cloud).
 for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
     os.environ.pop(_name, None)
 
@@ -8970,13 +8970,13 @@ class BatchBrake(Env):
         self.assertEqual(len(lines), 1, out)
         self.assertIn("#2", lines[0])
 
-ROLE_SESSION = "cse_role_gate_test"
+ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
 
-class MergeRoleGate(Env):
+class MergeRoleCheck(Env):
     """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is coordinator or batch-runner.
     The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
-    The gate refuses before any host read and before the lock. Preview, --unlock and a run outside the cloud are not gated.
+    The role check refuses before any host read and before the lock. Preview, --unlock and a run outside the cloud are not checked.
     Every case runs with CLAUDE_CONFIG_DIR in this run's folder and a made-up session id, so no case touches the live role file."""
 
     @classmethod
@@ -9038,18 +9038,18 @@ class MergeRoleGate(Env):
         return rc, out.getvalue(), err.getvalue()
 
     def assert_refused(self, **env):
-        """`merge 7 --confirm` stopped at the gate: rc 1, a line on stderr, no host read, no lock or push, no crash."""
+        """`merge 7 --confirm` stopped at the role check: rc 1, a line on stderr, no host read, no lock or push, no crash."""
         refs, reads = self.refs(), len(self.host.pr_calls)
         rc, out, err = self.run_main("7", "--confirm", **env)
         self.assertEqual(rc, 1, out + err)
-        self.assertEqual(len(self.host.pr_calls), reads, "the run read the host before the gate refused")
-        self.assertEqual(self.refs(), refs, "the run took the lock or pushed before the gate refused")
+        self.assertEqual(len(self.host.pr_calls), reads, "the run read the host before the role check refused")
+        self.assertEqual(self.refs(), refs, "the run took the lock or pushed before the role check refused")
         self.assertTrue(err.strip(), "the refusal said nothing on stderr")
         self.assertNotIn("--confirm", err)
         self.assertNotIn("Traceback", err)
 
     def assert_reaches_host(self, *argv, **env):
-        """The run got past any gate to the host read. The PR is closed, so the run then stops with that one line and merges nothing."""
+        """The run got past any role check to the host read. The PR is closed, so the run then stops with that one line and merges nothing."""
         self.host.pr_state = "CLOSED"
         reads = len(self.host.pr_calls)
         rc, out, err = self.run_main(*argv, **env)
@@ -9098,7 +9098,7 @@ class MergeRoleGate(Env):
             os.makedirs(self.role_file)  # a folder at the path: open() fails on every platform, as for an unreadable file (chmod proves nothing as root)
             self.assertIsNone(merge.read_merge_role())
 
-    # ---- the gate refuses
+    # ---- the role check refuses
     def test_no_role_file_refuses_before_any_host_read_or_lock(self):
         self.assert_refused()
 
@@ -9161,7 +9161,7 @@ class MergeRoleGate(Env):
         self.assertNotIn("--confirm", err)
         self.assertNotRegex(err, r"\bmerge\s+[<\d]")
 
-    # ---- the gate lets through
+    # ---- the role check lets through
     def test_a_coordinator_session_merges(self):
         self.put_role("coordinator")
         rc, out, err = self.run_main("7", "--confirm")
@@ -9174,7 +9174,7 @@ class MergeRoleGate(Env):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
-    # ---- not gated: these pass before the gate exists, and stop a gate that is too wide
+    # ---- not checked: these pass before the role check exists, and stop a check that is too wide
     def test_a_preview_in_the_cloud_needs_no_role(self):
         for role in (None, "lane"):
             with self.subTest(role=role):
@@ -9218,7 +9218,7 @@ class MergeRoleGate(Env):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(self.read_role_file(), (ROLE_SESSION, "batch-runner"))
 
-    def test_a_role_the_writer_recorded_passes_the_gate(self):
+    def test_a_role_the_writer_recorded_passes_the_check(self):
         rc, out, err = self.run_main("--role", "coordinator")
         self.assertEqual(rc, 0, out + err)
         rc, out, err = self.run_main("7", "--confirm")
