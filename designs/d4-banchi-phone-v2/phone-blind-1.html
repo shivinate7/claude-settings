@@ -1,0 +1,1354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Phone Blind 1</title>
+<style>
+/* Colour by role. Values are this lane's own choice: tokens.md gives roles, not values. */
+:root {
+  --font: -apple-system, system-ui, sans-serif;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px;
+  --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --radius: 8px;
+  --page: #e9e6e0; --bg: #f7f5f1; --surface: #fffefc; --surface-2: #ece8e1;
+  --text: #1c1a17; --text-2: #5c574f; --line: #d8d2c7;
+  --accent: #1d5c55; --on-accent: #ffffff; --accent-soft: #dcebe7;
+  --live: #2a7a52; --draft: #5c574f; --sold: #8a5212; --warn: #8c5a00;
+  --danger: #a3342b; --danger-soft: #f6e2df;
+  --note: #a1307a; --hatch: rgba(28, 26, 23, .14); --glass: rgba(255, 254, 252, .9);
+  --kbd: #d4d0c9; --key: #fdfcfa; --key-2: #b9b4ab;
+  --cam: #1f1d1a; --cam-2: #3a3631; --on-cam: #f7f5f1; --on-cam-2: #cfc8bd;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0b0a09; --bg: #141311; --surface: #1d1b19; --surface-2: #2a2724;
+    --text: #f2efea; --text-2: #b3ab9f; --line: #3b3732;
+    --accent: #7cc7b9; --on-accent: #0b1f1c; --accent-soft: #1f3a36;
+    --live: #6fd3a0; --draft: #b3ab9f; --sold: #e2a660; --warn: #e8b860;
+    --danger: #f2958a; --danger-soft: #3a1f1c;
+    --note: #f08ccf; --hatch: rgba(242, 239, 234, .16); --glass: rgba(29, 27, 25, .9);
+    --kbd: #2c2a27; --key: #4b4742; --key-2: #3a3733;
+    --cam: #0f0e0d; --cam-2: #2a2724; --on-cam: #f2efea; --on-cam-2: #c9c1b5;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0b0a09; --bg: #141311; --surface: #1d1b19; --surface-2: #2a2724;
+  --text: #f2efea; --text-2: #b3ab9f; --line: #3b3732;
+  --accent: #7cc7b9; --on-accent: #0b1f1c; --accent-soft: #1f3a36;
+  --live: #6fd3a0; --draft: #b3ab9f; --sold: #e2a660; --warn: #e8b860;
+  --danger: #f2958a; --danger-soft: #3a1f1c;
+  --note: #f08ccf; --hatch: rgba(242, 239, 234, .16); --glass: rgba(29, 27, 25, .9);
+  --kbd: #2c2a27; --key: #4b4742; --key-2: #3a3733;
+  --cam: #0f0e0d; --cam-2: #2a2724; --on-cam: #f2efea; --on-cam-2: #c9c1b5;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--page); color: var(--text); font-family: var(--font); }
+button { font: inherit; color: inherit; }
+
+/* Dynamic Type text styles, Large (default) size, from the Apple typography page. */
+.lt  { font: 700 34px/41px var(--font); }
+.t1  { font: 400 28px/34px var(--font); }
+.t2  { font: 700 22px/28px var(--font); }
+.t3  { font: 600 20px/25px var(--font); }
+.hl  { font: 600 17px/22px var(--font); }
+.bd  { font: 400 17px/22px var(--font); }
+.co  { font: 400 16px/21px var(--font); }
+.sh  { font: 400 15px/20px var(--font); }
+.fn  { font: 400 13px/18px var(--font); }
+.cp1 { font: 400 12px/16px var(--font); }
+.cp2 { font: 400 11px/13px var(--font); }
+.mut { color: var(--text-2); }
+.num { font-variant-numeric: tabular-nums; }
+.b   { font-weight: 700; }
+p, h1, h2, h3, h4 { margin: 0; }
+
+/* ---------- The page around the frames ---------- */
+.doc { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-6) var(--space-4) var(--space-10); }
+.banner { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 2px dashed var(--note); border-radius: var(--radius); background: var(--surface); }
+.banner strong { color: var(--note); }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.tools .lbl { font: 600 13px/18px var(--font); color: var(--text-2); }
+.tbtn { min-height: 44px; min-width: 44px; padding: 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); cursor: pointer; }
+.tbtn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.index { border-collapse: collapse; font: 400 15px/20px var(--font); }
+.index th, .index td { padding: var(--space-1) var(--space-2); text-align: start; border-bottom: 1px solid var(--line); }
+.index a { color: var(--accent); display: inline-flex; min-height: 44px; align-items: center; }
+.concept { display: flex; flex-direction: column; gap: var(--space-6); }
+.chead { display: flex; flex-direction: column; gap: var(--space-2); max-width: 72rem; }
+.chead .row1 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.state { display: flex; flex-direction: column; gap: var(--space-3); }
+.state > h3 { font: 600 20px/25px var(--font); }
+.poses { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-6); }
+figure { margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+figcaption { font: 600 13px/18px var(--font); color: var(--text-2); }
+
+/* "New:" marks. Annotation only, not part of the app. */
+.nw { outline: 2px dashed var(--note); outline-offset: -2px; position: relative; }
+.nw.in::after { top: 2px; }
+.nw::after { content: attr(data-new); position: absolute; top: -8px; right: 6px; z-index: 5; font: 600 11px/13px var(--font); color: var(--note); background: var(--surface); border: 1px dashed var(--note); border-radius: 4px; padding: 2px 4px; pointer-events: none; }
+.nolabels .nw { outline: none; }
+.nolabels .nw::after { display: none; }
+
+/* ---------- Device frames: 1 CSS px = 1 pt ---------- */
+.dev { position: relative; overflow: hidden; background: var(--bg); color: var(--text); border-radius: 24px; box-shadow: 0 0 0 1px var(--line), 0 0 0 6px var(--surface-2); }
+.folded   { width: 466px; height: 678px; }
+.unfolded { width: 951px; height: 644px; }
+/* Folded: safe content 382 x 644, trailing inset 84, bottom inset 34 (brief, measured 2026-10-27). No top inset given. */
+.safe { position: absolute; top: env(safe-area-inset-top, 0px); left: env(safe-area-inset-left, 0px); width: 382px; height: 644px; display: flex; flex-direction: column; }
+.ins-r { position: absolute; top: 0; right: 0; bottom: 0; width: max(env(safe-area-inset-right, 0px), 84px); background: repeating-linear-gradient(45deg, transparent 0 7px, var(--hatch) 7px 8px); display: flex; align-items: center; justify-content: center; }
+.ins-b { position: absolute; left: 0; bottom: 0; width: 382px; height: max(env(safe-area-inset-bottom, 0px), 34px); display: flex; align-items: center; justify-content: center; }
+.ins-r span, .fold span { writing-mode: vertical-rl; font: 400 11px/13px var(--font); color: var(--text-2); }
+.home { width: 134px; height: 5px; border-radius: 3px; background: var(--text); opacity: .8; }
+/* Keyboard open. Folded: content about 466 x 250 to 289; drawn at 250. Unfolded: 951 x 263. */
+.kfold { width: 466px; height: 250px; }
+.kopen { position: absolute; left: 0; right: 0; }
+.folded .kopen { top: 250px; bottom: 0; }
+.unfolded .kopen { top: 263px; bottom: 0; }
+/* Unfolded: fold strip 40 pt wide at 455.5 to 495.5. Height not given: drawn at 644. */
+.pane { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; background: var(--bg); }
+.pl { left: 0; width: 455.5px; }
+.pr { left: 495.5px; width: 455.5px; border-inline-start: 1px solid var(--line); }
+.unfolded.kb .pane { bottom: auto; height: 263px; }
+.fold { position: absolute; top: 0; bottom: 0; left: 455.5px; width: 40px; background: repeating-linear-gradient(-45deg, transparent 0 7px, var(--hatch) 7px 8px); display: flex; align-items: center; justify-content: center; }
+
+/* ---------- App parts (what SwiftUI gives) ---------- */
+.bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 44px; padding: 0 var(--space-2); flex: none; }
+.bar > :first-child { justify-self: start; }
+.bar > :last-child { justify-self: end; }
+.nb { display: inline-flex; align-items: center; gap: 2px; min-height: 44px; min-width: 44px; padding: 0 var(--space-2); background: none; border: 0; color: var(--accent); font: 400 17px/22px var(--font); }
+.nb.dim { color: var(--text-2); opacity: .6; }
+.nb.strong { font-weight: 600; }
+.head { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-4) var(--space-3); flex: none; }
+.fill { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.center { align-items: center; justify-content: center; text-align: center; padding: 0 var(--space-8); }
+.dock { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-4) var(--space-3); flex: none; }
+.dock .fn { text-align: center; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 50px; min-width: 44px; padding: 0 var(--space-4); border-radius: var(--radius); border: 0; font: 600 17px/22px var(--font); }
+.btn.p { background: var(--accent); color: var(--on-accent); }
+.btn.s { background: var(--accent-soft); color: var(--accent); }
+.btn.q { background: none; color: var(--accent); }
+.btn.off { opacity: .45; }
+.btn.sm { min-height: 44px; font-size: 15px; }
+.btn.wide { width: 100%; }
+.duo { display: flex; gap: var(--space-2); }
+.duo > * { flex: 1; }
+.ic { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic.sm { width: 18px; height: 18px; }
+
+/* Tab bar: floats above content at the bottom (Apple tab-bars page). */
+.tabbar { display: flex; justify-content: space-around; align-items: center; margin: 0 var(--space-4) var(--space-2); min-height: 56px; border-radius: 28px; background: var(--glass); box-shadow: 0 0 0 1px var(--line), 0 4px 16px rgba(0, 0, 0, .12); flex: none; }
+.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 64px; min-height: 48px; padding: 0; border: 0; background: none; color: var(--text-2); font: 500 11px/13px var(--font); }
+.tab.on { color: var(--accent); }
+
+/* Lists */
+.list { display: flex; flex-direction: column; background: var(--surface); border-block: 1px solid var(--line); }
+.row { display: flex; align-items: center; gap: var(--space-3); min-height: 64px; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row.sel { background: var(--accent-soft); }
+.row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.row .end { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
+.row .slot { flex: none; width: 48px; white-space: nowrap; font: 600 15px/20px var(--font); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.why { color: var(--warn); }
+.bad { color: var(--danger); }
+.cols { display: grid; grid-template-columns: 48px 12px 1fr 36px 64px; align-items: center; gap: var(--space-3); }
+.colhead { padding: var(--space-2) var(--space-4); font: 600 12px/16px var(--font); color: var(--text-2); border-bottom: 1px solid var(--line); background: var(--bg); }
+
+/* Status by shape: one legend per screen names them. */
+.st { width: 12px; height: 12px; display: inline-block; flex: none; }
+.st.live { background: var(--live); border-radius: 50%; }
+.st.draft { border: 2px solid var(--draft); border-radius: 50%; }
+.st.sold { background: var(--sold); border-radius: 2px; }
+.st.chk { background: var(--warn); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.st.fail { background: var(--danger); clip-path: polygon(20% 0, 50% 30%, 80% 0, 100% 20%, 70% 50%, 100% 80%, 80% 100%, 50% 70%, 20% 100%, 0 80%, 30% 50%, 0 20%); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); font: 400 12px/16px var(--font); color: var(--text-2); }
+.legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+.toolrow { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 var(--space-4); min-height: 44px; flex: none; }
+.chip { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; padding: 0 var(--space-3); border: 0; background: none; color: var(--accent); font: 600 15px/20px var(--font); }
+.chip span.pill { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-radius: 16px; background: var(--accent-soft); }
+.chk-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid var(--line); background: none; flex: none; }
+.chk-btn.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* Skeleton: keeps the loaded size, so nothing moves when data lands. */
+.sk { display: block; background: var(--surface-2); border-radius: 4px; }
+.sk.l1 { height: 18px; width: 70%; }
+.sk.l2 { height: 14px; width: 50%; }
+.sk.e1 { height: 18px; width: 52px; }
+.sk.e2 { height: 14px; width: 40px; }
+
+.prog { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.prog i { display: block; height: 100%; background: var(--accent); }
+.runbox { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.runbox .top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+
+.alert { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius); background: var(--danger-soft); }
+.alert .say { display: flex; gap: var(--space-2); align-items: flex-start; }
+details.disc summary { min-height: 44px; display: flex; align-items: center; gap: var(--space-1); color: var(--accent); font: 400 15px/20px var(--font); cursor: pointer; list-style: none; }
+details.disc summary::-webkit-details-marker { display: none; }
+.meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+
+/* Text field (Apple text-fields page: a label beside the placeholder, a Clear button at the trailing end). */
+.field { display: flex; flex-direction: column; gap: var(--space-1); padding: 0 var(--space-4); }
+.input { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-2) 0 var(--space-3); border-radius: var(--radius); background: var(--surface-2); font: 400 17px/22px var(--font); }
+.input .caret { width: 2px; height: 22px; background: var(--accent); margin-inline-start: -6px; }
+.input .clr { margin-inline-start: auto; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+
+/* Keyboard: drawn plain. The system draws the real one. */
+.keys { display: flex; flex-direction: column; gap: 10px; padding: 8px 4px; background: var(--kbd); height: 100%; }
+.krow { display: flex; justify-content: center; gap: 6px; }
+.k { flex: 1 1 0; max-width: 40px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: var(--key); font: 400 20px/25px var(--font); box-shadow: 0 1px 0 var(--key-2); }
+.k.fn2 { max-width: 64px; background: var(--key-2); font-size: 15px; }
+.k.sp { max-width: none; flex: 5 1 0; font-size: 15px; }
+.k.go { max-width: 96px; background: var(--accent); color: var(--on-accent); font-size: 15px; }
+.unfolded .k { max-width: 72px; }
+.unfolded .k.sp { max-width: none; }
+.keys.dec .k { max-width: none; font-size: 25px; }
+
+/* Camera view: a camera feed is dark in both themes. */
+.cam { position: relative; background: radial-gradient(120% 90% at 50% 40%, var(--cam-2), var(--cam)); color: var(--on-cam); overflow: hidden; }
+.cam .guide { position: absolute; left: 50%; top: 50%; width: 120px; height: 168px; transform: translate(-50%, -50%); border: 2px solid var(--on-cam); border-radius: 8px; opacity: .85; }
+.cam .guide.read { box-shadow: 0 0 0 4px rgba(124, 199, 185, .45); }
+.cam .tag { position: absolute; display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); border-radius: var(--radius); background: rgba(0, 0, 0, .55); color: var(--on-cam); font: 400 13px/18px var(--font); }
+.cam .mut2 { color: var(--on-cam-2); }
+
+/* Shelf boxes (C2) */
+.shelf { display: flex; flex-direction: column; gap: var(--space-3); padding: 0 var(--space-4); }
+.bx { display: flex; flex-direction: column; gap: var(--space-1); min-height: 44px; }
+.bx .lab { display: flex; justify-content: space-between; align-items: baseline; }
+.bar2 { position: relative; height: 28px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); overflow: visible; }
+.bar2 .fillx { position: absolute; inset: 0; border-radius: 3px; }
+.bar2::after { content: ""; position: absolute; inset: 0; border-radius: 3px; background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), var(--bg) calc(10% - 1px) 10%); opacity: .7; pointer-events: none; }
+.bar2.big { height: 40px; }
+.bx.sel .bar2 { box-shadow: 0 0 0 2px var(--accent); }
+.drafts { position: absolute; top: 0; bottom: 0; border-radius: 2px; box-shadow: inset 0 0 0 2px var(--draft); }
+.pin { position: absolute; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font: 700 12px/22px var(--font); text-align: center; z-index: 2; box-shadow: 0 0 0 2px var(--surface); }
+.mark { position: absolute; top: -6px; bottom: -6px; width: 3px; margin-left: -1px; background: var(--text); border-radius: 2px; z-index: 2; }
+.bracket { position: absolute; bottom: -8px; height: 4px; background: var(--accent); border-radius: 2px; }
+.unk { background: repeating-linear-gradient(45deg, var(--surface-2) 0 6px, var(--surface) 6px 12px); opacity: .7; }
+
+/* C3: the desk and the instrument */
+.panel { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); margin: 0 var(--space-3) var(--space-3); border-radius: 16px; background: var(--glass); color: var(--text); }
+.camfull { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; }
+.camtop { display: flex; justify-content: center; padding: var(--space-3) var(--space-4) 0; }
+.count { display: flex; align-items: baseline; gap: var(--space-2); }
+.deck { position: relative; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); margin: 0 var(--space-4); border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--line), 6px 6px 0 -1px var(--surface-2), 6px 6px 0 0 var(--line); }
+.photo { height: 120px; border-radius: var(--radius); background: radial-gradient(120% 90% at 50% 40%, var(--cam-2), var(--cam)); display: flex; align-items: center; justify-content: center; }
+.photo i { width: 60px; height: 84px; border: 2px solid var(--on-cam); border-radius: 6px; opacity: .8; }
+.ticket { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.route { display: flex; flex-direction: column; gap: var(--space-1); }
+.route div { display: flex; gap: var(--space-2); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--space-3); }
+.sec { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-4); }
+.place-big { display: flex; flex-direction: column; gap: 0; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-stack" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/></symbol>
+  <symbol id="i-order" viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8"/></symbol>
+  <symbol id="i-place" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-shelf" viewBox="0 0 24 24"><path d="M3 7h18M3 13h18M3 19h18M6 4v3M9 4v3M12 10v3M16 10v3M8 16v3M18 16v3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 7l2-3h4l2 3"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></symbol>
+  <symbol id="i-fold" viewBox="0 0 24 24"><path d="M4 5h7v14H4zM13 5h7v14h-7z"/></symbol>
+</svg>
+
+<main class="doc">
+  <div class="banner" role="note">
+    <p class="hl"><strong>Sample.</strong> No figure, name, price, order or place on this page is real.</p>
+    <p class="fn">Lane kind: blind. Lane phone-blind-1. Three concepts for one job: list a pre-sorted stack of trading card singles on TCGplayer with no per-card typing, and know the box and slot of every card. Each part is marked with a dashed "New:" label: a blind lane sees no current screen, so no part is marked "Today:".</p>
+    <p class="fn">Device: iPhone Duo, folded (outer screen), then iPhone Duo, unfolded (inner screen). 1 CSS px = 1 pt. Hatched areas are the trailing inset and the fold strip: no text or control sits on them.</p>
+  </div>
+
+  <div class="tools" role="group" aria-label="View">
+    <span class="lbl">Theme</span>
+    <button class="tbtn" data-theme-set="auto" type="button">Auto</button>
+    <button class="tbtn" data-theme-set="light" type="button">Light</button>
+    <button class="tbtn" data-theme-set="dark" type="button">Dark</button>
+    <span class="lbl">Options</span>
+    <button class="tbtn" data-hide="c1" type="button">Hide C1</button>
+    <button class="tbtn" data-hide="c2" type="button">Hide C2</button>
+    <button class="tbtn" data-hide="c3" type="button">Hide C3</button>
+    <button class="tbtn" id="lbls" type="button">Hide "New:" labels</button>
+    <a class="tbtn" href="#" id="showall" style="display:inline-flex;align-items:center;text-decoration:none">Show all states</a>
+  </div>
+
+  <table class="index" aria-label="Deep links">
+    <thead><tr><th>Concept</th><th>Empty</th><th>Loading</th><th>Full</th><th>Error</th><th>Keyboard</th><th>Order</th></tr></thead>
+    <tbody>
+      <tr><td>C1 Stack run</td><td><a href="#s=c1-empty">c1-empty</a></td><td><a href="#s=c1-loading">c1-loading</a></td><td><a href="#s=c1-full">c1-full</a></td><td><a href="#s=c1-error">c1-error</a></td><td><a href="#s=c1-keyboard">c1-keyboard</a></td><td><a href="#s=c1-order">c1-order</a></td></tr>
+      <tr><td>C2 Shelf</td><td><a href="#s=c2-empty">c2-empty</a></td><td><a href="#s=c2-loading">c2-loading</a></td><td><a href="#s=c2-full">c2-full</a></td><td><a href="#s=c2-error">c2-error</a></td><td><a href="#s=c2-keyboard">c2-keyboard</a></td><td><a href="#s=c2-order">c2-order</a></td></tr>
+      <tr><td>C3 Only what needs you</td><td><a href="#s=c3-empty">c3-empty</a></td><td><a href="#s=c3-loading">c3-loading</a></td><td><a href="#s=c3-full">c3-full</a></td><td><a href="#s=c3-error">c3-error</a></td><td><a href="#s=c3-keyboard">c3-keyboard</a></td><td><a href="#s=c3-order">c3-order</a></td></tr>
+    </tbody>
+  </table>
+
+<!-- ======================================================================
+     C1  STACK RUN
+     ====================================================================== -->
+<section class="concept" id="c1" aria-labelledby="c1-h">
+  <div class="chead">
+    <div class="row1"><h2 class="t2" id="c1-h">C1 · Stack run</h2></div>
+    <p class="sh mut">Task first. A stack is the unit of work. Scan the stack, look only at the cards the app is not sure of, then list the whole stack with one press. Each card gets the next slot of the box in stack order. Tabs: Stacks, Orders, Places. First screen: Stacks.</p>
+  </div>
+
+  <!-- C1 empty -->
+  <div class="state" data-state="c1-empty">
+    <h3>Empty</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Stacks</h1></div>
+            <div class="fill center"><p class="bd mut">Your stacks show here after you scan one.</p></div>
+            <div class="dock"><button class="btn p wide" type="button"><svg class="ic"><use href="#i-cam"/></svg>Scan a stack</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Stacks</h1></div>
+            <div class="fill center"><p class="bd mut">Your stacks show here after you scan one.</p></div>
+            <div class="dock"><button class="btn p wide" type="button"><svg class="ic"><use href="#i-cam"/></svg>Scan a stack</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr"></div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C1 loading -->
+  <div class="state" data-state="c1-loading">
+    <h3>Loading: prices for a scanned stack</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Stacks</button><span class="hl">Stack 14</span><span></span></div>
+            <div class="runbox">
+              <div class="top"><p class="sh">Getting prices · <span class="num">64 of 186</span></p><button class="btn s sm" type="button"><svg class="ic sm"><use href="#i-stop"/></svg>Stop</button></div>
+              <div class="prog"><i style="width:34%"></i></div>
+            </div>
+            <div class="fill">
+              <div class="list">
+                <div class="row"><span class="sk" style="width:40px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span><span class="sk e2"></span></div></div>
+                <div class="row"><span class="sk" style="width:40px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span><span class="sk e2"></span></div></div>
+                <div class="row"><span class="sk" style="width:40px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span><span class="sk e2"></span></div></div>
+                <div class="row"><span class="sk" style="width:40px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span><span class="sk e2"></span></div></div>
+                <div class="row"><span class="sk" style="width:40px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span><span class="sk e2"></span></div></div>
+              </div>
+            </div>
+            <div class="dock"><button class="btn p wide off" type="button" aria-disabled="true">List 186 cards</button><p class="fn mut">Waits for prices.</p></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Stacks</button><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Stack 14</h1><p class="sh mut">186 read · Box 3, slots 41 to 226</p></div>
+            <div class="runbox">
+              <div class="top"><p class="sh">Getting prices · <span class="num">64 of 186</span></p><button class="btn s sm" type="button"><svg class="ic sm"><use href="#i-stop"/></svg>Stop</button></div>
+              <div class="prog"><i style="width:34%"></i></div>
+            </div>
+            <div class="fill"></div>
+            <div class="dock"><button class="btn p wide off" type="button" aria-disabled="true">List 186 cards</button><p class="fn mut">Waits for prices.</p></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="colhead cols"><span>Slot</span><span></span><span>Card</span><span>Cond.</span><span style="text-align:end">Price</span></div>
+            <div class="list">
+              <div class="row cols"><span class="sk" style="width:32px;height:18px"></span><span></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><span class="sk" style="width:28px;height:18px"></span><span class="sk e1" style="justify-self:end"></span></div>
+              <div class="row cols"><span class="sk" style="width:32px;height:18px"></span><span></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><span class="sk" style="width:28px;height:18px"></span><span class="sk e1" style="justify-self:end"></span></div>
+              <div class="row cols"><span class="sk" style="width:32px;height:18px"></span><span></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><span class="sk" style="width:28px;height:18px"></span><span class="sk e1" style="justify-self:end"></span></div>
+              <div class="row cols"><span class="sk" style="width:32px;height:18px"></span><span></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><span class="sk" style="width:28px;height:18px"></span><span class="sk e1" style="justify-self:end"></span></div>
+              <div class="row cols"><span class="sk" style="width:32px;height:18px"></span><span></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><span class="sk" style="width:28px;height:18px"></span><span class="sk e1" style="justify-self:end"></span></div>
+              <div class="row cols"><span class="sk" style="width:32px;height:18px"></span><span></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><span class="sk" style="width:28px;height:18px"></span><span class="sk e1" style="justify-self:end"></span></div>
+              <div class="row cols"><span class="sk" style="width:32px;height:18px"></span><span></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><span class="sk" style="width:28px;height:18px"></span><span class="sk e1" style="justify-self:end"></span></div>
+            </div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C1 full -->
+  <div class="state" data-state="c1-full">
+    <h3>Full: a stack scanned, two cards to check</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Stacks</button><span class="hl">Stack 14</span><span></span></div>
+            <div class="cam nw" data-new="New: scan strip, no tap per card" style="height:148px;flex:none">
+              <i class="guide read" style="width:76px;height:106px"></i>
+              <span class="tag" style="left:12px;top:12px">Reading</span>
+              <span class="tag" style="left:12px;bottom:12px">Saltwind Courier → Box 3 · 49</span>
+              <span class="tag" style="right:12px;bottom:12px"><b class="num">186</b>&nbsp;read</span>
+            </div>
+            <div class="toolrow">
+              <div class="legend"><span><i class="st draft"></i>draft</span><span><i class="st chk"></i>check</span></div>
+              <button class="chip" type="button"><span class="pill"><i class="st chk"></i>2 to check</span></button>
+            </div>
+            <div class="fill">
+              <div class="list">
+                <div class="row"><span class="slot">44</span><div class="main"><span class="hl ell">Quiet Lantern</span><span class="fn mut ell">AX1 103 · NM · Japanese</span></div><div class="end"><span class="bd num">$0.80</span><i class="st draft" title="draft"></i></div></div>
+                <div class="row"><span class="slot">45</span><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn why ell">Price far from recent sales</span></div><div class="end"><span class="bd num">$12.50</span><i class="st chk" title="check"></i></div></div>
+                <div class="row"><span class="slot">46–48</span><div class="main"><span class="hl ell">Marsh Strider ×3</span><span class="fn mut ell">AX1 151 · NM · English</span></div><div class="end"><span class="bd num">$0.25</span><i class="st draft" title="draft"></i></div></div>
+                <div class="row"><span class="slot">49</span><div class="main"><span class="hl ell">Saltwind Courier</span><span class="fn why ell">Two printings match</span></div><div class="end"><span class="bd num">$0.40</span><i class="st chk" title="check"></i></div></div>
+              </div>
+            </div>
+            <div class="dock"><button class="btn p wide nw" id="c1-list" data-new="New: one press lists the stack" type="button">List 184 cards</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Stacks</button><span></span><button class="nb" type="button"><svg class="ic"><use href="#i-cam"/></svg>Scan more</button></div>
+            <div class="head"><h1 class="lt">Stack 14</h1><p class="sh mut">186 read · Box 3, slots 41 to 226</p></div>
+            <div class="list nw" data-new="New: the stack in counts, each a filter">
+              <div class="row"><i class="st draft"></i><div class="main"><span class="bd">Ready as drafts</span></div><span class="bd num mut">184</span><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+              <div class="row sel"><i class="st chk"></i><div class="main"><span class="bd">To check</span><span class="fn mut">Stay as drafts until you pick</span></div><span class="bd num mut">2</span><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+            </div>
+            <div class="fill"></div>
+            <div class="dock"><button class="btn p wide" type="button">List 184 cards</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span class="hl">2 cards</span><button class="nb" type="button">Show all</button></div>
+            <div class="colhead cols"><span>Slot</span><span></span><span>Card</span><span>Cond.</span><span style="text-align:end">Price</span></div>
+            <div class="list">
+              <div class="row cols"><span class="slot">45</span><i class="st chk" title="check"></i><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · Foil · English · Game A</span><span class="fn why">Price far from recent sales ($3.80 to $4.40)</span></div><span class="sh">NM</span><span class="bd num" style="text-align:end">$12.50</span></div>
+              <div class="row cols"><span class="slot">49</span><i class="st chk" title="check"></i><div class="main"><span class="hl ell">Saltwind Courier</span><span class="fn mut ell">AX1 162 or P07 · English · Game A</span><span class="fn why">Two printings match</span></div><span class="sh">NM</span><span class="bd num" style="text-align:end">$0.40</span></div>
+            </div>
+            <div class="fill"></div>
+            <div class="dock"><div class="duo"><button class="btn s" type="button">Use recent $4.10</button><button class="btn s" type="button">Keep $12.50</button></div><p class="fn mut">Hollow Crown, slot 45</p></div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C1 error -->
+  <div class="state" data-state="c1-error">
+    <h3>Error: three listings did not go live</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Stacks</button><span class="hl">Stack 14</span><span></span></div>
+            <div class="toolrow">
+              <div class="legend"><span><i class="st live"></i>live</span><span><i class="st fail"></i>not live</span></div>
+              <button class="chip" type="button"><span class="pill"><i class="st fail"></i>3</span></button>
+            </div>
+            <div class="fill">
+              <div class="list">
+                <div class="row"><span class="slot">41</span><div class="main"><span class="hl ell">Ember Warden</span><span class="fn mut ell">AX1 012 · NM · Foil · English</span></div><div class="end"><span class="bd num">$4.10</span><i class="st live" title="live"></i></div></div>
+                <div class="row"><span class="slot">42</span><div class="main"><span class="hl ell">Tidecaller Adept</span><span class="fn mut ell">AX1 047 · NM · English</span></div><div class="end"><span class="bd num">$0.35</span><i class="st fail" title="not live"></i></div></div>
+                <div class="row"><span class="slot">43</span><div class="main"><span class="hl ell">Glass Fox</span><span class="fn mut ell">AX1 088 · LP · English</span></div><div class="end"><span class="bd num">$1.20</span><i class="st live" title="live"></i></div></div>
+                <div class="row"><span class="slot">44</span><div class="main"><span class="hl ell">Quiet Lantern</span><span class="fn mut ell">AX1 103 · NM · Japanese</span></div><div class="end"><span class="bd num">$0.80</span><i class="st fail" title="not live"></i></div></div>
+              </div>
+            </div>
+            <div class="dock">
+              <div class="alert nw" data-new="New: the answer shows where List was pressed">
+                <p class="sh"><b>3 cards did not go live.</b> TCGplayer did not answer. 181 are live.</p>
+                <button class="btn p sm wide" type="button">Try the 3 again</button>
+                <details class="disc"><summary>What the server said <svg class="ic sm"><use href="#i-chev"/></svg></summary><p class="fn mut">503 Service Unavailable (sample)</p></details>
+              </div>
+            </div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Stacks</button><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Stack 14</h1><p class="sh mut">186 read · Box 3, slots 41 to 226</p></div>
+            <div class="fill"></div>
+            <div class="dock">
+              <div class="alert">
+                <p class="sh"><b>3 cards did not go live.</b> TCGplayer did not answer. 181 are live, and 2 wait for your check.</p>
+                <button class="btn p sm wide" type="button">Try the 3 again</button>
+                <details class="disc"><summary>What the server said <svg class="ic sm"><use href="#i-chev"/></svg></summary><p class="fn mut">503 Service Unavailable (sample)</p></details>
+              </div>
+            </div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span class="hl" style="display:inline-flex;align-items:center;gap:6px"><i class="st fail"></i>Not live</span><button class="nb" type="button">Show all</button></div>
+            <div class="colhead cols"><span>Slot</span><span></span><span>Card</span><span>Cond.</span><span style="text-align:end">Price</span></div>
+            <div class="list">
+              <div class="row cols"><span class="slot">42</span><i class="st fail"></i><div class="main"><span class="hl ell">Tidecaller Adept</span><span class="fn mut ell">AX1 047 · English · Game A</span></div><span class="sh">NM</span><span class="bd num" style="text-align:end">$0.35</span></div>
+              <div class="row cols"><span class="slot">44</span><i class="st fail"></i><div class="main"><span class="hl ell">Quiet Lantern</span><span class="fn mut ell">AX1 103 · Japanese · Game A</span></div><span class="sh">NM</span><span class="bd num" style="text-align:end">$0.80</span></div>
+              <div class="row cols"><span class="slot">117</span><i class="st fail"></i><div class="main"><span class="hl ell">Reed Hound</span><span class="fn mut ell">AX1 199 · English · Game A</span></div><span class="sh">LP</span><span class="bd num" style="text-align:end">$0.30</span></div>
+            </div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C1 keyboard -->
+  <div class="state" data-state="c1-keyboard">
+    <h3>Keyboard: fix the name of a misread card</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded kb" data-device="iphone-duo-folded">
+          <div class="safe kfold">
+            <div class="bar"><button class="nb" type="button">Cancel</button><span class="hl">Fix card · slot 45</span><button class="nb strong dim" type="button" aria-disabled="true">Done</button></div>
+            <div class="field"><span class="fn mut">Card name</span><div class="input">Hollow Cr<i class="caret"></i><span class="clr"><svg class="ic sm"><use href="#i-x"/></svg></span></div></div>
+            <div class="fill" style="padding-top:8px">
+              <div class="list">
+                <div class="row" style="min-height:52px"><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · Foil · Game A</span></div><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+                <div class="row" style="min-height:52px"><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · Not foil · Game A</span></div><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+              </div>
+            </div>
+          </div>
+          <div class="kopen"><div class="keys" data-kbd="abc" data-go="search"></div></div>
+        </div>
+        <figcaption>iPhone Duo, folded · keyboard open, content 466 × 250 pt</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded kb" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span class="hl">What the camera read</span><span></span></div>
+            <div class="sec"><div class="photo" style="height:150px"><i></i></div><p class="fn mut">Slot 45 · read as Hollow Crown, not sure which printing</p></div>
+          </div>
+          <div class="fold"><span>fold</span></div>
+          <div class="pane pr">
+            <div class="bar"><button class="nb" type="button">Cancel</button><span class="hl">Fix card</span><button class="nb strong dim" type="button" aria-disabled="true">Done</button></div>
+            <div class="field"><span class="fn mut">Card name</span><div class="input">Hollow Cr<i class="caret"></i><span class="clr"><svg class="ic sm"><use href="#i-x"/></svg></span></div></div>
+            <div class="fill" style="padding-top:8px">
+              <div class="list">
+                <div class="row" style="min-height:52px"><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · Foil · Game A</span></div><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+                <div class="row" style="min-height:52px"><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · Not foil · Game A</span></div><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+              </div>
+            </div>
+          </div>
+          <div class="kopen"><div class="keys" data-kbd="abc" data-go="search"></div></div>
+        </div>
+        <figcaption>iPhone Duo, unfolded · keyboard open, content 951 × 263 pt</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C1 order -->
+  <div class="state" data-state="c1-order">
+    <h3>Order: a sale to pull and ship (extra state)</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Orders</button><span class="hl">Order 0001</span><span></span></div>
+            <div class="head"><p class="sh mut">Sample Buyer A · 3 cards, in walk order</p></div>
+            <div class="fill">
+              <div class="list nw" data-new="New: picks sorted by place">
+                <div class="row"><div class="main"><span class="t3 num">Box 1 · 12</span><span class="fn mut ell">Glass Fox · AX1 088 · LP</span></div><button class="chk-btn on" type="button" aria-label="Pulled"><svg class="ic"><use href="#i-check"/></svg></button></div>
+                <div class="row"><div class="main"><span class="t3 num">Box 3 · 47</span><span class="fn mut ell">Marsh Strider · AX1 151 · NM</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+                <div class="row"><div class="main"><span class="t3 num">Box 5 · 3</span><span class="fn mut ell">Ember Warden · AX1 012 · NM · Foil</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+              </div>
+            </div>
+            <div class="dock"><button class="btn p wide" type="button">Mark shipped</button><p class="fn mut">2 cards left to pull. Shipped can be undone.</p></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Orders</h1><p class="sh mut">3 to pull</p></div>
+            <div class="list">
+              <div class="row sel"><div class="main"><span class="hl">Order 0001</span><span class="fn mut">Sample Buyer A · 3 cards</span></div><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+              <div class="row"><div class="main"><span class="hl">Order 0002</span><span class="fn mut">Sample Buyer B · 2 cards</span></div><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+              <div class="row"><div class="main"><span class="hl">Order 0003</span><span class="fn mut">Sample Buyer C · 1 card</span></div><svg class="ic sm mut"><use href="#i-chev"/></svg></div>
+            </div>
+            <div class="fill"></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab"><svg class="ic"><use href="#i-stack"/></svg>Stacks</button><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-place"/></svg>Places</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span class="hl">Order 0001</span><span></span></div>
+            <div class="head"><p class="sh mut">Sample Buyer A · 3 cards, in walk order</p></div>
+            <div class="list">
+              <div class="row"><div class="main"><span class="t3 num">Box 1 · 12</span><span class="fn mut ell">Glass Fox · AX1 088 · LP · English</span></div><button class="chk-btn on" type="button" aria-label="Pulled"><svg class="ic"><use href="#i-check"/></svg></button></div>
+              <div class="row"><div class="main"><span class="t3 num">Box 3 · 47</span><span class="fn mut ell">Marsh Strider · AX1 151 · NM · English</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+              <div class="row"><div class="main"><span class="t3 num">Box 5 · 3</span><span class="fn mut ell">Ember Warden · AX1 012 · NM · Foil · English</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+            </div>
+            <div class="fill"></div>
+            <div class="dock"><button class="btn p wide" type="button">Mark shipped</button><p class="fn mut">2 cards left to pull. Shipped can be undone.</p></div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================
+     C2  SHELF
+     ====================================================================== -->
+<section class="concept" id="c2" aria-labelledby="c2-h">
+  <div class="chead">
+    <div class="row1"><h2 class="t2" id="c2-h">C2 · Shelf</h2></div>
+    <p class="sh mut">Place first. The first screen is the person's boxes, drawn as they sit on the table: each box a bar of slots, each card a sliver coloured by its listing state. A stack pours into the next free slots, and a sale lights its slivers. Tabs: Shelf, Orders, and Search. First screen: Shelf.</p>
+  </div>
+
+  <!-- C2 empty -->
+  <div class="state" data-state="c2-empty">
+    <h3>Empty</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Shelf</h1></div>
+            <div class="fill center"><p class="bd mut">Your boxes show here after you add one.</p></div>
+            <div class="dock"><button class="btn p wide" type="button">Add a box</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Shelf</h1></div>
+            <div class="fill center"><p class="bd mut">Your boxes show here after you add one.</p></div>
+            <div class="dock"><button class="btn p wide" type="button">Add a box</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr"></div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C2 loading -->
+  <div class="state" data-state="c2-loading">
+    <h3>Loading: reading the places</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Shelf</h1><p class="sh mut">Reading your places…</p></div>
+            <div class="fill">
+              <div class="shelf">
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+              </div>
+            </div>
+            <div class="dock"><button class="btn p wide off" type="button" aria-disabled="true">Add a stack</button><p class="fn mut">Waits for your places.</p></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Shelf</h1><p class="sh mut">Reading your places…</p></div>
+            <div class="fill">
+              <div class="shelf">
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+                <div class="bx"><div class="lab"><span class="sk" style="width:56px;height:18px"></span><span class="sk" style="width:72px;height:14px"></span></div><div class="bar2"><span class="sk" style="position:absolute;inset:0"></span></div></div>
+              </div>
+            </div>
+            <div class="dock"><button class="btn p wide off" type="button" aria-disabled="true">Add a stack</button><p class="fn mut">Waits for your places.</p></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span class="sk" style="width:64px;height:20px"></span><span></span></div>
+            <div class="list">
+              <div class="row"><span class="sk" style="width:32px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span></div></div>
+              <div class="row"><span class="sk" style="width:32px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span></div></div>
+              <div class="row"><span class="sk" style="width:32px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span></div></div>
+              <div class="row"><span class="sk" style="width:32px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span></div></div>
+              <div class="row"><span class="sk" style="width:32px;height:18px"></span><div class="main"><span class="sk l1"></span><span class="sk l2"></span></div><div class="end"><span class="sk e1"></span></div></div>
+            </div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C2 full -->
+  <div class="state" data-state="c2-full">
+    <h3>Full: a stack pours into Box 3</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Shelf</button><span class="hl">Box 3</span><span></span></div>
+            <div class="sec nw" data-new="New: the box as a bar of slots" style="padding-bottom:12px;padding-top:8px">
+              <div class="bar2 big"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 16%, transparent 16%)"></div><i class="drafts" style="left:16%;width:74.4%"></i><i class="bracket" style="left:16%;width:74.4%"></i><i class="mark" style="left:90.4%"></i></div>
+              <div class="legend"><span><i class="st live"></i>live</span><span><i class="st draft"></i>this stack, draft</span><span>slots 1 to 250</span></div>
+            </div>
+            <div class="sec">
+              <div class="nw" data-new="New: the next free slot" style="display:flex;gap:12px;align-items:center">
+                <div class="cam" style="width:96px;height:96px;border-radius:8px;flex:none"><i class="guide read" style="width:44px;height:62px"></i></div>
+                <div class="place-big" id="c2-next"><span class="fn mut">Next card goes in</span><span class="t1 b num">Slot 227</span><span class="fn mut num">186 read</span></div>
+              </div>
+            </div>
+            <div class="fill" style="padding-top:8px">
+              <div class="list">
+                <div class="row"><span class="slot">224</span><div class="main"><span class="hl ell">Reed Hound</span><span class="fn mut ell">AX1 199 · LP · English</span></div><span class="bd num">$0.30</span></div>
+                <div class="row"><span class="slot">225</span><div class="main"><span class="hl ell">Tidecaller Adept</span><span class="fn mut ell">AX1 047 · NM · English</span></div><span class="bd num">$0.35</span></div>
+                <div class="row"><span class="slot">226</span><div class="main"><span class="hl ell">Glass Fox</span><span class="fn mut ell">AX1 088 · NM · English</span></div><span class="bd num">$1.40</span></div>
+              </div>
+            </div>
+            <div class="dock"><button class="btn p wide" type="button">List 186 cards</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><button class="nb" type="button">Add a box</button></div>
+            <div class="head"><h1 class="lt">Shelf</h1><p class="sh mut num">5 boxes · 1,016 cards</p></div>
+            <div class="shelf nw" id="c2-shelf" data-new="New: the shelf is the home screen">
+              <div class="legend"><span><i class="st live"></i>live</span><span><i class="st draft"></i>draft</span><span><i class="st sold"></i>sold, to pull</span></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 1</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 30%, var(--sold) 30% 31%, var(--live) 31% 81%, var(--sold) 81% 82%, var(--live) 82% 100%)"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 2</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 55%, var(--sold) 55% 56%, var(--live) 56% 100%)"></div></div></div>
+              <div class="bx sel"><div class="lab"><span class="hl">Box 3</span><span class="fn mut num">226 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 16%, transparent 16%)"></div><i class="drafts" style="left:16%;width:74.4%"></i></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 4</span><span class="fn mut num">230 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 92%, transparent 92%)"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 5</span><span class="fn mut num">60 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--sold) 0 1%, var(--live) 1% 24%, transparent 24%)"></div></div></div>
+            </div>
+            <div class="fill"></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span class="hl">Box 3</span><span></span></div>
+            <div class="head"><p class="sh mut">Stack 14 in slots 41 to 226 · next free slot 227</p></div>
+            <div class="list">
+              <div class="row"><span class="slot">41</span><i class="st draft"></i><div class="main"><span class="hl ell">Ember Warden</span><span class="fn mut ell">AX1 012 · NM · Foil · English</span></div><span class="bd num">$4.10</span></div>
+              <div class="row"><span class="slot">42</span><i class="st draft"></i><div class="main"><span class="hl ell">Tidecaller Adept</span><span class="fn mut ell">AX1 047 · NM · English</span></div><span class="bd num">$0.35</span></div>
+              <div class="row"><span class="slot">43</span><i class="st draft"></i><div class="main"><span class="hl ell">Glass Fox</span><span class="fn mut ell">AX1 088 · LP · English</span></div><span class="bd num">$1.20</span></div>
+              <div class="row"><span class="slot">44</span><i class="st draft"></i><div class="main"><span class="hl ell">Quiet Lantern</span><span class="fn mut ell">AX1 103 · NM · Japanese</span></div><span class="bd num">$0.80</span></div>
+              <div class="row"><span class="slot">45</span><i class="st draft"></i><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · NM · Foil · English</span></div><span class="bd num">$12.50</span></div>
+            </div>
+            <div class="fill"></div>
+            <div class="dock"><button class="btn p wide" type="button">List 186 cards</button></div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C2 error -->
+  <div class="state" data-state="c2-error">
+    <h3>Error: the places could not be read</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Shelf</h1></div>
+            <div class="sec">
+              <div class="alert">
+                <p class="sh"><b>Could not read your places.</b> The shelf below is from your last read, at 7:40 PM.</p>
+                <button class="btn p sm wide" type="button">Try again</button>
+                <details class="disc"><summary>What the server said <svg class="ic sm"><use href="#i-chev"/></svg></summary><p class="fn mut">Request timed out (sample)</p></details>
+              </div>
+            </div>
+            <div class="fill" style="padding-top:12px;opacity:.6">
+              <div class="shelf nw" data-new="New: last read, dimmed, never shown as empty">
+                <div class="bx"><div class="lab"><span class="hl">Box 1</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 30%, var(--sold) 30% 31%, var(--live) 31% 100%)"></div></div></div>
+                <div class="bx"><div class="lab"><span class="hl">Box 2</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:var(--live)"></div></div></div>
+                <div class="bx"><div class="lab"><span class="hl">Box 3</span><span class="fn mut num">40 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 16%, transparent 16%)"></div></div></div>
+              </div>
+            </div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Shelf</h1></div>
+            <div class="sec">
+              <div class="alert">
+                <p class="sh"><b>Could not read your places.</b> The shelf is from your last read, at 7:40 PM.</p>
+                <button class="btn p sm wide" type="button">Try again</button>
+                <details class="disc"><summary>What the server said <svg class="ic sm"><use href="#i-chev"/></svg></summary><p class="fn mut">Request timed out (sample)</p></details>
+              </div>
+            </div>
+            <div class="fill"></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span class="hl">Last read · 7:40 PM</span><span></span></div>
+            <div class="shelf" style="opacity:.6;padding-top:8px">
+              <div class="bx"><div class="lab"><span class="hl">Box 1</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 30%, var(--sold) 30% 31%, var(--live) 31% 100%)"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 2</span><span class="fn mut num">250 of 250</span></div><div class="bar2"><div class="fillx" style="background:var(--live)"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 3</span><span class="fn mut num">40 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 16%, transparent 16%)"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 4</span><span class="fn mut num">230 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 92%, transparent 92%)"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 5</span><span class="fn mut num">60 of 250</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 24%, transparent 24%)"></div></div></div>
+            </div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C2 keyboard -->
+  <div class="state" data-state="c2-keyboard">
+    <h3>Keyboard: where is a card?</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded kb" data-device="iphone-duo-folded">
+          <div class="safe kfold">
+            <div class="fill">
+              <div class="list">
+                <div class="row" style="min-height:56px"><div class="main"><span class="hl ell">Hollow Crown · Foil</span><span class="fn mut ell">AX1 140 · NM · English · draft</span></div><span class="t3 num">Box 3 · 45</span></div>
+                <div class="row" style="min-height:56px"><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · LP · English · live</span></div><span class="t3 num">Box 1 · 203</span></div>
+                <div class="row" style="min-height:56px"><div class="main"><span class="hl ell">Hollow Crown</span><span class="fn mut ell">AX1 140 · NM · Japanese · sold</span></div><span class="t3 num">Box 5 · 2</span></div>
+              </div>
+            </div>
+            <div class="field" style="padding-block:8px"><div class="input nw" data-new="New: search stays at the bottom"><svg class="ic sm mut"><use href="#i-search"/></svg>hollow c<i class="caret"></i><span class="clr"><svg class="ic sm"><use href="#i-x"/></svg></span></div></div>
+          </div>
+          <div class="kopen"><div class="keys" data-kbd="abc" data-go="search"></div></div>
+        </div>
+        <figcaption>iPhone Duo, folded · keyboard open, content 466 × 250 pt</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded kb" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span class="hl">3 places</span><span></span></div>
+            <div class="shelf nw" data-new="New: each match lit on the shelf">
+              <div class="bx"><div class="lab"><span class="hl">Box 1</span></div><div class="bar2"><div class="fillx" style="background:var(--live);opacity:.35"></div><i class="pin" style="left:81%">2</i></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 3</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 16%, transparent 16%);opacity:.35"></div><i class="drafts" style="left:16%;width:74.4%;opacity:.5"></i><i class="pin" style="left:18%">1</i></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 5</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 24%, transparent 24%);opacity:.35"></div><i class="pin" style="left:1%">3</i></div></div>
+            </div>
+          </div>
+          <div class="fold"><span>fold</span></div>
+          <div class="pane pr">
+            <div class="fill">
+              <div class="list">
+                <div class="row" style="min-height:52px"><span class="pin" style="position:static;margin:0">1</span><div class="main"><span class="hl ell">Hollow Crown · Foil · NM</span><span class="fn mut ell">AX1 140 · English · draft</span></div><span class="t3 num">Box 3 · 45</span></div>
+                <div class="row" style="min-height:52px"><span class="pin" style="position:static;margin:0">2</span><div class="main"><span class="hl ell">Hollow Crown · LP</span><span class="fn mut ell">AX1 140 · English · live</span></div><span class="t3 num">Box 1 · 203</span></div>
+                <div class="row" style="min-height:52px"><span class="pin" style="position:static;margin:0">3</span><div class="main"><span class="hl ell">Hollow Crown · NM</span><span class="fn mut ell">AX1 140 · Japanese · sold</span></div><span class="t3 num">Box 5 · 2</span></div>
+              </div>
+            </div>
+            <div class="field" style="padding-block:8px"><div class="input"><svg class="ic sm mut"><use href="#i-search"/></svg>hollow c<i class="caret"></i><span class="clr"><svg class="ic sm"><use href="#i-x"/></svg></span></div></div>
+          </div>
+          <div class="kopen"><div class="keys" data-kbd="abc" data-go="search"></div></div>
+        </div>
+        <figcaption>iPhone Duo, unfolded · keyboard open, content 951 × 263 pt</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C2 order -->
+  <div class="state" data-state="c2-order">
+    <h3>Order: the sale lit on the shelf (extra state)</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><button class="nb" type="button"><svg class="ic"><use href="#i-back"/></svg>Orders</button><span class="hl">Order 0001</span><span></span></div>
+            <div class="head"><p class="sh mut">Sample Buyer A · 3 cards</p></div>
+            <div class="shelf nw" data-new="New: the pull path on the shelf" style="padding-top:8px">
+              <div class="bx"><div class="lab"><span class="sh b">Box 1</span></div><div class="bar2"><div class="fillx" style="background:var(--live);opacity:.3"></div><i class="pin" style="left:5%">1</i></div></div>
+              <div class="bx"><div class="lab"><span class="sh b">Box 3</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 90.4%, transparent 90.4%);opacity:.3"></div><i class="pin" style="left:19%">2</i></div></div>
+              <div class="bx"><div class="lab"><span class="sh b">Box 5</span></div><div class="bar2"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 24%, transparent 24%);opacity:.3"></div><i class="pin" style="left:2%">3</i></div></div>
+            </div>
+            <div class="fill" style="padding-top:12px">
+              <div class="list">
+                <div class="row" style="min-height:56px"><span class="pin" style="position:static;margin:0">1</span><div class="main"><span class="hl ell">Box 1 · 12</span><span class="fn mut ell">Glass Fox · LP</span></div><button class="chk-btn on" type="button" aria-label="Pulled"><svg class="ic"><use href="#i-check"/></svg></button></div>
+                <div class="row" style="min-height:56px"><span class="pin" style="position:static;margin:0">2</span><div class="main"><span class="hl ell">Box 3 · 47</span><span class="fn mut ell">Marsh Strider · NM</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+                <div class="row" style="min-height:56px"><span class="pin" style="position:static;margin:0">3</span><div class="main"><span class="hl ell">Box 5 · 3</span><span class="fn mut ell">Ember Warden · NM · Foil</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+              </div>
+            </div>
+            <div class="dock"><button class="btn p wide" type="button">Mark shipped</button></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span class="hl">Order 0001 on the shelf</span><span></span></div>
+            <div class="shelf" style="padding-top:8px">
+              <div class="bx"><div class="lab"><span class="hl">Box 1</span></div><div class="bar2 big"><div class="fillx" style="background:var(--live);opacity:.3"></div><i class="pin" style="left:5%">1</i></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 2</span></div><div class="bar2 big"><div class="fillx" style="background:var(--live);opacity:.3"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 3</span></div><div class="bar2 big"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 90.4%, transparent 90.4%);opacity:.3"></div><i class="pin" style="left:19%">2</i></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 4</span></div><div class="bar2 big"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 92%, transparent 92%);opacity:.3"></div></div></div>
+              <div class="bx"><div class="lab"><span class="hl">Box 5</span></div><div class="bar2 big"><div class="fillx" style="background:linear-gradient(90deg, var(--live) 0 24%, transparent 24%);opacity:.3"></div><i class="pin" style="left:2%">3</i></div></div>
+            </div>
+            <div class="fill"></div>
+            <nav class="tabbar" aria-label="Sections"><button type="button" class="tab"><svg class="ic"><use href="#i-shelf"/></svg>Shelf</button><button type="button" class="tab on" aria-current="page"><svg class="ic"><use href="#i-order"/></svg>Orders</button><button type="button" class="tab"><svg class="ic"><use href="#i-search"/></svg>Search</button></nav>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span class="hl">Order 0001</span><span></span></div>
+            <div class="head"><p class="sh mut">Sample Buyer A · 3 cards</p></div>
+            <div class="list">
+              <div class="row"><span class="pin" style="position:static;margin:0">1</span><div class="main"><span class="hl">Box 1 · 12</span><span class="fn mut ell">Glass Fox · AX1 088 · LP · English</span></div><button class="chk-btn on" type="button" aria-label="Pulled"><svg class="ic"><use href="#i-check"/></svg></button></div>
+              <div class="row"><span class="pin" style="position:static;margin:0">2</span><div class="main"><span class="hl">Box 3 · 47</span><span class="fn mut ell">Marsh Strider · AX1 151 · NM · English</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+              <div class="row"><span class="pin" style="position:static;margin:0">3</span><div class="main"><span class="hl">Box 5 · 3</span><span class="fn mut ell">Ember Warden · AX1 012 · NM · Foil</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+            </div>
+            <div class="fill"></div>
+            <div class="dock"><button class="btn p wide" type="button">Mark shipped</button><p class="fn mut">2 cards left to pull. Shipped can be undone.</p></div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================
+     C3  ONLY WHAT NEEDS YOU  (bold)
+     ====================================================================== -->
+<section class="concept" id="c3" aria-labelledby="c3-h">
+  <div class="chead">
+    <div class="row1"><h2 class="t2" id="c3-h">C3 · Only what needs you (bold)</h2></div>
+    <p class="sh mut">No card list and no tab bar. The pose is the way to move: folded, the phone is a scanner in the hand that shows one count and where the stack goes; unfolded on the table, it is a desk that shows only the cards the app is not sure of, the orders to pull, and a "Where is" field. Every sure card is listed as it is read. First screen folded: the camera. First screen unfolded: Needs you.</p>
+  </div>
+
+  <!-- C3 empty -->
+  <div class="state" data-state="c3-empty">
+    <h3>Empty</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="cam" style="flex:1">
+              <div class="camfull">
+                <div class="camtop"></div>
+                <i class="guide"></i>
+                <div class="panel">
+                  <p class="bd">Hold the top card of a sorted stack in the frame.</p>
+                  <button class="btn p wide" type="button">Start stack</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Needs you</h1></div>
+            <div class="fill center"><p class="bd mut">Cards the app is not sure of show here after your first stack.</p></div>
+            <div class="dock"><button class="btn p wide" type="button"><svg class="ic"><use href="#i-fold"/></svg>Start stack</button></div>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr"></div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C3 loading -->
+  <div class="state" data-state="c3-loading">
+    <h3>Loading: prices for what was read</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="cam" style="flex:1">
+              <div class="camfull">
+                <div class="camtop"><span class="tag" style="position:static">Stack → Box 3, from slot 41</span></div>
+                <i class="guide"></i>
+                <div class="panel">
+                  <div class="count"><span class="lt num">186</span><span class="sh mut">read</span></div>
+                  <div class="runbox" style="padding:0">
+                    <div class="top"><p class="sh">Getting prices · <span class="num">64 of 186</span></p><button class="btn s sm" type="button"><svg class="ic sm"><use href="#i-stop"/></svg>Stop</button></div>
+                    <div class="prog"><i style="width:34%"></i></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Needs you</h1></div>
+            <div class="runbox">
+              <div class="top"><p class="sh">Getting prices · <span class="num">64 of 186</span></p><button class="btn s sm" type="button"><svg class="ic sm"><use href="#i-stop"/></svg>Stop</button></div>
+              <div class="prog"><i style="width:34%"></i></div>
+            </div>
+            <div class="deck"><span class="sk" style="height:120px"></span><span class="sk l1"></span><span class="sk l2"></span><div class="duo"><span class="sk" style="height:50px"></span><span class="sk" style="height:50px"></span></div></div>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="sec"><span class="sk" style="height:41px;width:60%"></span><div class="ticket"><span class="sk l1"></span><span class="sk l2"></span><span class="sk" style="height:44px"></span></div></div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C3 full -->
+  <div class="state" data-state="c3-full">
+    <h3>Full: cards list as they are read; two need you</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="cam nw in" data-new="New: no tabs, the fold picks the mode" style="flex:1">
+              <div class="camfull">
+                <div class="camtop"><span class="tag" style="position:static">Stack → Box 3, from slot 41 · next 227</span></div>
+                <i class="guide read"></i>
+                <div class="panel nw" data-new="New: one count, no card list">
+                  <div class="count" id="c3-count"><span class="lt num">184</span><span class="sh">listed this stack</span></div>
+                  <div class="duo">
+                    <button class="btn s" type="button"><i class="st chk"></i>2 need you</button>
+                    <button class="btn s" type="button">End stack</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span class="fn mut" style="padding-inline-end:8px">1 of 2</span></div>
+            <div class="head"><h1 class="lt">Needs you</h1></div>
+            <div class="deck nw" id="c3-deck" data-new="New: one question per card, big answers">
+              <div class="photo"><i></i></div>
+              <div><p class="hl">Saltwind Courier · Box 3 · 49</p><p class="sh mut">Which printing is it?</p></div>
+              <div class="duo"><button class="btn s" type="button">AX1 162</button><button class="btn s" type="button">Promo P07</button></div>
+              <button class="btn q sm" type="button">Not sure: keep as draft</button>
+            </div>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="stack" style="padding:0 16px">
+              <h2 class="t2">To pull</h2>
+              <div class="ticket">
+                <p class="hl">Order 0002 · Sample Buyer B</p>
+                <div class="route fn"><div><b class="num">Box 1 · 12</b><span class="mut">Glass Fox</span></div><div><b class="num">Box 5 · 3</b><span class="mut">Ember Warden</span></div></div>
+                <button class="btn p sm wide" type="button">Start pull</button>
+              </div>
+              <h2 class="t2">Where is</h2>
+              <div class="input" style="color:var(--text-2)"><svg class="ic sm"><use href="#i-search"/></svg>A card name</div>
+            </div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C3 error -->
+  <div class="state" data-state="c3-error">
+    <h3>Error: TCGplayer does not answer; reading goes on</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="cam" style="flex:1">
+              <div class="camfull">
+                <div class="camtop"><span class="tag" style="position:static">Stack → Box 3, from slot 41 · next 227</span></div>
+                <i class="guide read"></i>
+                <div class="panel">
+                  <div class="count"><span class="lt num">146</span><span class="sh">listed · <b class="num">40</b> wait as drafts</span></div>
+                  <p class="sh bad">TCGplayer did not answer.</p>
+                  <button class="btn p wide" type="button">Try the 40 again</button>
+                  <details class="disc"><summary>What the server said <svg class="ic sm"><use href="#i-chev"/></svg></summary><p class="fn mut">503 Service Unavailable (sample)</p></details>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span></span><span class="fn mut" style="padding-inline-end:8px">1 of 2</span></div>
+            <div class="head"><h1 class="lt">Needs you</h1></div>
+            <div class="deck">
+              <div class="photo"><i></i></div>
+              <div><p class="hl">Saltwind Courier · Box 3 · 49</p><p class="sh mut">Which printing is it?</p></div>
+              <div class="duo"><button class="btn s" type="button">AX1 162</button><button class="btn s" type="button">Promo P07</button></div>
+              <button class="btn q sm" type="button">Not sure: keep as draft</button>
+            </div>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="sec">
+              <div class="alert">
+                <p class="sh"><b>40 cards wait as drafts.</b> TCGplayer did not answer.</p>
+                <button class="btn p sm wide" type="button">Try the 40 again</button>
+                <details class="disc"><summary>What the server said <svg class="ic sm"><use href="#i-chev"/></svg></summary><p class="fn mut">503 Service Unavailable (sample)</p></details>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C3 keyboard -->
+  <div class="state" data-state="c3-keyboard">
+    <h3>Keyboard: set a price the app was not sure of</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded kb" data-device="iphone-duo-folded">
+          <div class="safe kfold">
+            <div class="bar"><button class="nb" type="button">Cancel</button><span class="hl">Set price</span><button class="nb strong" type="button">Done</button></div>
+            <div class="sec"><p class="hl">Hollow Crown · AX1 140 · NM · Foil</p><p class="fn mut">Recent sales $3.80 to $4.40. Your rule gave $12.50.</p></div>
+            <div class="field" style="padding-top:8px"><span class="fn mut">Price</span><div class="input t3 nw" data-new="New: number pad, no letters">$4.2<i class="caret"></i><span class="clr"><svg class="ic sm"><use href="#i-x"/></svg></span></div></div>
+          </div>
+          <div class="kopen"><div class="keys dec" data-kbd="dec"></div></div>
+        </div>
+        <figcaption>iPhone Duo, folded · keyboard open, content 466 × 250 pt</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded kb" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><span></span><span class="hl">Needs you · 2 of 2</span><span></span></div>
+            <div class="sec"><div class="photo" style="height:120px"><i></i></div><p class="hl">Hollow Crown · Box 3 · 45</p><p class="fn mut">AX1 140 · NM · Foil · English</p></div>
+          </div>
+          <div class="fold"><span>fold</span></div>
+          <div class="pane pr">
+            <div class="bar"><button class="nb" type="button">Cancel</button><span class="hl">Set price</span><button class="nb strong" type="button">Done</button></div>
+            <div class="sec"><p class="fn mut">Recent sales $3.80 to $4.40. Your rule gave $12.50.</p></div>
+            <div class="field" style="padding-top:8px"><span class="fn mut">Price</span><div class="input t3">$4.2<i class="caret"></i><span class="clr"><svg class="ic sm"><use href="#i-x"/></svg></span></div></div>
+          </div>
+          <div class="kopen"><div class="keys dec" data-kbd="dec"></div></div>
+        </div>
+        <figcaption>iPhone Duo, unfolded · keyboard open, content 951 × 263 pt</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <!-- C3 order -->
+  <div class="state" data-state="c3-order">
+    <h3>Order: pull one card at a time (extra state)</h3>
+    <div class="poses">
+      <figure>
+        <div class="dev folded" data-device="iphone-duo-folded">
+          <div class="safe">
+            <div class="bar"><button class="nb" type="button">End pull</button><span class="hl">Order 0002 · 1 of 2</span><span></span></div>
+            <div class="sec" style="padding-top:16px">
+              <div class="place-big nw" id="c3-pull" data-new="New: the place is the headline"><span class="lt num">Box 1</span><span class="t1 b num">Slot 12</span></div>
+              <p class="bd">Glass Fox · AX1 088 · LP · English</p>
+            </div>
+            <div class="fill" style="padding:16px">
+              <div class="cam" style="flex:1;border-radius:8px"><i class="guide" style="width:72px;height:100px"></i><span class="tag" style="left:12px;bottom:12px">Show it to the camera to check it</span></div>
+            </div>
+            <div class="dock"><button class="btn p wide" type="button">Pulled</button><button class="btn q sm wide" type="button">Not in its slot</button></div>
+          </div>
+          <div class="ins-r"><span>trailing inset 84 pt</span></div>
+          <div class="ins-b"><i class="home"></i></div>
+        </div>
+        <figcaption>iPhone Duo, folded</figcaption>
+      </figure>
+      <figure>
+        <div class="dev unfolded" data-device="iphone-duo-unfolded">
+          <div class="pane pl">
+            <div class="bar"><button class="nb" type="button">End pull</button><span></span><span></span></div>
+            <div class="head"><h1 class="lt">Order 0002</h1><p class="sh mut">Sample Buyer B · 2 cards, in walk order</p></div>
+            <div class="list">
+              <div class="row"><div class="main"><span class="t3 num">Box 1 · 12</span><span class="fn mut">Glass Fox · AX1 088 · LP</span></div><button class="chk-btn on" type="button" aria-label="Pulled"><svg class="ic"><use href="#i-check"/></svg></button></div>
+              <div class="row"><div class="main"><span class="t3 num">Box 5 · 3</span><span class="fn mut">Ember Warden · AX1 012 · NM · Foil</span></div><button class="chk-btn" type="button" aria-label="Pulled"></button></div>
+            </div>
+          </div>
+          <div class="fold"><span>fold 40 pt</span></div>
+          <div class="pane pr">
+            <div class="bar"><span></span><span></span><span></span></div>
+            <div class="stack" style="padding:0 16px">
+              <h2 class="t2">Ship</h2>
+              <p class="sh mut">Box 1 · 12 and Box 5 · 3 become free slots when you mark it shipped.</p>
+            </div>
+            <div class="fill"></div>
+            <div class="dock"><button class="btn p wide" type="button">Mark shipped</button><p class="fn mut">1 card left to pull. Shipped can be undone.</p></div>
+          </div>
+        </div>
+        <figcaption>iPhone Duo, unfolded</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+
+  // Keyboards: drawn plain, filled here so the markup stays short.
+  var ROWS = {
+    abc: [["q","w","e","r","t","y","u","i","o","p"], ["a","s","d","f","g","h","j","k","l"], ["⇧","z","x","c","v","b","n","m","⌫"]],
+    dec: [["1","2","3"], ["4","5","6"], ["7","8","9"], [".","0","⌫"]]
+  };
+  document.querySelectorAll(".keys").forEach(function (box) {
+    var kind = box.getAttribute("data-kbd");
+    ROWS[kind].forEach(function (row) {
+      var r = document.createElement("div");
+      r.className = "krow";
+      row.forEach(function (k) {
+        var s = document.createElement("span");
+        s.className = "k" + ((k === "⇧" || k === "⌫") && kind === "abc" ? " fn2" : "");
+        s.textContent = k;
+        r.appendChild(s);
+      });
+      box.appendChild(r);
+    });
+    if (kind === "abc") {
+      var last = document.createElement("div");
+      last.className = "krow";
+      last.innerHTML = '<span class="k fn2">123</span><span class="k sp">space</span><span class="k go"></span>';
+      last.querySelector(".go").textContent = box.getAttribute("data-go") || "return";
+      box.appendChild(last);
+    }
+  });
+
+  // Hash: s=<concept>-<state>, t=light|dark, h=c1,c2 (hidden options), l=0 (labels off).
+  function params() { return new URLSearchParams(location.hash.replace(/^#/, "")); }
+  function setParam(key, value) {
+    var p = params();
+    if (value === null || value === "") p.delete(key); else p.set(key, value);
+    var s = p.toString();
+    history.replaceState(null, "", s ? "#" + s : location.pathname + location.search);
+    apply();
+  }
+  function apply() {
+    var p = params();
+    var t = p.get("t");
+    if (t === "light" || t === "dark") root.setAttribute("data-theme", t); else root.removeAttribute("data-theme");
+    document.querySelectorAll("[data-theme-set]").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === (t || "auto")));
+    });
+    var hidden = (p.get("h") || "").split(",").filter(Boolean);
+    var s = p.get("s");
+    var target = s ? document.querySelector('[data-state="' + s + '"]') : null;
+    document.querySelectorAll("section.concept").forEach(function (sec) {
+      sec.hidden = target ? !sec.contains(target) : hidden.indexOf(sec.id) !== -1;
+    });
+    document.querySelectorAll("[data-state]").forEach(function (el) { el.hidden = !!target && el !== target; });
+    document.querySelectorAll("[data-hide]").forEach(function (b) {
+      var on = hidden.indexOf(b.getAttribute("data-hide")) !== -1;
+      b.setAttribute("aria-pressed", String(on));
+      b.textContent = (on ? "Show " : "Hide ") + b.getAttribute("data-hide").toUpperCase();
+    });
+    var noLabels = p.get("l") === "0";
+    document.body.classList.toggle("nolabels", noLabels);
+    document.getElementById("lbls").setAttribute("aria-pressed", String(noLabels));
+    if (target) target.scrollIntoView({ block: "start" });
+  }
+  document.querySelectorAll("[data-theme-set]").forEach(function (b) {
+    b.addEventListener("click", function () { var v = b.getAttribute("data-theme-set"); setParam("t", v === "auto" ? null : v); });
+  });
+  document.querySelectorAll("[data-hide]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var id = b.getAttribute("data-hide");
+      var list = (params().get("h") || "").split(",").filter(Boolean);
+      var i = list.indexOf(id);
+      if (i === -1) list.push(id); else list.splice(i, 1);
+      setParam("h", list.join(","));
+    });
+  });
+  document.getElementById("lbls").addEventListener("click", function () {
+    setParam("l", params().get("l") === "0" ? null : "0");
+  });
+  document.getElementById("showall").addEventListener("click", function (e) { e.preventDefault(); setParam("s", null); });
+  window.addEventListener("hashchange", apply);
+  apply();
+})();
+</script>
+</body>
+</html>
