@@ -1,9 +1,9 @@
 {
- "title": "q_max drops the code-check excludes that c183 made dead",
- "phase": "cleanup",
- "status": "todo",
- "order": 103.3389992,
- "why": "Orchestrator, Oct 28 14:15 CDT: q_max#980 (c185, pin only) found no .onnx or .npz entry to drop, but q_max's exclude list still names kinds c183 now skips.",
- "note": "Next lane, in q_max, through a PR, after q_max#980 merges (same file). q_max's code-check exclude list still holds models/, handbook_v2.xlsx, map-skill-bundle.json.gz, the northline xlsx, .npmrc and .nvmrc. c183 (main a065acdb) skips .gz, .xlsx, .onnx, .npz, .nvmrc and .npmrc, so all but models/ are likely dead; models/ goes only if every file in it is one of those kinds (read the folder first). Remove only entries the pinned check passes without; the list only shrinks. Red first: the pinned check passes with each entry gone, and a data file of a kind c183 does not skip would still fail. Small; needs no answer. Port: q_max only. Placed after c185 (triage 12, Oct 28).",
- "updatedAt": "2026-10-28T19:30:00Z"
+  "title": "q_max drops the code-check excludes that c183 made dead",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3389992,
+  "why": "Orchestrator, Oct 28 14:15 CDT: q_max#980 (c185, pin only) found no .onnx or .npz entry to drop, but q_max's exclude list still names kinds c183 now skips.",
+  "note": "Next lane, in q_max, through a PR. q_max's code-check exclude list still holds models/, handbook_v2.xlsx, map-skill-bundle.json.gz, the northline xlsx, .npmrc and .nvmrc. c183 (main a065acdb) skips .gz, .xlsx, .onnx, .npz, .nvmrc and .npmrc, so all but models/ are likely dead; models/ goes only if every file in it is one of those kinds (read the folder first). Remove only entries the pinned check passes without; the list only shrinks. Red first: the pinned check passes with each entry gone, and a data file of a kind c183 does not skip would still fail. Same lane: raise stamp.json merge.deadlineMinutes to at least 185, since the merge tool warned it sits below the largest job cap, 180 (coordinator, Oct 29 15:03 CDT). Small; needs no answer. Port: q_max only. Placed after c185 (triage 12, Oct 28). Ready Oct 29 15:03 CDT: its wait, the pin PR (q_max#980, replaced by #981), merged in q_max#982 (a353d59a).",
+  "updatedAt": "2026-10-29T20:06:00Z"
 }
