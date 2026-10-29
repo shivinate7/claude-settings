@@ -376,8 +376,8 @@ body.sheet-open { overflow: hidden; }
   .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
   .prail .nm > span:first-child { overflow-wrap: anywhere; }
 }
-/* Five chips fit a name and the current-phase dot on one line only from a 410px box (measured on Organize, the longest name). Below that the rail wraps to three columns. */
-@container (max-width: 409px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* Five chips keep each phase name and the current-phase dot on one line from a 452px box in DejaVu Sans, a wide fallback if the web font fails, and from a 410px box in the web font (Organize current is the widest). Five columns start at 464px, a 12px margin over the wide font. Below that the rail wraps to three columns. */
+@container (max-width: 463px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 .cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 @container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
