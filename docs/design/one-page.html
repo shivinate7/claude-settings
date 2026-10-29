@@ -351,6 +351,11 @@ body.sheet-open { overflow: hidden; }
 .readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
 .readat li { overflow-wrap: anywhere; }
 .unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.g.unk { width: 12px; height: 12px; vertical-align: -1px; }
 
 .live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
@@ -607,19 +612,19 @@ const segs = (d, a, b, n) => '<i class="done"></i>'.repeat(d) + '<i class="act">
 function readAt(known) {
   const rows = known
     ? ['<li>Steps: roadmap branch, read at <span class="num">4f2a1c9</span></li>', '<li>Decisions: docs/decisions, read at <span class="num">0a1b2c3</span></li>', '<li>Debts: docs/debts, read at <span class="num">0a1b2c3</span></li>']
-    : ['<li class="unk">Steps: unknown. No roadmap branch on origin or here.</li>', '<li>Decisions: docs/decisions, read at <span class="num">0a1b2c3</span></li>'];
-  return `<details class="readat" data-new="read-at stamps in a closed disclosure"><summary>${known ? "Read Oct 29, 13:10 CDT" : 'Read Oct 29, 13:10 CDT. <span class="unk">Steps unknown.</span>'}</summary><ul>${rows.join("")}</ul></details>`;
+    : ['<li class="unk"><span class="g unk" aria-hidden="true"></span> Steps: no roadmap branch on origin or here.</li>', '<li>Decisions: docs/decisions, read at <span class="num">0a1b2c3</span></li>'];
+  return `<details class="readat" data-new="read-at stamps in a closed disclosure"><summary>${known ? "Read Oct 29, 13:10 CDT" : 'Read Oct 29, 13:10 CDT <span class="g unk" role="img" aria-label="one part not read"></span>'}</summary><ul>${rows.join("")}</ul></details>`;
 }
 function live(known) {
-  if (!known) return `<details class="live"><summary><span class="lh">Live work</span><span class="unk">unknown: the build had no live file</span></summary></details>`;
-  return `<details class="live" data-new="&quot;asking you&quot; for a thread that waits"><summary><span class="lh">Live work</span><span class="tag st-working">2 working</span><span class="tag st-asking">1 asking you</span><span class="tag st-review">1 ready for review</span><span>3 open pull requests</span><span class="asof">read <span class="num">13:05 CDT</span></span></summary></details>`;
+  if (!known) return `<details class="live"><summary><span class="lh">Live work</span><span class="unk"><span class="g unk" aria-hidden="true"></span> not read: the build had no live file</span></summary></details>`;
+  return `<details class="live" data-new="&quot;asking in its chat&quot;, not a page item"><summary><span class="lh">Live work</span><span class="tag st-working">2 working</span><span class="tag st-asking">1 asking in its chat</span><span class="tag st-review">1 ready for review</span><span>3 open pull requests</span><span class="asof">read <span class="num">13:05 CDT</span></span></summary></details>`;
 }
 function now() {
   return `<section class="now" aria-label="Where the plan stands" data-today="roadmap band, in this page's tokens">
     <div><h3>Phase <span class="num">2/5</span></h3><div class="ph">Organize</div><div class="lead"><span class="num">3</span> of <span class="num">9</span> done, <span class="num">2</span> in progress</div><div class="segbar">${segs(3, 2, 0, 9)}</div><div class="lead">Whole plan <span class="num">13/41</span> done</div></div>
     <div><h3>Doing now</h3><ul>${OPEN_STEPS.filter((s) => s.st === "active").map((s) => `<li>${rg("active")}<span class="id">${s.id}</span><button class="tx" type="button">${esc(s.title)}</button></li>`).join("")}</ul></div>
     <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${OPEN_STEPS.filter((s) => s.st === "todo").map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${s.id}</span><button class="tx" type="button">${esc(s.title)}</button></li>`).join("")}</ol></div>
-    <div class="offt"><h3>Off track <span class="num" style="color:var(--holds)">1</span></h3><ul><li><span class="ic">Blocked</span><button class="tx" type="button">In Organize: <span class="id">s25</span> Split the import lane in two</button></li></ul></div>
+    <div class="offt"><h3>Off track <span class="num" style="color:var(--holds)">1</span></h3><ul><li>${rgl("blocked")}<button class="tx" type="button">In Organize: <span class="id">s25</span> Split the import lane in two</button></li></ul></div>
   </section>`;
 }
 function views() {
@@ -629,8 +634,8 @@ function plan() {
   const prail = `<nav class="prail" aria-label="Phases">${PH.map((p) => `<button type="button" aria-pressed="${p.k === "organize"}" aria-label="${p.n}: ${p.d} of ${p.t} done${p.k === "organize" ? ", current phase" : ""}"><span class="nm"><span>${p.n}${p.k === "organize" ? '<span class="here"></span>' : ""}</span><span class="num">${p.d}/${p.t}</span></span><span class="segbar">${segs(p.d, p.a || 0, p.b || 0, p.t)}</span></button>`).join("")}</nav>`;
   const rows = OPEN_STEPS.map((s) => `<li class="${s.st}"><button class="rrow" type="button" aria-expanded="false" aria-label="${s.id}, ${LBL[s.st]}: ${esc(s.title)}">${rg(s.st)}<span class="id">${s.id}</span><span class="ttl">${esc(s.title)}</span><span class="meta">${s.tags.join("")}</span><span class="chev" aria-hidden="true">▶</span></button></li>`).join("");
   const phase = `<section class="box" aria-label="Phase 2, Organize">
-    <div class="ph-head"><span class="lbl">Phase 2</span><h3>Organize</h3><div class="prog"><span class="num">3/9</span><div class="segbar">${segs(3, 2, 1, 9)}</div><span>done</span></div></div>
-    <div class="tiles"><div class="tile"><span class="tl">Record kinds with a home</span><span class="v">4<small> of 7</small></span><span class="meter" aria-hidden="true">${'<i class="on"></i>'.repeat(4)}${"<i></i>".repeat(3)}</span></div><div class="tile"><span class="tl">Pages merged</span><span class="v">0<small> of 2</small></span><span class="meter" aria-hidden="true"><i></i><i></i></span></div></div>
+    <div class="ph-head" data-new="phase name and done once"><h3>Phase 2<span class="sr">, Organize</span></h3><div class="prog"><span class="num" aria-label="3 of 9 steps done">3/9</span><div class="segbar">${segs(3, 2, 1, 9)}</div></div></div>
+    <div class="tiles"><div class="tile"><span class="tl">Record kinds with a home</span><span class="v">4<small>/7</small></span><span class="meter" aria-hidden="true">${'<i class="on"></i>'.repeat(4)}${"<i></i>".repeat(3)}</span></div><div class="tile"><span class="tl">Pages merged</span><span class="v">0<small>/2</small></span><span class="meter" aria-hidden="true"><i></i><i></i></span></div></div>
     <div class="hint"><span>6 open steps, in work order</span><span>Read only</span></div>
     <ul class="rsteps">${rows}</ul>
     <button class="fold" type="button" aria-expanded="false"><span aria-hidden="true">▶</span><span><span class="num">3</span> done</span></button>
@@ -639,7 +644,7 @@ function plan() {
       <li><span class="when">11:02 CDT</span>${rgl("done")}<span>s20 Name the page writer</span></li>
       <li><span class="when">09:40 CDT</span>${rgl("active")}<span>s21 Fold the two status pages into one</span></li>
       <li><span class="when">08:15 CDT</span>${rgl("blocked")}<span>s25 Split the import lane in two</span></li></ul></section>
-    <section class="box"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num">13</span> of <span class="num">41</span></span></header><div class="burn"><svg viewBox="0 0 200 56" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,54 30,50 60,44 90,40 120,30 150,24 180,20 200,18" fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="ft"><span>Oct 1</span><span>Oct 29</span></div></div></section></aside>`;
+    <section class="box"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num" aria-label="13 of 41 steps">13/41</span></span></header><div class="burn"><svg viewBox="0 0 200 56" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,54 30,50 60,44 90,40 120,30 150,24 180,20 200,18" fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="ft"><span>Oct 1</span><span>Oct 29</span></div></div></section></aside>`;
   return `<div class="sview" role="tabpanel" aria-label="Plan">${prail}<div class="cols">${phase}${side}</div></div>`;
 }
 function noRoadmap() {
@@ -659,16 +664,16 @@ function status(s) {
 /* ---------- One page: header, tabs, then the part the tab names ---------- */
 function screen(s, theme, lab) {
   const onStatus = s === "status" || s === "no-status", empty = s === "empty";
-  const tabs = empty ? "" : `<nav class="in tabs" id="tabs" aria-label="Page"><a href="#" id="tabQ" data-go="main"${onStatus ? "" : ' aria-current="page"'}>Questions <span class="cnt" data-new="open count">${OPEN}</span></a><a href="#" id="tabS" data-go="${s === "no-status" ? "no-status" : "status"}"${onStatus ? ' aria-current="page"' : ""} data-new="Status tab, always second">Status</a></nav>`;
+  const tabs = `<nav class="in tabs" id="tabs" aria-label="Page"><a href="#" id="tabQ" data-go="main"${onStatus ? "" : ' aria-current="page"'}>Questions <span class="cnt" data-new="open count">${empty ? 0 : OPEN}</span></a><a href="#" id="tabS" data-go="${s === "no-status" ? "no-status" : "status"}"${onStatus ? ' aria-current="page"' : ""} data-new="Status tab, always second">Status</a></nav>`;
   let body;
-  if (empty) body = `<div class="in lonely"><div class="empty" data-new="no tabs: one line, then status">Nothing is waiting on you right now. Sessions add items here when they park something for your word.</div></div>${status(s)}`;
+  if (empty) body = `<div class="in lonely"><div class="empty" data-new="tab row stays; one line, then status">Nothing on this page waits on you. A session that asks you in its own chat shows under Live work.</div></div>${status(s)}`;
   else if (onStatus) body = status(s);
   else body = `<div class="in main" id="qView" data-today="questions as on main">${rail()}${list()}</div>`;
   const bar = empty
     ? `<div class="bar" id="bar"><div class="in"><span class="st"></span><button class="btn send" type="button" disabled>Send answers</button></div></div>`
     : `<div class="bar" id="bar"${onStatus ? ' data-new="bar stays on the Status tab"' : ""}><div class="in"><span class="st"><b>${READY}</b> ready (${READY} where my pick stands). <b>${OPEN - READY}</b> stay open.</span><button class="btn send" type="button">Send ${READY} answer${READY === 1 ? "" : "s"}</button></div></div>`;
-  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sample-repo: waiting on you</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
-<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1><span class="sub">waiting on you</span></div></div></header>
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sample-repo: ${onStatus ? "status" : "waiting on you"}</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1><span class="sub"${onStatus ? ' data-new="header names the open tab"' : ""}>${onStatus ? "project status" : "waiting on you"}</span></div></div></header>
 ${tabs}${body}${bar}
 <script>document.addEventListener("click",function(e){var a=e.target.closest("[data-go]");if(a){e.preventDefault();parent.postMessage({oneState:a.dataset.go},"*");}});<\/script></body></html>`;
 }

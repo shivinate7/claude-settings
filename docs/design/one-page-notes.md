@@ -4,8 +4,10 @@ Mockup: `docs/design/one-page.html`. Screens: `skills/waiting-page/page.html` an
 `skills/roadmap/page/index.html` (main 1cc47f01).
 Ruling: the owner, Oct 27 12:15 CDT. One page per repo, with one writer. "Waiting on you" comes
 first. Status sits below it or in a tab. The two-page proposal is dropped.
+Rulings for this round (orchestrator, inside the owner's ruling): the waiting-page writer alone
+publishes the page file, and the tab row always shows.
 Sizes: phone 390, mid 800, wide 1280, light and dark. They are the sizes of `waiting-page-notes.md`.
-The mockup draws the waiting part with the `<style>` of page.html, unchanged. The header is as on main.
+The mockup draws the waiting part with the `<style>` of page.html, unchanged.
 
 ## States and deep links
 
@@ -13,7 +15,7 @@ The mockup draws the waiting part with the `<style>` of page.html, unchanged. Th
 |---|---|---|
 | `main` | `#s=main` | Questions tab: all four tiers, one group frame, one answered card. |
 | `status` | `#s=status` | Status tab: read-at stamps, live work, the plan band, the view switch, the Plan view. |
-| `empty` | `#s=empty` | No item waits: no tab row, main's one empty line, then status. |
+| `empty` | `#s=empty` | No item waits: the tab row with Questions 0, one line, then status. |
 | `no-status` | `#s=no-status` | Status tab of a repo with no roadmap: unknown, why, and one control. |
 
 Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an element with
@@ -32,49 +34,72 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
      own frame, and a change in one part moves nothing in the other. Main's tab row is extended,
      so the page gets no second tab home. Loss: status is one press away, and it is hidden until
      he presses.
-2. Tab row: "Questions" with its open count, then "Status", then "Designs" when an item has a
-   design. Gain: Status never moves, and the count shows what waits from either tab. Loss: the tab
-   row now shows on every page that has an item. Main hides it when no item has a design.
-3. Nothing waits (`#s=empty`). The page has no tab row. Main's empty line shows, and status follows
-   under a "Status" heading. Gain: a tab with nothing behind it is not drawn
-   (`ux-control-earns-place`). Loss: the page has two layouts. When an item arrives while status
-   is in view, the tab row comes back with Status open, so status does not jump away.
-4. A load always opens Questions. The page does not keep the tab choice. The roadmap's own view
+2. The tab row always shows: "Questions" with its open count, then "Status", then "Designs" when an
+   item has a design. Gain: Status never moves, the count shows what waits from either tab, and an
+   item that arrives moves no tab. Loss: main hides the row when no item has a design.
+3. Nothing waits (`#s=empty`). The tab row shows "Questions 0". Under it, one line, then status
+   with a "Status" heading, with no press. When an item arrives, its card takes the line's place.
+   The header and the tab row do not move. Status under the card moves down by the card's height.
+   If the line is above the view, scroll anchoring keeps the status in view still. That is
+   unmeasured.
+4. The empty line: "Nothing on this page waits on you. A session that asks you in its own chat
+   shows under Live work." Live work can say "1 asking in its chat" on the same screen. A thread
+   that asks in its chat has no item on this page, so both lines are true
+   (`ux-statements-are-true`). Departs from: page.html `renderList`, which says "Nothing is
+   waiting on you right now."
+5. A load always opens Questions. The page does not keep the tab choice. The roadmap's own view
    memory (`rm-view`) stays for Plan, Changes, Reference and Records. Gain: what waits is first,
    each time. Loss: the owner who reads status first presses once on each load.
-5. The answer bar stays on the Status tab. Gain: a pick is never left behind, nothing moves at a
+6. The header names the open tab: "waiting on you" on Questions, "project status" on Status, in
+   the header and in the document title. On a phone the header hides this word, as on main.
+7. The answer bar stays on the Status tab. Gain: a pick is never left behind, nothing moves at a
    tab change, and the bar says how many items wait. Loss: the bar shows under status, which it
    does not change.
-6. Order in the status part: read-at stamps, live work, the plan band, the view switch, then the
+8. Order in the status part: read-at stamps, live work, the plan band, the view switch, then the
    view. The phase rail moves into the Plan view. Gain: nothing sits between the view switch and its
    view (`ux-control-beside-area`). Loss: the Changes, Reference and Records views lose the phase rail.
    Departs from: `skills/roadmap/page/index.html`, `#now`, `#stamps`, `#live` and `#rail` sit
    between `.tabs` and `.view`.
-7. Read-at stamps sit in a closed disclosure. Its summary is "Read Oct 29, 13:10 CDT". Gain: paths
+9. Read-at stamps sit in a closed disclosure. Its summary is "Read Oct 29, 13:10 CDT". Gain: paths
    and commit ids are machine text (`ux-machine-text-hidden`). Loss: one press to see each panel's commit.
    Departs from: the stamps block (`#stamps`) in the `build:script` of the roadmap page, which shows them open.
-8. A live thread that waits on the owner shows "asking you". Gain: "Waiting on you" stays the name
-   of the first part only (`ux-one-plain-name`). Loss: the word differs from the thread list.
-   Departs from: `NAME.blocked` in the live work block of the `build:script`.
-9. One token set and one font: page.html's. Times are US Central, 24-hour, with the zone, as
-   page.html's `fmt`. Gain: one page looks like one page, and the repo colour from `meta/page` reaches
-   status. Loss: the roadmap's own colours and IBM Plex Sans go.
-   Departs from: the theme token block and `when`, `dayLabel`, `timeLabel` in the roadmap page.
-10. No theme switch and no roadmap brand bar. The page follows the system theme, as page.html does.
+10. A live thread that waits on the owner shows "asking in its chat". Gain: "Waiting on you" stays
+    the name of the first part only (`ux-one-plain-name`), and the words say where the ask is.
+    Loss: the word differs from the thread list. Departs from: `NAME.blocked` in the live work block
+    of the `build:script`.
+11. One token set and one font: page.html's. Times are US Central, 24-hour, with the zone, as
+    page.html's `fmt`. Gain: one page looks like one page, and the repo colour from `meta/page` reaches
+    status. Loss: the roadmap's own colours and IBM Plex Sans go.
+    Departs from: the theme token block and `when`, `dayLabel`, `timeLabel` in the roadmap page.
+12. No theme switch and no roadmap brand bar. The page follows the system theme, as page.html does.
     Gain: one header. Loss: the owner cannot force light or dark on this page.
     Departs from: `applyTheme`, `#modeSeg` and `.brand` in the roadmap page.
-11. No roadmap (`#s=no-status`). The Plan view says "Plan: unknown", why, and that the questions are
+13. No roadmap (`#s=no-status`). The Plan view says "Plan: unknown", why, and that the questions are
     not affected. The build's text is in a closed disclosure. One control copies an ask to start a
     roadmap (`ux-no-dead-end`). The roadmap's `unavailable()` text is not used: it says to open the
-    page on claude.ai while signed in, which is false here (`ux-statements-are-true`).
-12. In "Latest changes", the status mark alone carries a step's state, with its name for a screen
-    reader. Gain: "Done", "In progress" and "Blocked" show once on the page (`ux-label-once`).
-    Loss: a sighted reader reads the mark, not a word. `label_once.py` on the status state prints
-    only "done", "of" and "organize", which are data.
-13. The status part reads its box. Its 640 and 1000 breakpoints are container queries on its
+    page on claude.ai while signed in, which is false here (`ux-statements-are-true`). The read-at
+    summary and Live work show a dashed ring and plain words, so "unknown" shows once.
+14. Each state word and label shows once (`ux-label-once`):
+    - In "Latest changes" and "Off track", a step's state is its mark, with its name for a screen
+      reader. The step row keeps the word, as the roadmap does today.
+    - The phase card says "Phase 2". The rail button names the phase. The phase card, the tiles and
+      the running total show counts as `3/9`, with the words for a screen reader.
+    - Departs from: `renderPhase` and `metaTiles` in the roadmap page, which repeat the name and "of".
+    - Output of `python3 lint/label_once.py` on the 24 rendered files (4 states, 3 sizes,
+      2 themes), at commit time: no line, exit 0.
+15. Each disclosure (read-at, Live work, "What the build said") shows an open or closed marker, ▸ or ▾.
+16. The status part reads its box. Its 640 and 1000 breakpoints are container queries on its
     wrapper, not the media queries of the roadmap page (`ux-component-reads-its-box`).
-14. The waiting part is main's, with no change. The order in each tier is the writer's `rank`, then
+17. The waiting part is main's, with no change. The order in each tier is the writer's `rank`, then
     age, as main's `sorted()` gives it. Card details that other lanes change now are not drawn.
+
+## Roadmap parts not drawn
+
+Each part below is kept as it is today, with no change. The mockup does not draw it.
+- The Live work body: the thread list, the open pull requests and the branches.
+- A step row's open body: Status, Why, Note, Ask with Copy, and When.
+- The Changes view (all changes by day), the Reference view and the Records view.
+- The jump links in the feed, the 5-day chart, the pager, and the clean-up trend card.
 
 ## Build constraints
 
@@ -87,12 +112,21 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
    `meta/advisor`, and the waiting part reads `meta/page`. The roadmap data stays in its baked
    global. It is never written to the live database.
 3. The page publishes to the waiting page's URL, whose database holds the answers.
-4. A republish keeps the page's `designData` block and its capabilities: `db` and `{comments: {}}`.
-5. The page now has two writers of its file. The roadmap build must keep `designData` and the
-   capabilities. A waiting-page republish or a design add must keep the baked roadmap block.
-   `stale_pages.py` compares a page with page.html, so it will see the merged page as different.
-6. The roadmap's class names that page.html also uses are scoped or renamed: `.bar`, `.rail`,
+4. Saved answers survive each republish. The builder writes this test first, and shows it red on
+   the old code: build the merged page, republish it over a page whose database holds
+   `answers/<id>`, then check that the answered card shows. The test also checks that nothing
+   writes or deletes a document in `answers/`.
+5. One writer publishes the page file: the waiting-page writer. The roadmap build makes only a data
+   block, in its own marked block, and gives it to that writer. The build never publishes.
+6. Before each publish, the writer reads the live page. It replaces only the marked block that it
+   changes: the `designData` block or the roadmap block. It keeps the other block. It runs one
+   publish at a time, never with `force`. It keeps the capabilities `db` and `{comments: {}}`.
+7. `stale_pages.py` compares each page with the merged template, with the `designData` block and the
+   roadmap block made empty on both sides. A republish of a page that is behind keeps both blocks.
+8. The old roadmap page retires. The roadmap skill publishes no page by itself. The repo's extras
+   key for the roadmap points at the waiting page's URL. The old roadmap URL gets no more publishes.
+9. The roadmap's class names that page.html also uses are scoped or renamed: `.bar`, `.rail`,
    `.card`, `.tabs`, `.steps`, `.g`, `.top`, `.big`, `.sub`, `.empty`. The page loads no font for
    status.
-7. Status is read only, as the baked roadmap is today. The step mark is not a control, and the
-   hint says "Read only".
+10. Status is read only, as the baked roadmap is today. The step mark is not a control, and the
+    hint says "Read only".
