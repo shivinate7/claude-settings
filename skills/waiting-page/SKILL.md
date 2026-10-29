@@ -107,6 +107,19 @@ into `meta/page`.
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item.
 
+## Chat first
+
+A session that talks with the owner asks in chat first: in the reply, or in the box where step 3 of
+"Add an item" allows one (decision questions-go-to-owner, "Chat first, then the page").
+
+- No answer in chat after 5 minutes: send the question to the writer, who adds the item.
+- No timer counts the 5 minutes. At each wake, check the age of each chat question still open.
+- An answer in chat: still send the question and the answer, with its time, to the writer. On a
+  question with no item, the writer writes the item with `status: "closed"`, the answer and its
+  time in `context`, and `receipts/<id>`. On a question with an item, route it as "Route and close"
+  says. So every question and answer ends on the page.
+- A lane has no chat with the owner. Its question still goes in its report.
+
 ## Add an item
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
@@ -140,6 +153,8 @@ into `meta/page`.
      answers, and what runs goes on with no one to brake it. You may end the turn: each agent's end
      wakes the session.
    - With nothing running, ask in the terminal question box too, and put the page URL in the box.
+   - A question the owner already saw in chat and left 5 minutes needs no new ask: name the item
+     and the page URL in one line.
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
