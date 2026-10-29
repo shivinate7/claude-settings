@@ -2572,21 +2572,26 @@ def _git_root_of(cwd):
 #
 # docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
 # (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `pick`. Read at the same ArtifactData call.
+# option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`.
+# Read at the same ArtifactData call.
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
                  "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
                  "match the shared format, or leave pick out.")
 
 
 def widens_pick_hit(data) -> str:
-    """The matched text when this write's `pick` names an option it marks `widens: true`. An update
-    that carries `pick` without `options` cannot see the stored options and passes."""
+    """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
+    `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
     options, pick = data.get("options"), data.get("pick")
-    if not isinstance(options, list) or not isinstance(pick, str):
-        return ""
-    if any(isinstance(o, dict) and o.get("key") == pick and o.get("widens") is True for o in options):
+    if isinstance(pick, str):
+        pick = [pick]
+    if not isinstance(pick, list) or not isinstance(options, list):
+        return ""  # an absent or null pick picks nothing, so it never matches a keyless option
+    keys = {p for p in pick if isinstance(p, str)}
+    if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
+           and o.get("widens") is True for o in options):
         return "pick names a widening option"
     return ""
 
