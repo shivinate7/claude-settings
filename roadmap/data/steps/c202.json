@@ -1,9 +1,9 @@
 {
   "title": "Ask in chat first; after 5 minutes without an answer, the page; every answer ends on the page",
   "phase": "organize",
-  "status": "doing",
+  "status": "done",
   "order": 103.3389994,
   "why": "shiv, Oct 28 15:05 and 15:10 CDT (via the coordinator): ask in chat first; if he has not answered after 5 minutes, the question goes to triage for the page; when he answers in chat, the session sends the answer to triage anyway.",
-  "note": "Ruling, Oct 28 15:10 CDT (shiv, chat, correcting his 15:06 note): a session asks in chat first, the \"fast lane\" (his name, 15:07). If he has not answered in chat after 5 minutes (his number, waiting-page item 52, b), the question goes to triage for the waiting page. When he answers in chat, the session sends the answer to triage anyway, so the page record is always complete. \"Never chat only\" means every question and answer ends on the page, not that both are posted at once. The repo does not hold this today: decision questions-go-to-owner on main has no such rule. Task: amend decision questions-go-to-owner and the waiting-page skill, with a check if one is cheap. Port: yes, every repo with a waiting page. Placed after c201 (triage 12, Oct 28). Lane started Oct 29 11:39 CDT (coordinator; session_013NEJL3HBQRWCMeSRu1pq4w).",
-  "updatedAt": "2026-10-29T16:45:00Z"
+  "note": "Ruling, Oct 28 15:10 CDT (shiv, chat, correcting his 15:06 note): a session asks in chat first, the \"fast lane\" (his name, 15:07). If he has not answered in chat after 5 minutes (his number, waiting-page item 52, b), the question goes to triage for the waiting page. When he answers in chat, the session sends the answer to triage anyway, so the page record is always complete. \"Never chat only\" means every question and answer ends on the page, not that both are posted at once. The repo does not hold this today: decision questions-go-to-owner on main has no such rule. Task: amend decision questions-go-to-owner and the waiting-page skill, with a check if one is cheap. Port: yes, every repo with a waiting page. Placed after c201 (triage 12, Oct 28). Lane started Oct 29 11:39 CDT (coordinator; session_013NEJL3HBQRWCMeSRu1pq4w). Done Oct 29 15:17 CDT (coordinator): #799 merged in batch 19 #801 (main 0f6a1487); the chat-first ruling is on main. The report-check follow-up, #807, passed round 3 but is parked by the review cap; its merge is item 79.",
+  "updatedAt": "2026-10-29T20:18:00Z"
 }
