@@ -915,6 +915,69 @@ test("a saved none note does not ride along when the owner picks an option", asy
 
 const sent = (page) => page.evaluate(() => window.__sent);
 const told = (page, text) => page.locator("#sentStatus", { hasText: text }).waitFor();
+const NOTE_ONLY = { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", note: "Which cable?" } };
+
+test("a task note with no Mark done makes the card ready, live as the owner types", async (t) => {
+  const page = await open(t); if (!page) return;
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open with nothing answered");
+  await addNote(page, TASK, "Which cable?");
+  assert.equal(await card(page, TASK).locator(".ready").textContent(), "Ready to send: note, not done.");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer");
+  await page.fill(`#n-${TASK.id}`, "   ");
+  assert.equal(await card(page, TASK).locator(".ready").textContent(), "");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on a blank note");
+});
+
+test("a note-only task sends its note with no done; the notice says note, not done and the receipt says Not marked done", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, TASK, "Which cable?");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a note-only task");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], TASK.id);
+  const a = (await answers(page))[TASK.id];
+  assert.deepEqual([a.item, a.n, a.note], [TASK.id, 28, "Which cable?"]);
+  assert.ok(!("done" in a), "a note-only answer carries done");
+  await page.waitForFunction(() => window.__sent.length === 1);
+  assert.match((await sent(page))[0].text, /28 note, not done \(Which cable\?\)/);
+  await card(page, TASK).locator(".receipt").waitFor();
+  assert.match(await card(page, TASK).locator(".receipt").textContent(), /Not marked done/);
+});
+
+test("a saved note-only answer shows Not marked done with its note, and Change keeps the note", async (t) => {
+  const page = await open(t, { answers: NOTE_ONLY }); if (!page) return;
+  const c = card(page, TASK);
+  assert.match(await c.locator(".receipt").textContent(), /Not marked done/);
+  assert.match(await c.locator(".receipt .rnote").textContent(), /^Note: Which cable\?$/);
+  await c.getByRole("button", { name: "Change" }).click();
+  assert.equal(await page.inputValue(`#n-${TASK.id}`), "Which cable?");
+  assert.equal(await c.locator(".ready").textContent(), "Ready to send: note, not done.");
+  await page.fill(`#n-${TASK.id}`, "");
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+});
+
+test("the Copy line names a note-only task as note, not done", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await addNote(page, TASK, "Which cable?");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a note-only task");
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await page.click("#copy");
+  assert.equal(await page.evaluate(() => window.__copied), "28 note, not done (Which cable?)");
+});
+
+test("the Copy line keeps a saved done when a draft under Change would not send", async (t) => {
+  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
+  await card(page, TASK).getByRole("button", { name: "Change" }).click();
+  await card(page, TASK).getByRole("button", { name: "Mark done" }).click(); // the draft is no longer done
+  await addNote(page, TASK, "   ");
+  await choose(page, DECISION, "a"); // a ready answer, so the failed write opens the Copy line
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await page.click("#copy");
+  assert.equal(await page.evaluate(() => window.__copied), "27 a, 28 done");
+});
 
 test("a send gives one notice that names the item and the choice", async (t) => {
   const page = await open(t); if (!page) return;
