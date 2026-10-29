@@ -59,6 +59,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
     (a number, or text such as `3 min`).
+  - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
+    When the cloud refused the act, the session first asks a session on the owner's computer
+    (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
+    The writer refuses a task with no such line (guard rule `task-names-check`).
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
@@ -124,6 +128,10 @@ into `meta/page`.
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
+   - On a task, add the "Why yours:" line to `context` first. When the cloud refused the act, ask a
+     session on the owner's computer before you write the task (`list_computer_folders`, then
+     `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it.
+     Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
