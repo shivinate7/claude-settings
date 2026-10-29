@@ -46,6 +46,29 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - "... you should really be messaging triage for this part to save context, etc, it's a learning experience for me."
   - The line names the session's own tier, the right tier, and why, such as saving context.
   - The session then still handles the message, or routes it.
+- **Triage feeds the lanes** (owner, 2026-10-29 13:45 CDT): "a role that's whole job is to be pushing stuff from triage into more lanes to work ie identify parallelism opportunities and push to you to start them ie a flywheel of sorts".
+  - At each wake and each check-in, triage sends the coordinator a ready list. A step is ready when every question it has is answered and its files do not clash with a running lane.
+  - The list also names each step that waits only on order, and what it waits on.
+  - The coordinator starts each ready step in the same turn.
+- **No owner step for work he signed off** (owner, 2026-10-29 13:44 CDT): "I shouldn't be expected to be around to do something I'd already signed off for".
+  - Triage asks nothing that a past ruling answers. The coordinator does the act, or finds who can.
+- **Opus grants live on the roadmap step** (owner, 2026-10-29 13:44 CDT, pick a): "Grants living in roadmap actually does make a lot of sense -- i lean towards that route."
+  - Triage writes each Opus grant on the step it covers, with the owner's words and time. A lane's guard reads the grant of its own step. Lane opus-grant-on-step builds this; decision agent-model-cap gets the lift when it lands.
+
+## How it works
+
+Mechanics that carry out the rulings above. They are not owner rulings.
+
+- **Tier tags** (coordinator, 2026-10-28). Each session the coordinator starts carries these two tags, beside any others such as `cs-step:<step>`.
+  - `cs-build:<tier>`, one of `coordinator`, `triage`, `batch-runner`, `lane`.
+  - `cs-repo:<owner>/<name>`, the repo it builds.
+- **Live-coordinator check.** A session that would act as coordinator reads every page of `list_sessions`. It looks for one session with both tags whose `session_status` is not archived. That session is the active coordinator.
+  - The `tags` filter of `list_sessions` errors inside a session, so the check filters the rows itself.
+  - `list_sessions` leaves out runs a scheduled task started. The check misses a coordinator started that way.
+- **Session start** (lane L3). In a cloud session (`CLAUDE_CODE_REMOTE=true`), `hooks/session_start.sh` prints one fixed line, in any working folder, git or not. The line tells the session to read its own record with `get_session`, and gives the check above.
+  - The hook cannot read the tier itself. `get_session` and `list_sessions` are MCP tools only, and a hook never calls the sessions API with a token.
+  - Outside the cloud the hook prints no line. The gate is that one env value.
+  - Cost: one env read in the hook already running. No network, no new process, no timer, no file written. `hooks/test_session_start.py` proves the line prints once in cloud, in a git folder or not, and never outside the cloud.
 
 ## Why
 
