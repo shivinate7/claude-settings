@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk.
+Owner rulings, 2026-10-28 and 2026-10-29 CDT. They name the session tiers and how they talk.
 
 - **Session shape** (owner, 15:18). A new session in a repo reads what the owner asks, and picks one shape.
   - Solo. It builds the change itself.
@@ -37,7 +37,8 @@ Owner rulings, all 2026-10-28 CDT. They name the session tiers and how they talk
   - the CI waits,
   - the merge tool runs,
   - archiving finished lanes.
-  The coordinator holds only lane state and talks with the owner.
+  The coordinator holds only lane state and talks with the owner. The batch runner runs the merge tool under the coordinator's merge grant (next bullet). It holds no grant of its own.
+- **Merge grant** (owner, 2026-10-29 16:47 CDT). The coordinator holds a standing merge grant in claude-settings and in the owner's other repos, until the owner withdraws it in chat. It never asks the owner to merge. The grant lifts the owner's word only: green CI, no merge during a batch CI run, fresh review and the net-value hold still apply. Record `standing-merge-grant` (the coordinator's standing merge grant) holds the words, the repos and the limits.
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
   - "... and want it so that u push back on me somehow being like by the way, im coordinator ..."
