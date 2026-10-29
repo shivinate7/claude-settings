@@ -1,4 +1,4 @@
-# <Role> hand-off, <date>
+# <Role> handoff, <date>
 
 From "<old session title>" at <the limit hit, or the slip>. Checked: main <commit>, record branch
 <commit>.

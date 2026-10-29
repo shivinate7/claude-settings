@@ -269,9 +269,9 @@ It never shuts down a simulator it did not boot. The exit code is xcodebuild's. 
 
 The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds the
 session tiers (a coordinator that starts triage and the batch runner, then lane sessions), one roster,
-rotation of the standing sessions by a usage tally, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role hand-off notes. Its
+rotation of the standing sessions by a usage tally, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
-the roster, a brief and a role hand-off note. A repo adopts it only on the owner's grant. See
+the roster, a brief and a role handoff note. A repo adopts it only on the owner's grant. See
 `skills/project-ops/SKILL.md`.
 
 ## Details worth knowing but not part of setup

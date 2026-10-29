@@ -8,7 +8,7 @@ same vetting as the first eight mods (desktop support first). No row authorizes 
 | Item | Status | Reason |
 | --- | --- | --- |
 | Robot Workers | Try later | Owner wants a trial. It adds files touched per agent. |
-| claude-flightdeck | Reference only | Per-session depth. The session board builds its own (session-board-mod-limits). Verify its README statements in code. Lowest reach. |
+| claude-flightdeck | Reference only | Per-session depth. The session board builds its own (session-board-mod-limits). Verify its README claims in code. Lowest reach. |
 | hamzafer/claude-code-mods | Consider later. Do not touch it now. | About 24 separate mods in one marketplace. The owner picks each one. |
 | claude-pokemon-mod | Later, optional | Fun only. It fetches sprites from the network and states no license. Skip unless the sprites are copied in and the license is clear. |
 | glowup | Skip | Poor fit. Haiku writes the pet lines, which spends usage. The Spotify tab does not run on Windows. Themes can load from web addresses. The side pane repeats the board and the built-in diff. |
@@ -21,7 +21,7 @@ same vetting as the first eight mods (desktop support first). No row authorizes 
 
 Parked, not built, flag to the owner as later items:
 
-- An `agent.spawn` hook sets an agent's model. It would replace the guard refusal for the step-up rule (reviewer rounds 2 and 3 on Sonnet, builder round 3 on Opus) with correct spawns.
+- An `agent.spawn` hook sets an agent's model. It would replace the guard refusal for the step-up rule (reviewer rounds 2 and 3 on Sonnet, builder try 3 on Opus) with correct spawns.
 - A `$.audio` sound when a session starts waiting on the owner. No community mod uses `$.audio`.
 
 ## Unvetted candidates

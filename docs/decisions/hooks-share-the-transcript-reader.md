@@ -8,7 +8,7 @@ The Stop hooks read the transcript through one module, `lint/_transcript.py`. It
 - `hooks/config_watch.py` calls neither, because its expiry rule fires with no file change, so no such exit is safe there.
 - `building-allow-list-is-the-constant` does not govern it: a transcript helper is not a permit list.
 
-Why: four hooks carried copies of the same readers, and the statement that each Stop hook stays in one file with no import between hooks was already false.
+Why: four hooks carried copies of the same readers, and the claim that each Stop hook stays in one file with no import between hooks was already false.
 
 Protection of the old outcome (one bad edit must mute one reporter, never all four):
 

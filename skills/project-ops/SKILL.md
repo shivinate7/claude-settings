@@ -1,6 +1,6 @@
 ---
 name: project-ops
-description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation by usage tally, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and hand-off templates. Not for ordinary code edits.
+description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation by usage tally, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
@@ -16,19 +16,20 @@ Without a project, each tier is one Claude Code session, and the owner acts as t
   `templates/operating-model.md` says what each tier owns, and how triage and the batch runner
   rotate by a usage tally. The coordinator compacts in place and has no successor.
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
-- **Autopilot.** A step that needs the owner's answer gets a "Deferred" line and waits. All other
+- **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
   The model adds only the "frozen at <sha>" line on each merge go.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
-  briefs and role hand-off notes. It is never merged into main.
+  briefs and role handoff notes. It is never merged into main.
 - **The outbox.** `roadmap/outbox/`, one file per session, for non-urgent notes to triage. Its
   README gives the format. `templates/operating-model.md` says when to message instead.
-- **Briefs and role hand-offs.** `templates/brief.md` and `templates/role-handoff.md`.
+- **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`.
 
-A role hand-off note is not a session handoff. A session handoff is the notes file of one session
-under `~/.claude/handoffs/` (GLOSSARY.md, "handoff"). A role hand-off note is a file in the record
-branch's `handoffs/` folder that triage or the batch runner writes for its successor.
+A role handoff note and a session handoff are two cases of one meaning: notes one holder writes so the next
+reader can continue (GLOSSARY.md, "handoff"). A session handoff is the notes file of one session
+under `~/.claude/handoffs/`. A role handoff note is a file in the record branch's `handoffs/` folder
+that triage or the batch runner writes for its successor.
 
 ## Steps
 
@@ -69,7 +70,7 @@ Decision `shared-resource-owner` (a shared machine names one owning repo) govern
   and the hold record.
 - Before a deploy, a restart or a bulk import, run the owner's preflight and read its holds.
   A hold stops the act.
-- A user repo that needs a change to the preflight or the holds writes a hand-off to the owner
+- A user repo that needs a change to the preflight or the holds writes a handoff to the owner
   repo's session: a note in the owner's outbox on its record branch. It never edits the owner's
   files. It never overrides the owner's guard.
 
