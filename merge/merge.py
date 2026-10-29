@@ -2367,7 +2367,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set.")
     if tier not in MERGE_ROLES:
-        raise Stop(f"--role takes one of: {', '.join(sorted(MERGE_ROLES))}.")
+        raise Stop("this session's tier may not record a merge role. Hand the pull request number and its head to the batch runner.")  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
