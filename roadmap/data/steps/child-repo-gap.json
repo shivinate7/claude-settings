@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.338,
   "why": "Child repos drift from the shared rules, and nobody has measured how far.",
-  "note": "Read-only check of the five child repos (coordinator, Oct 29 13:45 CDT). Lane started 13:45 CDT: session_013NEJKz84e4K9tbyMHrjonT (tag cs-step:child-repo-gap). Needs no answer. Placed after c136 (triage 12, Oct 29): a read-only lane, no file clash.",
+  "note": "Read-only check of the five child repos (coordinator, Oct 29 13:45 CDT). Lane started 13:45 CDT: session_013NEJKz84e4K9tbyMHrjonT (tag cs-step:child-repo-gap). Needs no answer. Placed ahead of c198 (triage 12, Oct 29): a read-only lane, no file clash, and it is already running.",
   "updatedAt": "2026-10-29T18:58:00Z"
 }
