@@ -15,7 +15,7 @@ The mockup draws the waiting part with the `<style>` of page.html, unchanged.
 |---|---|---|
 | `main` | `#s=main` | Questions tab: all four tiers, one group frame, one answered card. |
 | `status` | `#s=status` | Status tab: read-at stamps, live work, the plan band, the view switch, the Plan view. |
-| `empty` | `#s=empty` | No item waits: the tab row with Questions 0, one line, then status. |
+| `empty` | `#s=empty` | No item waits: the tab row with Questions 0, and one line. |
 | `no-status` | `#s=no-status` | Status tab of a repo with no roadmap: unknown, why, and one control. |
 
 Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an element with
@@ -37,21 +37,20 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
 2. The tab row always shows: "Questions" with its open count, then "Status", then "Designs" when an
    item has a design. Gain: Status never moves, the count shows what waits from either tab, and an
    item that arrives moves no tab. Loss: main hides the row when no item has a design.
-3. Nothing waits (`#s=empty`). The tab row shows "Questions 0". Under it, one line, then status
-   with a "Status" heading, with no press. When an item arrives, its card takes the line's place.
-   The header and the tab row do not move. Status under the card moves down by the card's height.
-   If the line is above the view, scroll anchoring keeps the status in view still. That is
-   unmeasured.
-4. The empty line: "Nothing on this page waits on you. A session that asks you in its own chat
-   shows under Live work." Live work can say "1 asking in its chat" on the same screen. A thread
-   that asks in its chat has no item on this page, so both lines are true
-   (`ux-statements-are-true`). Departs from: page.html `renderList`, which says "Nothing is
+3. Status shows only behind its tab, on every load and in every state. Ruling: orchestrator, round 2.
+   Nothing waits (`#s=empty`): the tab row shows "Questions 0", and the Questions tab shows one
+   line. When an item arrives, its card takes the line's slot. Nothing else moves
+   (`ux-press-moves-nothing`). The page has one layout.
+4. The empty line is one sentence: "Nothing on this page waits on you." A thread that asks in its
+   own chat has no item on this page, and Live work names it "asking in its chat", so both stay
+   true (`ux-statements-are-true`). Departs from: page.html `renderList`, which says "Nothing is
    waiting on you right now."
 5. A load always opens Questions. The page does not keep the tab choice. The roadmap's own view
    memory (`rm-view`) stays for Plan, Changes, Reference and Records. Gain: what waits is first,
    each time. Loss: the owner who reads status first presses once on each load.
-6. The header names the open tab: "waiting on you" on Questions, "project status" on Status, in
-   the header and in the document title. On a phone the header hides this word, as on main.
+6. The status part has one name: "Status". The tab and the document title use it. On the Status
+   tab the header shows the repo name only, with no "waiting on you". On Questions the header and
+   title are as on main.
 7. The answer bar stays on the Status tab. Gain: a pick is never left behind, nothing moves at a
    tab change, and the bar says how many items wait. Loss: the bar shows under status, which it
    does not change.
@@ -85,8 +84,11 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
     - The phase card says "Phase 2". The rail button names the phase. The phase card, the tiles and
       the running total show counts as `3/9`, with the words for a screen reader.
     - Departs from: `renderPhase` and `metaTiles` in the roadmap page, which repeat the name and "of".
-    - Output of `python3 lint/label_once.py` on the 24 rendered files (4 states, 3 sizes,
-      2 themes), at commit time: no line, exit 0.
+    - A step row has no "Now" tag and no thread tag. The row's mark and fill show that it is in
+      progress, "Doing now" names it, and Live work counts the threads. Departs from: `stepRow`
+      (`t-now`) and the live work block's `tag()` in the roadmap page.
+    - `python3 lint/label_once.py` on the 24 rendered files (4 states, 3 sizes, 2 themes) at
+      commit time printed no line and exited 0 (`exit=0`).
 15. Each disclosure (read-at, Live work, "What the build said") shows an open or closed marker, ▸ or ▾.
 16. The status part reads its box. Its 640 and 1000 breakpoints are container queries on its
     wrapper, not the media queries of the roadmap page (`ux-component-reads-its-box`).
@@ -112,10 +114,12 @@ Each part below is kept as it is today, with no change. The mockup does not draw
    `meta/advisor`, and the waiting part reads `meta/page`. The roadmap data stays in its baked
    global. It is never written to the live database.
 3. The page publishes to the waiting page's URL, whose database holds the answers.
-4. Saved answers survive each republish. The builder writes this test first, and shows it red on
-   the old code: build the merged page, republish it over a page whose database holds
+4. Saved answers survive each republish. The builder writes this test first in
+   `skills/waiting-page/tests/page.test.mjs`, and shows it red on the old code. It runs in CI
+   against a stubbed database: build the merged page, republish it over a page whose database holds
    `answers/<id>`, then check that the answered card shows. The test also checks that nothing
-   writes or deletes a document in `answers/`.
+   writes or deletes a document in `answers/`. The live check runs once per batch, as step 4 of
+   "Update a repo's pages" in the waiting-page skill says: update one page first, then read its items.
 5. One writer publishes the page file: the waiting-page writer. The roadmap build makes only a data
    block, in its own marked block, and gives it to that writer. The build never publishes.
 6. Before each publish, the writer reads the live page. It replaces only the marked block that it

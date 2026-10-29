@@ -590,8 +590,8 @@ function list() {
 /* ---------- Status part: sample roadmap data, in the shapes ROADMAP_DB and ROADMAP_BUILD give today ---------- */
 const PH = [{ k: "cleanup", n: "Clean up", d: 10, t: 10 }, { k: "organize", n: "Organize", d: 3, t: 9, a: 2, b: 1 }, { k: "design", n: "Design", d: 0, t: 6 }, { k: "rollout", n: "Roll out", d: 0, t: 9 }, { k: "later", n: "Later", d: 0, t: 7 }];
 const OPEN_STEPS = [
-  { id: "s21", title: "Fold the two status pages into one", st: "active", tags: ['<span class="tag t-now">Now</span>', '<span class="tag st-working">Working</span>'] },
-  { id: "s22", title: "Rank the open items on the page", st: "active", tags: ['<span class="tag t-now">Now</span>', '<span class="tag landed">Landed in #51</span>'] },
+  { id: "s21", title: "Fold the two status pages into one", st: "active", tags: [] },
+  { id: "s22", title: "Rank the open items on the page", st: "active", tags: ['<span class="tag landed">Landed in #51</span>'] },
   { id: "s23", title: "Name a home for each record kind", st: "todo", tags: ['<span class="tag next">Next 1</span>'] },
   { id: "s24", title: "Move the sample importer to its own folder", st: "todo", tags: ['<span class="tag next">Next 2</span>'] },
   { id: "s26", title: "Write the phone layout for the import screen", st: "todo", tags: ['<span class="tag next">Next 3</span>'] },
@@ -656,9 +656,9 @@ function noRoadmap() {
   </section></div>`;
 }
 function status(s) {
-  const known = s !== "no-status", heading = s === "empty" ? '<h2 id="sv-h">Status</h2>' : "";
-  return `<div class="in svwrap"><section class="sv" id="sView"${s === "empty" ? ' aria-labelledby="sv-h"' : ' aria-label="Status"'}>
-    <div class="sv-head">${heading}${readAt(known)}</div>${live(known)}${known ? now() : ""}${views()}${known ? plan() : noRoadmap()}</section></div>`;
+  const known = s !== "no-status";
+  return `<div class="in svwrap"><section class="sv" id="sView" aria-label="Status">
+    <div class="sv-head">${readAt(known)}</div>${live(known)}${known ? now() : ""}${views()}${known ? plan() : noRoadmap()}</section></div>`;
 }
 
 /* ---------- One page: header, tabs, then the part the tab names ---------- */
@@ -666,14 +666,14 @@ function screen(s, theme, lab) {
   const onStatus = s === "status" || s === "no-status", empty = s === "empty";
   const tabs = `<nav class="in tabs" id="tabs" aria-label="Page"><a href="#" id="tabQ" data-go="main"${onStatus ? "" : ' aria-current="page"'}>Questions <span class="cnt" data-new="open count">${empty ? 0 : OPEN}</span></a><a href="#" id="tabS" data-go="${s === "no-status" ? "no-status" : "status"}"${onStatus ? ' aria-current="page"' : ""} data-new="Status tab, always second">Status</a></nav>`;
   let body;
-  if (empty) body = `<div class="in lonely"><div class="empty" data-new="tab row stays; one line, then status">Nothing on this page waits on you. A session that asks you in its own chat shows under Live work.</div></div>${status(s)}`;
+  if (empty) body = `<div class="in lonely"><div class="empty" data-new="one line; a new card takes its slot">Nothing on this page waits on you.</div></div>`;
   else if (onStatus) body = status(s);
   else body = `<div class="in main" id="qView" data-today="questions as on main">${rail()}${list()}</div>`;
   const bar = empty
     ? `<div class="bar" id="bar"><div class="in"><span class="st"></span><button class="btn send" type="button" disabled>Send answers</button></div></div>`
     : `<div class="bar" id="bar"${onStatus ? ' data-new="bar stays on the Status tab"' : ""}><div class="in"><span class="st"><b>${READY}</b> ready (${READY} where my pick stands). <b>${OPEN - READY}</b> stay open.</span><button class="btn send" type="button">Send ${READY} answer${READY === 1 ? "" : "s"}</button></div></div>`;
-  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sample-repo: ${onStatus ? "status" : "waiting on you"}</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
-<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1><span class="sub"${onStatus ? ' data-new="header names the open tab"' : ""}>${onStatus ? "project status" : "waiting on you"}</span></div></div></header>
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sample-repo: ${onStatus ? "Status" : "waiting on you"}</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo"${onStatus ? ' data-new="no &quot;waiting on you&quot; on Status"' : ""}>sample-repo</h1>${onStatus ? "" : '<span class="sub">waiting on you</span>'}</div></div></header>
 ${tabs}${body}${bar}
 <script>document.addEventListener("click",function(e){var a=e.target.closest("[data-go]");if(a){e.preventDefault();parent.postMessage({oneState:a.dataset.go},"*");}});<\/script></body></html>`;
 }
