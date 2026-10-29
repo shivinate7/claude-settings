@@ -5,7 +5,7 @@ the same turn that a session rotates. A session reads it right before it message
 
 - Coordinator (starts every other session, holds lane state, talks with the owner): "<session title>",
   <session id>, since <date and time>. It compacts in place and has no successor.
-- Triage (gatekeeper, waiting page and roadmap page): "<session title>", <session id>, since
+- Triage (gatekeeper, the repo's one page): "<session title>", <session id>, since
   <date and time>.
 - Batch runner (integration batch, CI waits, merge tool runs, archiving finished lanes):
   "<session title>", <session id>, since <date and time>.

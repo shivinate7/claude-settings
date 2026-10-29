@@ -4,10 +4,11 @@
 `data/meta/<name>.json`. A step file holds the fields `title`, `status` (`todo`, `active`, `done`),
 `phase`, `order`, `why`, `note`, `ask` and `updatedAt`.
 
-The page builder is `skills/roadmap` in claude-settings. Build the page from this repo's checkout:
+The block builder is `skills/roadmap` in claude-settings. Build the roadmap block from this repo's checkout:
 
-    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --out FILE
+    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out FILE
 
-The builder runs without live work. Triage adds `--live live.json` at each publish, after the
-publisher writes `live.json`. The skill says what that file holds, and what the page shows without
-it. Build again after each edit to `data/`.
+The builder publishes nothing. The waiting-page writer splices the block into the repo's one page
+and alone publishes it (skill `waiting-page`). The builder runs without live work. Triage adds
+`--live live.json` at each publish, after the waiting-page writer writes `live.json`. The skill says
+what that file holds, and what the block shows without it. Build again after each edit to `data/`.
