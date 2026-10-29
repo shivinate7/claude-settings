@@ -103,6 +103,18 @@ const answers = (page) => page.evaluate(() => window.__answers());
 // A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
 const takePick = (page, it) => card(page, it).getByRole("button", { name: /Take my pick/ }).click();
+// The keyboard way to take a pick: focus the button and press Enter. Resolves to what holds focus one frame later, so a fix that focuses in a frame still counts.
+const enterTakePick = async (page, it) => {
+  await page.locator(`#b-take-${it.id}`).focus();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  return page.evaluate(() => ({ tag: document.activeElement.tagName, id: document.activeElement.id }));
+};
+// After Take my pick hides, focus belongs on the input of the pick's first key, as the A to C key handler leaves it.
+const assertFocusOnFirstPick = (at, it, key) => {
+  assert.notEqual(at.tag, "BODY", `${it.id}: focus fell to BODY after Enter on Take my pick`);
+  assert.equal(at.id, `o-${it.id}-${key}`, `${it.id}: focus is not on the first key of the pick`);
+};
 const addNote = async (page, it, text) => { await card(page, it).getByRole("button", { name: "Add a note" }).click(); await page.fill(`#n-${it.id}`, text); };
 const send = (page) => page.click("#send");
 const written = (page) => page.waitForFunction(() => window.__log.some((l) => l[0] === "set"));
@@ -373,6 +385,15 @@ test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   await page.keyboard.press("Control+Enter");
   await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
   assert.equal((await answers(page))[DECISION.id].choice, "b");
+});
+
+// The pick is B, not the first option, so a fix that focuses the first radio of the card fails.
+test("Enter on Take my pick puts focus on the pick's input, on a pick-one card", async (t) => {
+  const it = mk("take-focus", 40, { pick: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const at = await enterTakePick(page, it);
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
 });
 
 // ---------------------------------------------------------------- repo colour
@@ -2614,6 +2635,26 @@ test("Undo puts a list pick back as a draft, in its order", async (t) => {
   assert.deepEqual(await ticked(page, r), ["a", "c"]);
   assert.match(await rankText(page, r, "c"), rank("1st", 2), "Undo lost the order");
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
+});
+
+// The first option is in no pick, so a fix that focuses the first box of the card fails. The ranked pick starts with C, so a fix that reads option order fails.
+test("Enter on Take my pick puts focus on the first key of the pick, on a multi card", async (t) => {
+  const it = multi("take-focus-multi", 41, { pick: ["b", "c"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["b", "c"], "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
+});
+
+test("Enter on Take my pick puts focus on the first key of the pick, in rank order, on a ranked card", async (t) => {
+  const it = ranked("take-focus-ranked", 42);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["a", "c", "d"], "Enter did not take the pick");
+  assert.match(await rankText(page, it, "c"), rank("1st", 3), "the pick's first key is not ranked 1st");
+  assertFocusOnFirstPick(at, it, "c");
 });
 
 test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
