@@ -2117,3 +2117,300 @@ test("a decision card with no differs mark shows no stray null or undefined text
   }, DECISION.id);
   assert.deepEqual(stray, [], "stray text in the decision card");
 });
+
+// ---------------------------------------------------------------- c135: a question that takes several answers
+// Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
+
+// The one home of the multi fixtures; a case adds only its own fields. Option keys a to d show as letters A to D.
+const COLOURS = [opt("a", "Red"), opt("b", "Blue"), opt("c", "Green"), opt("d", "Yellow")];
+const multi = (id, n, over = {}) => mk(id, n, { multi: true, options: COLOURS.slice(0, 3), pick: ["a", "c"], why: "Red and Green cover it.", ...over });
+const ranked = (id, n, over = {}) => multi(id, n, { ranked: true, options: COLOURS, pick: ["c", "a", "d"], ...over });
+// Item 31's shape: options that can coexist, which were asked as pick-one.
+const digest = (over = {}) => multi("digest", 31, { title: "Which reminders should the weekly digest send?", options: [opt("a", "Open items older than a week"), opt("b", "Picks that stood"), opt("c", "Answers that failed to save")], why: "Old items and lost answers cost you time.", ...over });
+const boxes = (page, it) => card(page, it).locator(".opts input[type=checkbox]");
+// The keys ticked now, in option order.
+const ticked = (page, it) => page.evaluate((id) => [...document.querySelectorAll(`#item-${id} .opts input`)].filter((i) => i.checked).map((i) => i.value), it.id);
+// Every case starts here, so a page that still draws the item as pick-one fails on this line.
+const needBoxes = async (page, it, n) => assert.equal(await boxes(page, it).count(), n, `item ${it.n} has no ${n} checkboxes: it is drawn as pick-one`);
+// A ranked card's label stretches over the whole card, so a press on its text lands on that label: press the label.
+const tick = (page, it, key) => (it.ranked ? page.locator(`label[for="o-${it.id}-${key}"]`).click() : choose(page, it, key));
+const labelOf = (it, key) => it.options.find((o) => o.key === key).label;
+const rankText = (page, it, key) => page.locator(`#item-${it.id} .opt:has(#o-${it.id}-${key})`).textContent();
+const moveBtn = (page, it, key, dir) => card(page, it).getByRole("button", { name: `Move ${labelOf(it, key)} ${dir}`, exact: true });
+const sendOne = async (page, it) => { await send(page); await page.waitForFunction((id) => !!window.__answers()[id], it.id); return (await answers(page))[it.id]; };
+
+test("a multi item draws checkboxes in a group, and two ticks send choice as a list of both keys", async (t) => {
+  const it = digest();
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it);
+  await needBoxes(page, it, 3);
+  assert.equal(await c.getByRole("radiogroup").count(), 0, "the options are still a radiogroup");
+  assert.equal(await c.getByRole("group", { name: /Options for No\. 31/ }).count(), 1, "the options are not a group");
+  assert.equal(await c.locator("input[type=radio]").count(), 0, "a radio is left on a multi item");
+  await choose(page, it, "a"); await choose(page, it, "c");
+  assert.deepEqual(await ticked(page, it), ["a", "c"]);
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer");
+  const a = await sendOne(page, it);
+  assert.deepEqual([a.item, a.n, a.choice, a.note], [it.id, 31, ["a", "c"], ""]);
+});
+
+test("a ranked item: three ticks, one Up, and Send writes the list in the order shown", async (t) => {
+  const it = ranked("rk-send", 32);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  for (const k of ["c", "a", "d"]) await tick(page, it, k);
+  assert.deepEqual(await ticked(page, it), ["a", "c", "d"]);
+  for (const [k, r] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), new RegExp(`\\b${r} of 3\\b`), `rank of ${k}`);
+  await moveBtn(page, it, "a", "up").click();
+  for (const [k, r] of [["a", "1st"], ["c", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), new RegExp(`\\b${r} of 3\\b`), `rank of ${k} after Up`);
+  const a = await sendOne(page, it);
+  assert.deepEqual([a.choice, a.note], [["a", "c", "d"], ""]);
+});
+
+test("a ranked item: a new tick goes last and an untick closes the gap", async (t) => {
+  const it = ranked("rk-gap", 32);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  await tick(page, it, "c"); await tick(page, it, "a");
+  assert.match(await rankText(page, it, "c"), /\b1st of 2\b/);
+  assert.match(await rankText(page, it, "a"), /\b2nd of 2\b/);
+  await tick(page, it, "d"); await tick(page, it, "b");
+  assert.match(await rankText(page, it, "d"), /\b3rd of 4\b/, "a new tick did not go last");
+  assert.match(await rankText(page, it, "b"), /\b4th of 4\b/);
+  await tick(page, it, "a"); // untick the 2nd
+  for (const [k, r] of [["c", "1st"], ["d", "2nd"], ["b", "3rd"]]) assert.match(await rankText(page, it, k), new RegExp(`\\b${r} of 3\\b`), `rank of ${k} after the untick`);
+  assert.match(await rankText(page, it, "a"), /Not in your order/);
+  const a = await sendOne(page, it);
+  assert.deepEqual(a.choice, ["c", "d", "b"]);
+});
+
+test("Take my pick on a multi item writes the whole pick list with the note accepted pick, ranked or not", async (t) => {
+  const m = digest(), r = ranked("rk-take", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  const take = card(page, m).getByRole("button", { name: /Take my pick/ });
+  assert.match(await take.textContent(), /^Take my pick \(.*Open items older than a week.*Answers that failed to save.*\)$/, "the button does not name both picks by title");
+  await take.click(); await takePick(page, r);
+  assert.deepEqual(await ticked(page, m), ["a", "c"]);
+  assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
+  for (const [k, n] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, r, k), new RegExp(`\\b${n} of 3\\b`), `rank of ${k}`);
+  assert.equal(await take.isVisible(), false, "Take my pick stays after it was taken");
+  assert.match(await card(page, m).locator(".ready").textContent(), /, my pick\.$/);
+  assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  const a = await answers(page);
+  assert.deepEqual([a[m.id].choice, a[m.id].note], [["a", "c"], "accepted pick"]);
+  assert.deepEqual([a[r.id].choice, a[r.id].note], [["c", "a", "d"], "accepted pick"]);
+});
+
+test("a note on a multi item with nothing ticked is choice none plus the note; with ticks it rides on the list", async (t) => {
+  const bare = digest(), withTicks = multi("note-ticks", 32);
+  const page = await open(t, { items: [bare, withTicks] }); if (!page) return;
+  await needBoxes(page, bare, 3); await needBoxes(page, withTicks, 3);
+  await addNote(page, bare, "Only the failed ones, as a push");
+  await choose(page, withTicks, "a"); await choose(page, withTicks, "b");
+  await addNote(page, withTicks, "push too");
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  const a = await answers(page);
+  assert.deepEqual([a[bare.id].choice, a[bare.id].note], ["none", "Only the failed ones, as a push"]);
+  assert.deepEqual([a[withTicks.id].choice, a[withTicks.id].note], [["a", "b"], "push too"]);
+});
+
+test("None of these on a multi item clears the ticks, needs a note, and sends the string none", async (t) => {
+  const it = digest();
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  await choose(page, it, "a");
+  await card(page, it).getByRole("button", { name: "None of these" }).click();
+  assert.deepEqual(await ticked(page, it), [], "a tick stayed beside None of these");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on None of these with no note");
+  await page.fill(`#n-${it.id}`, "Only a push");
+  const a = await sendOne(page, it);
+  assert.deepEqual([a.choice, a.note], ["none", "Only a push"]);
+});
+
+test("keys A to C toggle an option on a multi item, ranked or not", async (t) => {
+  const m = digest(), r = ranked("rk-keys", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  await card(page, m).locator(".title").click();
+  await page.keyboard.press("a"); await page.keyboard.press("c");
+  assert.deepEqual(await ticked(page, m), ["a", "c"], "a key did not tick its option");
+  await page.keyboard.press("a");
+  assert.deepEqual(await ticked(page, m), ["c"], "a second press did not untick");
+  await card(page, r).locator(".title").click();
+  await page.keyboard.press("c"); await page.keyboard.press("a");
+  assert.match(await rankText(page, r, "c"), /\b1st of 2\b/);
+  assert.match(await rankText(page, r, "a"), /\b2nd of 2\b/);
+  assert.deepEqual(await ticked(page, m), ["c"], "a key on the ranked card ticked the other card");
+});
+
+test("a saved multi answer lists each pick with its letter and title in order, and Change puts the list back", async (t) => {
+  const m = digest(), r = ranked("rk-saved", 32);
+  const at = "2026-10-26T01:00:00Z";
+  const page = await open(t, { items: [m, r], answers: { [m.id]: { item: m.id, n: 31, at, choice: ["a", "c"], note: "" }, [r.id]: { item: r.id, n: 32, at, choice: ["c", "a", "d"], note: "" } } }); if (!page) return;
+  const rows = async (c, tag) => (await c.locator(`.receipt ${tag} li`).allTextContents()).map((s) => s.replace(/\s+/g, " ").trim());
+  const mr = await rows(card(page, m), "ul"), rr = await rows(card(page, r), "ol");
+  assert.equal(mr.length, 2, "the saved card does not list the picks as a bullet list: " + mr);
+  assert.match(mr[0], /^A\W*Open items older than a week$/); assert.match(mr[1], /^C\W*Answers that failed to save$/);
+  assert.equal(rr.length, 3, "the saved ranked card does not list the picks as a numbered list: " + rr);
+  assert.match(rr[0], /^C\W*Green$/); assert.match(rr[1], /^A\W*Red$/); assert.match(rr[2], /^D\W*Yellow$/);
+  assert.match(await card(page, m).locator(".receipt").textContent(), /You chose:/);
+  assert.match(await card(page, r).locator(".receipt").textContent(), /You chose, in order:/);
+  await card(page, r).getByRole("button", { name: "Change" }).click();
+  assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
+  assert.match(await rankText(page, r, "c"), /\b1st of 3\b/, "Change lost the order");
+  assert.match(await rankText(page, r, "a"), /\b2nd of 3\b/);
+});
+
+test("the ready line names the picks by title, shortened, never by letter, and a ranked line gives the order", async (t) => {
+  const m = multi("rd-m", 41, { options: WORDY, pick: ["value", "watch"] }), r = ranked("rd-r", 42, { options: WORDY, pick: ["nothing", "value"] });
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 3);
+  const ready = (it) => card(page, it).locator(".ready").textContent();
+  assert.equal(await ready(m), "", "a ready line shows before a tick");
+  await tick(page, m, "value"); await tick(page, m, "watch");
+  assert.match(await ready(m), /^Ready to send: Value for the card.*… and Watch, your choice\.$/);
+  await tick(page, m, "nothing");
+  const three = await ready(m);
+  assert.ok(three.indexOf("Value for the card") < three.indexOf("Watch") && three.indexOf("Watch") < three.indexOf("Nothing") && /^Ready to send: /.test(three) && / and /.test(three), "three picks are not named in a list: " + three);
+  await tick(page, r, "nothing"); await tick(page, r, "value");
+  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, your order\.$/);
+  await takePick(page, r);
+  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, my pick\.$/);
+  assert.match(await card(page, r).getByRole("button", { name: /Take my pick/ }).textContent(), /^Take my pick \(Nothing.*Value for the card.*…\)$/, "Take my pick does not name the picks by title");
+});
+
+const LONGER = [opt("a", "Open items older than a week, listed oldest first"), opt("b", "Picks that stood since the last digest went out"), opt("c", "Answers that failed to save and need a second chance"), opt("d", "A fourth title that is long enough to wrap")];
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
+  test(`no card moves when a box is ticked or Up and Down are pressed, at ${viewport.width} wide`, async (t) => {
+    const items = [multi("mv-m", 1, { context: LONG, options: LONGER.slice(0, 3) }), ranked("mv-r", 2, { context: LONG, options: LONGER }), mk("mv-p", 3, { context: LONG })];
+    const page = await open(t, { items, viewport }); if (!page) return;
+    await noAnchor(page);
+    await needBoxes(page, items[0], 3); await needBoxes(page, items[1], 4);
+    const base = await geo(page);
+    const same = async (what) => assert.deepEqual(await geo(page), base, "the page moved on " + what);
+    await tick(page, items[0], "a"); await same("a first tick");
+    await tick(page, items[0], "b"); await same("a second tick");
+    await tick(page, items[0], "a"); await same("an untick");
+    await takePick(page, items[0]); await same("Take my pick on a multi item");
+    for (const k of ["c", "a", "d"]) { await tick(page, items[1], k); await same("a tick on a ranked item"); }
+    await moveBtn(page, items[1], "a", "up").click(); await same("Up");
+    await moveBtn(page, items[1], "d", "up").click(); await same("a second Up");
+    await moveBtn(page, items[1], "d", "down").click(); await same("Down");
+    const first = moveBtn(page, items[1], "a", "up");
+    await first.focus(); await page.keyboard.press("Enter"); await same("Up on the first");
+    await tick(page, items[1], "d"); await same("an untick on a ranked item");
+    await takePick(page, items[1]); await same("Take my pick on a ranked item");
+  });
+}
+
+test("Up and Down are 44px targets on each ticked card, in the Tab order, and work from the keyboard", async (t) => {
+  const it = ranked("rk-keyboard", 32);
+  const page = await open(t, { items: [it], viewport: { width: 390, height: 800 } }); if (!page) return;
+  await needBoxes(page, it, 4);
+  for (const k of ["c", "a", "d"]) await tick(page, it, k);
+  for (const k of ["c", "a", "d"]) for (const dir of ["up", "down"]) {
+    const b = moveBtn(page, it, k, dir);
+    assert.equal(await b.count(), 1, `no Move ${labelOf(it, k)} ${dir} button`);
+    const r = await b.boundingBox();
+    assert.ok(r.width >= 44 && r.height >= 44, `Move ${labelOf(it, k)} ${dir} is ${r.width} by ${r.height}`);
+  }
+  await page.locator(`#o-${it.id}-c`).focus();
+  const stops = [];
+  for (let i = 0; i < 4; i++) { await page.keyboard.press("Tab"); stops.push(await page.evaluate(() => document.activeElement.getAttribute("aria-label"))); }
+  assert.ok(stops.includes("Move Green up") && stops.includes("Move Green down"), "Tab does not reach Up and Down: " + stops);
+  await moveBtn(page, it, "a", "up").focus(); await page.keyboard.press("Enter");
+  assert.match(await rankText(page, it, "a"), /\b1st of 3\b/, "Enter on Up did not move the card up");
+  await moveBtn(page, it, "d", "up").focus(); await page.keyboard.press("Space");
+  assert.match(await rankText(page, it, "d"), /\b2nd of 3\b/, "Space on Up did not move the card up");
+  const a = await sendOne(page, it);
+  assert.deepEqual(a.choice, ["a", "d", "c"]);
+});
+
+test("a pick-one item is unchanged: radios in a radiogroup, and choice is one string", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  const c = card(page, DECISION);
+  assert.equal(await c.getByRole("radiogroup").count(), 1);
+  assert.equal(await c.locator("input[type=radio]").count(), 2);
+  assert.equal(await c.locator("input[type=checkbox]").count(), 0, "a pick-one item drew a checkbox");
+  assert.equal(await page.locator(`label[for="o-${DECISION.id}-a"] .pick`).count(), 1, "the star left the pick-one item's pick");
+  await choose(page, DECISION, "b");
+  const a = await sendOne(page, DECISION);
+  assert.deepEqual([a.choice, typeof a.choice, a.note], ["b", "string", ""]);
+});
+
+test("a pick that stands, as a list, sits in the last section, goes with Send as the list, and a changed list wins", async (t) => {
+  const s1 = multi("stand-m", 7, { stands: true }), s2 = ranked("stand-r", 8, { stands: true });
+  const page = await open(t, { items: [s1, s2] }); if (!page) return;
+  assert.equal(await page.locator("#tier-stands article.card").count(), 2, "a stands item with a list pick is not in the last section");
+  await needBoxes(page, s1, 3); await needBoxes(page, s2, 4);
+  assert.deepEqual(await ticked(page, s1), ["a", "c"], "a stood pick is not shown");
+  assert.deepEqual(await ticked(page, s2), ["a", "c", "d"]);
+  assert.match(await rankText(page, s2, "c"), /\b1st of 3\b/);
+  assert.match(await page.locator("#barStatus").textContent(), /2 where my pick stands/);
+  await choose(page, s1, "a"); // untick: the owner's list now differs from my pick
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  const a = await answers(page);
+  assert.deepEqual([a[s1.id].choice, a[s1.id].note], [["c"], ""]);
+  assert.deepEqual([a[s2.id].choice, a[s2.id].note], [["c", "a", "d"], "accepted pick"]);
+});
+
+test("a pick that is not a valid list shows no star and no Take my pick; a valid list does", async (t) => {
+  const bad = [multi("bad-str", 51, { pick: "a" }), multi("bad-key", 52, { pick: ["a", "zzz"] }), multi("bad-dup", 53, { pick: ["a", "a"] }), multi("bad-empty", 54, { pick: [] }), mk("bad-one", 55, { pick: ["a", "b"] })];
+  const good = multi("good-list", 56);
+  const page = await open(t, { items: [...bad, good] }); if (!page) return;
+  for (const it of [...bad.slice(0, 4), good]) await needBoxes(page, it, 3);
+  assert.equal(await card(page, good).locator(".opt .pick").count(), 2, "a valid list is not starred on each pick");
+  assert.match(await page.locator(`#item-${good.id} .opt:has(#o-${good.id}-a) .pick`).textContent(), /Red and Green cover it\./);
+  assert.equal(await card(page, good).getByRole("button", { name: /Take my pick/ }).count(), 1);
+  for (const it of bad) {
+    assert.equal(await card(page, it).locator(".opt .pick").count(), 0, `${it.id}: a star shows for a bad pick`);
+    assert.equal(await card(page, it).getByRole("button", { name: /Take my pick/ }).count(), 0, `${it.id}: Take my pick shows for a bad pick`);
+  }
+});
+
+test("the notice to Claude writes a list pick as 31 a+c, in rank order when ranked", async (t) => {
+  const m = digest(), r = ranked("rk-notice", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  await tick(page, m, "a"); await tick(page, m, "c"); await addNote(page, m, "bold");
+  await tick(page, r, "c"); await tick(page, r, "a");
+  await send(page);
+  await told(page, "Claude was told");
+  const s = await sent(page);
+  assert.equal(s.length, 1);
+  assert.match(s[0].text, /31 a\+c \(bold\)/);
+  assert.match(s[0].text, /32 c\+a/);
+});
+
+test("Undo puts a list pick back as a draft, in its order", async (t) => {
+  const m = digest(), r = ranked("rk-undo", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  await tick(page, m, "a"); await tick(page, m, "c"); await tick(page, r, "c"); await tick(page, r, "a");
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  assert.deepEqual(await ticked(page, m), ["a", "c"], "Undo lost the list");
+  assert.deepEqual(await ticked(page, r), ["a", "c"]);
+  assert.match(await rankText(page, r, "c"), /\b1st of 2\b/, "Undo lost the order");
+  assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
+});
+
+test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
+  const it = { ...picItem("multi-pics", 33), multi: true, pick: ["a", "c"] };
+  const page = await open(t, { items: [it], designData: PICS }); if (!page) return;
+  await needBoxes(page, it, 3);
+  for (const o of LOOK_OPTS) assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-${o.key}"] .opic iframe.dframe`).count(), 1, "no picture in option " + o.key);
+  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
+  assert.deepEqual(await ticked(page, it), [], "a tap on the picture ticked the option");
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "the viewer did not open");
+  await page.click("#dClose");
+  await choose(page, it, "b"); await choose(page, it, "c");
+  assert.deepEqual(await ticked(page, it), ["b", "c"]);
+});
