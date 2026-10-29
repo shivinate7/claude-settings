@@ -2290,54 +2290,76 @@ test("the document title names the open tab: <repo>: Questions, then <repo>: Sta
 });
 
 // ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)
-// The rail's current phase carries a dot, so its name has the least room. No phase name may break
-// inside a word at any page width from 320 to 414px. The page is the five real phases (Clean up,
-// Organize, Design, Roll out, Later) with Organize current, the longest name beside the dot. Each word is
-// measured with a Range: more than one client rect is a word on two lines. The width is swept on one
+// The rail's current phase carries a dot, so its name has the least room. From 320 to 480px of page
+// width, in light and dark, with each of the five real phases (Clean up, Organize, Design, Roll out,
+// Later) current in turn: no phase name may break inside a word, and the dot may not sit alone on a line
+// below its name (design notes, item 16: 5 columns only while each name with the dot sits on one line).
+// The sweep must cross the rail's change from 3 to 5 columns, or it pins nothing about where that change
+// sits. Each word is measured with a Range: more than one client rect is a word on two lines. The dot is
+// alone when its top is at or below the bottom of its name's last text line. The width is swept on one
 // page with setViewportSize, so the rail re-lays out as it does when a phone turns or a window is dragged.
 
-const RAIL_WIDTHS = Array.from({ length: 414 - 320 + 1 }, (_, i) => 320 + i);
+const RAIL_WIDTHS = Array.from({ length: 480 - 320 + 1 }, (_, i) => 320 + i);
+const RAIL_PHASES = [["cleanup", "Clean up"], ["organize", "Organize"], ["design", "Design"], ["rollout", "Roll out"], ["later", "Later"]];
 const railWords = (page) => page.evaluate(() => {
   const words = [], split = [];
+  let dotAlone = false;
   for (const nm of document.querySelectorAll(".prail .nm > span:first-child")) {
     const walk = document.createTreeWalker(nm, NodeFilter.SHOW_TEXT);
+    let lastBottom = -Infinity;
     for (let n = walk.nextNode(); n; n = walk.nextNode()) {
       for (const m of n.textContent.matchAll(/\S+/g)) {
         const r = document.createRange();
         r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
         words.push(m[0]);
-        if (r.getClientRects().length > 1) split.push(m[0]);
+        const rects = r.getClientRects();
+        if (rects.length > 1) split.push(m[0]);
+        for (const q of rects) lastBottom = Math.max(lastBottom, q.bottom);
       }
     }
+    const dot = nm.querySelector(".here");
+    if (dot && dot.getBoundingClientRect().top >= lastBottom) dotAlone = true;
   }
-  return { words, split };
+  const rail = document.querySelector(".prail");
+  return { words, split, dotAlone, cols: getComputedStyle(rail).gridTemplateColumns.split(" ").length, box: Math.round(rail.getBoundingClientRect().width) };
 });
-// "372-380px Organize; 381px Design": the widths of each word's splits as runs.
-const splitRuns = (hits) => {
-  const byWord = new Map();
-  for (const { w, word } of hits) byWord.set(word, [...(byWord.get(word) || []), w]);
-  return [...byWord].map(([word, ws]) => {
+// "372-380px Organize current: dot alone on a line": the widths of each kind of hit as runs.
+const hitRuns = (hits) => {
+  const byKey = new Map();
+  for (const { w, key } of hits) byKey.set(key, [...(byKey.get(key) || []), w]);
+  return [...byKey].map(([key, ws]) => {
     const runs = [];
     for (const w of ws) { const last = runs[runs.length - 1]; if (last && last[1] === w - 1) last[1] = w; else runs.push([w, w]); }
-    return runs.map(([a, b]) => (a === b ? a : a + "-" + b) + "px").join(", ") + " " + word;
+    return runs.map(([a, b]) => (a === b ? a : a + "-" + b) + "px").join(", ") + " " + key;
   }).join("; ");
 };
 
 for (const scheme of ["light", "dark"]) {
-  test(`no phase name breaks inside a word at any page width from 320 to 414px, ${scheme} theme`, async (t) => {
-    const page = await open(t, { pageHtml: mergedPage("--current", "organize"), viewport: { width: RAIL_WIDTHS[0], height: 900 }, scheme }); if (!page) return;
-    await openStatus(page);
-    assert.equal(await page.locator(".prail > button").count(), 5, "the rail does not hold the five phases");
-    assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
-    assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), "Organize", "the current phase is not Organize");
-    const hits = [];
-    for (const w of RAIL_WIDTHS) {
-      await page.setViewportSize({ width: w, height: 900 });
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-      const { words, split } = await railWords(page);
-      assert.deepEqual(words, ["Clean", "up", "Organize", "Design", "Roll", "out", "Later"], `${w}px: the rail's words`);
-      for (const word of split) hits.push({ w, word });
-    }
-    assert.equal(hits.length, 0, `a phase name breaks inside a word, first at ${hits[0] && hits[0].w}px on "${hits[0] && hits[0].word}"; every split: ${splitRuns(hits)}`);
-  });
+  for (const [phase, name] of RAIL_PHASES) {
+    test(`no phase name breaks inside a word or leaves its dot alone at any page width from 320 to 480px, ${name} current, ${scheme} theme`, async (t) => {
+      const page = await open(t, { pageHtml: mergedPage("--current", phase), viewport: { width: RAIL_WIDTHS[0], height: 900 }, scheme }); if (!page) return;
+      await openStatus(page);
+      assert.equal(await page.locator(".prail > button").count(), 5, "the rail does not hold the five phases");
+      assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+      assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), name, "the current phase is not " + name);
+      const hits = [], cols = new Set();
+      for (const w of RAIL_WIDTHS) {
+        await page.setViewportSize({ width: w, height: 900 });
+        const m = await railWords(page); // the reads force a layout, so the container queries have resolved
+        assert.deepEqual(m.words, ["Clean", "up", "Organize", "Design", "Roll", "out", "Later"], `${w}px: the rail's words`);
+        cols.add(m.cols);
+        for (const word of m.split) hits.push({ w, key: `${name} current: "${word}" breaks inside the word`, box: m.box });
+        if (m.dotAlone) hits.push({ w, key: `${name} current: dot alone on a line`, box: m.box });
+      }
+      assert.deepEqual([...cols].sort(), [3, 5], "the sweep does not cross the rail's change from 3 to 5 columns, so it pins no threshold; columns seen: " + [...cols]);
+      assert.equal(hits.length, 0, `the rail breaks at ${hits[0] && hits[0].w}px page width (rail box ${hits[0] && hits[0].box}px), ${hits[0] && hits[0].key}; every hit: ${hitRuns(hits)}`);
+    });
+  }
 }
+
+test("merged_page.py refuses --current with --no-roadmap, since a repo with no roadmap has no current phase", () => {
+  const r = spawnSync(process.env.PYTHON || "python3", [MERGED, "--page", PAGE, "--no-roadmap", "--current", "organize"], { encoding: "utf8" });
+  assert.equal(r.status, 2, "exit status of the refusal: " + r.status);
+  assert.match(r.stderr, /--current needs a roadmap/);
+  assert.equal(r.stdout, "", "the refusal printed a page");
+});

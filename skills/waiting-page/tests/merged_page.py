@@ -62,6 +62,8 @@ def main():
     ap.add_argument("--no-roadmap", action="store_true", help="a repo with no record branch")
     ap.add_argument("--current", choices=PHASE_KEYS, help="the phase the rail marks as current")
     args = ap.parse_args()
+    if args.no_roadmap and args.current:
+        ap.error("--current needs a roadmap: a repo with no record branch has no current phase, so it cannot go with --no-roadmap")
     folder = _test_temp.run_folder()
     try:
         if args.no_roadmap:
