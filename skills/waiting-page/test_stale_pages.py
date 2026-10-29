@@ -32,14 +32,21 @@ ALTERED = PAGE.replace("<title>", "<title>Altered ", 1)  # differs outside desig
 BS = chr(92)  # one backslash: a live page's mockups hold backslash-u-003c escapes
 STALE_BODY = '{"a": "' + BS + 'u003cp>mock' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
 MOCK_BODY = '{"a": "' + BS + 'u003cp>mockup' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
-SKELETON_OPEN = '<!doctype html><html><head><meta charset="utf-8"></head><body>\n'
-SKELETON_CLOSE = '\n</body></html>'
+WRAPPER = os.path.join(HERE, "tests", "host-wrapper.txt")  # the real host wrapper, from an Artifact read
+with open(WRAPPER, encoding="utf-8", newline="") as f:
+    WRAPPER_TEXT = f.read()
 VERDICT = re.compile(r"\b(current|behind|unknown)\b")
 
 
 def set_body(text, body):
     """The text with its designData body replaced. A function replacement keeps the body's backslashes."""
     return BLOCK.sub(lambda m: m.group(1) + body + m.group(3), text, count=1)
+
+
+def host_wrapped(page, after_body=""):
+    """The host wrapper around `page`, with `after_body` placed right after its <body> tag."""
+    assert WRAPPER_TEXT.count("@@PAGE@@") == 1 and WRAPPER_TEXT.count("<body>") == 1, "the wrapper fixture changed shape"
+    return WRAPPER_TEXT.replace("<body>", "<body>" + after_body, 1).replace("@@PAGE@@", page, 1)
 
 
 def write_text(path, text):
@@ -287,7 +294,8 @@ class Stale(unittest.TestCase):
     def test_extra_code_outside_the_template_is_behind(self):
         cases = {
             "appended script": PAGE + "<script>window.extra = 1;</script>",
-            "prepended style": "<style>p { color: red; }</style>" + PAGE,
+            "style right after body": host_wrapped(PAGE, "<style>p { color: red; }</style>"),
+            "script right after body": host_wrapped(PAGE, "<script>window.extra = 1;</script>"),
         }
         for label, text in cases.items():
             with self.subTest(label):
@@ -296,11 +304,18 @@ class Stale(unittest.TestCase):
                 self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
                 self.assertEqual(self.verdict(r)[0], "behind")
 
-    def test_document_skeleton_around_the_template_is_current(self):
-        page = write_text(os.path.join(self.fetched, "skeleton.html"), SKELETON_OPEN + PAGE + SKELETON_CLOSE)
-        r = self.page_run(page, "--main", TEMPLATE)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.verdict(r)[0], "current")
+    def test_host_wrapper_around_the_template_is_current_in_both_modes(self):
+        with self.subTest("single page"):
+            page = write_text(os.path.join(self.fetched, "wrapped.html"), host_wrapped(PAGE))
+            r = self.page_run(page, "--main", TEMPLATE)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(self.verdict(r)[0], "current")
+        with self.subTest("batch"):
+            root = self.repo("wrapped", "HHH")
+            self.fetch("HHH", host_wrapped(PAGE))
+            code, out = self.run_cmd(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn("current: wrapped", out)
 
     def test_batch_mode_appended_code_is_behind(self):
         root = self.repo("appended", "GGG")
@@ -338,6 +353,27 @@ class Stale(unittest.TestCase):
         link_repo_dirs(claude, hooks=False)
         same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
         self.assert_unknown_run(same, home, script)
+
+    def test_non_utf8_pointer_file_gives_no_traceback(self):
+        clone = self.make_clone("clone", {"skills/waiting-page/page.html": PAGE, "CLAUDE.md": "# claude-settings\n"})
+        home = os.path.join(self.tmp.name, "home")
+        claude = os.path.join(home, ".claude")
+        installed = os.path.join(claude, "skills", "waiting-page")
+        os.makedirs(installed)
+        script = os.path.join(installed, "stale_pages.py")
+        shutil.copy2(CMD, script)
+        write_text(os.path.join(installed, "page.html"), ALTERED)
+        link_repo_dirs(claude)
+        # Bytes that are not UTF-8, then a valid pointer line to the clone.
+        pointer = bytes([255, 254, 32]) + b"caf" + bytes([233, 10]) + b"@" + os.fsencode(clone) + b"/CLAUDE.md" + bytes([10])
+        with open(os.path.join(claude, "CLAUDE.md"), "wb") as f:
+            f.write(pointer)
+        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
+        r = self.page_run(same, home=home, script=script)
+        self.assertIn(r.returncode, (0, 1, 2), r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+        word, line = self.verdict(r)
+        self.assertEqual(r.returncode, {"current": 0, "behind": 1, "unknown": 2}[word], line)
 
     def test_check_mode_writes_no_file_and_write_mode_writes_exactly_one(self):
         stale = write_text(os.path.join(self.fetched, "cost.html"), set_body(ALTERED, STALE_BODY))
