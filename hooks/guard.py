@@ -73,8 +73,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
   env-file             deny. Any read or write of an environment file.
-  merge-checks         deny. A merge while the head has a check pending or red, or the read
-                       could not run. `--auto` too.
+  merge-checks         deny. A merge while the head has a check pending or red, while another
+                       ready PR on the base runs CI, or when the read could not run. `--auto` too.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)

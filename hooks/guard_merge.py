@@ -23,8 +23,8 @@ from guard_pointer import (
 # quoted message and a heredoc body name an act and perform none.
 #
 # 1. merge-checks: a merge made outside the merge tool is
-#    refused while the head has a check or a workflow run pending or red, or when that read could
-#    not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    refused while the head has a check or a workflow run pending or red, while another ready PR
+#    on the same base runs CI (decision no-merge-during-batch-ci), or when that read could not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
 #    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.
 # 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
 #    its path is refused. The id is the record's file name without folder or `.md`, the slug

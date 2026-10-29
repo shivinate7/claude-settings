@@ -6,9 +6,9 @@ The owner ruled on Oct 28 at 13:36 CDT: no one merges to main while a batch's CI
 
 - Mechanism: the merge tool (`merge <pr> --confirm`) and the merge guard refuse to merge a PR while another open, non-draft PR on the same base is busy.
 - What counts as busy (orchestrator ruling, Oct 28): its head has any workflow run not completed, or a required check or status reported and pending. A running workflow counts, required or not, because a required job can wait on another job: in checks.yml, `checks` needs `scope`, so `checks` has no row while `scope` runs. Runs and checks that merge.ignoreChecks names never count.
-- The tool checks under the lock before any push. It checks again right before the merge call. So a batch that goes ready during the wait for the head's checks is refused.
+- The tool checks under the lock before any push. It checks again right before the merge call. So a batch that goes ready during the wait for the head's checks is refused. That second refusal reverts the claim, and the revert push starts a new run on the refused PR.
 - The preview prints a `batch:` line.
-- Required names: the repo's pinned `merge.requiredChecks` list, else the branch protection. The guard's ruling (owner, Oct 28): with no branch protection (HTTP 404), every reported pending check on the other ready PR counts. The tool refuses a base with no protection and no pinned list.
+- Required names: the repo's pinned `merge.requiredChecks` list, else the branch protection. The guard's ruling (orchestrator, Oct 28): with no branch protection (HTTP 404), every reported pending check on the other ready PR counts. The tool refuses a base with no protection and no pinned list.
 - A failed read refuses. Unknown is red, as in decision ci-unknown-is-red (an unknown read in CI is red).
 - The refusal names the other PR, and the check with its link or the workflow that runs. It says to wait. The session that watches the other PR wakes when its run ends. A red run also posts the CI-done comment (rule git-ci-done-comment-wakes).
 - No reason flag lifts this refusal in the tool.
@@ -25,6 +25,7 @@ Limits:
 
 - Pressing GitHub's own Merge button is not refused by a hook.
 - A raw `gh api -X PUT .../pulls/<n>/merge` is not refused by a hook.
+- GitHub auto-merge, turned on with the MCP tool `enable_pr_auto_merge`, is not refused by a hook. Main has the same gap.
 - The guard stops `gh pr merge` and the MCP merge tool. For the rest, the rule binds the owner by the owner's own word.
 - A required check with no entry and no workflow run on the other head does not count. So in the seconds after a PR goes ready, before GitHub creates its runs, a merge is not refused.
 
