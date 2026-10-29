@@ -1,0 +1,9 @@
+{
+  "title": "A round-3 builder on Opus runs with no approval, whatever the brief's first line looks like",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33755,
+  "why": "Incident, Oct 29 (coordinator, 16:30 CDT): c204's round-3 builder, briefed \"Builder, Round 3 of 3.\" on its first line, hit the Opus ask, because hooks/guard.py STEP_UP_MARKER matches only a line that starts with \"Round N of 3\".",
+  "note": "Ruling, Oct 29 16:29 CDT (shiv, chat, via coordinator): a round-3 builder on Opus must just run, with no approval. Home: decision agent-model-cap, which the lane updates. Lane started 16:30 CDT (coordinator; session_013NEJL2r8WsVfCfeGEaH9Z2). Red first: the c204 brief's first line hits the ask today; green after, while a brief with no round-3 marker still asks. Needs no answer. Port: the guard is shared. Placed after silent-undo-renames (triage 12, Oct 29): both are running, and both unblock lanes.",
+  "updatedAt": "2026-10-29T21:32:00Z"
+}

@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.3375,
   "why": "Incident, Oct 29 15:52 CDT (coordinator): joyous#53 was refused at merge (\"gates.yml: hunk reversed, undoing 1e4db8df7\") though the lane only renamed gates.yml to checks.yml and bumped pins. check_silent_undo runs git with --no-renames, so a rename reads as a reversed hunk.",
-  "note": "Lane started Oct 29 15:52 CDT (coordinator; session_013NEJL3d2kTUJYvWXpi3Z8p). Red first: a rename-only diff is refused today; green after, while a real reversed hunk is still refused. Needs no answer. Port: the check is shared, so every repo gets it on its next pin bump. joyous#53 (shiv's 15:22 CDT merge grant) waits on it. Placed ahead of child-repo-gap (triage 12, Oct 29): it blocks that step's last merges.",
-  "updatedAt": "2026-10-29T20:55:00Z"
+  "note": "Lane started Oct 29 15:52 CDT (coordinator; session_013NEJL3d2kTUJYvWXpi3Z8p). Red first: a rename-only diff is refused today; green after, while a real reversed hunk is still refused. Needs no answer. Port: the check is shared, so every repo gets it on its next pin bump. joyous#53 (shiv's 15:22 CDT merge grant) waits on it. Placed ahead of child-repo-gap (triage 12, Oct 29): it blocks that step's last merges. Built: #816, joins batch 21 (coordinator, 16:28 CDT).",
+  "updatedAt": "2026-10-29T21:32:00Z"
 }
