@@ -1308,7 +1308,8 @@ jobs:
         run: bash actions/stamp/test_action.sh
 
   # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
-  # skipped, so every needed job runs on a ready PR and gates its steps, never the job.
+  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job.
+  # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
   all-jobs-passed:
     runs-on: ubuntu-latest
     needs:
@@ -1325,7 +1326,7 @@ jobs:
       - checks-windows-merge
       - checks-windows-rest
       - checks-windows-sweep
-    if: ${{ always() && !github.event.pull_request.draft }}
+    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
