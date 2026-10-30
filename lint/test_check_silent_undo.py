@@ -80,11 +80,11 @@ class Red(unittest.TestCase):
     def setUp(self):
         self.r = base_repo()
 
-    def merged_pr(self, branch="pr1"):
-        """PR 1: deletes Card from app.txt, merges into main with a merge commit."""
+    def merged_pr(self, branch="pr1", msg="delete Card", **files):
+        """PR 1: deletes Card from app.txt, merges into main with a merge commit. `files` replaces that edit."""
         r = self.r
         r.sh("checkout", "-q", "-b", branch)
-        r.commit("delete Card", app_txt=BODY)
+        r.commit(msg, **(files or {"app_txt": BODY}))
         r.sh("checkout", "-q", "main")
         r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", branch)
         r.push()
@@ -190,6 +190,35 @@ class Red(unittest.TestCase):
         r.sh("add", "-A")
         r.sh("commit", "-q", "-m", "Merge main\n\nDrops-lines: app.txt -- main's line is dead")
         self.assertEqual(r.verdict(), [])
+
+    def assert_names_a_delete(self, path):
+        """The branch deleted `path`, which an earlier PR added: each finding says so, never a restore."""
+        got = [p for p in self.r.verdict() if p.startswith(path + ":")]
+        self.assertTrue(got, "no finding for %s" % path)
+        for p in got:
+            self.assertIn("deleted", p)
+            self.assertNotIn("restored", p)
+            self.assertNotIn("hunk reversed", p)
+
+    def test_a_delete_of_a_file_a_prior_pr_added_says_deleted(self):
+        """q_max PR 993 shape: PR 1 adds a file, the branch cut after the merge removes it."""
+        self.merged_pr(msg="add debt", docs__debts__missing_md="debt body line\nsecond line\n")
+        r = self.r
+        r.sh("checkout", "-q", "-b", "gone")
+        r.sh("rm", "-q", "docs/debts/missing.md")
+        r.sh("commit", "-q", "-m", "drop the debt")
+        self.assert_names_a_delete("docs/debts/missing.md")
+
+    def test_a_delete_of_a_file_a_prior_pr_added_and_main_then_edited_says_deleted(self):
+        """The same, with a later main commit that edits the file: the whole-file blob no longer matches."""
+        self.merged_pr(msg="add debt", docs__debts__missing_md="debt body line\nsecond line\n")
+        r = self.r
+        r.commit("main edits the debt", docs__debts__missing_md="debt body line\nsecond line\nthird line\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "gone")
+        r.sh("rm", "-q", "docs/debts/missing.md")
+        r.sh("commit", "-q", "-m", "drop the debt")
+        self.assert_names_a_delete("docs/debts/missing.md")
 
 
 class PrBodyEscape(unittest.TestCase):
