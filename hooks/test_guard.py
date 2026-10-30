@@ -12105,8 +12105,8 @@ wp_write("owner judge: a press with no link and no Your stake line is refused by
 # --------------------------------------------------------------------------- an item field the page renders
 FAMILY = "item-field-rendered"
 #
-# Rule item-field-rendered, built against a named incident: triage 2026-10-30 13:10 CDT. 37 live items
-# carried `reply`, and page.html never showed it. A write of a waiting item is refused when it names a
+# docs/decisions/item-field-rendered.md, rule item-field-rendered, built against a named incident
+# (incident in the record): live items carried `reply`, and page.html never showed it. A write of a waiting item is refused when it names a
 # top-level field the page does not render. The page lists those fields in one block,
 # <script type="application/json" id="itemFields">[...]</script>. The page and the guard both read that
 # block, so no copy of the list lives anywhere else. An update may remove a field with
