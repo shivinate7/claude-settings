@@ -461,7 +461,8 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    assert.equal(await page.title(), "Agent Q: Questions"); // one-page notes, choice 6: the title names the open tab
+    // The title is "<repo> Queue" on Questions (shiv ruling, Oct 30 14:33 CDT).
+    assert.equal(await page.title(), "Agent Q Queue");
   });
 }
 
@@ -2781,13 +2782,30 @@ test("a note typed on an item survives a press of Status and back, because Statu
   assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
 });
 
-test("the document title names the open tab: <repo>: Questions, then <repo>: Status", async (t) => {
+// The title is "<repo> Queue" on Questions and "<repo> Queue · Status" (a middle dot, a space each side) on Status
+// (shiv ruling, Oct 30 14:33 CDT).
+test("the document title names the repo and the open tab: <repo> Queue, then <repo> Queue · Status", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
-  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
   await openStatus(page);
-  assert.equal(await titleOf(page, "Compass: Status"), "Compass: Status");
+  assert.equal(await titleOf(page, "Compass Queue · Status"), "Compass Queue · Status");
   await page.click("#tabQ");
-  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
+});
+
+// With no identity name the title is the page name alone, "Queue" (shiv ruling, Oct 30 14:33 CDT).
+test("with no identity name the document title is Queue, then Queue · Status", async (t) => {
+  const page = await open(t); if (!page) return;
+  assert.equal(await titleOf(page, "Queue"), "Queue");
+  await openStatus(page);
+  assert.equal(await titleOf(page, "Queue · Status"), "Queue · Status");
+});
+
+// The static <title> in page.html is the page name, "Queue"; setTitle adds the repo name at run time (shiv ruling, Oct 30 14:33 CDT).
+test("page.html's static title is Queue", () => {
+  const staticTitle = html.match(/<title>([^<]*)<\/title>/);
+  assert.ok(staticTitle, "page.html has no static <title>");
+  assert.equal(staticTitle[1], "Queue");
 });
 
 // ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)

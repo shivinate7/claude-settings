@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<title>Questions</title>
+<title>Queue</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -815,11 +815,11 @@ function applyIdentity() {
   }
   setTitle();
 }
-// Each part has one name, the name of its tab, and the title names the open one.
+// The title is "<repo> Queue", with " · Status" on the Status tab; with no repo name it is "Queue" or "Queue · Status".
 function setTitle() {
   const name = state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "";
   const part = state.tab === "s" ? "Status" : "Questions";
-  document.title = (name ? name + ": " : "") + part;
+  document.title = (name ? name + " " : "") + "Queue" + (state.tab === "s" ? " \u00b7 Status" : "");
   // With no name the tab row already shows the part's name, so the header shows the mark only; the h1 stays for a screen reader.
   $("repoName").textContent = name || part;
   $("repoName").classList.toggle("sr", !name);
