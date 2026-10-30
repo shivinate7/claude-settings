@@ -29,19 +29,19 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
 
 /* Card pictures (states pic-1a, pic-1b, pic-5a, pic-5b): one figure each, the focus of its option card on the waiting page.
    300 wide and under 480 high, so the card draws it whole with no scroll, at about 0.65 in a 198 column. Colours are page.html's tokens. */
-:root { --p-paper: #ffffff; --p-ink: #161b22; --p-muted: #565f6b; --p-line: #d9dee5; --p-chip: #eef1f4; --p-focus: #e0f2e7; --p-focus-edge: #1d7445; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --p-paper: #191e26; --p-ink: #e8ecf1; --p-muted: #a3adba; --p-line: #2c3440; --p-chip: #222a35; --p-focus: #15301f; --p-focus-edge: #6fcf98; } }
-:root[data-theme="dark"] { --p-paper: #191e26; --p-ink: #e8ecf1; --p-muted: #a3adba; --p-line: #2c3440; --p-chip: #222a35; --p-focus: #15301f; --p-focus-edge: #6fcf98; }
+:root { --p-paper: #ffffff; --p-ink: #161b22; --p-muted: #565f6b; --p-line: #d9dee5; --p-chip: #eef1f4; --p-focus: #e0f2e7; --p-focus-edge: #1d7445; --p-new-edge: #6d28d9; }   /* New edge on #fff: 7.10:1 */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --p-paper: #191e26; --p-ink: #e8ecf1; --p-muted: #a3adba; --p-line: #2c3440; --p-chip: #222a35; --p-focus: #15301f; --p-focus-edge: #6fcf98; --p-new-edge: #8b5cf6; } }
+:root[data-theme="dark"] { --p-paper: #191e26; --p-ink: #e8ecf1; --p-muted: #a3adba; --p-line: #2c3440; --p-chip: #222a35; --p-focus: #15301f; --p-focus-edge: #6fcf98; --p-new-edge: #8b5cf6; }
 body.picmode { background: var(--p-paper); }
 body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: none; }
 #pics > a { display: block; padding: 8px 12px; font-size: 13px; color: var(--p-muted); }
-.pic { width: 300px; margin: 0; background: var(--p-paper); color: var(--p-ink); font: 17px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.pic { width: 300px; margin: 0; padding-bottom: 12px;background: var(--p-paper); color: var(--p-ink); font: 17px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .pic .pban { background: #5b21b6; color: #fff; font: 700 15px/30px system-ui, sans-serif; text-align: center; }
 .pic .phead { display: flex; gap: 10px; align-items: flex-start; padding: 12px 12px 4px; }
 .pic .pkey { flex: none; min-width: 44px; height: 32px; border-radius: 8px; background: var(--p-ink); color: var(--p-paper); font: 700 18px/32px ui-monospace, Menlo, monospace; text-align: center; }
 .pic .phead b { font-size: 21px; line-height: 1.2; }
 .pic .pbody { position: relative; margin: 18px 12px 12px; padding: 10px; border: 2px dashed #0f766e; border-radius: 8px; }
-.pic .pbody.new { border-color: #6d28d9; }
+.pic .pbody.new { border-color: var(--p-new-edge); }   /* Dark edge #8b5cf6 on #191e26: 3.95:1; Today's #0f766e there: 3.06:1 */
 .pic .ptag { position: absolute; left: 8px; top: -12px; padding: 1px 6px; border-radius: 4px; background: #0f766e; color: #fff; font: 600 13px/1.4 system-ui, sans-serif; }
 .pic .pbody.new .ptag { background: #6d28d9; }
 .pic .pnotes { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 17px; }
@@ -57,7 +57,7 @@ body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: n
 .pic .side { display: grid; gap: 10px; font-size: 16px; line-height: 1.25; }
 .pic .side span { display: block; }
 /* 5A and 5B: the card column (dashed) and the scroll box in it, drawn at 0.52 of card pixels, with a sample phone inside. */
-.pic .pcol { position: relative; margin: 0 auto; width: 150px; height: 250px; border: 2px dashed var(--p-muted); border-radius: 6px; display: grid; justify-items: center; }
+.pic .pcol { position: relative; margin: 0 auto; width: 150px; height: 250px; border: 2px solid var(--p-muted); border-radius: 6px; display: grid; justify-items: center; }
 .pic .pbox { position: relative; height: 250px; border: 1px solid var(--p-line); background: #ffffff; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 5px; }
 .pic .mini { --s: 0.16; overflow: hidden; color: #161b22; }
 .pic .mini .mb { height: calc(40px * var(--s)); background: #5b21b6; }
@@ -93,7 +93,7 @@ body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: n
   <figure class="pic" id="pic-1a" data-state="pic-1a" hidden>
     <div class="pban">Sample. No figure is real.</div>
     <div class="phead"><span class="pkey">1A</span><b>The card scrolls only the focus</b></div>
-    <div class="pbody"><span class="ptag">Today: as built</span>
+    <div class="pbody"><span class="ptag">Today: scroll range</span>
       <div class="pdia">
         <div class="strip" aria-hidden="true"><span class="off">Above</span><span class="sf">Focus</span><span class="off">Below</span><i class="win"></i><i class="rng" style="top: 46px; height: 150px"></i></div>
         <div class="side"><span><b>Frame:</b> the card when it opens</span><span><b>Bar:</b> what the card scrolls</span></div>
@@ -104,7 +104,7 @@ body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: n
   <figure class="pic" id="pic-1b" data-state="pic-1b" hidden>
     <div class="pban">Sample. No figure is real.</div>
     <div class="phead"><span class="pkey">1B</span><b>The card scrolls the whole mockup</b></div>
-    <div class="pbody new"><span class="ptag">New: this option</span>
+    <div class="pbody new"><span class="ptag">New: scroll range</span>
       <div class="pdia">
         <div class="strip" aria-hidden="true"><span>Above</span><span class="sf">Focus</span><span>Below</span><i class="win"></i><i class="rng" style="top: 0; height: 242px"></i></div>
         <div class="side"><span><b>Frame:</b> the card when it opens</span><span><b>Bar:</b> what the card scrolls</span></div>
@@ -115,17 +115,17 @@ body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: n
   <figure class="pic" id="pic-5a" data-state="pic-5a" hidden>
     <div class="pban">Sample. No figure is real.</div>
     <div class="phead"><span class="pkey">5A</span><b>A scroll picture at today's scale</b></div>
-    <div class="pbody"><span class="ptag">Today: as built</span>
+    <div class="pbody"><span class="ptag">Today: picture width</span>
       <div class="pcol" aria-hidden="true"><div class="pbox" style="width: 69px"><div class="mini" style="--s: 0.16"></div><div class="gut"></div><span class="pill">↓ More</span></div></div>
-      <ul class="pnotes"><li><b>Picture:</b> 120 wide</li><li><b>Text:</b> 0.31 of its size</li><li><b>Dashed:</b> the card column</li></ul>
+      <ul class="pnotes"><li><b>Picture:</b> 120 wide</li><li><b>Text:</b> 0.31 of its size</li><li><b>Grey frame:</b> the card column</li></ul>
     </div>
   </figure>
   <figure class="pic" id="pic-5b" data-state="pic-5b" hidden>
     <div class="pban">Sample. No figure is real.</div>
     <div class="phead"><span class="pkey">5B</span><b>A scroll picture at phone width</b></div>
-    <div class="pbody new"><span class="ptag">New: this option</span>
+    <div class="pbody new"><span class="ptag">New: picture width</span>
       <div class="pcol" aria-hidden="true"><div class="pbox" style="width: 122px"><div class="mini" style="--s: 0.296"></div><div class="gut"></div><span class="pill">↓ More</span></div></div>
-      <ul class="pnotes"><li><b>Picture:</b> 222 wide</li><li><b>Text:</b> 0.57 of its size</li><li><b>Dashed:</b> the card column</li></ul>
+      <ul class="pnotes"><li><b>Picture:</b> 222 wide</li><li><b>Text:</b> 0.57 of its size</li><li><b>Grey frame:</b> the card column</li></ul>
     </div>
   </figure>
 </div>

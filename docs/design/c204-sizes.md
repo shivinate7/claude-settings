@@ -67,10 +67,10 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
 
    | Option | slug | `state` | `focus` | `size` |
    |---|---|---|---|---|
-   | 1A | `c204-1a` | `pic-1a` | `#pic-1a` | {w: 300, h: 441} |
-   | 1B | `c204-1b` | `pic-1b` | `#pic-1b` | {w: 300, h: 441} |
-   | 5A | `c204-5a` | `pic-5a` | `#pic-5a` | {w: 300, h: 473} |
-   | 5B | `c204-5b` | `pic-5b` | `#pic-5b` | {w: 300, h: 473} |
+   | 1A | `c204-1a` | `pic-1a` | `#pic-1a` | {w: 300, h: 465} |
+   | 1B | `c204-1b` | `pic-1b` | `#pic-1b` | {w: 300, h: 465} |
+   | 5A | `c204-5a` | `pic-5a` | `#pic-5a` | {w: 300, h: 497} |
+   | 5B | `c204-5b` | `pic-5b` | `#pic-5b` | {w: 300, h: 497} |
 
    - Replace the HTML of each of the four slugs in the page's `designData` with this file. The live HTML has no `pic-` element, so a `state` alone makes the page block the option ("names a state its mockup does not draw"). One shared slug also works, with an `option` key on each design.
-   - Measured on a copy of the card: page.html's own `withState` and `fitScript`, a sandboxed srcdoc frame 390 wide, and fitFrame's scale with maxH 480. Columns 289, 230 and 198, light and dark. No picture scrolls. At 198 each picture draws 198 × 288 (1A, 1B) or 198 × 309 (5A, 5B), and its 17px text reads at 11px.
+   - Measured on a copy of the card: page.html's own `withState` and `fitScript`, a sandboxed srcdoc frame 390 wide, and fitFrame's scale with maxH 480. Columns 289, 230 and 198, light and dark. No picture scrolls. At 198 each picture draws 198 × 304 (1A, 1B) or 198 × 325 (5A, 5B), and its 17px text reads at 11px.
