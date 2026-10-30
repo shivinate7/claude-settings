@@ -9,8 +9,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
 - One allow entry quotes every command in the guard's remedy verbatim, read from
   BRANCH_DELETE_DENY_REASON itself, so a change to the remedy fails here until the entry follows.
 - One "Owner PR Housekeeping:" entry quotes the measured PR close, names the bound shivinate7,
-  and never covers merge, approve, branch delete, force push, or a repo outside it
-  (decision auto-mode-owner-acts).
+  and never covers merge, approve, branch delete, force push, a base branch change, or a repo
+  outside it (decision auto-mode-owner-acts). Its Covers text names the visible conversation
+  and the batch's integration pull request.
 - One "Owner Session Message:" entry quotes mcp__claude-code-remote__send_message and never
   covers permissions, settings, override, or merge (decision auto-mode-owner-acts).
 """
@@ -141,6 +142,18 @@ class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
         missing = unnamed_terms(clause, PR_EXTRA_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
+    def test_covers_names_the_visible_conversation(self):
+        self.assertRegex(bounds_text(allow_entry(OWNER_PR)), r"(?i)visible conversation",
+                         "Covers text must name the visible conversation")
+
+    def test_covers_names_the_integration_pull_request(self):
+        self.assertRegex(bounds_text(allow_entry(OWNER_PR)), r"(?i)integration pull request",
+                         "Covers text must bound marking ready to the integration pull request")
+
+    def test_never_covers_names_the_base_branch(self):
+        self.assertRegex(never_covers(allow_entry(OWNER_PR)) or "", r"(?i)\bbase\b",
+                         "Never covers must name changing a pull request's base branch")
+
 
 class OwnerSessionMessageIsAllowed(unittest.TestCase):
     def test_one_entry_names_the_owner_message(self):
@@ -166,6 +179,14 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the owner message entry")
         missing = unnamed_terms(clause, MESSAGE_EXTRA_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_covers_names_the_already_granted_act(self):
+        self.assertRegex(bounds_text(allow_entry(OWNER_MESSAGE)), r"(?i)already granted",
+                         "Covers text must limit the message to acts already granted")
+
+    def test_never_covers_names_priority_now(self):
+        self.assertRegex(never_covers(allow_entry(OWNER_MESSAGE)) or "", r"(?i)priority:\s*now",
+                         "Never covers must name interrupting the target's turn with priority: now")
 
 
 class NeverCoversSentence(unittest.TestCase):
