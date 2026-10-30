@@ -226,7 +226,7 @@ CHAT_PRESS_LINK_REASON = ("An option that asks the owner to press in a web app c
                           "description; for a pull request or an issue, the url of that number.")
 COMMAND_REASON = ("A step never sends the owner to a file for a command, and never holds one. Put the "
                   "command in the item's `command` field as {powershell, mac}: a PowerShell 5.1-safe "
-                  "string (no &&, ||, << or <<<) and a bash or zsh string for the Mac, both non-empty. "
+                  "string (no &&, ||, <<, <<<, /dev/null or export) and a bash or zsh string for the Mac, both non-empty. "
                   "Say \"paste the command below\" in the step.")
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
