@@ -636,3 +636,6 @@
 - cloud-swap-old-left: a run killed between the two `mv` calls of the clone swap leaves `claude-settings.old.<pid>`, which the stale sweep (`claude-settings.clone.*` only) never removes (install.sh cloud clone).
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
+- shoot-seed-fail-open: when the localStorage write throws, the shot runs unseeded and can pass on the wrong screen; Chromium's top frame on http(s) does not throw (bin/shoot seedStorage). Decision: shoot-is-one-shared-command
+- shoot-loading-race-2s: the "no steps holds the loading screen" fixture swaps content 2 s after load, so a runner that stalls longer turns it red with no defect (lint/test_shoot.mjs). Decision: shoot-is-one-shared-command
+- shoot-own-context-newpage: a seeded or stepped route's own context stays open until browser close when newPage throws; the run aborts with exit 2, so nothing leaks (bin/shoot main). Decision: shoot-is-one-shared-command
