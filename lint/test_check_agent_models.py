@@ -6,24 +6,38 @@ Every other agent or skill file keeps the Sonnet floor.
 Failure classes: false deny (a listed role fails), false allow (another file passes, by name
 collision, case or alias), unreadable frontmatter.
 One case reads the real agents/plan.md: its "Premises first" paragraph cites the premise record.
+The lane session row of docs/decisions/agent-model-cap.md must start its effort cell with medium.
 """
-import contextlib, io, os, re, sys, tempfile, unittest
+import contextlib, io, os, re, shutil, sys, tempfile, time, unittest, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import check_agent_models as C  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 
 ROLES = ("explore", "claude-code-guide", "test-author", "reviewer")
 MODELS = ("haiku", "claude-haiku-5-5", "Haiku")
+# The model table of docs/decisions/agent-model-cap.md, reduced to its lane session row. Only the effort cell varies.
+RECORD_RELPATH = os.path.join("docs", "decisions", "agent-model-cap.md")
+LANE_RECORD = ("| Point | Model | Effort |\n|---|---|---|\n"
+               "| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT | %s |\n")
 
 
-def verdict(relpath, model, closed=True):
-    with tempfile.TemporaryDirectory() as tmp:
+def verdict(relpath, model=None, closed=True, text=None):
+    """Write one fixture under this run's folder and return the check's (code, stdout).
+
+    An agent file with frontmatter, unless `text` gives the whole file (a record).
+    """
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
         path = os.path.join(tmp, relpath)
         os.makedirs(os.path.dirname(path))
         with open(path, "w") as handle:
-            handle.write("---\nname: x\nmodel: %s\n%sbody\n" % (model, "---\n" if closed else ""))
+            if text is None:
+                handle.write("---\nname: x\nmodel: %s\n%sbody\n" % (model, "---\n" if closed else ""))
+            else:
+                handle.write(text)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = C.main([path])
@@ -75,6 +89,45 @@ class PlanPremises(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertIsNone(re.search(r"\b%s\b" % kind, found[0], re.I),
                                   "the paragraph copies the kind %r; cite the record" % kind)
+
+
+class LaneEffort(unittest.TestCase):
+    # The check reads the record it is given as a path. A record at docs/decisions/agent-model-cap.md fails
+    # unless the lane session row's effort cell starts with the lane effort, medium (owner ruling 2026-10-30 15:11 CDT).
+    def record(self, effort):
+        return verdict(RECORD_RELPATH, text=LANE_RECORD % effort)
+
+    def test_lane_row_effort_default_fails(self):
+        code, out = self.record("default")
+        self.assertEqual(code, 1, "a lane row at effort default passes: %r" % out)
+
+    def test_lane_row_effort_starting_medium_passes(self):
+        self.assertEqual(self.record("medium, the owner's ruling of 2026-10-30 15:11 CDT"), (0, ""))
+
+    def test_lane_row_effort_must_start_with_medium(self):
+        # A medium later in the cell is not the lane effort: the cell must start with it.
+        code, out = self.record("default, medium")
+        self.assertEqual(code, 1, "a lane row whose cell only mentions medium passes: %r" % out)
+
+
+class RunFolder(unittest.TestCase):
+    def test_first_request_sweeps_old_siblings_and_keeps_new_ones(self):
+        # test-temp-standard: the first request of a run removes a sibling over a day old and keeps a newer one.
+        root = os.path.join(RUN_FOLDER, "sweep")
+        old = os.path.join(root, "1-%s" % uuid.uuid4().hex)
+        new = os.path.join(root, "2-%s" % uuid.uuid4().hex)
+        for path in (old, new):
+            os.makedirs(path)
+        two_days_ago = time.time() - 2 * 24 * 60 * 60
+        os.utime(old, (two_days_ago, two_days_ago))
+        own = _test_temp.run_folder(temp_root=root)
+        self.assertFalse(os.path.exists(old), "an old sibling run folder survived the sweep")
+        self.assertTrue(os.path.isdir(new), "a new sibling run folder was swept")
+        self.assertTrue(os.path.isdir(own))
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 if __name__ == "__main__":
