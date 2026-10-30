@@ -2289,11 +2289,12 @@ async function sentMidScreen(t, { width, height, scheme, anchored }) {
   const page = await open(t, { items: [...LEADS, target, below, ...FILLER], scheme, viewport: { width, height } }); if (!page) return;
   if (!anchored) await noAnchor(page);
   await choose(page, target, "a");
+  // The sent card can be taller than the screen at a phone width, so the card below is placed at 60% and the sent card starts above the screen.
   // The page can reflow after its first frames, and scroll anchoring follows that reflow, so the card is placed once more after the frames settle.
   await frameWait(page, 3);
-  await placeAt(page, target, 0.2);
+  await placeAt(page, below, 0.6);
   await frameWait(page, 3);
-  await placeAt(page, target, 0.2);
+  await placeAt(page, below, 0.6);
   const full = (await card(page, target).boundingBox()).height;
   const at = (await posOf(page, [below]))[below.id].top;
   assert.ok(at > 0 && at < height, `the card below is off screen before Send at ${at}`);
