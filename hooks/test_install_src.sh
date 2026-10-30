@@ -3288,6 +3288,104 @@ caseL3() {
   rm -rf "$h"
 }
 
+# ---- caseM: a cloud install moves a clean, detached session checkout to main, and only that one ----------------
+# move_fixture NAME: a GitHub fixture whose main went: the repo, then commit OLD without merge/cloud_allow.json,
+# then the file back. A session's own checkout at $work/NAME-co (unmarked, origin the GitHub URL) sits detached at
+# OLD, as a cloud session left on its creation commit. HOME $h sends GitHub to the fixture. Sets fx, h, co, old, want.
+move_fixture() {
+  fx="$work/$1-fx"; h="$work/$1-home"; co="$work/$1-co"
+  mkdir -p "$h"
+  make_github_fixture "$fx"
+  gc() { git -C "$fx/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false "$@"; }
+  gc rm -q merge/cloud_allow.json; gc commit -q -m "before the rules"
+  old=$(git -C "$fx/src" rev-parse HEAD)
+  gc checkout -q HEAD~1 -- merge/cloud_allow.json; gc commit -q -m "the rules"
+  git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
+  want=$(fixture_sha "$fx")
+  git clone -q "$fx/bare.git" "$co"
+  git -C "$co" config remote.origin.url https://github.com/shivinate7/claude-settings.git
+  git -C "$co" checkout -q --detach "$old"
+  write_redirect "$h" "$fx/bare.git"
+}
+move_install() {
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
+        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+}
+merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
+
+caseM1() {
+  name="caseM1: a clean, detached checkout on an old main commit moves to main and gets the merge allow rules"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m1
+  move_install
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
+    bad "$name" "the checkout is not detached at main [$want]: $(git -C "$co" rev-parse HEAD) $(install_problems)"
+  elif [ "$(merge_rule_count)" != 2 ]; then
+    bad "$name" "settings.json has $(merge_rule_count) merge allow rules, not 2"
+  elif [ "$(git -C "$co" rev-parse --is-shallow-repository)" != false ]; then
+    bad "$name" "the fetch made the checkout shallow"
+  else
+    ok "$name"
+  fi
+}
+
+caseM2() {
+  name="caseM2: a detached checkout with uncommitted changes stays where it is, with a WARN"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m2
+  printf 'local edit\n' >> "$co/README.md"
+  move_install
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || ! grep -q 'local edit' "$co/README.md"; then
+    bad "$name" "the dirty checkout was moved or its edit lost"
+  elif ! printf '%s\n' "$out" | grep -q "WARN: the checkout $co has uncommitted changes; left as is"; then
+    bad "$name" "no WARN names the dirty checkout: $(install_problems)"
+  elif [ "$(merge_rule_count)" != 0 ]; then
+    bad "$name" "settings.json got $(merge_rule_count) merge allow rules from a checkout without the file"
+  else
+    ok "$name"
+  fi
+}
+
+caseM3() {
+  name="caseM3: a checkout on a branch stays on it, with a WARN"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m3
+  git -C "$co" checkout -q -b lane
+  move_install
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(git -C "$co" symbolic-ref --short HEAD 2>/dev/null)" != lane ] || [ "$(git -C "$co" rev-parse HEAD)" != "$old" ]; then
+    bad "$name" "the branch checkout was moved"
+  elif ! printf '%s\n' "$out" | grep -q "WARN: the checkout $co is on branch lane; left as is"; then
+    bad "$name" "no WARN names the branch: $(install_problems)"
+  else
+    ok "$name"
+  fi
+}
+
+caseM4() {
+  name="caseM4: a clean, detached checkout at a commit main does not hold stays, so the commit is not lost"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m4
+  git -C "$co" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m "local only"
+  mine=$(git -C "$co" rev-parse HEAD)
+  move_install
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$mine" ]; then
+    bad "$name" "the checkout left a commit main does not hold"
+  elif ! printf '%s\n' "$out" | grep -q "WARN: the checkout $co is at .* a commit main does not hold; left as is"; then
+    bad "$name" "no WARN names the unheld commit: $(install_problems)"
+  else
+    ok "$name"
+  fi
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -3397,6 +3495,10 @@ run caseK11
 run caseL1
 run caseL2
 run caseL3
+run caseM1
+run caseM2
+run caseM3
+run caseM4
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

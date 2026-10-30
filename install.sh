@@ -336,6 +336,27 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$(git -C "$SRC" config --get claude-s
   fi
 fi
 
+# Cloud, a session's own checkout (no marker): a cloud session starts it detached at its creation commit, so its
+# hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
+# holds moves to origin/$REF, so nothing is lost. A branch, a dirty tree or a commit main lacks stays as it is.
+# The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
+if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] \
+   && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+  if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
+  elif [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
+    log "WARN: the checkout $SRC has uncommitted changes; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
+  elif ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF"; then
+    log "WARN: could not fetch $REF into $SRC; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
+  elif ! git -C "$SRC" merge-base --is-ancestor HEAD "refs/remotes/origin/$REF"; then
+    log "WARN: the checkout $SRC is at $(git -C "$SRC" rev-parse --short HEAD), a commit $REF does not hold; left as is"
+  elif git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; then
+    log "moved the checkout $SRC to $REF at $(git -C "$SRC" rev-parse --short HEAD)"
+  else
+    log "WARN: could not move the checkout $SRC to $REF; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
+  fi
+fi
+
 # No checkout found: clone into a sibling folder, then swap it in, so a failed clone leaves the old
 # copy. A .git at the clone path that checkout_at refused is not ours: it is never removed.
 if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; then
