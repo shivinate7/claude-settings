@@ -872,6 +872,8 @@ const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
 const stoodNow = (it) => standsOk(it) && !state.answers[it.id];
 const eff = (it) => {
   const d = state.draft[it.id];
+  // A ruling holds one draft, overturn. A pick draft left from when the item was open is ignored.
+  if (isRuling(it)) return d && d.choice === OVERTURN ? d : undefined;
   if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: pickChoice(it), auto: true, stood: true };
   return d || (stoodNow(it) ? { choice: pickChoice(it), auto: true, stood: true } : undefined);
 };
@@ -1085,7 +1087,7 @@ function ruledOf(it) {
 function receipt(it) {
   const sv = state.answers[it.id], rc = rcOf(it);
   let what, picks = null;
-  if (isRuling(it)) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
+  if (isRuling(it) && sv.choice === OVERTURN) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
   else if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
   else if (sv.choice === NONE) what = "None of these";
   else if (isMulti(it) && validKeys(it, sv.choice)) {

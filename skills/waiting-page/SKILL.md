@@ -42,7 +42,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
     `home` the ruling's record id, `pick` the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
     The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item stays hidden.
-    A ruling is never in a tier and never counts as open.
+    A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
+    the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
+    current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
     ranked items, oldest first. A group sits together at its best member's `rank`.
@@ -118,7 +120,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     whichever more of its pixels stand out on. A square icon reads best: a wide one shrinks to fit
     the 22px slot. The page never fetches a URL; any other value keeps the letter.
 
-The page hides an item with status `closed`. It shows an item as answered, in place, when
+The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered, in place, when
 `answers/<id>` exists: a green edge and the badge "Answered, filing pending" or "Answered, filed
 in <home>", never "waited". It stays on the page until the owning session closes the item.
 
@@ -297,10 +299,15 @@ once as a note on its step (the item's home), never held for the lane. A chat an
    enough to write them, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to
    its version), and leave the item open. Say in the terminal what was not clear.
-5. An `overturn` answer: the item's `owner` session reopens the ruling's item. It updates `items/<id>` to
-   `status` `open`, removes `arbiter`, and sets `added` to now. It puts this line first in `context`:
-   "The arbiter ruled <label>; you overturned it at <time>." Then it adds a "Your stake:" line. Then it deletes
-   `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
+5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
+   - `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
+   - A new `pick` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
+     recommendation.
+   - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
+     "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
+     guard refuses an open decision update without it.
+
+   Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
 ## Make a repo's page
 
