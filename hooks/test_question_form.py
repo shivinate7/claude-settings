@@ -17,11 +17,15 @@ Interface the module must match (the lane's form contract):
       Goal: <the goal>
       Problem (<stake>): <the problem, and why it needs his word>     <stake> is one of OWNER_STAKES
       Based on (<kind>): <one premise>                                 one to three; <kind> is in PREMISE_KINDS
-  A stood pick (`stands: true`) may write `Problem: ...` with no stake kind.
+  A stood pick (`stands: true`) may write `Problem: ...` with no stake kind. A line out of this order
+  refuses. Only `Based on (<kind>):` is a Based on line: prose that starts with "Based on the log" is not.
 - Each option states gain and loss: page `gain` and `lose` fields; chat `Gain:` and `Lose:` in the description.
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your uniform ruling (t18)`
   in its label or description, and never `(Recommended)` in its label (rule uniform-pick).
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
+  The chat scan skips an option's Gain and Lose text, as the page scan reads only label and how.
+- A chat refusal reason names its remedy and no field of the waiting page (no `stands`). Each page reason
+  is the text of question_form.PAGE_REASONS, the one table guard.py prints from.
 - A closed item passes. An update is judged only for the fields it carries. A str_replace on `context`
   that removes a Goal, Problem or Based on line is refused.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
@@ -33,7 +37,9 @@ the chat surface from one table (FORM_VARIANTS). The call_judge cases reuse test
 one home of the model stub). Temp files: the run folder of lint/_test_temp.py, whose sweep
 lint/test_find_copies.py proves once (decision test-temp-standard).
 """
+import contextlib
 import copy
+import io
 import json
 import os
 import sys
@@ -95,10 +101,12 @@ def form_text(goal=GOAL, problem=PROBLEM, based=BASED):
     return "\n".join(line for line in (goal, problem, *based) if line)
 
 
-def page_item(tail="", options=None, **over):
-    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a."""
+def page_item(tail="", options=None, lines=None, **over):
+    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a. `lines`
+    sets the whole context, one line each, for a case that changes the order of the lines."""
     item = copy.deepcopy(ITEM92)
-    item["context"] = form_text(**{k: v for k, v in over.items() if k in ("goal", "problem", "based")}) + tail
+    item["context"] = "\n".join(lines) if lines is not None else form_text(
+        **{k: v for k, v in over.items() if k in ("goal", "problem", "based")}) + tail
     item["options"][1]["widens"] = True
     if options is not None:
         item["options"] = options
@@ -383,6 +391,140 @@ def case_chat_boxes():
          ("press-link", None))
 
 
+# ------------------------------------------------------------------ the order of the lines, prose that starts with Based on
+
+PROSE = "Based on the log, option A is safer."
+# (name, the context lines in order, verdict). Only `Based on (<kind>):` is a Based on line, so prose that
+# starts with the same two words is not one, and does not move a Based on line before Problem.
+LINE_VARIANTS = [
+    ("the lines in order", [GOAL, PROBLEM, *BASED], None),
+    ("Problem before Goal", [PROBLEM, GOAL, *BASED], (FORM_RULE, None)),
+    ("a Based on line before Problem", [GOAL, BASED[0], PROBLEM, BASED[1]], (FORM_RULE, None)),
+    ("every Based on line before Problem", [GOAL, *BASED, PROBLEM], (FORM_RULE, None)),
+    ("a Based on line before Goal", [BASED[0], GOAL, PROBLEM, BASED[1]], (FORM_RULE, None)),
+    ("prose that starts with Based on, after the form lines", [GOAL, PROBLEM, *BASED, PROSE], None),
+    ("prose that starts with Based on, between Goal and Problem", [GOAL, PROSE, PROBLEM, *BASED], None),
+    ("prose that starts with Based on, beside three Based on lines", [GOAL, PROBLEM, *BASED, THIRD, PROSE], None),
+    ("prose that starts with Based on is no Based on line", [GOAL, PROBLEM, PROSE], (FORM_RULE, "Based on")),
+    ("a Based on kind outside PREMISE_KINDS still refuses beside the prose",
+     [GOAL, PROBLEM, BASED[0], "Based on (guess): the log is old.", PROSE], (FORM_RULE, "Based on")),
+]
+
+
+def case_line_order_and_prose():
+    for name, lines, want in LINE_VARIANTS:
+        page(name, "set", entry_of(page_item(lines=lines)), want)
+        box = tcj.good_box()
+        box["questions"][0]["question"] = "\n".join(lines)
+        chat(name, box, want)
+
+
+# ------------------------------------------------------------------ a press in the how-text only
+
+def case_chat_press_scan_skips_gain_and_lose():
+    # The page scans an option's label and how; the chat scan reads the label and the description without
+    # its Gain and Lose text, which says what the pick does to the owner and is no instruction to press.
+    keep = tcj.good_options()[1]
+    options = [{"label": "Go ahead (Recommended)", "description": "Gain: merge the pull request today. Lose: nothing."},
+               keep]
+    chat("a Gain that says merge the pull request is no press", tcj.good_box(options=options), None)
+    options[0]["description"] = "Gain: it lands today. Lose: click the button once more on GitHub."
+    chat("a Lose that says click on GitHub is no press", tcj.good_box(options=options), None)
+    options[0]["description"] = "Press Merge on the pull request in GitHub. Gain: it lands today. Lose: nothing."
+    chat("a press in the how-text with no url still refuses as press-link", tcj.good_box(options=options),
+         ("press-link", None))
+    options[0]["description"] += " https://github.com/shivinate7/home/pull/374"
+    chat("a press in the how-text with an https url passes", tcj.good_box(options=options), None)
+
+
+# ------------------------------------------------------------------ the reasons a refusal prints
+
+# What each chat refusal must tell the agent to write, and the words that belong to the waiting page only:
+# a chat box has no `stands`, `context`, `links` or `pick` field to set.
+CHAT_REMEDY = {FORM_RULE: ("Goal", "Problem", "Based on", "Gain", "Lose"), "owner-judge": tuple(OWNER_STAKES),
+               "uniform-pick": ("(Recommended)",), "press-link": ("https://",)}
+PAGE_ONLY = ("stands", "`context`", "waiting page", "`links`", "`pick`", "`gain`", "`lose`")
+
+
+def case_chat_reasons_name_a_remedy_and_no_page_field():
+    table = getattr(question_form, "CHAT_REASONS", None)
+    if table is None:
+        check("chat reasons: question_form.CHAT_REASONS is the table of chat reasons", False, MISSING)
+        return
+    for rule, text in table.items():
+        named = [word for word in PAGE_ONLY if word in text]
+        check("chat reasons: the %s reason names no field of the waiting page" % rule, not named, named)
+        missing = [word for word in CHAT_REMEDY.get(rule, ("<no remedy pinned for this rule>",)) if word not in text]
+        check("chat reasons: the %s reason names its remedy" % rule, not missing, missing)
+    options = tcj.good_options()
+    options[0] = {"label": "Allow the second form (Recommended)",
+                  "description": "Gain: it lands today. Lose: two forms stay. Goes against your uniform ruling (t18)."}
+    press = tcj.good_options()
+    press[1] = {"label": "Press Merge in GitHub", "description": "Gain: it lands at once. Lose: nobody reads it first."}
+    for name, box in (("a missing Problem line", tcj.good_box(problem=None)),
+                      ("a stake outside the set", tcj.good_box(problem="Problem (internals): which job runs it")),
+                      ("a Recommended widening option", tcj.good_box(options=options)),
+                      ("a press with no url", tcj.good_box(options=press))):
+        r = tcj.run_hook(tcj.question_input(box=box), answer=tcj.ALLOW)
+        said = r.reason()
+        rule = said.split(":", 1)[0]
+        named = [word for word in PAGE_ONLY if word in said]
+        check("chat reasons: call_judge's refusal for %s names no field of the waiting page" % name,
+              bool(said) and not named, named or tcj.detail(r))
+        missing = [word for word in CHAT_REMEDY.get(rule, ("<no remedy pinned for rule %s>" % rule,)) if word not in said]
+        check("chat reasons: call_judge's refusal for %s names its remedy" % name, bool(said) and not missing,
+              missing or tcj.detail(r))
+
+
+# One table of page reasons: guard.py prints the text of question_form.PAGE_REASONS, so a change to the
+# table shows in the refusal. The guard runs in this process with the table's text marked, and the mark
+# must reach the printed reason; a guard that prints its own copy of the text does not show it.
+def printed_reason(tool_input):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        try:
+            guard.judge({"tool_name": "ArtifactData", "tool_input": tool_input, "cwd": PAGE_REPO})
+        except SystemExit:
+            pass
+    text = out.getvalue().strip()
+    return json.loads(text)["hookSpecificOutput"]["permissionDecisionReason"] if text else ""
+
+
+def case_page_reasons_are_one_table():
+    table = getattr(question_form, "PAGE_REASONS", None)
+    if table is None:
+        check("page reasons: question_form.PAGE_REASONS is the table of page reasons", False, MISSING)
+        return
+    why = "Why yours: a session on your computer was asked first and none could reach the remote"
+    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"], "context": why}
+    press = copy.deepcopy(ITEM92["options"])
+    press[1].update(label="Press Merge in GitHub", how="Do it by hand.")
+    for name, data in (
+            ("a decision with no Problem line", ITEM92),
+            ("a stake outside the set", page_item(problem="Problem (internals): which job runs it")),
+            ("a port with no Departs from line", page_item(port=True)),
+            ("a pick that names the widening option", page_item(pick="b")),
+            ("a press with no link", page_item(options=press)),
+            ("a step that sends the owner to a file for a command",
+             dict(task, steps=["Open plans/merge.md", "Run its command"])),
+            ("a task with no Why yours line", dict(task, context="Nothing here."))):
+        tool_input = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": data}
+        rule = guard.data_tool_hit(tool_input, PAGE_REPO)[0]
+        if rule not in table:
+            check("page reasons: %s is refused by a rule in the table" % name, False, "rule %r" % rule)
+            continue
+        original = table[rule]
+        check("page reasons: the refusal for %s prints the table's text of rule %s" % (name, rule),
+              original in printed_reason(tool_input), printed_reason(tool_input)[:200])
+        table[rule] = "TABLEMARK " + original
+        try:
+            marked = printed_reason(tool_input)
+        finally:
+            table[rule] = original
+        check("page reasons: the refusal for %s reads its text from the table (%s)" % (name, rule),
+              "TABLEMARK" in marked, marked[:200])
+
+
 # ------------------------------------------------------------------ call_judge
 
 def case_call_judge():
@@ -423,7 +565,10 @@ def case_call_judge():
 
 def main():
     for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
-                 case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes, case_call_judge):
+                 case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
+                 case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
+                 case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
+                 case_call_judge):
         try:
             case()
         except Exception as exc:
