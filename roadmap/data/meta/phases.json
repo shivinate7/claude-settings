@@ -1,13 +1,13 @@
 {
   "design": {
-    "asOf": "Measured Oct 29: claude-settings 134b23c, banchi 63014cf, q_max d3a047a, home-app 6964b7f (home merged in)",
+    "asOf": "Measured Oct 30: claude-settings 8a45b83, banchi 5a69c3a, q_max 7667003, home-app e2d35ae (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
         "label": "Repos with a screenshot command",
         "rule": "Only banchi (make screenshot). claude-settings ships bin/shoot on main, but no repo has a .claude/shoot.json yet, so it counts nowhere (d6). home merged into home-app",
         "target": "4 of 4",
-        "value": "1 of 4"
+        "value": "2 of 4"
       },
       {
         "label": "Design agents in place",
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Oct 29 at claude-settings 134b23c",
+    "asOf": "Measured Oct 30 at claude-settings 8a45b83",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Oct 29: claude-settings 134b23c, banchi 63014cf, q_max d3a047a, home-app 6964b7f (home merged in)",
+    "asOf": "Measured Oct 30: claude-settings 8a45b83, banchi 5a69c3a, q_max 7667003, home-app e2d35ae (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -68,7 +68,7 @@
         "label": "Biggest CLAUDE.md, lines",
         "rule": "banchi 402 (Oct 27, fbb9200), q_max 182, claude-settings 106, home-app 15",
         "target": "200 or fewer",
-        "value": 403
+        "value": 407
       },
       {
         "label": "Remote branches, claude-settings",
@@ -80,9 +80,10 @@
           36,
           55,
           79,
-          77
+          77,
+          124
         ],
-        "value": 77
+        "value": 124
       },
       {
         "label": "Repos with a living roadmap page",
@@ -93,7 +94,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Oct 29: q_max d3a047a, home-app 6964b7f",
+    "asOf": "Measured Oct 30: q_max 7667003, home-app e2d35ae",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
