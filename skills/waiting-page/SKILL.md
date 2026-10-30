@@ -291,7 +291,7 @@ or a comment. It is never a done mark and never a grant. It takes step 4 only: a
 item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
 turn it is filed. An answer whose lane is busy is filed at
-once as a note on its step (the item's home), never held for the lane. The writer then sets `lane` on the
+once as a note on its step (the item's home), never held for the lane. The writer then sets `lane` and `lastAnswer` on the
 item and leaves it open until the lane takes the answer. Then it closes the item. A chat answer has no
 `answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
 
