@@ -92,7 +92,8 @@ coordinator starts a lane with a `create_session` prompt that is exactly `/effor
 the brief with `send_message`. A slash command runs only when it is the whole prompt (coordinator
 probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same line with text after it
 set none). Guard rule `lane-effort-pin` (likely risk, landed 2026-10-30) refuses a `create_session`
-call tagged `cs-build:lane` with any other prompt. `LANE_EFFORT` in `hooks/guard.py` is the one
+call tagged `cs-build:lane` with any other prompt. A lane started with no such tag is unseen; the
+tag is the coordinator's rule in `session-tiers`. `LANE_EFFORT` in `hooks/guard.py` is the one
 value; `lint/check_agent_models.py` fails when the lane row's effort cell does not start with it.
 Other tiers keep the model default. Ruled out: `effortLevel` in user settings does not count for Opus
 5.5, project settings and an environment's `CLAUDE_CODE_EFFORT_LEVEL` reach every tier, and a
