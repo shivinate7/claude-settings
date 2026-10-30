@@ -15,7 +15,7 @@ source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\(
 # with a token. Cost: one env read, no network, no new process, no timer, no file written.
 tier_line() {
   if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
-    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed.'
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:coordinator or cs-build:batch-runner, and for no other. Such a session runs `~/.claude/bin/merge --role <tier>` (its own tier) at session start and again after each resume, because a fresh container loses the role file. A lane or any other tier never runs it, and this line is no instruction to it.'
   fi
 }
 
@@ -178,7 +178,11 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   # instead of staying silent, which would read as "up to date".
   #
   # CLAUDE_SETTINGS_FETCH_TIMEOUT overrides the 2 second bound, for tests.
-  if [ "$pointer_branch" = "main" ]; then
+  #
+  # A clone install.sh made (claude-settings.cloudMirror) is refreshed by install.sh in the same
+  # session start, so a behind count on it is a false alarm. The check skips it.
+  cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
+  if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
     if bounded_fetch "$d" main; then
       behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then

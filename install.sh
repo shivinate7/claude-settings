@@ -80,7 +80,8 @@ checkout_at() {
   [ -n "$cand" ] || return 1
   top=$(git -C "$cand" rev-parse --show-toplevel 2>/dev/null) || return 1
   [ -n "$top" ] || return 1
-  origin=$(git -C "$top" remote get-url origin 2>/dev/null) || return 1
+  # The config value, not `remote get-url`: get-url applies insteadOf, which rewrites the GitHub URL.
+  origin=$(git -C "$top" config --get remote.origin.url 2>/dev/null) || return 1
   origin_matches_repo "$origin" || return 1
   [ -f "$top/CLAUDE.md" ] || return 1
   [ -f "$top/settings.json" ] || return 1
@@ -302,6 +303,67 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
     SRC="$PIN"
   else
     log "WARN: $SRC has no branch named main; the links follow the clone's checked-out branch"
+  fi
+fi
+
+# Cloud only: git over the cloud proxy reaches repos that are out of the session's scope; the tarball
+# URL gets a 403 there, and a tarball copy has no .git. cloud_git bounds a stalled transfer at 10 s
+# and a slow one at 40 s, because the hook that runs this script is killed at 60 s.
+cloud_git() {
+  if command -v timeout >/dev/null 2>&1; then
+    GIT_TERMINAL_PROMPT=0 timeout 40 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+  else
+    GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+  fi
+}
+
+# Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
+# person's own and is never moved. mirrorSha is the sha this script last set main to: a main that
+# differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
+# unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
+# new tip only, never the history under it. A failed fetch keeps the clone as it was.
+if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
+  mirror_sha=$(git -C "$SRC" config --get claude-settings.mirrorSha 2>/dev/null)
+  if [ -n "$mirror_sha" ] && [ "$(git -C "$SRC" rev-parse -q --verify main 2>/dev/null)" != "$mirror_sha" ]; then
+    log "WARN: the clone $SRC has local commits on main that $REF lacks; keeping it as it is"
+  elif ! cloud_git -C "$SRC" fetch -q --depth 1 origin "$REF"; then
+    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
+  elif git -C "$SRC" checkout -q -B main FETCH_HEAD \
+       && git -C "$SRC" config claude-settings.mirrorSha "$(git -C "$SRC" rev-parse main)"; then
+    log "refreshed the clone $SRC to $REF"
+  else
+    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
+  fi
+fi
+
+# No checkout found: clone into a sibling folder, then swap it in, so a failed clone leaves the old
+# copy. A .git at the clone path that checkout_at refused is not ours: it is never removed.
+if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; then
+  clone_tmp="$HOME/claude-settings.clone.$$"
+  # A killed run leaves its temp clone behind. Older than 5 minutes is past the hook's 60 s cap, so
+  # no run still owns it; a newer one may belong to a run in parallel.
+  find "$HOME" -maxdepth 1 -name 'claude-settings.clone.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
+  rm -rf "$clone_tmp"
+  if cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+     && git -C "$clone_tmp" checkout -q -B main \
+     && git -C "$clone_tmp" config claude-settings.cloudMirror true \
+     && clone_sha=$(git -C "$clone_tmp" rev-parse main) \
+     && git -C "$clone_tmp" config claude-settings.mirrorSha "$clone_sha" \
+     && [ -f "$clone_tmp/CLAUDE.md" ] && [ -f "$clone_tmp/settings.json" ]; then
+    old_copy="$HOME/claude-settings.old.$$"
+    rm -rf "$old_copy"
+    if { [ ! -e "$HOME/claude-settings" ] || mv "$HOME/claude-settings" "$old_copy"; } && mv "$clone_tmp" "$HOME/claude-settings"; then
+      rm -rf "$old_copy"
+      SRC="$HOME/claude-settings"
+      log "cloned $REPO at $REF into $SRC"
+    else
+      [ ! -e "$old_copy" ] || [ -e "$HOME/claude-settings" ] || mv "$old_copy" "$HOME/claude-settings"
+      rm -rf "$clone_tmp"
+      log "WARN: could not swap in the clone; falling back to the tarball"
+    fi
+  else
+    rm -rf "$clone_tmp"
+    log "WARN: could not clone $REPO at $REF; falling back to the tarball"
   fi
 fi
 
@@ -646,13 +708,17 @@ if [ "$CLOUD" = 1 ]; then
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
   HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"
   if command -v jq >/dev/null 2>&1; then
-    jq --arg cmd "$HOOK_CMD" \
-      '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])' \
+    # merge/cloud_allow.json: the `merge --confirm` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
+    ALLOW_FILE="$SRC/merge/cloud_allow.json"
+    [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
+    jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
+      '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
+       | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
       "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"
-    log "wrote $TARGET_JSON (repo settings + cloud refresh hook)"
+    log "wrote $TARGET_JSON (repo settings + cloud refresh hook + merge/cloud_allow.json rules)"
   else
     cp "$SRC/settings.json" "$TARGET_JSON"
-    log "wrote $TARGET_JSON (jq missing, no refresh hook added)"
+    log "wrote $TARGET_JSON (jq missing, no refresh hook and no merge/cloud_allow.json rules added)"
   fi
 else
   # Local: symlink, so `git pull` in the clone is the whole update.

@@ -11540,6 +11540,62 @@ add("uniform pick: the refusal names the ruling and what to pick", "deny", "unif
     carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="banchi-titles", data=up_item())
 
+# Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
+# option keys. The list never holds a key of an option marked `widens: true`, as a string pick never does.
+UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
+            "lose": "l"}
+UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
+
+up("a multi item whose list pick holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+up("a multi item whose list pick holds the widening option last is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c", "a"]))
+up("a multi item whose list pick is the widening option alone is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a"]))
+up("a multi item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"]))
+up("a multi item with a widening option offered and not in the list pick is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["c"], why="One form."))
+up("a multi item whose widening option has widens false is allowed", "allow",
+   up_item(multi=True, options=[dict(UP_WIDE, widens=False), UP_MATCH, UP_THIRD], pick=["a", "b"]))
+up("a ranked item whose list pick holds the widening option is denied", "deny",
+   up_item(ranked=True, options=UP_THREE, pick=["b", "a"]))
+up("a ranked item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(ranked=True, options=UP_THREE, pick=["c", "b"]))
+up("a stood multi pick that holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "c"], stands=True))
+up("a stood multi pick of non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"], stands=True))
+up("an update that carries options and a widening list pick is denied", "deny",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
+up("an update that carries options and a non-widening list pick is allowed", "allow",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
+up("a task with a list pick is not judged", "allow",
+   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"]))
+# A list that holds a non-string member still names its string members. The page reads such a list as
+# not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
+up("a multi item whose list pick holds the widening key and a null is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", None]))
+up("a multi item whose list pick holds a number and a widening key is denied", "deny",
+   up_item(multi=True, options=[dict(UP_WIDE, key="w"), UP_MATCH, UP_THIRD], pick=[1, "w"]))
+# A widening option with no key is named by no pick. An item with no pick, or a null pick, picks nothing, so
+# the missing pick never reads as the key None.
+UP_KEYLESS = {k: v for k, v in UP_WIDE.items() if k != "key"}
+up("a widening option with no key and an item with no pick is allowed", "allow",
+   up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+up("a widening option with no key and an item with a null pick is allowed", "allow",
+   dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+up("a widening option with no key and a multi item with no pick is allowed", "allow",
+   up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
+add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
+    "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
+             "data": up_item(multi=True, options=UP_THREE, pick=["a", "b"])}])
+add("uniform pick: the refusal of a widening list pick names the ruling and what to pick", "deny",
+    "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    action="set", collection="items", doc_id="banchi-titles",
+    data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+
 
 # --------------------------------------------------------------------------- the runner
 
@@ -12177,6 +12233,10 @@ for _name, _verdict, _script in (
          _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
         ("builder Round 3 on opus", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
+        ("builder Round 3 after a role word on line one, on sonnet", "deny",
+         _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'sonnet'")),
+        ("builder Round 3 after a role word on line one, on opus", "allow",
+         _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'opus'")),
         ("builder Round 3 as a prompt key on sonnet", "deny",
          "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
         ("builder Round 2 on sonnet", "allow",
@@ -12285,6 +12345,71 @@ for _role, _brief in (
         ("builder", "Plan: Try 3 of 3 later, after the review.")):
     add("ceiling: Agent %s on opus with the brief %r asks" % (_role, _brief[:24]), "ask", CEILING,
         tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
+# A brief may open with a role word before the marker, or wrap the marker in markup. The first
+# non-blank line counts when it holds the marker anywhere, word-bounded. A later line counts only
+# when it starts with the marker. Failure classes: a false ask (a third-try builder on opus asks
+# because a word or markup sits before the marker), a false allow (a middle-step marker, a near-miss
+# like "of 30", or the marker in later prose earns the grant; a reviewer behind a role word dodges
+# its step-up).
+FIRST_LINE_BRIEF = "Builder, Round 3 of 3. Lane c204 fix the marker scan.\nFiles: hooks/guard.py."
+add("first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed",
+    "allow", tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with blank lines ahead of that first line is allowed",
+    "allow", tool="Agent", prompt="\n \t\n" + FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: the same brief on sonnet is denied by the step-up", "deny", STEP_UP,
+    tool="Agent", prompt=FIRST_LINE_BRIEF, model="sonnet", subagent_type="builder")
+for _label, _first in (("a role word and a dash", "Builder — Round 3 of 3"),
+                       ("bold markup", "**Round 3 of 3**"),
+                       ("a heading mark", "## Round 3 of 3")):
+    add("first-line marker: builder on opus whose first line is %s around the marker is allowed" % _label,
+        "allow", tool="Agent", prompt=_first + "\nLane c204 fix the marker scan.", model="opus",
+        subagent_type="builder")
+add("first-line marker: builder on opus with the marker on its own line two is allowed", "allow",
+    tool="Agent", prompt="Builder, lane c204: don't skip the scan.\nRound 3 of 3\nFiles: hooks/guard.py.",
+    model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with Round 2 of 3 on line one asks", "ask", CEILING,
+    tool="Agent", prompt="Builder, Round 2 of 3. Lane c204 continue the fix.", model="opus",
+    subagent_type="builder")
+add("first-line marker: builder on opus with Round 3 of 3 only in later prose asks", "ask", CEILING,
+    tool="Agent", model="opus", subagent_type="builder",
+    prompt="Builder, lane c204: fix the marker scan.\nFiles: hooks/guard.py.\n"
+           "Notes: the review said Round 3 of 3 is next, after this pass.")
+for _label, _first in (("a longer total", "Builder, Round 3 of 30. Lane c204 fix the marker scan."),
+                       ("a longer word before it", "Builder, Subround 3 of 3. Lane c204 fix the marker scan.")):
+    add("first-line marker: builder on opus with %s on line one asks" % _label, "ask", CEILING,
+        tool="Agent", prompt=_first, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with no marker in the brief asks, and says what was missing",
+    "ask", CEILING, tool="Agent", prompt="Builder. Lane c204 fix the marker scan.\nFiles: hooks/guard.py.",
+    model="opus", subagent_type="builder",
+    carries=("Round 3 of 3", ("first line", "first non-blank line")))
+add("first-line marker: reviewer with no model and Round 2 of 3 after a role word on line one is denied",
+    "deny", STEP_UP, tool="Agent", prompt="Reviewer, Round 2 of 3. Lane c204 re-check the diff.",
+    subagent_type="reviewer")
+# On the first line only the leftmost marker counts. A second marker later on that line is prose
+# about another step, so it never earns the grant, never adds a step-up deny, and never hides the
+# leftmost one.
+TWO_MARKERS = "Builder, Round 2 of 3. Do not jump to Round 3 of 3 yet."
+add("first-line marker: builder on opus with a later marker on line one after Round 2 of 3 asks", "ask",
+    CEILING, tool="Agent", prompt=TWO_MARKERS, model="opus", subagent_type="builder")
+add("first-line marker: the same brief on sonnet is allowed", "allow", tool="Agent",
+    prompt=TWO_MARKERS, model="sonnet", subagent_type="builder")
+add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 3 later asks, no step-up deny",
+    "ask", CEILING, tool="Agent", model="opus", subagent_type="reviewer",
+    prompt="Round 3 of 3. The Round 2 of 3 report found one defect.")
+add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="Round 1 of 3: check that Round 3 of 3 logic works")
+# A first line that already starts with a marker, in any case or spelling, is read by that start alone.
+# A first line whose leftmost marker-shaped text is the old spelling adds nothing either. A later
+# marker on the line is prose in both.
+for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("lowercase at the start", "round 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("the old spelling after a role word", "Builder, Try 2 of 3. Round 3 of 3 later.")):
+    add("first-line marker: builder on opus with %s and a later Round 3 of 3 asks" % _label, "ask", CEILING,
+        tool="Agent", prompt=_first, model="opus", subagent_type="builder")
+add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="round 1 of 3: check Round 2 of 3 logic")
 # Text that only names opus is no model.
 add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
     tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",

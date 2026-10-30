@@ -1828,21 +1828,36 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
+# A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
+# it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
+# prose, so a leftmost `Try N of 3` adds nothing. Case-sensitive, so lowercase prose does not count (decision agent-model-cap).
+FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
 
 
+def brief_markers(brief) -> list:
+    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
+    marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
+    home of the marker scan."""
+    if not isinstance(brief, str):
+        return []
+    found = STEP_UP_MARKER.findall(brief)
+    first = next((line for line in brief.split("\n") if line.strip()), "")
+    lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
+    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
+
+
 def builder_third_round(brief) -> bool:
-    """True when a brief holds a builder's third-round marker line, in either spelling."""
-    return isinstance(brief, str) and any(
-        kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in STEP_UP_MARKER.findall(brief))
+    """True when a brief holds a builder's third-round marker, in either spelling."""
+    return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
 
 
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
-    """The step-up reason for a spawn whose marker line and model disagree, or "". Only a line
-    that is the marker counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
+    """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
+    that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
     frontmatter model is haiku, so a reviewer round 2 must name sonnet and round 3 must name sonnet or opus."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
@@ -1863,7 +1878,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 def step_up_reason(prompt: str, role, model) -> str:
     model = str(model or "").lower()
-    for kind, n in STEP_UP_MARKER.findall(prompt):
+    for kind, n in brief_markers(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
@@ -2033,12 +2048,16 @@ OPUS_SPAWN_REASON = (
     "reviewer and a builder's Round 3 of 3 "
     "(decision agent-model-cap). Approve it only when the owner asked for Opus here."
 )
+OPUS_BUILDER_REASON = (
+    OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
+    "any line. The marker applies only to a builder's third try, after review round 2 failed."
+)
 OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
 
 
 def opus_spawn_hit(tool: str, tool_input) -> str:
     """The model of an Agent or Task spawn that sets Opus with no standing grant, or "". A standing grant
-    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds the third-round marker line (the same marker
+    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds the third-round marker (the same marker
     step_up_hit reads). A reviewer's spawn is no standing grant, so a reviewer on Opus asks. The spawn ask is liftable by an
     override, so never_lifted does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
@@ -2579,21 +2598,26 @@ def _git_root_of(cwd):
 #
 # docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
 # (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `pick`. Read at the same ArtifactData call.
+# option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`.
+# Read at the same ArtifactData call.
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
                  "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
                  "match the shared format, or leave pick out.")
 
 
 def widens_pick_hit(data) -> str:
-    """The matched text when this write's `pick` names an option it marks `widens: true`. An update
-    that carries `pick` without `options` cannot see the stored options and passes."""
+    """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
+    `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
     options, pick = data.get("options"), data.get("pick")
-    if not isinstance(options, list) or not isinstance(pick, str):
-        return ""
-    if any(isinstance(o, dict) and o.get("key") == pick and o.get("widens") is True for o in options):
+    if isinstance(pick, str):
+        pick = [pick]
+    if not isinstance(pick, list) or not isinstance(options, list):
+        return ""  # an absent or null pick picks nothing, so it never matches a keyless option
+    keys = {p for p in pick if isinstance(p, str)}
+    if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
+           and o.get("widens") is True for o in options):
         return "pick names a widening option"
     return ""
 
@@ -3131,7 +3155,9 @@ def judge(payload) -> None:
     # pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
     opus_model = opus_spawn_hit(tool, tool_input)
     if opus_model:
-        refuse(tool, "ask", "agent-model-cap", OPUS_SPAWN_REASON, opus_model,
+        refuse(tool, "ask", "agent-model-cap",
+               OPUS_BUILDER_REASON if tool_input.get("subagent_type") == "builder" else OPUS_SPAWN_REASON,
+               opus_model,
                spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
