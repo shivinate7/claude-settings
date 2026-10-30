@@ -4020,7 +4020,7 @@ class GhHalf(Env):
         self.assertEqual(rc, 0, out)
 
     def test_a_required_all_jobs_passed_that_only_skipped_reads_pending(self):
-        # A draft's run skips all-jobs-passed on the head. The ready run that passes it has not run yet, so the head waits; it is not green.
+        # A workflow_dispatch run, or a push run in a repo whose push trigger covers branches, skips all-jobs-passed beside a passing scope check. Only a pull_request run passes it, so the head waits; it is not green.
         red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("pass", "")]}, ["all-jobs-passed"])
         self.assertEqual(red, [])
         self.assertEqual(pending, ["all-jobs-passed"])
@@ -4031,7 +4031,7 @@ class GhHalf(Env):
         self.assertEqual((red, pending), ([], []))
 
     def test_a_skip_only_all_jobs_passed_beside_a_passing_check_does_not_merge(self):
-        # The draft's skip must not merge. The wait holds for the ready run, then stops at the deadline with the check named.
+        # That skip beside a passing scope check, from a dispatch run or a push run in a repo whose push trigger covers branches, must not merge. The wait holds for a pull_request run, then stops at the deadline with the check named.
         self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "pass", "")]])
         rc, out = self.go(required=["all-jobs-passed"])
         self.assertEqual(rc, 1, out)
@@ -4045,6 +4045,32 @@ class GhHalf(Env):
         self.assertTrue(any("no check ran on this head" in r for r in red), red)
         self.assertTrue(any("gh workflow run checks.yml --ref" in r for r in red), red)
         self.assertTrue(any("gh pr ready" in r for r in red), red)
+
+    def test_a_draft_head_with_all_jobs_passed_required_is_red_not_pending(self):
+        # A draft run skips every job, scope included, so all-jobs-passed skips too. No run is coming for this head: red wins over pending.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
+        self.assertEqual(pending, [])
+        self.assertTrue(any("no check ran on this head" in r for r in red), red)
+
+    def test_a_draft_head_with_all_jobs_passed_required_remedy_names_ready_or_push_not_a_dispatch(self):
+        # A dispatch run skips all-jobs-passed, so a dispatch cannot pass this head. The remedy names gh pr ready or a new push.
+        red, _, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
+        text = " ".join(red)
+        self.assertIn("gh pr ready", text)
+        self.assertIn("push", text)
+        self.assertNotIn("gh workflow run", text)
+
+    def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
+        # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
+        self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "skipping", "")]], runs_seq=[[("checks", "completed", "skipped")]])
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no check ran on this head", out)
+        self.assertIn("gh pr ready", out)
+        self.assertNotIn("gh workflow run", out)
+        self.assertNotIn("Still pending", out)
+        self.assertEqual(self.paused, [], out)  # no pause: the first read is the verdict
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_docs_only_head_whose_scope_check_passed_is_not_unproven(self):
         red, pending, _ = merge.Host.classify({"scope": [("pass", "")], "checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
