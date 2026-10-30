@@ -9,8 +9,9 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
   over memory, and say when it and the repos disagree.
 - To file: `git fetch origin roadmap`, work on a checkout of `roadmap` (a worktree is fine), edit,
   run `python roadmap/build.py`, commit the JSON and roadmap/roadmap.html, `git push origin roadmap`.
-  Then republish roadmap/roadmap.html to the roadmap page,
-  https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h (Artifact tool, same URL).
+  Then the waiting-page writer (triage) splices the roadmap block into the Queue page's Status tab,
+  https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx (skill waiting-page, "Update the roadmap block").
+  The old roadmap page gets no more publishes (skill roadmap, main).
 - Once per clone, run `sh roadmap/hooks/install.sh` (never set core.hooksPath): its pre-commit refuses a
   commit that adds or grows an open step's note past 250 words in a roadmap checkout (build.py
   `--check-staged`, step c138), and is a no-op elsewhere. It leaves other hooks (main-ref) in place and
