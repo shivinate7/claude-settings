@@ -829,6 +829,47 @@ for (const width of [390, 1440]) {
   });
 }
 
+// Owner ruling (waiting-page item 84 pick b, option 5B), round 2: at 1065 wide the option column binds, so a scrolling picture is column less 2 less the gutter.
+// Read at fractional pixels, so a box that passes its column by under a pixel still fails. The 0.5px slack is the only one allowed.
+const strictBox = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
+  const o = w.parentElement, cs = getComputedStyle(o), r = o.getBoundingClientRect();
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), borderX = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+  return {
+    wrapR: w.getBoundingClientRect().right,
+    colR: r.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight),
+    colW: r.width - borderX - padX,
+    sizerW: w.querySelector(".dsizer").getBoundingClientRect().width,
+    fw: w.querySelector("iframe").getBoundingClientRect().width,
+    g: w.offsetWidth - w.clientWidth - 2,
+    cls: w.className,
+  };
+});
+
+test("a tall picture that scrolls at 1065 wide stays inside its column: the box, the sizer and the picture fit the column less 2 and the gutter", async (t) => {
+  const it = picItem("scroll-col", 60);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1065, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await settleFit(page, it.id);
+  const s = await strictBox(page, it.id), room = s.colW - 2 - s.g;
+  assert.ok(/scroll/.test(s.cls), "the picture does not scroll");
+  assert.ok(s.wrapR <= s.colR + 0.5, `the box ends at ${s.wrapR}, past its column's content edge ${s.colR}`);
+  assert.ok(s.sizerW <= room + 0.5, `the sizer is ${s.sizerW} wide, past the column ${s.colW} less 2 and the gutter ${s.g} = ${room}`);
+  assert.ok(Math.abs(s.fw - room) <= 1, `the picture is ${s.fw} wide, not the column ${s.colW} less 2 and the gutter ${s.g} = ${room.toFixed(1)}`);
+});
+
+test("a picture that differs from its siblings and scrolls at 1065 wide stays inside its column, its 3px border in the gutter", async (t) => {
+  const it = picItem("dif-col", 61, { differs: ["picture"] });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1065, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await settleFit(page, it.id);
+  assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif") && getComputedStyle(w).borderLeftWidth === "3px"), "the picture is not a differing picture with a 3px left border");
+  const s = await strictBox(page, it.id), room = s.colW - 2 - s.g;
+  assert.ok(/scroll/.test(s.cls), "the differing picture does not scroll");
+  assert.ok(s.wrapR <= s.colR + 0.5, `the box ends at ${s.wrapR}, past its column's content edge ${s.colR}`);
+  assert.ok(s.sizerW <= room + 0.5, `the sizer is ${s.sizerW} wide, past the column ${s.colW} less 2 and the gutter ${s.g} = ${room}`);
+  assert.ok(Math.abs(s.fw - room) <= 1, `the picture is ${s.fw} wide, not the column ${s.colW} less 2 and the gutter ${s.g} = ${room.toFixed(1)}`);
+});
+
 test("a resize or a repaint keeps the owner's scroll, the same box, and the scroll hint in the picture's name", async (t) => {
   const it = picItem("once", 36);
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1440, height: 900 } }); if (!page) return;
