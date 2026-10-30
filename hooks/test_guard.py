@@ -97,6 +97,7 @@ FAMILIES = {
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
+    "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -11505,6 +11506,11 @@ UP_MATCH = {"key": "b", "label": "Rename banchi's titles to the shared form", "h
             "lose": "l"}
 
 
+# The line a waiting-page task carries (rule task-names-check, its cases below). It sits here, above its
+# first use in this section.
+TN_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
 def up_item(**over):
     item = {"id": "banchi-titles", "kind": "decision", "status": "open", "title": "Banchi record titles",
             "context": "Banchi's titles differ from the shared form.", "options": [UP_WIDE, UP_MATCH],
@@ -11530,7 +11536,8 @@ up("a stood pick of a widening option is denied", "deny", up_item(stands=True))
 up("an update that carries options and a widening pick is denied", "deny",
    {"options": [UP_WIDE, UP_MATCH], "pick": "a"}, action="update")
 up("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
-up("a task is not judged", "allow", up_item(kind="task"))
+# A task now needs its Why yours line (task-names-check, below). The line keeps this case on the pick rule.
+up("a task is not judged", "allow", up_item(kind="task", context="Banchi's titles differ from the shared form.\n" + TN_WHY))
 up("an items set to another artifact is allowed", "allow", up_item(), url="https://claude.ai/artifact/other")
 add("uniform pick: a batch with today's item among the sets is denied", "deny", "uniform-pick",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -11570,7 +11577,8 @@ up("an update that carries options and a widening list pick is denied", "deny",
 up("an update that carries options and a non-widening list pick is allowed", "allow",
    {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
 up("a task with a list pick is not judged", "allow",
-   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"]))
+   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"],
+           context="Banchi's titles differ from the shared form.\n" + TN_WHY))
 # A list that holds a non-string member still names its string members. The page reads such a list as
 # not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
 up("a multi item whose list pick holds the widening key and a null is denied", "deny",
@@ -11594,6 +11602,73 @@ add("uniform pick: the refusal of a widening list pick names the ruling and what
     "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
     action="set", collection="items", doc_id="banchi-titles",
     data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+
+
+# --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
+FAMILY = "task-names-check"
+#
+# Decision task-names-its-check: a waiting-page task carries a "Why yours:" line naming the check that
+# showed no session could do the act. Item 39's exact record is lost, so this fixture is built from its
+# shape: steps to run in a repo, a cloud refusal in context, and no Why yours line. The rule judges
+# only this repo's waiting page.
+
+TN_CTX = "The cloud proxy refused the branch deletes (403)."
+TN_STEPS = ["open plans/c152-stale-branch-deletes.md", "run its command"]
+
+
+def tn_task(**over):
+    task = {"id": "stale-branch-deletes", "kind": "task", "status": "open", "title": "Delete the stale branches",
+            "context": TN_CTX, "steps": TN_STEPS}
+    task.update(over)
+    return {k: v for k, v in task.items() if v is not None}
+
+
+def tn(name, expected, data, action="set", **extra):
+    kw = dict(action=action, collection="items", doc_id="stale-branch-deletes", data=data)
+    kw.update(extra)
+    add("task names its check: " + name, expected, "task-names-check" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
+
+
+tn("item 39's shape (a task with steps, no Why yours line) is denied", "deny", tn_task())
+tn("a Why yours line in context allows the task", "allow", tn_task(context=TN_CTX + "\n" + TN_WHY))
+tn("the Why yours line is read in any case, at a line start", "allow",
+   tn_task(context=TN_CTX + "\nwhy yours: none could reach the remote"))
+tn("a Why yours phrase mid-line does not count", "deny", tn_task(context="Reason. " + TN_WHY))
+tn("a task with no context is denied", "deny", tn_task(context=None))
+tn("an update that carries kind task and context with no Why yours line is denied", "deny",
+   {"kind": "task", "context": TN_CTX}, action="update")
+tn("an update that carries kind task, context and a Why yours line is allowed", "allow",
+   {"kind": "task", "context": TN_CTX + "\n" + TN_WHY}, action="update")
+tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
+tn("a decision is not judged", "allow", tn_task(kind="decision"))
+tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
+add("task names its check: a batch with item 39's shape among the sets is denied", "deny", "task-names-check",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": "stale-branch-deletes", "data": tn_task()}])
+add("task names its check: the refusal says to ask a session on the owner's computer and add the line", "deny",
+    "task-names-check", carries=("Why yours", "computer"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    action="set", collection="items", doc_id="stale-branch-deletes", data=tn_task())
+tn("a bare Why yours line with nothing after the colon is denied", "deny",
+   tn_task(context=TN_CTX + "\nWhy yours:   "))
+
+
+def tn_replace(name, expected, field, old, new):
+    """One str_replace on a field of the task. The rule judges the text that replaces old_str."""
+    add("task names its check: " + name, expected, "task-names-check" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items",
+        doc_id="stale-branch-deletes", field=field, old_str=old, new_str=new)
+
+
+tn_replace("a str_replace that drops the Why yours line from context is denied", "deny", "context",
+           TN_CTX + "\n" + TN_WHY, TN_CTX)
+tn_replace("a str_replace that keeps the Why yours line in context is allowed", "allow", "context",
+           TN_CTX + "\n" + TN_WHY, "The cloud proxy refused the branch deletes (403) again.\n" + TN_WHY)
+tn_replace("a str_replace on the title is allowed", "allow", "title",
+           "Delete the stale branches", "Delete the old branches")
+tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "allow", "context",
+           TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
 
 
 # --------------------------------------------------------------------------- the runner

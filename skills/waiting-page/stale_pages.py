@@ -11,7 +11,7 @@ could not read gets an empty file <artifact id>.unreadable instead. A page with 
 unknown too.
 
 Verdict, one line per page, then a total line:
-  current  the fetched page holds page.html (white space and the designData mockups ignored)
+  current  the fetched page holds page.html (white space, the designData mockups and the roadmap block ignored)
   behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
   unknown  the page was not read: another account, a missing file, an empty file
 Exit 0 only when every page is current. A behind or unknown page exits 1: an unread page is never
@@ -29,7 +29,7 @@ Single-page mode (the writer, at each wake and before each republish):
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
 or more than one, main's page.html cannot be read, or --write fails. --write, on current or behind,
-saves main's page with the live designData body kept; unknown writes nothing. The template is
+saves main's page with the live designData and roadmap blocks kept (splice.carry); unknown writes nothing. The template is
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
 sys.path.insert(2, os.path.join(HERE, "..", "..", "hooks"))
 sys.path.insert(3, os.path.join(os.path.expanduser("~"), ".claude", "hooks"))
+import splice  # noqa: E402  the one home of the roadmap block's markers (beside this script)
 
 TEMPLATE = os.path.join(HERE, "page.html")
 DESIGN = re.compile(r'(<script type="application/json" id="designData">).*?(</script>)', re.S)
@@ -63,9 +64,17 @@ PIECE = re.compile(r'\s+|<!doctype[^<>]*>|<(?P<close>/?)(?P<tag>html|head|body)%
 TAIL = re.compile(r'(?:\s|</(?:body|html)\s*>)*', re.I)
 
 
+def empty_roadmap_block(text):
+    """`text` with the body of its roadmap block cut out, markers kept; unchanged when it has no one block."""
+    found = splice.markers(text)
+    if [m[0] for m in found] != [splice.OPEN, splice.CLOSE]:
+        return text
+    return text[:found[0][2]] + text[found[1][1]:]
+
+
 def normal(text):
-    """The page text with every designData body emptied and white space collapsed."""
-    return " ".join(DESIGN.sub(r"\1\2", text).split())
+    """The page text with every designData body and the roadmap block emptied, and white space collapsed."""
+    return " ".join(empty_roadmap_block(DESIGN.sub(r"\1\2", text)).split())
 
 
 def skeleton_before(text):
@@ -219,8 +228,11 @@ def single_page(argv):
         return 2
     current = matches(template, live)
     if args.write:
-        # Slicing, never re.sub: a mockup body holds < and backslashes that a replacement string would read.
-        text = template[:spot.start(2)] + live_blocks[0][1] + template[spot.end(2):]
+        try:
+            text = splice.carry(template, live)  # the one carry home: live designData and roadmap blocks, byte for byte
+        except SystemExit as err:  # a template or live page whose roadmap markers carry cannot place
+            print("unknown: the --write file cannot be built (%s)" % err)
+            return 2
         try:
             with open(args.write, "w", encoding="utf-8", newline="") as f:
                 f.write(text)

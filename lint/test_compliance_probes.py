@@ -174,6 +174,52 @@ class Layout(unittest.TestCase):
 SHOOT = '{"baseUrl": "http://localhost:5173", "routes": ["/", "/b"]}'
 
 
+def shoot_json(route=None, **config):
+    """A one-route shoot config. `route` adds keys to the route object, `config` to the top level."""
+    return json.dumps({"baseUrl": "http://localhost:5173", "routes": [dict({"path": "/"}, **(route or {}))], **config})
+
+
+# Each malformed value of the reach keys, as (label, route keys, config keys, a pattern the gap line must match).
+# bin/shoot refuses the same list (lint/test_shoot.mjs, REFUSED). It is a copy because that suite is
+# Node and this one is Python, and a shared data file would sit outside the CI scope map.
+SHOOT_STEPS = "step|state|click|wait"
+SHOOT_REACH_BAD = (
+    [("steps is %s" % label, {"steps": value}, {}, SHOOT_STEPS) for label, value in (
+        ("an object", {"click": "#a"}), ("a string", "click #a"), ("a number", 5), ("an empty list", []),
+        ("null", None), ("an empty string", ""), ("the number 0", 0),
+        ("a click selector that is empty", [{"click": ""}]),
+        ("a click selector that is blank", [{"click": " "}]),
+        ("a state that is null", [{"wait": "#a", "state": None}]),
+        ("a step with neither click nor wait", [{}]),
+        ("a step with both click and wait", [{"click": "#a", "wait": "#b"}]),
+        ("a step with only a state", [{"state": "hidden"}]),
+        ("a click step with a state", [{"click": "#a", "state": "visible"}]),
+        ("a step with another key", [{"tap": "#a"}]),
+        ("a step that is a string", ["#a"]), ("a step that is null", [None]), ("a step that is a number", [5]),
+        ("a step that is a list", [["click", "#a"]]),
+        ("a good step, then a bad one", [{"click": "#a"}, {}]),
+        ("a click selector that is a number", [{"click": 5}]),
+        ("a click selector that is null", [{"click": None}]),
+        ("a click selector that is true", [{"click": True}]),
+        ("a wait selector that is a list", [{"wait": ["#a"]}]),
+        ("a wait selector that is an object", [{"wait": {"css": "#a"}}]),
+        ("a state of attached", [{"wait": "#a", "state": "attached"}]),
+        ("a state of detached", [{"wait": "#a", "state": "detached"}]),
+        ("a state that is true", [{"wait": "#a", "state": True}]),
+    )]
+    + [("localStorage: %s" % label, {"localStorage": value}, {}, "localStorage") for label, value in (
+        ("a string", "k=v"), ("a number", 5), ("true", True), ("a list", ["k", "v"]),
+        ("a value that is a number", {"k": 1}), ("a value that is null", {"k": None}),
+        ("a value that is true", {"k": True}), ("a value that is an object", {"k": {"a": "b"}}),
+        ("a value that is a list", {"k": ["v"]}), ("a good value, then a bad one", {"a": "x", "b": 2}),
+    )]
+    + [("ignoreHTTPSErrors: %s" % label, {}, {"ignoreHTTPSErrors": value}, "ignoreHTTPSErrors") for label, value in (
+        ("a string", "yes"), ("the string true", "true"), ("the number 1", 1), ("the number 0", 0),
+        ("a list", []), ("an object", {}),
+    )]
+)
+
+
 class Design(unittest.TestCase):
     def test_no_screens_is_na(self):
         code, out = Repo(self).write("a.py").run("design")
@@ -200,14 +246,42 @@ class Design(unittest.TestCase):
         self.assertIn("ui copy: known gap", out)
         self.assertTrue(out.startswith("design: out"), out)
 
+    def assert_gap(self, bad, key=None):
+        """A config shoot refuses reads as a gap. `key`, when given, is a pattern the gap line must match."""
+        code, out = Repo(self).write("a.tsx").write(".claude/shoot.json", bad).write("tokens.css").run("design")
+        self.assertEqual(code, 1, bad)
+        self.assertIn("screens named: gap", out)
+        self.assertIn("screenshot command: gap", out)
+        self.assertNotIn(": pass - the shared shoot", out)
+        if key:
+            line = next(line for line in out.splitlines() if line.startswith("  screens named: gap"))
+            self.assertRegex(line, "(?i)" + key, "the gap line does not name the bad key")
+
     def test_a_config_shoot_refuses_is_a_gap(self):
         for bad in ('{"routes": ["/"]}', '{"baseUrl": "http://h", "routes": ["/"], "sizes": "x"}',
                     '{"baseUrl": "http://h", "routes": ["/"], "themes": ["sepia"]}', '{"baseUrl": "http://h", "routes": []}'):
-            code, out = Repo(self).write("a.tsx").write(".claude/shoot.json", bad).write("tokens.css").run("design")
-            self.assertEqual(code, 1, bad)
-            self.assertIn("screens named: gap", out)
-            self.assertIn("screenshot command: gap", out)
-            self.assertNotIn(": pass - the shared shoot", out)
+            self.assert_gap(bad)
+
+    def test_a_malformed_steps_localstorage_or_https_flag_is_a_gap(self):
+        for label, route, config, key in SHOOT_REACH_BAD:
+            with self.subTest(label):
+                self.assert_gap(shoot_json(route, **config), key)
+
+    def test_a_config_using_the_new_keys_correctly_is_in_shape(self):
+        steps = [{"click": "#menu"}, {"wait": "#ready"}, {"wait": "#spinner", "state": "hidden"}, {"wait": "#view", "state": "visible"}]
+        for flag in (True, False):
+            good = json.dumps({"baseUrl": "http://localhost:5173", "ignoreHTTPSErrors": flag, "futureKey": 1, "routes": [
+                "/", {"path": "/b", "steps": steps, "futureRouteKey": {"a": 1}},
+                {"name": "c", "path": "/c", "localStorage": {"token": "abc", "theme": "dark"}},
+                {"path": "/d", "steps": [{"click": "#x"}], "localStorage": {"k": "v"}}]})
+            with self.subTest(ignoreHTTPSErrors=flag):
+                repo = Repo(self).write("src/App.tsx").write(".claude/shoot.json", good).write("src/tokens.css")
+                repo.write("ios/Tokens.swift", "// Generated from src/tokens.css. Do not edit.\n")
+                code, out = repo.run("design")
+                self.assertEqual(code, 0, out)
+                self.assertIn("screens named: pass - 4 route(s)", out)
+                self.assertIn("screenshot command: pass - the shared shoot reads", out)
+                self.assertTrue(out.startswith("design: in shape"), out)
 
     def test_token_paths_tests_and_generated(self):
         repo = Repo(self).write("a.tsx").write(".claude/shoot.json", SHOOT)
