@@ -251,8 +251,10 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 /* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
 .cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd + .cmd { border-top: 1px solid var(--line); padding-top: 14px; }
 .cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.shell .cmd-say { color: var(--ink); font-weight: 600; }
 .cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
 /* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
 .btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
@@ -1127,7 +1129,7 @@ function cmdBlock(it, text, shell) {
   const pre = h("pre", { class: "cmd-text", id: "cc-" + it.id + sfx }, h("code", {}, text.split("\n").map((l) => h("span", { class: "ln" }, l))));
   const more = h("details", { class: "cmd-more" }, h("summary", {}, "Show the " + what), pre);
   let timer = 0;
-  const box = h("div", { class: "cmd", id: "cmd-" + it.id + sfx });
+  const box = h("div", { class: "cmd" + (shell ? " shell" : ""), id: "cmd-" + it.id + sfx });
   const copy = h("button", { class: "btn alt cmd-copy", type: "button", "aria-label": "Copy the " + what + " for No. " + it.n, "aria-controls": "cc-" + it.id + sfx, onclick: async () => {
     clearTimeout(timer);
     box.classList.remove("copied", "failed");
