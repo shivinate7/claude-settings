@@ -201,7 +201,7 @@ class Red(unittest.TestCase):
             self.assertNotIn("hunk reversed", p)
 
     def test_a_delete_of_a_file_a_prior_pr_added_says_deleted(self):
-        """q_max PR 993 shape: PR 1 adds a file, the branch cut after the merge removes it."""
+        """A file a merged PR added, then deleted on a later branch, reads as deleted."""
         self.merged_pr(msg="add debt", docs__debts__missing_md="debt body line\nsecond line\n")
         r = self.r
         r.sh("checkout", "-q", "-b", "gone")
