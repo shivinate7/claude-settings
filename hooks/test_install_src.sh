@@ -3227,7 +3227,8 @@ caseK11() {
   fi
 }
 
-# ---- caseL: the merge --confirm allow rules come from the source checkout, and the log says what was written ----
+# ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
+# The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
 # allow_case NAME HAS: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
 # merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. Then one piped cloud install
 # from inside it. Sets h, co, rc and out.
@@ -3262,7 +3263,7 @@ caseL1() {
     bad "$name" "allow rules were written with no rules file: $(written_allow | tr '\n' ' ')"
   elif printf '%s\n' "$out" | grep -q "allow rules from\|merge/cloud_allow.json rules)"; then
     bad "$name" "the log claims rules that were not written: $(settings_lines)"
-  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge --confirm allow rules: $co at $sha has no rules in merge/cloud_allow.json"; then
+  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge allow rules: $co at $sha has no rules in merge/cloud_allow.json"; then
     bad "$name" "no WARNING names the checkout and its commit: $(settings_lines)"
   else
     ok "$name"
@@ -3280,7 +3281,7 @@ caseL2() {
     bad "$name" "install.sh exited $rc: $(install_problems)"
   elif [ "$(written_allow)" != "$(want_allow)" ]; then
     bad "$name" "allow rules [$(written_allow | tr '\n' ' ')] != the file's [$(want_allow | tr '\n' ' ')]"
-  elif ! printf '%s\n' "$out" | grep -qF "+ $count merge --confirm allow rules from $co at $sha)"; then
+  elif ! printf '%s\n' "$out" | grep -qF "+ $count merge allow rules from $co at $sha)"; then
     bad "$name" "the log does not name the count, the checkout and its commit: $(settings_lines)"
   else
     ok "$name"
@@ -3334,6 +3335,8 @@ move_install() {
 }
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
 
+# The count comes from the rules file, which holds the role rules as well as the confirm rules, so a tier added to the file needs no edit here.
+# A file with no rules fails: an empty file would otherwise pass as 0 = 0.
 caseM1() {
   name="caseM1: a clean, detached checkout on an old main commit moves to main and gets the merge allow rules"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
@@ -3343,8 +3346,10 @@ caseM1() {
     bad "$name" "install.sh exited $rc: $(install_problems)"
   elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
     bad "$name" "the checkout is not detached at main [$want]: $(git -C "$co" rev-parse HEAD) $(install_problems)"
-  elif [ "$(merge_rule_count)" != 2 ]; then
-    bad "$name" "settings.json has $(merge_rule_count) merge allow rules, not 2"
+  elif [ "$(want_allow | wc -l | tr -d ' ')" -le 0 ]; then
+    bad "$name" "the rules file in the checkout has no allow rules, so the count proves nothing"
+  elif [ "$(merge_rule_count)" != "$(want_allow | wc -l | tr -d ' ')" ]; then
+    bad "$name" "settings.json has $(merge_rule_count) merge allow rules, not the $(want_allow | wc -l | tr -d ' ') in the rules file"
   elif [ "$(git -C "$co" rev-parse --is-shallow-repository)" != false ]; then
     bad "$name" "the fetch made the checkout shallow"
   else

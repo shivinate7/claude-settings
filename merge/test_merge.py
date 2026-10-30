@@ -9428,6 +9428,9 @@ CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
 # repo's own bin/merge. No rule runs merge/merge.py by path: that runs the working copy's file, which on an old lane branch has no role check.
 CLOUD_ALLOW_SHIMS = ("~/.claude/bin/merge",)
 CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
+# A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES. No `*` and no word after the tier, so it cannot
+# pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design).
+CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS for tier in sorted(merge.MERGE_ROLES))
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
 SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
@@ -9498,19 +9501,19 @@ class ShellScan(unittest.TestCase):
         self.assertNotIn(self.NAME, head + local)
 
 class CloudAllow(unittest.TestCase):
-    """merge/cloud_allow.json holds the `merge --confirm` allow rules that only a cloud session's settings.json gets (install.sh's cloud branch).
-    A local settings.json is a link to the repo's settings.json and gets none."""
+    """merge/cloud_allow.json holds the `merge --confirm` and `merge --role` allow rules that only a cloud session's settings.json gets
+    (install.sh's cloud branch). A local settings.json is a link to the repo's settings.json and gets none."""
 
     def allow(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             return json.load(f)["permissions"]["allow"]
 
-    def test_the_rules_file_is_exactly_the_two_confirm_rules_of_the_home_shim(self):
+    def test_the_rules_file_is_exactly_the_confirm_and_role_rules_of_the_home_shim(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"permissions"})
         self.assertEqual(set(data["permissions"]), {"allow"})
-        self.assertEqual(sorted(data["permissions"]["allow"]), sorted(CLOUD_ALLOW_RULES))  # no more, no fewer, no repeat
+        self.assertEqual(sorted(data["permissions"]["allow"]), sorted(CLOUD_ALLOW_RULES + CLOUD_ROLE_RULES))  # no more, no fewer, no repeat
 
     def test_no_rule_names_the_script_or_python(self):
         for rule in self.allow():
@@ -9530,13 +9533,27 @@ class CloudAllow(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertNotIn(rule[len("Bash("):].split(" ", 1)[0], ("merge", "bin/merge"))
 
-    def test_every_rule_names_confirm_and_none_is_broad(self):
+    def test_every_rule_is_a_confirm_shape_or_an_exact_role_command_and_none_is_broad(self):
         narrow = re.compile(r"Bash\(~/\.claude/bin/merge \* --confirm( \*)?\)")
+        role = re.compile(r"Bash\(~/\.claude/bin/merge --role (\S+)\)")
         for rule in self.allow():
             with self.subTest(rule=rule):
                 self.assertNotEqual(rule, "Bash(*)")
-                # the shim, one `*` for the PR, --confirm, then at most one `*` for trailing arguments
-                self.assertTrue(narrow.fullmatch(rule), f"{rule} is not one of the narrow shapes")
+                m = role.fullmatch(rule)
+                if m:
+                    self.assertIn(m.group(1), merge.MERGE_ROLES, f"{rule} names a tier the code does not know")
+                else:
+                    # the shim, one `*` for the PR, --confirm, then at most one `*` for trailing arguments
+                    self.assertTrue(narrow.fullmatch(rule), f"{rule} is neither a narrow confirm shape nor an exact role command")
+
+    def test_no_role_rule_holds_a_star_or_anything_after_the_tier(self):
+        role_rules = [rule for rule in self.allow() if "--role" in rule]
+        self.assertEqual(len(role_rules), len(merge.MERGE_ROLES), "want one role rule per tier")
+        for rule in role_rules:
+            with self.subTest(rule=rule):
+                self.assertNotIn("*", rule)
+                self.assertTrue(rule.endswith(")"), rule)
+                self.assertIn(rule[:-1].rsplit(" ", 1)[1], merge.MERGE_ROLES)  # the tier is the last word: nothing after it
 
     def test_install_sh_names_the_rules_file_in_its_cloud_branch(self):
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
