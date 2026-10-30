@@ -117,6 +117,9 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt, trimmed, is
+                       not `/effort medium` (LANE_EFFORT). A call with no lane tag passes. An override
+                       lifts it. (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-cap, simulator-boot-twin
@@ -1701,6 +1704,15 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
+CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
+# The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
+LANE_EFFORT = "medium"
+LANE_TAG = "cs-build:lane"
+LANE_EFFORT_REASON = (
+    "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
+    "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
+    % LANE_EFFORT
+)
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
@@ -1825,6 +1837,16 @@ def floor_hit(tool: str, tool_input) -> str:
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
                     return keys["model"]
     return ""
+
+
+def lane_effort_hit(tool: str, tool_input) -> str:
+    """The prompt of a create_session call that tags a lane and is not the effort command alone, or "".
+    A call with no lane tag is not judged. A missing prompt reads as empty, which is not the command."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL or not isinstance(tags, list) or LANE_TAG not in tags:
+        return ""
+    prompt = str(tool_input.get("prompt") or "").strip()
+    return "" if prompt == "/effort " + LANE_EFFORT else prompt or "(no prompt)"
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
@@ -3346,6 +3368,12 @@ def judge(payload) -> None:
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
+
+    # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
+    # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
+    lane_prompt = lane_effort_hit(tool, tool_input)
+    if lane_prompt:
+        refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
 
     # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
     # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
