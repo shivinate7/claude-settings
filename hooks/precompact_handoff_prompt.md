@@ -50,6 +50,8 @@ The handoff holds these sections, in this order:
 - Next steps.
 - The files and commands that matter.
 
+For a list that has a home (a page collection, a roadmap ref or a git ref), name the home and never copy the list.
+
 ## 5. Check premises
 
 A premise is a statement, not a fact. After a compaction, a /clear or a fork, treat every

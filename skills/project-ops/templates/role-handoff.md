@@ -9,11 +9,12 @@ From "<old session title>" at <the limit hit, or the slip>. Checked: main <commi
 
 ## State
 
-<What merged, what is in flight, each wait handed over and to whom, and the work order now, in words.>
+<What merged, what is in flight, each wait handed over and to whom, and the work order now, in words.
+Name the home of each list (open items, waits), never copy it.>
 
 ## Deferred for the owner
 
-<Each deferred step, and why. Do not ask.>
+<Each deferred step, and why. Do not ask. Name the home of the list of deferred steps, never copy it.>
 
 ## Traps seen
 
