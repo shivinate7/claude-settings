@@ -5,7 +5,7 @@
 A field on a waiting item is for the owner to read. A field the page does not draw is lost to him. The page lists the top-level item fields it draws in one block, `<script type="application/json" id="itemFields">[...]</script>` in `skills/waiting-page/page.html`. That block is the one home of the list. The page reads it, and so does the guard. Nothing else holds a copy.
 
 - The page shows a visible warning on the card of an item that carries a top-level field outside the list. It names each field. It never blocks Send.
-- Guard rule `item-field-rendered` (`hooks/guard.py`, `item_field_hit`) refuses an `ArtifactData` write to `items` that names a top-level field outside the list.
+- Guard rule `item-field-rendered` (`hooks/question_form.py`, `item_field_hit`, called by `item_hit`) refuses an `ArtifactData` write to `items` that names a top-level field outside the list.
   - It reads the block with `html.parser`, never a regex. Script text is data, so a block inside a string or a template literal is no block.
   - It judges `set` and `update` by the keys of `data`, and `str_replace` by `field`. It reads each write in a batch and data read from `file_path`.
   - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
