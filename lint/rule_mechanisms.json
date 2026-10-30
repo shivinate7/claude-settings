@@ -684,6 +684,22 @@
       },
       "test": "hooks/test_guard.py::uniform pick: today's item (pick names the widening option) is denied"
     },
+    "style-press-has-link": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "press-link",
+        "reason": "The guard refuses a waiting-page option, or task steps read together, that has a press verb and a web marker with no link to the exact page (decision act-in-place). It reads words, so a press verb outside its list (such as enable auto-merge, select or close) passes, and an unnumbered press passes with any link."
+      },
+      "test": "hooks/test_guard.py::press link: today's item (a press on home#374, no link) is denied"
+    },
+    "style-command-in-item": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "command-in-item",
+        "reason": "The guard refuses a waiting-page task whose steps, joined, name a file and a command in it (decision act-in-place). It reads words, so a step that sends the owner to a file in other words passes."
+      },
+      "test": "hooks/test_guard.py::command in item: a step that opens a plan file, then one that says run its command, is denied"
+    },
     "style-question-inside-box": {
       "mechanism": {
         "kind": "unmechanized",

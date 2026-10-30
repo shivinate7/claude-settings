@@ -7,6 +7,7 @@
     python3 lint/compliance_probes.py playwright <child root>
     python3 lint/compliance_probes.py ios <child root>
     python3 lint/compliance_probes.py words <child root>
+    python3 lint/compliance_probes.py slugs <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
@@ -39,7 +40,14 @@ words: each retired word in a checked repo, one item per line: `  <word>: <file>
   the line of a path hit. The word list is read live from lint/check_glossary.py and the GLOSSARY.md beside
   it: its path, identifier, rule anchor, record slug and hook message reads, run on the child's tracked
   files. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
-  parse, makes the group unknown. It prints the claude-settings commit whose glossary it read.
+  parse, makes the group unknown. It prints the claude-settings commit whose glossary it read. A term of
+  the child's own GLOSSARY.md, at its root, spans a retired word, as a claude-settings term does. A child
+  term that repeats a claude-settings term, or is the retired word itself, does not. After WORDS_DEADLINE
+  seconds the group is `unknown - stopped at <file>, N of M read`. That limit is a bandaid for file shapes
+  the read is not yet fast on.
+slugs: a record file this change adds against origin/main, in the child's own record folders (the layout's),
+  with a slug over 32 characters is one item line. Long slugs already on main are one note line: the count
+  and the first three. No origin/main makes the group unknown. It calls lint/check_record_slugs.py.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
@@ -48,6 +56,7 @@ import json
 import os
 import re
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -83,8 +92,17 @@ OWNER_NAMED = re.compile(r"\((owner|ruling)\b|\b(owner|ruling)\b[^.]*\d{4}-\d{2}
 QUOTES = {"\"": "\"", "'": "'", "`": "`", "\u201c": "\u201d", "\u2018": "\u2019"}  # a cap in quotes is cited, not set
 
 
+# BANDAID, named: the words group stops after this many seconds, for a file shape the read is not yet fast on.
+# Cause: unknown file shapes. The deadline turns a stall into an "unknown" that names the file. Read at run time.
+WORDS_DEADLINE = 300.0
+
+
 class CannotRun(Exception):
     pass
+
+
+class DeadlineHit(Exception):
+    """The words group ran past WORDS_DEADLINE."""
 
 
 def tracked(root):
@@ -368,11 +386,17 @@ MODE_5 = re.compile(r"\bswift(LanguageModes|LanguageVersions)\s*:\s*\[[^\]]*\.v(
 MACOS_IMAGE = re.compile(r"^\s*(?:-\s*)?(?:runs-on|os|labels)\s*:.*?(?<![\w.-])(macos-[\w.-]+)", re.M)
 RUNS_ON = re.compile(r"\bruns-on:")
 PACKAGE_TESTS = re.compile(r"\bswift\s+test\b|\bmake\s+(\S+\s+)*kit-test\b|\bmake\s+(\S+\s+)*native-check\b")
-APP_COMPILE = re.compile(r"\bxcodebuild\b(?!\s+-version)|\bmake\s+(\S+\s+)*(app-build|native-check)\b")
-XCODEBUILD_TEST = r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])"
-UI_ON_PR = re.compile(XCODEBUILD_TEST + r"|\bmake\s+(\S+\s+)*(ui-test|native-check)\b|\bsim-test\b")
+MAKE_COMPILE = re.compile(r"\bmake\s+(\S+\s+)*(app-build|native-check)\b")
+MAKE_UI = re.compile(r"\bmake\s+(\S+\s+)*(ui-test|native-check)\b|\bsim-test\b")
+INFO_FLAGS = {"-version", "-showsdks", "-list", "-showBuildSettings", "-help"}  # xcodebuild prints and builds nothing
+TEST_ACTIONS = {"test", "test-without-building"}
+UI_BUNDLE = "bundle.ui-testing"
+# A mark that opens or ends a command. Quote marks are read as nothing: a quoted `run:` value and a `bash -c "..."` argument hold
+# commands, so `;`, `|`, `&` and a backtick are marks inside quotes too. A parenthesis in quotes is text, as in a simulator name
+# (`iPad Pro (12.9-inch)`), unless it closes a `$(` opened in the same quote.
+COMMAND_MARKS = {";", "|", "&", "$(", "(", ")", "`"}
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
-XCODEBUILD_TEST_RE = re.compile(XCODEBUILD_TEST)
+XCODEBUILD_TEST_RE = re.compile(r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])")
 NO_DIAGNOSE = re.compile(r"(?<![\w-])-collect-test-diagnostics\s+never(?![-\w.])")
 DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*[\"']?[A-Z0-9]")
 
@@ -395,6 +419,125 @@ def make_recipes(text):
         elif line.strip():
             names = []
     return out
+
+
+def shell_words(line):
+    """The words of one line, with COMMAND_MARKS as words of their own. A quote opens after a non-letter, as in `uncommented`:
+    a quote after a letter is an apostrophe in text."""
+    words, word, quote, opened = [], [], None, []  # `opened`: the quote state at each open `$(`
+    i = 0
+    while i < len(line):
+        ch, mark = line[i], None
+        if ch in "\"'":
+            if quote == ch:
+                quote = None
+            elif quote is None and not (i and line[i - 1].isalnum()):
+                quote = ch
+            i += 1
+            continue
+        if line.startswith("$(", i):
+            mark, opened = "$(", opened + [quote]
+            i += 1
+        elif ch == ")" and (quote is None or (opened and opened[-1] == quote)):
+            mark, opened = ")", opened[:-1]
+        elif ch == "(" and quote is None or ch in ";|&`":
+            mark = ch
+        if mark:
+            words += ["".join(word), mark] if word else [mark]
+            word = []
+        elif ch.isspace():
+            words += ["".join(word)] if word else []
+            word = []
+        else:
+            word.append(ch)
+        i += 1
+    return words + ["".join(word)] * bool(word)
+
+
+def xcodebuild_runs(text):
+    """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
+    ends at a COMMAND_MARKS mark or the line end."""
+    runs = []
+    for line in text.splitlines():
+        group = []
+        for word in shell_words(line) + [";"]:
+            if word in COMMAND_MARKS:
+                names = [w.rsplit("/", 1)[-1] for w in group]
+                if "xcodebuild" in names:
+                    runs.append(group[names.index("xcodebuild") + 1:])
+                group = []
+            else:
+                group.append(word)
+    return runs
+
+
+def compiles_app(text):
+    """True when a workflow compiles the app: a make target that does, or an `xcodebuild` that is no info-only call."""
+    return bool(MAKE_COMPILE.search(text)) or any(not INFO_FLAGS & set(run) for run in xcodebuild_runs(text))
+
+
+def xcodegen_tests(text):
+    """({target: type}, {scheme: [test target]}) read from a project.yml with comments cut. Only the two shapes XcodeGen's
+    template writes are read: `type:` under a target, and `test: targets:` as an inline list or `- name` items. Anything else
+    is left out, so a run that needs it stays unresolved."""
+    targets, schemes = {}, {}
+    top = first = entry = test = listing = inner = None  # the open key; the entry's indent and name; the `test:` and `targets:` indents; the indent of an entry's own keys
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        indent, body = len(line) - len(line.lstrip()), line.strip()
+        key, _, value = body.partition(":")
+        key, value = key.strip("\"'"), value.strip()
+        if first is not None and indent > first and inner is None:
+            inner = indent
+        if indent == 0:
+            top, first, entry, test, listing, inner = key, None, None, None, None, None
+        elif top not in ("targets", "schemes"):
+            continue
+        elif first is None or indent == first:
+            first, entry, test, listing, inner = indent, key, None, None, None
+            if top == "schemes":
+                schemes[entry] = []
+        elif top == "targets" and key == "type" and indent == inner:  # a `type:` deeper down is a source's
+            targets[entry] = value.strip("\"'")
+        elif top == "schemes" and key == "test":
+            test = indent
+        elif top == "schemes" and key == "targets" and test is not None and indent > test:
+            listing = indent if not value else None
+            if value.startswith("["):
+                schemes[entry] = [t.strip().strip("\"'") for t in value.strip("[]").split(",") if t.strip()]
+        elif top == "schemes" and listing is not None and indent >= listing and body.startswith("-"):
+            item = body[1:].strip()
+            schemes[entry].append((item.partition(":")[2].strip() if item.startswith("name:") else item).strip("\"'"))
+    return targets, schemes
+
+
+def runs_ui_bundle(args, specs):
+    """True when an `xcodebuild test` run may cover a UI-test bundle: it does, or it cannot be resolved (today's gap).
+    `-only-testing:<target>` names what runs; with none, the scheme's test targets do (XcodeGen makes a scheme named for each
+    target). `specs`: the (targets, schemes) of each iOS project.yml."""
+    only = [a.split(":", 1)[1].split("/")[0] for a in args if a.startswith("-only-testing:")]
+    scheme = next((args[i + 1] for i, a in enumerate(args[:-1]) if a == "-scheme"), None)
+    verdicts = []
+    for targets, schemes in specs:
+        if only:
+            names = only
+        elif scheme in schemes:
+            names = schemes[scheme]
+        elif scheme in targets and targets[scheme] != "application":
+            names = [scheme]
+        else:
+            continue
+        if not names or any(n not in targets for n in names):
+            continue
+        verdicts.append(any(targets[n] == UI_BUNDLE for n in names))
+    return not verdicts or any(verdicts)
+
+
+def runs_ui_tests(text, specs):
+    """True when a workflow runs UI tests: a UI make target or `sim-test`, or an `xcodebuild test` that may cover a UI bundle."""
+    return bool(MAKE_UI.search(text)) or any(
+        TEST_ACTIONS & set(run) and runs_ui_bundle(run, specs) for run in xcodebuild_runs(text))
 
 
 def probe_ios(root):
@@ -450,13 +593,14 @@ def probe_ios(root):
         item("ci runner", "gap", "; ".join(floating) + " (want %s)" % IOS_RUNNER)
     else:
         item("ci runner", "pass" if pinned else "gap", IOS_RUNNER if pinned else "no workflow runs on macOS")
-    wants = (("runs the package tests", PACKAGE_TESTS),) * bool(packages) + (("compiles the app", APP_COMPILE),)
+    wants = (("runs the package tests", PACKAGE_TESTS.search),) * bool(packages) + (("compiles the app", compiles_app),)
     on_pr = [f for f in flows if PULL_REQUEST.search(text[f])]
     lacks = ([] if on_pr else ["no pull_request workflow"]) + [
-        "no workflow " + what for what, pattern in wants if not any(pattern.search(text[f]) for f in on_pr)]
+        "no workflow " + what for what, test in wants if not any(test(text[f]) for f in on_pr)]
     item("ci checks", "gap" if lacks else "pass",
          "; ".join(lacks) if lacks else "%s on each pull request" % ("package tests and an app compile" if packages else "an app compile"))
-    slow = [f for f in flows if UI_ON_PR.search(text[f])]
+    projects = [xcodegen_tests(text[f]) for f in specs]
+    slow = [f for f in flows if runs_ui_tests(text[f], projects)]
     item("slow tests", "gap" if slow else "pass",
          "%s runs UI tests; they run once per batch on the Mac, through sim-test" % ", ".join(slow) if slow else "no UI suite in CI")
     # Each run of xcodebuild test, split at `&&`, `;` and `|`, needs the flag itself. sim-test adds its own.
@@ -565,6 +709,25 @@ def glossary_uncommitted(root, name):
     return done.returncode == 0 and bool(done.stdout.strip())
 
 
+def probe_slugs(root):
+    try:
+        import check_record_slugs  # the one home of the slug rule and of how the added files are read
+        dirs = check_record_slugs.record_dirs(root)
+        new = check_record_slugs.added(root)
+        every = check_record_slugs.tracked(root)
+    except ImportError as err:
+        raise CannotRun("check_record_slugs: %s" % err)
+    except (layout.LayoutError, check_record_slugs.Unknown) as err:
+        raise CannotRun(str(err))
+    bad = check_record_slugs.too_long(new, dirs)
+    old = [f for f in check_record_slugs.too_long(every, dirs) if f not in new]
+    lines = ["  %s: gap - slug over %d characters" % (f, check_record_slugs.MAX) for f in bad]
+    if old:
+        lines.append("old slugs over %d characters on main: %d, %s%s"
+                     % (check_record_slugs.MAX, len(old), ", ".join(old[:3]), ", ..." if len(old) > 3 else ""))
+    return finish("slugs", lines, "out" if bad else "in shape", 1 if bad else 0)
+
+
 def probe_words(root):
     try:
         import check_glossary  # the one home of the retired words and of how a name is read
@@ -577,6 +740,8 @@ def probe_words(root):
     if not table:
         raise CannotRun("%s has no rows under '%s'" % (check_glossary.GLOSSARY, check_glossary.SECTION))
     found, unread, files = [], [], tracked(root)
+    child = read(root, "GLOSSARY.md") if "GLOSSARY.md" in files else None  # the child's own domain terms, in its root
+    spans = check_glossary.child_spans(check_glossary.rows(child.lstrip("\ufeff")), table) if child else []
 
     def add(rel, line, problem, detail):
         word = WORD_HIT.search(problem)
@@ -584,24 +749,39 @@ def probe_words(root):
         if item not in found:
             found.append(item)
 
-    for rel in files:
-        for problem in check_glossary.path_problems(rel, table):  # "<path> uses '<word>'; ..."
-            add(rel, "-", problem, problem[len(rel):].strip())
-        body = read(root, rel)
-        if body is None:
-            unread.append(rel)
-            continue
-        if rel.startswith(check_glossary.SKIP_CODE):
-            continue
-        if body.startswith("\ufeff"):  # the check's own read uses utf-8-sig; a BOM would fail the Python parse
-            body = body[1:]
-        try:
-            problems = check_glossary.code_problems(rel, body, table, None)
-        except SyntaxError as err:
-            raise CannotRun("%s does not parse (%s)" % (rel, err.msg))
-        for problem in problems:  # "<rel>:<line>: <where> uses '<word>'; ..."
-            line, _, detail = problem[len(rel) + 1:].partition(": ")
-            add(rel, line, problem, detail)
+    deadline = time.monotonic() + WORDS_DEADLINE
+
+    def tick():
+        if time.monotonic() > deadline:
+            raise DeadlineHit()
+
+    check_glossary.tick = tick  # the check calls it inside its name loop, so one giant file cannot outrun the deadline
+    current, done = None, 0
+    try:
+        for done, rel in enumerate(files):
+            current = rel
+            tick()
+            for problem in check_glossary.path_problems(rel, table, spans):  # "<path> uses '<word>'; ..."
+                add(rel, "-", problem, problem[len(rel):].strip())
+            body = read(root, rel)
+            if body is None:
+                unread.append(rel)
+                continue
+            if rel.startswith(check_glossary.SKIP_CODE):
+                continue
+            if body.startswith("\ufeff"):  # the check's own read uses utf-8-sig; a BOM would fail the Python parse
+                body = body[1:]
+            try:
+                problems = check_glossary.code_problems(rel, body, table, None, spans)
+            except SyntaxError as err:
+                raise CannotRun("%s does not parse (%s)" % (rel, err.msg))
+            for problem in problems:  # "<rel>:<line>: <where> uses '<word>'; ..."
+                line, _, detail = problem[len(rel) + 1:].partition(": ")
+                add(rel, line, problem, detail)
+    except DeadlineHit:
+        raise CannotRun("stopped at %s, %d of %d read" % (current, done, len(files)))
+    finally:
+        check_glossary.tick = None
     note = "unread: %d files, %s" % (len(unread), ", ".join(unread[:3]) + (", ..." if len(unread) > 3 else ""))
     if not files:
         raise CannotRun("no tracked files")
@@ -619,11 +799,12 @@ def probe_words(root):
 
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
-          "ios": probe_ios, "words": probe_words, "scorecard": scorecard}
+          "ios": probe_ios, "words": probe_words, "slugs": probe_slugs, "scorecard": scorecard}
 
 
 def main(argv):
-    if len(argv) != 2 or argv[0] not in GROUPS:
+    # A root that is an option or no folder is refused: scorecard would write under the cwd.
+    if len(argv) != 2 or argv[0] not in GROUPS or argv[1].startswith("-") or not os.path.isdir(argv[1]):
         print("usage: compliance_probes.py {%s} <child root>" % ",".join(GROUPS), file=sys.stderr)
         return 2
     root = os.path.abspath(argv[1])

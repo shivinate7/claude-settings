@@ -44,6 +44,12 @@ class Matcher(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers))
 
+    def test_guard_matcher_covers_exit_worktree(self):
+        # Rule session-home deletes a session's record on ExitWorktree, so the guard must see that call.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, "ExitWorktree") for m in matchers),
+                        "no guard matcher covers ExitWorktree: %r" % matchers)
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a

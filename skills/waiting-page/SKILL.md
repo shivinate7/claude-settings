@@ -50,6 +50,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     an allow-list entry or a per-repo exception. Its card shows "Goes against your uniform ruling (t18)": a repo
     that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
+  - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
+    asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
+    The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
+    and an update that sets `steps` carries `links` again: the guard cannot see the stored fields.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
@@ -62,8 +66,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
       On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
       A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
-  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
-    (a number, or text such as `3 min`).
+  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`
+    (a number, or text such as `3 min`). The item shows `command` in a closed "Show the command" disclosure with a Copy
+    button that works while it is closed. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
+    A step never sends the owner to a file for a command: put it in `command` and say "paste the command below"
+    (guard rule `command-in-item`).
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.

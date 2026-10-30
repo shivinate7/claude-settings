@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Each session writes only inside its own checkout. An agent whose worktree is gone must stop and report. `hooks/guard.py` rule 0 holds both parts and runs before every other rule.
+Each session writes only inside its own checkout. An agent whose worktree is gone must stop and report. A top-level session whose worktree is gone makes a new one before it writes. `hooks/guard.py` rule 0 holds all three parts and runs before every other rule.
 
 Why, three events:
 
@@ -33,7 +33,26 @@ Risk: incident (2026-09-06). `other-checkout` landed 2026-10-28.
 - **Cost.** At most one `git worktree list --porcelain -z` per call. A Read or Grep spends none. A shell command spends none unless it holds a `>`, a mutating command or `sed` once redirects onto a stream (`2>&1`) or `/dev/null` are dropped. A call whose `cwd` has no `.git` at or above it spends none (a stat walk). No file, log or process is added. `worktree_home_cross_checkout_cost_case` counts the spawns.
 - **An owner override lifts it.** The owner may mean the write. It has its own rule id so that `worktree-home` stays outside every override.
 
-### Both parts
+### `session-home`: a top-level session whose worktree is gone makes a new one
+
+Owner ask, 2026-10-29 16:49 CDT: a resumed top-level session whose worktree was removed ran in the primary checkout. Risk: likely (owner-reported). Landed 2026-10-29.
+
+- **The record.** A call with no `agent_id` whose `cwd` sits in `<primary>/.claude/worktrees/<name>` writes that path to `<primary>/.git/session-homes/<session_id>`, only when the record is missing or differs. A call with an `agent_id` never writes it: agents share the session's `session_id`. A call whose `cwd` sits in an agent's worktree, `<primary>/.claude/worktrees/agent-<agent_id>`, never writes it either: that is the session inspecting an agent's tree.
+- **A deliberate exit clears it.** An ExitWorktree call with no `agent_id`, from any `cwd`, deletes a record whose folder still stands. ExitWorktree is in the guard's PreToolUse matcher for this reason. An ExitWorktree while the record is lost clears nothing.
+- **The write is atomic.** A temp file in the same folder, then a rename, so no reader sees half a path.
+- **The act.** No `agent_id`, a non-empty record whose folder is gone, `cwd` in the primary checkout, and one of:
+  - a Write, Edit, MultiEdit or NotebookEdit target, or a shell write as `_shell_write_hit` reads it, in the primary checkout or under the lost home path;
+  - a git command run in the primary that changes its files or branch: checkout, switch, pull, merge, commit, rebase, restore, reset, stash, cherry-pick, revert, am, apply. The owner's ask is "refuse writes in the primary checkout", and these write it.
+- **Passes.** A target under `<primary>/.git/`, or outside the clone. Read, Grep, and a shell call that writes no file (`git fetch`, `git status`, `git log`, `git diff`, `git branch <name>`, `git worktree add`), so recovery never depends on the lost state. A git command run with `-C` in a live worktree. A git command whose folder is a shell variable (`cd "$WT" && git commit`, `git -C "$WT" commit`): the folder is unknown. A write inside a new worktree, which also rewrites the record.
+- **No record passes.** A fresh session, and one that never entered a worktree, are unchanged.
+- **Resume notice.** `hooks/session_start.sh`, on `source` `resume` with a record whose folder is gone, prints one line: make a new worktree with the EnterWorktree tool before any write. EnterWorktree branches from origin's default branch by default (`worktree.baseRef` "fresh").
+- **The refusal** names EnterWorktree, never the lost path (`git-remedy-never-names-target`).
+- **An owner override lifts it** (`owner-override`). A top-level session is the owner's own, so the owner may mean the write.
+- **Cost.** No git spawn beyond what the call already spends: the primary is found by path shape and a stat walk. Files written: one record per session that entered a worktree, rewritten only when its worktree changes, deleted at ExitWorktree. Nothing else deletes it. `session_home_*_case` counts the spawns.
+- **Premises.** ExitWorktree reaching PreToolUse is read from the docs, unmeasured live (debt exit-worktree-hook-unmeasured). A resume keeps the `session_id` unless `--fork-session` is passed (CLI reference, read; unmeasured live). A resume whose worktree is gone starts in the folder Claude was launched from (worktrees docs, read).
+- **Limits.** A visit to a non-agent lane tree records it as home (debt session-home-lane-visit). A session whose `cwd` is in no checkout, which then runs `cd <primary> && <write>`, is not judged. A lane lost before its first guarded call (Read and Grep only) left no record. A git command inside `bash -c` or `sh -c`, and `submodule update`, `read-tree` or `checkout-index`, are not read. A `git` word left unquoted in another command (`echo git commit`), and `git apply --check`, are refused. A worktree removed by hand with `git worktree remove`, without ExitWorktree, leaves the record: primary writes are refused until a new worktree or an override. A cloud container reclaim gives a fresh clone with no record, so a resumed cloud session is allowed in its fresh, unshared primary.
+
+### All three parts
 
 - **Read and Grep** are always allowed, so a session can still report (`verification-recovery-independent-of-state`).
 - **The refusal** never names the target or the home (`git-remedy-never-names-target`). The matched detail goes to the log.

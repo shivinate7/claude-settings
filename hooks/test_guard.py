@@ -77,6 +77,7 @@ FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
+    "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
     "hand-made-worktree": "a lane worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
@@ -97,6 +98,8 @@ FAMILIES = {
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
+    "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
+    "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
@@ -11604,21 +11607,242 @@ add("uniform pick: the refusal of a widening list pick names the ruling and what
     data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
 
 
+# --------------------------------------------------------------------------- a press in a web app carries its link
+FAMILY = "press-link"
+#
+# A waiting item that asks the owner to press in a web app (GitHub, a PR, a pull request, a
+# `home#374` ref, Settings) carries a link to that exact page: on the option whose label or how asks
+# it, or on a task's `links`. The writer refuses it at the same ArtifactData call. The red case is
+# the old shape of item 47, rebuilt from its step note: the option said to press Merge, with no link.
+
+WP_DOC = "home-374-merge"
+PL_LINK = [{"label": "home#374 on GitHub", "url": "https://github.com/shivinate7/home/pull/374"}]
+PL_WRONG = [{"label": "home#375 on GitHub", "url": "https://github.com/shivinate7/home/pull/375"}]
+PL_BAD_OPT = {"key": "a", "label": "Merge home#374 yourself", "how": "Mark home#374 ready and press Merge.",
+              "gain": "g", "lose": "l"}
+PL_KEEP_OPT = {"key": "b", "label": "Leave home#374 open", "how": "Do nothing yet.", "gain": "g", "lose": "l"}
+
+
+def pl_opt(label, how, key="a", **more):
+    return dict({"key": key, "label": label, "how": how, "gain": "g", "lose": "l"}, **more)
+
+
+def pl_item(**over):
+    item = {"id": WP_DOC, "kind": "decision", "status": "open", "title": "Merge home#374 yourself or wait?",
+            "context": "The home pull request is ready for review.", "options": [PL_BAD_OPT, PL_KEEP_OPT]}
+    item.update(over)
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def pl_task(steps, links=None, **over):
+    # The Why yours line keeps each case on the press-link rule; task-names-check reads it (TN_WHY).
+    task = {"id": WP_DOC, "kind": "task", "status": "open", "title": "Merge home#374", "steps": steps,
+            "links": links, "context": TN_WHY}
+    task.update(over)
+    return {k: v for k, v in task.items() if v is not None}
+
+
+def wp_write(name, expected, rule, item, action="set", doc_id=WP_DOC, **extra):
+    """One ArtifactData write of a waiting item to the fixture repo's waiting page. The rule is named on a deny only."""
+    kw = dict(action=action, collection="items", doc_id=doc_id, data=item)
+    kw.update(extra)
+    add(name, expected, rule if expected == "deny" else None, tool="ArtifactData", cwd=PQ_REPO,
+        **{"url": PQ_URL, **kw})
+
+
+def pl(name, expected, item, **extra):
+    wp_write("press link: " + name, expected, "press-link", item, **extra)
+
+
+pl("today's item (a press on home#374, no link) is denied", "deny", pl_item())
+pl("the refusal names the link to add", "deny", pl_item(), carries=("links", "url"))
+pl("a press option with a link to the exact page is allowed", "allow",
+   pl_item(options=[dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT]))
+pl("a link to the wrong number, /pull/375, is denied", "deny",
+   pl_item(options=[dict(PL_BAD_OPT, links=PL_WRONG), PL_KEEP_OPT]))
+pl("a link to /pull/3745 is not the exact page and is denied", "deny",
+   pl_item(options=[dict(PL_BAD_OPT, links=[{"label": "home#374 on GitHub",
+                                             "url": "https://github.com/shivinate7/home/pull/3745"}]),
+                    PL_KEEP_OPT]))
+pl("a link to the issue page of the same number is allowed", "allow",
+   pl_item(options=[dict(PL_BAD_OPT, links=[{"label": "home#374",
+                                             "url": "https://github.com/shivinate7/home/issues/374"}]),
+                    PL_KEEP_OPT]))
+pl("a link on another option does not stand in for this one", "deny",
+   pl_item(options=[PL_BAD_OPT, dict(PL_KEEP_OPT, links=PL_LINK)]))
+pl("a press in an option label, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Press Merge in GitHub", "Do it by hand."), PL_KEEP_OPT]))
+pl("the PR merged, with no press, is allowed", "allow",
+   pl_item(options=[pl_opt("Wait until the PR merged", "Do nothing yet."), PL_KEEP_OPT]))
+pl("press on with the plan, with no web marker, is allowed", "allow",
+   pl_item(options=[pl_opt("Press on with the plan", "Finish the work in this session."), PL_KEEP_OPT]))
+pl("a click on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Click Merge on GitHub."), PL_KEEP_OPT]))
+pl("a tap on a PR with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Tap Merge on the PR."), PL_KEEP_OPT]))
+pl("a press on a pull request with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on the pull request."), PL_KEEP_OPT]))
+pl("a press in Settings with no link is denied", "deny",
+   pl_item(options=[pl_opt("Turn it on", "Press Save in Settings."), PL_KEEP_OPT]))
+pl("a press on the settings page with no link is denied", "deny",
+   pl_item(options=[pl_opt("Turn it on", "Press Save on the settings page."), PL_KEEP_OPT]))
+pl("marking a PR ready with no link is denied", "deny",
+   pl_item(options=[pl_opt("Ready it", "Mark the PR ready for review."), PL_KEEP_OPT]))
+pl("a press on GitHub with a link to the repo is allowed", "allow",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on GitHub.",
+                           links=[{"label": "home on GitHub", "url": "https://github.com/shivinate7/home"}]),
+                    PL_KEEP_OPT]))
+pl("a task step that presses Merge on home#374, with no links, is denied", "deny",
+   pl_task(["Press Merge on home#374"]))
+pl("a task step that presses Merge on home#374, with the link to /pull/374, is allowed", "allow",
+   pl_task(["Press Merge on home#374"], links=PL_LINK))
+pl("a task step that presses Merge on home#374, with the link to /pull/375, is denied", "deny",
+   pl_task(["Press Merge on home#374"], links=PL_WRONG))
+pl("a task step that presses Merge in GitHub, with no links, is denied", "deny",
+   pl_task(["Press Merge in GitHub"]))
+pl("a task step that presses Merge in GitHub, with any link, is allowed", "allow",
+   pl_task(["Press Merge in GitHub"], links=[{"label": "home on GitHub", "url": "https://github.com/shivinate7/home"}]))
+pl("a task step with a press and no web marker is allowed", "allow", pl_task(["Press on with the plan"]))
+pl("a task step that names the PR with no press is allowed", "allow", pl_task(["Read the PR notes"]))
+pl("an update that carries a pressing option with no link is denied", "deny",
+   {"options": [PL_BAD_OPT, PL_KEEP_OPT]}, action="update")
+pl("an update that carries a pressing option with its link is allowed", "allow",
+   {"options": [dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT]}, action="update")
+pl("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+pl("an update that carries a press step with the exact link is allowed", "allow",
+   {"steps": ["Press Merge on home#374"], "links": PL_LINK}, action="update")
+pl("an update that carries a press step with a wrong link is denied", "deny",
+   {"steps": ["Press Merge on home#374"], "links": PL_WRONG}, action="update")
+pl("an items set to another artifact is allowed", "allow", pl_item(), url="https://claude.ai/artifact/other")
+add("press link: a batch with the press item among the sets is denied", "deny", "press-link",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+            {"op": "set", "collection": "items", "doc_id": WP_DOC, "data": pl_item()}])
+add("press link: a batch of linked sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
+    url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": WP_DOC,
+             "data": pl_item(options=[dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT])}])
+
+
+pl("a Merge on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Merge home#374 on GitHub."), PL_KEEP_OPT]))
+pl("an Approve on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Approve it", "Approve the PR on GitHub."), PL_KEEP_OPT]))
+pl("a Hit on the PR with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Hit Merge on the PR."), PL_KEEP_OPT]))
+pl("a Go to Settings with no link is denied", "deny",
+   pl_item(options=[pl_opt("Turn it on", "Go to Settings and turn it on."), PL_KEEP_OPT]))
+pl("a press with a space before the # and no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374."), PL_KEEP_OPT]))
+pl("a press with a space before the # and a link to /pull/375 is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374.", links=PL_WRONG), PL_KEEP_OPT]))
+pl("a press with a space before the # and a link to /pull/374 is allowed", "allow",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374.", links=PL_LINK), PL_KEEP_OPT]))
+pl("a label with the ref and a how with the click are judged together and denied", "deny",
+   pl_item(options=[pl_opt("Merge home#374 yourself", "Click the green button."), PL_KEEP_OPT]))
+pl("a task step that opens the PR #374 and approves it, with no links, is denied", "deny",
+   pl_task(["Open the PR #374 and approve it"]))
+pl("press on with the PR open is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press on; the PR stays open."), PL_KEEP_OPT]))
+pl("press on with the claude-settings lane is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press on with the claude-settings lane."), PL_KEEP_OPT]))
+pl("press Save after editing settings.json is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press Save after you edit settings.json."), PL_KEEP_OPT]))
+pl("marking the decision ready once the PR is open is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Mark the decision ready once the PR is open."), PL_KEEP_OPT]))
+# Task steps are judged joined: the page named in one step and the press in the next is still a press.
+pl("task steps that open home#374 on GitHub, then press Merge, with no link, are denied", "deny",
+   pl_task(["Open home#374 on GitHub.", "Press Merge."]))
+pl("task steps that open the PR on GitHub, then click Merge, with no link, are denied", "deny",
+   pl_task(["Open the PR on GitHub.", "Click Merge."]))
+pl("a task titled Merge home#374 with a step that presses Merge, with no link, is denied", "deny",
+   pl_task(["Press Merge."]))
+pl("the task steps with a link to /pull/374 are allowed", "allow",
+   pl_task(["Open home#374 on GitHub.", "Press Merge."], links=PL_LINK))
+pl("an option that says then you merge home#374, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "Then you merge home#374."), PL_KEEP_OPT]))
+pl("an option that says you approve the PR on GitHub, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "You approve the PR on GitHub."), PL_KEEP_OPT]))
+pl("an option that says mark it ready for review on home#374, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "Mark it ready for review on home#374."), PL_KEEP_OPT]))
+# The page's own buttons and item numbers are not web-app presses.
+pl("task steps that press Send when the PR is merged are allowed", "allow",
+   pl_task(["Check the PR is merged.", "Press Send when the PR is merged."]))
+pl("an option that answers item #47, then presses Send, is allowed", "allow",
+   pl_item(options=[pl_opt("Go ahead", "Answer item #47, then press Send."), PL_KEEP_OPT]))
+pl("a step that taps Mark done after step #2 is allowed", "allow",
+   pl_task(["Tap Mark done after step #2."]))
+pl("a step that takes my pick, then presses Send, is allowed", "allow",
+   pl_task(["Take my pick, then press Send."]))
+
+
+# --------------------------------------------------------------------------- a task step never sends the owner to a file for a command
+FAMILY = "command-in-item"
+#
+# A waiting task's steps never send the owner to a file for a command: the owner would open the file
+# and copy the command out. The steps are judged joined, since the two halves can sit in separate
+# steps. The red case is the old shape of item 39, rebuilt from its step note: one step opened a plan
+# file and the next said to run its command. A decision is not judged by this rule.
+
+CI_DOC = "c152-stale-branch-deletes"
+CI_STEPS = ["Open plans/c152-stale-branch-deletes.md", "Run its command"]
+
+
+def ci_task(steps, **over):
+    # The Why yours line keeps each case on the command rule; task-names-check reads it (TN_WHY).
+    task = {"id": CI_DOC, "kind": "task", "status": "open", "title": "Delete the stale branches",
+            "steps": steps, "context": TN_WHY}
+    task.update(over)
+    return {k: v for k, v in task.items() if v is not None}
+
+
+def ci(name, expected, item, **extra):
+    wp_write("command in item: " + name, expected, "command-in-item", item, doc_id=CI_DOC, **extra)
+
+
+ci("a step that opens a plan file, then one that says run its command, is denied", "deny", ci_task(CI_STEPS))
+ci("the refusal names the command to add", "deny", ci_task(CI_STEPS),
+   carries=("`command`", "paste the command below"))
+ci("an update that carries those steps is denied", "deny", {"steps": CI_STEPS}, action="update")
+ci("a run-the-command-in-file step is denied", "deny",
+   ci_task(["Run the command in plans/c152-stale-branch-deletes.md"]))
+ci("a copy-the-command-from-file step is denied", "deny",
+   ci_task(["Copy the command from plans/c152-stale-branch-deletes.md"]))
+ci("a file opened and its command run in one step is denied", "deny",
+   ci_task(["Open plans/c152-stale-branch-deletes.md and run its command"]))
+ci("a terminal step with the command on the item is allowed", "allow",
+   ci_task(["Open Terminal", "Paste the command below and run it"], command="git push origin --delete old-a"))
+ci("a decision that opens a file and runs its command is not judged", "allow",
+   {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
+    "context": "The plan file lists them.",
+    "options": [{"key": "a", "label": "Delete them",
+                 "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
+                {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
+
+
+ci("a file step with the command set is denied", "deny",
+   ci_task(CI_STEPS, command="git push origin --delete old-a"))
+ci("a run-the-command-in-file step with the command set is denied", "deny",
+   ci_task(["Run the command in plans/c152.md"], command="git push origin --delete old-a"))
+
+
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
 FAMILY = "task-names-check"
 #
 # Decision task-names-its-check: a waiting-page task carries a "Why yours:" line naming the check that
-# showed no session could do the act. Item 39's exact record is lost, so this fixture is built from its
-# shape: steps to run in a repo, a cloud refusal in context, and no Why yours line. The rule judges
-# only this repo's waiting page.
+# showed no session could do the act. The fixture is a task with a cloud refusal in context and no Why
+# yours line. Its steps are plain and it carries a
+# `command`, so command-in-item passes it and only this rule judges it. The rule judges only this
+# repo's waiting page.
 
 TN_CTX = "The cloud proxy refused the branch deletes (403)."
-TN_STEPS = ["open plans/c152-stale-branch-deletes.md", "run its command"]
+TN_STEPS = ["Open Terminal", "Paste the command below and run it"]
+TN_COMMAND = "git push origin --delete old-a"
 
 
 def tn_task(**over):
     task = {"id": "stale-branch-deletes", "kind": "task", "status": "open", "title": "Delete the stale branches",
-            "context": TN_CTX, "steps": TN_STEPS}
+            "context": TN_CTX, "steps": TN_STEPS, "command": TN_COMMAND}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}
 
@@ -11630,7 +11854,7 @@ def tn(name, expected, data, action="set", **extra):
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
 
 
-tn("item 39's shape (a task with steps, no Why yours line) is denied", "deny", tn_task())
+tn("a task with steps and no Why yours line is denied", "deny", tn_task())
 tn("a Why yours line in context allows the task", "allow", tn_task(context=TN_CTX + "\n" + TN_WHY))
 tn("the Why yours line is read in any case, at a line start", "allow",
    tn_task(context=TN_CTX + "\nwhy yours: none could reach the remote"))
@@ -11644,7 +11868,7 @@ tn("an update of the status only is allowed", "allow", {"status": "closed"}, act
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 tn("a decision is not judged", "allow", tn_task(kind="decision"))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
-add("task names its check: a batch with item 39's shape among the sets is denied", "deny", "task-names-check",
+add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "stale-branch-deletes", "data": tn_task()}])
 add("task names its check: the refusal says to ask a session on the owner's computer and add the line", "deny",
@@ -13325,15 +13549,15 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
-def _decide_full(tool, cwd, agent_id=None, process_cwd=None, **tool_input):
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, **tool_input):
     """`decide`, but for a hand-built payload naming every key `decide` reads by index.
 
     `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
     relative `file_path` must resolve against the payload `cwd`, never against wherever the
-    guard subprocess happens to run from.
+    guard subprocess happens to run from. `session` is the payload's session_id.
     """
     return decide({
-        "raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": None,
+        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
         "config": None, "agent_id": agent_id, "process_cwd": process_cwd,
         "tool_input": tool_input,
     })
@@ -13969,6 +14193,664 @@ LOG_CHECKS = (
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+
+
+# =========================================================================== session-home
+#
+# Rule session-home: a session whose linked worktree is gone may not write into the primary
+# checkout. The record is `<primary>/.git/session-homes/<session_id>`, one file per session. It
+# holds the worktree path, and a top-level call (no agent_id) from inside
+# `<primary>/.claude/worktrees/<name>` writes it when it is missing or differs. That session's
+# ExitWorktree deletes it. An agent shares its session's id, so an agent call never writes or
+# deletes the record. The rule reads the path shape and walks the folders up for `.git`: no git read.
+FAMILY = "session-home"
+SH_AGENT = "shomeagent0f1e2d3c"  # an agent id in the shape AGENT_ID accepts
+
+
+def sh_session():
+    """A session id in the shape SESSION_ID_RE accepts, unique to one case."""
+    return "shome-" + uuid.uuid4().hex
+
+
+def sh_new_primary(name):
+    """A primary checkout of its own, with one commit, under this run's folder."""
+    primary = os.path.join(ROOT, "shome_" + name)
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    return primary
+
+
+def sh_add_lane(primary, name):
+    """A linked worktree at `.claude/worktrees/<name>`, the shape the harness makes. Returns
+    (folder, branch)."""
+    lane = os.path.join(primary, ".claude", "worktrees", name)
+    branch = "shome-" + name
+    made = run_vcs(primary, "worktree", "add", "-q", lane, "-b", branch)
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: the worktree add at %r: %s" % (lane, made.stderr.strip()))
+    return lane, branch
+
+
+def sh_lose_lane(primary, lane, branch):
+    """The harness removes a worktree's folder and its branch together."""
+    run_vcs(primary, "worktree", "remove", "--force", lane)
+    run_vcs(primary, "branch", "-D", branch)
+
+
+def sh_record(primary, session):
+    return os.path.join(primary, ".git", "session-homes", session)
+
+
+def sh_holds(primary, session, folder):
+    """True when the session's record names `folder`, compared through realpath. A missing or
+    empty record holds nothing."""
+    try:
+        with open(sh_record(primary, session), encoding="utf-8") as handle:
+            text = handle.read().strip()
+    except OSError:
+        return False
+    return bool(text) and os.path.realpath(text) == os.path.realpath(folder)
+
+
+def sh_refusal_problems(label, got, reason, primary, lost):
+    """What a session-home refusal holds: the rule's name and the EnterWorktree tool. It never
+    names a path: not the primary, not the lost folder, not the `.claude` folder."""
+    if got != "deny":
+        return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
+    problems = []
+    if "session-home" not in reason or "EnterWorktree" not in reason:
+        problems.append("%s: the refusal must name session-home and EnterWorktree: %s"
+                        % (label, reason[:160]))
+    for text in (primary, slash(primary), lost, slash(lost), ".claude"):
+        if text in reason:
+            problems.append("%s: the refusal names %r" % (label, text))
+    return problems
+
+
+def session_home_lost_refuses_case():
+    """Rule session-home: a session whose worktree is gone is refused a write into the primary
+    checkout, by Write, Edit, MultiEdit, NotebookEdit and a shell write. The refusal names
+    EnterWorktree and no path. The lane call that makes the record is checked first."""
+    primary = sh_new_primary("lost")
+    lane, branch = sh_add_lane(primary, "lane-lost")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", lane, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    src = os.path.join(primary, "src", "app.py")
+    rows = (
+        ("Write", {"file_path": src, "content": "x"}),
+        ("Edit", {"file_path": src, "old_string": "1", "new_string": "2"}),
+        ("MultiEdit", {"file_path": src, "edits": [{"old_string": "1", "new_string": "2"}]}),
+        ("NotebookEdit", {"notebook_path": os.path.join(primary, "nb.ipynb"), "new_source": "x"}),
+        ("Bash", {"command": "echo x > f.txt"}),
+        ("Bash", {"command": "echo x > " + slash(os.path.join(primary, "f.txt"))}),
+    )
+    for index, (tool, tool_input) in enumerate(rows):
+        got, reason = _decide_full(tool, primary, session=session, **tool_input)
+        problems += sh_refusal_problems("row %d, %s" % (index, tool), got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "every write tool and shell write is refused, naming session-home and EnterWorktree"
+
+
+def session_home_present_folder_passes_case():
+    """A session whose worktree folder is still there may write into the primary checkout. The
+    record is checked first, so the pass is the record's doing, not a missing record's."""
+    primary = sh_new_primary("present")
+    lane, _ = sh_add_lane(primary, "lane-present")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if got != "allow":
+        problems.append("the primary Write with the folder present: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command="echo x > f.txt")
+    if got != "allow":
+        problems.append("the primary shell write with the folder present: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the primary checkout is writable while the recorded folder stands"
+
+
+def session_home_fresh_session_passes_case():
+    """Pinned: a session with no record, which never had a worktree, writes into the primary
+    checkout, and a primary call writes no record."""
+    primary = sh_new_primary("fresh")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write: want allow, got %s (%s)" % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command="echo x > f.txt")
+    if got != "allow":
+        problems.append("the primary shell write: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("a primary call wrote a session record")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a session with no record writes into the primary checkout and writes no record"
+
+
+def session_home_other_sessions_pass_case():
+    """Records are per session. Another session's lost record refuses that session only. A session
+    that never had a worktree, and a session whose record file is empty, both write into the
+    primary checkout."""
+    primary = sh_new_primary("other")
+    lane, branch = sh_add_lane(primary, "lane-other")
+    lost_for = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=lost_for, command="echo hi")
+    if not sh_holds(primary, lost_for, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=lost_for, file_path=src, content="x")
+    problems += sh_refusal_problems("the session that lost its worktree", got, reason, primary, lane)
+    never = sh_session()
+    got, reason = _decide_full("Write", primary, session=never, file_path=src, content="x")
+    if got != "allow":
+        problems.append("a session that never had a worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    empty = sh_session()
+    write(sh_record(primary, empty), "")  # a record that names no folder
+    got, reason = _decide_full("Write", primary, session=empty, file_path=src, content="x")
+    if got != "allow":
+        problems.append("a session whose record is empty: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the lost session is refused; a session with no record or an empty one passes"
+
+
+def session_home_agent_call_writes_no_record_case():
+    """An agent shares its session's id, so an agent call never writes or rewrites the session's
+    record. A lost record never refuses an agent's call from the primary checkout."""
+    primary = sh_new_primary("agent")
+    agent_lane, _ = sh_add_lane(primary, "agent-" + SH_AGENT)
+    lane, lane_branch = sh_add_lane(primary, "lane-agent")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", agent_lane, session=session, agent_id=SH_AGENT,
+                               command="echo hi")
+    if got != "allow":
+        problems.append("an agent call from its own worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("an agent call wrote the session record")
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the top-level call from the lane wrote no session record naming it")
+    _decide_full("Bash", agent_lane, session=session, agent_id=SH_AGENT, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("after an agent call the session record no longer names the lane")
+    sh_lose_lane(primary, lane, lane_branch)
+    got, reason = _decide_full("Write", primary, session=session, agent_id=SH_AGENT,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if "session-home" in reason:
+        problems.append("an agent's Write from the primary checkout was refused as session-home: %s"
+                        % reason[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent call neither writes nor rewrites the session record, nor is refused by it"
+
+
+def session_home_new_worktree_rewrites_case():
+    """After a lost worktree, a call from a new worktree rewrites the session's record to name it.
+    The primary write then follows the record's folder: allowed while that folder stands, refused
+    once it is gone."""
+    primary = sh_new_primary("rewrite")
+    old, old_branch = sh_add_lane(primary, "lane-old")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", old, session=session, command="echo hi")
+    sh_lose_lane(primary, old, old_branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write after the first loss", got, reason,
+                                    primary, old)
+    new, new_branch = sh_add_lane(primary, "lane-new")
+    got, reason = _decide_full("Write", new, session=session,
+                               file_path=os.path.join(new, "src", "new.py"), content="x")
+    if got != "allow":
+        problems.append("a write inside the new worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if not sh_holds(primary, session, new):
+        problems.append("the call from the new worktree did not rewrite the record to name it")
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write while the new worktree stands: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    sh_lose_lane(primary, new, new_branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write after the second loss", got, reason,
+                                    primary, new)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the record follows the newest worktree, and the primary write follows the record"
+
+
+def session_home_exit_worktree_clears_case():
+    """ExitWorktree from a session's live lane deletes its record, so the primary checkout is writable
+    again. The clear is the live lane's: an ExitWorktree from the primary leaves the record in place,
+    see session_home_exit_from_primary_case. An agent's ExitWorktree shares the session's id, so it
+    leaves the record in place too."""
+    primary = sh_new_primary("exit")
+    lane, branch = sh_add_lane(primary, "lane-exit")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    got, reason = _decide_full("ExitWorktree", lane, session=session, agent_id=SH_AGENT)
+    if got != "allow":
+        problems.append("an agent's ExitWorktree: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("after an agent's ExitWorktree the session record no longer names the lane")
+    got, reason = _decide_full("ExitWorktree", lane, session=session)
+    if got != "allow":
+        problems.append("the session's ExitWorktree: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("the session's ExitWorktree left its record")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after ExitWorktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "ExitWorktree from the session clears the record; an agent's leaves it"
+
+
+def session_home_pass_through_case():
+    """While a session's worktree is gone, its writes into the clone's .git and into a folder in
+    no checkout still pass, and so does every read and every non-writing shell call. Only a write
+    into the primary's own files is refused. The refusal is checked first."""
+    primary = sh_new_primary("pass")
+    lane, branch = sh_add_lane(primary, "lane-pass")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    exclude = os.path.join(primary, ".git", "info", "exclude")
+    scratch = os.path.join(ROOT, "shome_scratch", "note.txt")
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    sh_lose_lane(primary, lane, branch)
+    problems = []
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the control: the primary Write", got, reason, primary, lane)
+    rows = (
+        ("Write into the clone's .git", "Write", {"file_path": exclude, "content": "x"}),
+        ("Write to a folder in no checkout", "Write", {"file_path": scratch, "content": "x"}),
+        ("shell append into the clone's .git", "Bash", {"command": "echo x >> " + slash(exclude)}),
+        ("shell git fetch of main", "Bash", {"command": VCS + " fetch origin main"}),
+        ("shell git status", "Bash", {"command": VCS + " status"}),
+        ("shell cat of a primary file", "Bash", {"command": "cat " + slash(src)}),
+        ("Read of a primary file", "Read", {"file_path": src}),
+        ("Grep of the primary checkout", "Grep", {"pattern": "x", "path": primary}),
+    )
+    for label, tool, tool_input in rows:
+        got, reason = _decide_full(tool, primary, session=session, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    # The refusal is for a call whose cwd is the primary checkout. A call from another live linked
+    # worktree is judged by the other rules alone. This check runs last: its own call from a
+    # `.claude/worktrees/<name>` folder rewrites the record to name that live folder.
+    live, _ = sh_add_lane(primary, "lane-live")
+    got, reason = _decide_full("Write", live, session=session,
+                               file_path=os.path.join(live, "src", "new.py"), content="x")
+    if got != "allow":
+        problems.append("a write from another live worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the control is refused; .git, a scratch folder, fetch, status, reads and a live worktree pass"
+
+
+def session_home_owner_override_lifts_case():
+    """session-home is liftable: the owner may mean the write. It is refused before a timed
+    override and allowed under it. It is not in never_lifted, so the override reaches it."""
+    config = ov_config("session-home")
+    primary = sh_new_primary("override")
+    lane, branch = sh_add_lane(primary, "lane-override")
+    session = sh_session()
+    ov_call("Bash", {"command": "echo hi"}, lane, config, session, 0)  # records the lane
+    sh_lose_lane(primary, lane, branch)
+    src = os.path.join(primary, "src", "app.py")
+    call = lambda s: ov_call("Write", {"file_path": src, "content": "x"}, primary, config,
+                             session, s)
+    problem = ov_want(*call(0), "deny", "session-home")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "session-home")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def session_home_spawn_cost_case():
+    """The record and the refusal add no git read to the same call made with no session. Each
+    check compares the two, so the other rules' reads cancel out: the record write adds none, a
+    refused primary write adds no more than the same write would, and a non-writing shell call
+    adds none. A stand-in git on PATH logs each spawn."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    real = shutil.which(VCS)
+    if not real:
+        return False, "no git on PATH"
+    primary = sh_new_primary("cost")
+    lane, branch = sh_add_lane(primary, "lane-cost")
+    folder = os.path.join(ROOT, "shome_cost_bin")
+    log = os.path.join(ROOT, "shome_cost_spawns.log")
+    stand_in = os.path.join(folder, VCS)
+    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
+    os.chmod(stand_in, 0o755)
+    path = folder + os.pathsep + os.environ.get("PATH", "")
+
+    def counted(tool, cwd, session, **tool_input):
+        """(decision, reason, git spawns) for one guard call."""
+        if os.path.exists(log):
+            os.remove(log)
+        got, reason = decide({
+            "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": path,
+            "config": None, "agent_id": None, "tool_input": tool_input,
+        })
+        spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        return got, reason, len(spawns)
+
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    lane_write = {"file_path": os.path.join(lane, "src", "new.txt"), "content": "x"}
+    got, reason, with_record = counted("Write", lane, session, **lane_write)
+    _, _, without = counted("Write", lane, None, **lane_write)
+    if got != "allow":
+        problems.append("the lane write: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane write wrote no session record naming the lane")
+    if with_record < 1:  # other-checkout reads the worktree list on any write: no spawn means no stand-in
+        problems.append("the stand-in git saw no spawn, so the counts below prove nothing")
+    if with_record != without:
+        problems.append("the record write spent %d git spawn(s), the same call with no session %d"
+                        % (with_record, without))
+    sh_lose_lane(primary, lane, branch)
+    lost_got, lost_reason, lost_n = counted("Write", primary, session, file_path=src, content="x")
+    _, _, free_n = counted("Write", primary, None, file_path=src, content="x")
+    problems += sh_refusal_problems("the lost primary Write", lost_got, lost_reason, primary, lane)
+    if lost_n > free_n:
+        problems.append("the refused primary write spent %d git spawn(s), more than the same write "
+                        "with no session %d" % (lost_n, free_n))
+    status = {"command": VCS + " status"}
+    _, _, status_with = counted("Bash", primary, session, **status)
+    _, _, status_without = counted("Bash", primary, None, **status)
+    if status_with != status_without:
+        problems.append("a non-writing shell call spent %d git spawn(s), the same call with no "
+                        "session %d" % (status_with, status_without))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the record write, the refused write and a non-writing shell call add no git spawn"
+
+
+def session_home_non_isolated_agent_case():
+    """An agent with no worktree of its own (no agent-home record, cwd in the primary checkout) is
+    not refused as session-home while the session's record is lost. Rule session-home judges only a
+    call with no agent_id: an agent shares its session's id, so the session's lost record must not
+    refuse a non-isolated agent's write into the primary. The session's own write is refused, which
+    shows the record is live."""
+    primary = sh_new_primary("nonisolated")
+    lane, branch = sh_add_lane(primary, "lane-nonisolated")
+    session = sh_session()
+    agent = "shomenonisolated01"  # an agent id in the shape AGENT_ID accepts, with no worktree
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the session's own primary Write (control)", got, reason,
+                                    primary, lane)
+    got, reason = _decide_full("Write", primary, session=session, agent_id=agent, file_path=src,
+                               content="x")
+    if got != "allow":
+        problems.append("a non-isolated agent's Write into the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, agent_id=agent,
+                               command="echo x > f.txt")
+    if got != "allow":
+        problems.append("a non-isolated agent's shell write into the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a non-isolated agent writes into the primary while the session's record is lost"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a non-isolated agent, with no record of its own, writes into the "
+                         "primary checkout while the session's record is lost",
+                         session_home_non_isolated_agent_case))
+
+
+def session_home_exit_from_primary_case():
+    """Rule session-home: only an ExitWorktree whose cwd sits in the recorded, live worktree clears the
+    record. From the primary checkout, with the recorded worktree lost, the record stays and the
+    primary write stays refused."""
+    primary = sh_new_primary("exitprim")
+    lane, branch = sh_add_lane(primary, "lane-exitprim")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("ExitWorktree", primary, session=session)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("an ExitWorktree from the primary changed the lost session's record")
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write after that ExitWorktree", got, reason,
+                                    primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an ExitWorktree from the primary leaves the lost record; the primary write stays refused"
+
+
+def session_home_lost_home_path_case():
+    """Rule session-home: a write to the lost home path, `.claude/worktrees/<name>/...`, would re-create
+    the gone worktree by mistake, and is refused while the record is lost. A write into a different,
+    live worktree is other-checkout's business: this case checks only that session-home does not name it."""
+    primary = sh_new_primary("lostpath")
+    lane, branch = sh_add_lane(primary, "lane-lostpath")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    live, _ = sh_add_lane(primary, "lane-livepath")
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(lane, "x.ts"), content="x")
+    problems += sh_refusal_problems("a Write to the lost home path", got, reason, primary, lane)
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(live, "x.ts"), content="x")
+    if "session-home" in reason:
+        problems.append("a Write into the live worktree was named session-home: %s" % reason[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write to the lost home path is refused; a live worktree write is not session-home's"
+
+
+def session_home_git_verbs_case():
+    """Rule session-home: while the record is lost, a git verb that changes the primary's files or
+    branch is refused from the primary. A read, a fetch, a branch, a worktree add under
+    `.claude/worktrees`, and a commit run with -C into a live worktree pass."""
+    primary = sh_new_primary("verbs")
+    lane, branch = sh_add_lane(primary, "lane-verbs")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    live, _ = sh_add_lane(primary, "lane-verbslive")
+    for verb in ("checkout -b x", "switch main", "pull --ff-only", "merge origin/main", "commit -m x",
+                 "reset --hard", "stash", "rebase origin/main", "restore f"):
+        command = VCS + " " + verb
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(command, got, reason, primary, lane)
+    for verb in ("fetch origin main", "status", "log", "diff", "worktree add .claude/worktrees/y origin/main",
+                 "branch y"):
+        command = VCS + " " + verb
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    command = VCS + " -C " + slash(live) + " commit -m x"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the primary's file and branch verbs are refused; reads, fetch, branch, worktree add and a live -C commit pass"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: an ExitWorktree from the primary checkout leaves a lost session's "
+                         "record in place, and the primary write stays refused", session_home_exit_from_primary_case))
+LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused; a write into a live "
+                         "worktree is not named session-home", session_home_lost_home_path_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
+                         "refused; reads, fetch, branch, worktree add and a live -C commit pass",
+                         session_home_git_verbs_case))
+
+
+def session_home_agent_tree_inspect_case():
+    """Rule session-home: a top-level call (no agent_id) whose cwd sits in an agent's worktree,
+    `.claude/worktrees/agent-<id>`, is an orchestrator inspecting that tree. It writes no session
+    record. Once that tree is removed, the primary checkout stays writable, and so does a git commit
+    made there."""
+    primary = sh_new_primary("inspect")
+    tree, branch = sh_add_lane(primary, "agent-" + SH_AGENT)
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Bash", tree, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the inspecting call: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("a top-level call inside an agent's worktree wrote a session record")
+    sh_lose_lane(primary, tree, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after the agent tree is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command=VCS + " commit -m x")
+    if got != "allow":
+        problems.append("the primary git commit after the agent tree is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an inspecting call writes no record; the primary write and commit pass after removal"
+
+
+def session_home_exit_live_from_primary_case():
+    """Rule session-home: an ExitWorktree from the primary checkout clears a record that names a live
+    worktree. A record that names a lost worktree is kept, and the primary write stays refused."""
+    primary = sh_new_primary("exitlive")
+    live, live_branch = sh_add_lane(primary, "lane-exitlive")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", live, session=session, command="echo hi")
+    if not sh_holds(primary, session, live):
+        problems.append("the live lane call wrote no session record naming the lane")
+    got, reason = _decide_full("ExitWorktree", primary, session=session)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("an ExitWorktree from the primary left the record naming a live worktree")
+    sh_lose_lane(primary, live, live_branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after the live lane is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    lost, lost_branch = sh_add_lane(primary, "lane-exitlost")
+    other = sh_session()
+    _decide_full("Bash", lost, session=other, command="echo hi")
+    if not sh_holds(primary, other, lost):
+        problems.append("the lane call that is lost next wrote no session record naming the lane")
+    sh_lose_lane(primary, lost, lost_branch)
+    got, reason = _decide_full("ExitWorktree", primary, session=other)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary, lost record: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if not sh_holds(primary, other, lost):
+        problems.append("an ExitWorktree from the primary cleared a lost session's record")
+    got, reason = _decide_full("Write", primary, session=other, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write for the lost session", got, reason,
+                                    primary, lost)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an ExitWorktree from the primary clears a live record and keeps a lost one"
+
+
+def session_home_variable_folder_commit_case():
+    """Rule session-home: while the record is lost, a git commit whose folder is a shell variable
+    passes, both as `cd "$WT" && git commit` and as `git -C "$WT" commit`. The folder is unknown, and
+    an unknown folder is no hit."""
+    primary = sh_new_primary("varcommit")
+    lane, branch = sh_add_lane(primary, "lane-varcommit")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    for command in ('cd "$WT" && ' + VCS + " commit -m x", VCS + ' -C "$WT" commit -m x'):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a commit whose folder is a variable passes, by cd and by -C"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a top-level call inside an agent's worktree writes no session "
+                         "record, and the primary write and commit pass once that tree is removed",
+                         session_home_agent_tree_inspect_case))
+LOG_CHECKS_EXTRA.append(("session-home: an ExitWorktree from the primary clears a record that names a "
+                         "live worktree, and keeps a lost one", session_home_exit_live_from_primary_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a commit whose folder is a shell variable passes, "
+                         "by cd and by -C", session_home_variable_folder_commit_case))
+LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree is gone is refused a write into the "
+                         "primary checkout, by each write tool and a shell write, naming EnterWorktree "
+                         "and no path", session_home_lost_refuses_case))
+LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree folder stands writes into the primary "
+                         "checkout", session_home_present_folder_passes_case))
+LOG_CHECKS_EXTRA.append(("session-home: a fresh session with no record writes into the primary checkout "
+                         "and writes no record", session_home_fresh_session_passes_case))
+LOG_CHECKS_EXTRA.append(("session-home: records are per session; another session's lost record, or an "
+                         "empty one, does not refuse this session", session_home_other_sessions_pass_case))
+LOG_CHECKS_EXTRA.append(("session-home: an agent call writes and rewrites no session record, and is "
+                         "never refused as session-home", session_home_agent_call_writes_no_record_case))
+LOG_CHECKS_EXTRA.append(("session-home: a call from a new worktree rewrites the record, and the primary "
+                         "write follows the record's folder", session_home_new_worktree_rewrites_case))
+LOG_CHECKS_EXTRA.append(("session-home: the session's ExitWorktree clears its record, an agent's leaves it",
+                         session_home_exit_worktree_clears_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, the clone's .git, a folder in no checkout, fetch, "
+                         "status, reads and a live worktree pass; the primary write is refused",
+                         session_home_pass_through_case))
+LOG_CHECKS_EXTRA.append(("session-home: an owner override lifts the refusal, which stays out of "
+                         "never_lifted", session_home_owner_override_lifts_case))
+LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git spawn to the same call "
+                         "with no session", session_home_spawn_cost_case))
 
 
 # =========================================================================== mask_script lexemes
