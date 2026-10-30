@@ -127,6 +127,7 @@ into `meta/page`.
 - Every other session sends its question to the writer, which writes the item. A lane's question
   reaches the writer through its report to its orchestrator ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
+  The writer watches the page (see "Read the answers").
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
@@ -233,8 +234,11 @@ relays an answer. An answer typed in the chat counts the same. A chat answer to 
 writer adds the answer and its time to the item's `context`, and the owning session routes and
 closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 
-- A session that adds an item watches the page: `ArtifactComments` action `watch` with the page
-  URL. It stops watching when it has no open item: `ArtifactComments` action `watch` with `on: false` and the page URL.
+- A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
+  adds an item, takes the writer role, or inherits open items. A session that inherits items also
+  rewrites each item's `owner` to itself: `owner` is the session that reads the answer. Its
+  handoff names the watch as `Watch: <page URL>`. A session stops (`ArtifactComments` action
+  `watch` with `on: false` and the page URL) only when it holds none of these, and at rotation.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.

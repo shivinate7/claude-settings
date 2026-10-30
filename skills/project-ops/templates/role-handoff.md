@@ -23,9 +23,15 @@ From "<old session title>" at <the limit hit, or the slip>. Checked: main <commi
 
 Watches stopped at <time>
 
-<The URL of each page this role owns. The old session stopped watching each one at that time,
+Open items: <n, ...> or none
+
+Watch: <page URL>
+
+<The URL of each page this role owns, one `Watch:` line each. The old session stopped watching each one at that time,
 answered each comment still open at that time, then wrote this file. The successor watches
-each one at once, and reads its comments since that time.>
+each one at once, and reads its comments since that time. `Open items:` lists the number of each
+waiting-page item this role owns that is still open. The successor runs `ArtifactComments` action `watch` on each
+`Watch:` URL first, before any other act.>
 
 ## Sessions
 
