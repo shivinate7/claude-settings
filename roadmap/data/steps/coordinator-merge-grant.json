@@ -1,9 +1,9 @@
 {
   "title": "The coordinator holds standing merge authority in every repo until shiv withdraws it",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.3376,
   "why": "Ruling, Oct 29 16:47 CDT (shiv, chat, via coordinator): the coordinator has perpetual standing merge authority for claude-settings and his other repos \"for now\", until he withdraws it; no more merge asks.",
-  "note": "Home: decision standing-merge-grant (docs/decisions/standing-merge-grant.md), pointed to from session-tiers. Built Oct 29 17:29 CDT: #824, review passed in round 3; joins batch 22. Each child repo's CLAUDE.md line rides its r1 visit. Open: the line in claude-settings' .claude/CLAUDE.md was refused by the classifier as self-modification; the coordinator asked shiv in chat. Waiting page: no merge-only item was open when it landed (items 75, 79 and 80 were already closed). It does not lift CI: rule git-never-merge-failing-ci still holds. Needs no answer. Port: yes, every repo. Placed ahead of zero-value-merges (triage 12, Oct 29).",
-  "updatedAt": "2026-10-29T22:30:00Z"
+  "note": "Home: decision standing-merge-grant (docs/decisions/standing-merge-grant.md), pointed to from session-tiers. Built Oct 29 17:29 CDT: #824, review passed in round 3; joins batch 22. Each child repo's CLAUDE.md line rides its r1 visit. Open: the line in claude-settings' .claude/CLAUDE.md was refused by the classifier as self-modification; the coordinator asked shiv in chat. Waiting page: no merge-only item was open when it landed (items 75, 79 and 80 were already closed). It does not lift CI: rule git-never-merge-failing-ci still holds. Needs no answer. Port: yes, every repo. Placed ahead of zero-value-merges (triage 12, Oct 29). Done: batch 22c #836 merged Oct 29 21:52 CDT as main 53536ea7.",
+  "updatedAt": "2026-10-30T03:08:00Z"
 }
