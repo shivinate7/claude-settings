@@ -6,15 +6,16 @@
 //   baseUrl (required; a path in it is kept: base http://h/app and route /a shoot http://h/app/a),
 //   routes (required: "/path" strings or {name, path}; two routes with the same file name are a config error), sizes (widths, default 1440, 820, 390),
 //   themes (light and dark, the default; set through prefers-color-scheme), height (default 900),
-//   fullPage (default true), timeoutMs (per route and per step, default 15000), simulator (an iOS simulator UDID, optional),
+//   fullPage (default true), timeoutMs (per route and per route step, default 15000), simulator (an iOS simulator UDID, optional),
 //   ignoreHTTPSErrors (boolean, default false; true shoots an app with a self-signed certificate).
 // Route keys beyond name and path, both optional (a bad value is a config error):
-//   steps: a non-empty list, run in order after the page loads and its status passes, before the screenshot.
-//     Each step is {click: css} or {wait: css, state: "visible" | "hidden"} (state defaults to visible).
-//     A step that errors or times out fails the shot. A hidden wait passes at once when nothing matches the
+//   steps (the route steps): a non-empty list, run in order after the page loads and its status passes, before the screenshot.
+//     Each route step is {click: css} or {wait: css, state: "visible" | "hidden"} (state defaults to visible).
+//     A route step that errors or times out fails the shot. A hidden wait passes at once when nothing matches the
 //     selector, so it alone proves nothing: pair it with a wait for real content.
 //   localStorage: {key: "value"}, strings only. Set before the page's own scripts run, in the top frame only.
-//     A route with it gets its own browser context, closed after the shot, so its seed never reaches another route.
+//   A route with steps or localStorage runs in its own browser context, with ignoreHTTPSErrors carried into it. The context is closed
+//     after the shot, so the route starts clean and leaves nothing behind (localStorage, cookies) for another route.
 // Other keys, on the config or on a route, are ignored.
 // A shot fails on a navigation error, a timeout, an HTTP status of 400 or more, or a blank image (one colour only).
 // The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
@@ -78,7 +79,7 @@ const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 function checkSteps(file, r) {
   const where = `config ${file}: route ${r.path}: steps`;
   if (!Array.isArray(r.steps) || !r.steps.length) die(`${where} is a non-empty list`);
-  const form = `${where}: each step is {click: css} or {wait: css, state: "visible" or "hidden"}`;
+  const form = `${where}: each route step is {click: css} or {wait: css, state: "visible" or "hidden"}`;
   for (const s of r.steps) {
     if (!isObject(s)) die(form);
     const keys = Object.keys(s);
@@ -181,11 +182,11 @@ async function main() {
             shots++;
             const name = `${slug(r.name || r.path)}-${width}-${theme}`;
             const url = join(cfg.baseUrl, r.path);
-            // Storage is per context, so a seeded route gets its own: its seed cannot reach the next route.
-            const own = r.localStorage !== undefined ? await browser.newContext(opts) : null;
+            // Storage and cookies are per context, so a route with steps (a click can write them) or a seed gets its own.
+            const own = r.localStorage !== undefined || r.steps !== undefined ? await browser.newContext(opts) : null;
             const page = await (own || ctx).newPage();
             try {
-              if (own) await page.addInitScript(seedStorage, Object.entries(r.localStorage));
+              if (r.localStorage !== undefined) await page.addInitScript(seedStorage, Object.entries(r.localStorage));
               const res = await page.goto(url, { waitUntil: "load", timeout: cfg.timeoutMs });
               if (res && res.status() >= 400) { fails.push(`${name}: HTTP ${res.status()} at ${url}`); continue; }
               for (const s of r.steps || []) {

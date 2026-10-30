@@ -187,7 +187,7 @@ def shoot_config(root):
         if not isinstance(route, dict):
             continue
         if "steps" in route and not shoot_steps_ok(route["steps"]):
-            return None, "%s: steps is a non-empty list; each step is {click: css} or {wait: css, state: visible or hidden}" % SHOOT_CONFIG
+            return None, "%s: steps is a non-empty list; each route step is {click: css} or {wait: css, state: visible or hidden}" % SHOOT_CONFIG
         stored = route.get("localStorage", {})
         if not isinstance(stored, dict) or not all(isinstance(v, str) for v in stored.values()):
             return None, "%s: localStorage is an object of strings" % SHOOT_CONFIG
@@ -195,7 +195,7 @@ def shoot_config(root):
 
 
 def shoot_steps_ok(steps):
-    """True for a non-empty list of {click: css} and {wait: css, state?: visible|hidden} steps."""
+    """True for a non-empty list of route steps: {click: css} and {wait: css, state?: visible|hidden}."""
     def selector(v):
         return isinstance(v, str) and v.strip() != ""
 
