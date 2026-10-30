@@ -20,6 +20,8 @@ Three things can drift from it, and this check reads each:
     python3 lint/check_layout.py [--root DIR]
 
 Exits 0 and prints nothing on agreement. Exits 1 and names each site that disagrees.
+Checks claude-settings itself: a root that lacks its files, or (with no --root) a cwd outside the
+checkout, is refused with one line that names the child-repo check.
 """
 import ast
 import importlib.util
@@ -163,13 +165,40 @@ def problems():
     return found
 
 
+def is_claude_settings(root):
+    """True when every file problems() reads exists under root (a worktree has a `.git` file, so .git proves nothing)."""
+    files = [GUARD, "lint/layout.py", *(rel for rel, _ in ACTION_INPUTS), *ACTION_SCRIPTS]
+    return all(os.path.isfile(os.path.join(root, *rel.split("/"))) for rel in files) \
+        and os.path.isdir(os.path.join(root, *STAMP_EXAMPLES.split("/")))
+
+
+def inside(folder, root):
+    """True when folder is root or lies under it, links resolved; another Windows drive counts as outside."""
+    folder, root = (os.path.normcase(os.path.realpath(p)) for p in (folder, root))
+    try:
+        return os.path.commonpath([folder, root]) == root
+    except ValueError:
+        return False
+
+
+def refuse(where):
+    print("check_layout: FAIL: this checks claude-settings itself, not %s; "
+          "the child-repo check is compliance_probes.py layout <root>" % where)
+    return 1
+
+
 def main(argv):
     global ROOT
-    if argv[:1] == ["--root"] and len(argv) == 2:
+    given = argv[:1] == ["--root"] and len(argv) == 2
+    if given:
         ROOT = os.path.abspath(argv[1])
     elif argv:
         print("check_layout: FAIL: usage: check_layout.py [--root DIR]")
         return 1
+    if not is_claude_settings(ROOT):
+        return refuse(ROOT)
+    if not given and not inside(os.getcwd(), ROOT):
+        return refuse(os.getcwd())
     try:
         found = problems()
     except Exception as err:  # a check that cannot read its sources is red, never green

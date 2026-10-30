@@ -687,3 +687,5 @@
 - install-move-ignored-file: the checkout move overwrites an ignored local file when main tracks that path (install.sh). Decision: session-tiers.
 - install-move-test-gaps: caseM1-M4 have no shallow detached checkout, no failed-fetch case and no local-mode case (hooks/test_install_src.sh). Decision: session-tiers.
 - win-rest-runner-hang: batch 23 #840 checks-windows-rest: the Windows runner stopped mid-job twice (no log, step timeout never fired); same head passed on re-run; cause outside repo code, unmeasured.
+- layout-check-deleted-cwd: lint/check_layout.py with no --root and a deleted cwd (a removed worktree) prints a Traceback, exit 1, not its one refusal line; it never passes. Decision: one-layout-every-repo.
+- layout-test-worktree-prune: lint/test_layout.py Identity runs `git worktree prune` on the real repo's git folder, which also drops stale worktree records of other sessions; unmeasured race. Decision: one-layout-every-repo.
