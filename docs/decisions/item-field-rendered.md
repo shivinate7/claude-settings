@@ -11,13 +11,14 @@ A field on a waiting item is for the owner to read. A field the page does not dr
   - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
   - Scope: top-level keys only. A key inside `options`, `steps` or a listed field is not judged.
   - An update may remove a stored field with `{"__delete__": true}`, which passes. A set never carries that marker.
-  - A page with no block, or a block that is no JSON list of strings, reads as unknown and the write passes.
+  - A page with no block, an empty list, or a block that is no JSON list of strings, reads as unknown and the write passes.
   - The reason names `itemFields`. It tells the session to draw the field and add it to the block, or leave it out.
   - It is built against a named incident, below. It landed 2026-10-30.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. For a call to the waiting page it reads `page.html` once per write (about 2,200 lines). It writes no file unless it denies.
   - Known limit: the guard sees that a field is listed, not that the page draws it well. A name added to the block with no drawing passes. Review catches it.
+  - Known limit: the guard reads the template `page.html`, not the live page. A page published before this change lacks the block, so the stale-page gate (`stale_pages.py`) is the backstop.
   - Known limit: it cannot see a stored field. An item written before the rule keeps its fields, and the page warns on them.
-- The fields `reply`, `lastAnswer` and `lane` are listed, and the page draws each (`docs/design/last-answer-notes.md`).
+- The fields `reply`, `lastAnswer` and `lane` are listed, and the page draws each on an open item (`docs/design/last-answer-notes.md`).
 
 Incident:
 

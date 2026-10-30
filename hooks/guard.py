@@ -2822,7 +2822,8 @@ ITEM_FIELDS_REASON = ("The waiting page draws only the top-level item fields tha
 
 def _item_fields(path):
     """The list in the page's itemFields block, found with an HTML parser (script text is data, so a
-    string or a template literal holds no block). None when the file, the block or the list does not read."""
+    string or a template literal holds no block). None when the file, the block or the list does not read,
+    and when the list is empty: a block that names no field is not a list to judge by."""
     from html.parser import HTMLParser
 
     class Block(HTMLParser):
@@ -2848,13 +2849,13 @@ def _item_fields(path):
         fields = json.loads("".join(block.text or []))
     except Exception:
         return None
-    return fields if isinstance(fields, list) and all(isinstance(x, str) for x in fields) else None
+    return fields if isinstance(fields, list) and fields and all(isinstance(x, str) for x in fields) else None
 
 
 def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
-    field in `field`. A page with no readable block reads as unknown, and the write passes."""
+    field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
     fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
     if fields is None:
         return ""
@@ -2884,7 +2885,8 @@ def data_tool_hit(tool_input, cwd=""):
     if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
         return "", ""
     for op, entry in writes:
-        hit = item_field_hit(op, entry, _write_data(entry))
+        data = _write_data(entry)
+        hit = item_field_hit(op, entry, data)
         if hit:
             return "item-field-rendered", hit
         if op == "str_replace":
@@ -2895,7 +2897,6 @@ def data_tool_hit(tool_input, cwd=""):
             if hit:
                 return "owner-judge", hit
             continue
-        data = _write_data(entry)
         hit = port_item_hit(op, data)
         if hit:
             return "port-question", hit

@@ -263,6 +263,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .cmd.copied .cmd-copy .ok { visibility: visible; }
 .cmd-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--acc); font-weight: 600; font-size: 14.5px; }
 .cmd-more[open] > summary { margin-bottom: 8px; }
+.status .cmd-more { font-weight: 400; color: var(--ink); }
 /* Each written line is one block. A long line wraps in the block, and its wrapped part hangs 2ch in. */
 .cmd-text { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
 .cmd-text code { font: inherit; }
@@ -1104,12 +1105,12 @@ function threadEl(it) {
   return h("section", { class: "thread", id: "thread-" + it.id, "aria-label": la && rp ? "Your last answer and the reply" : la ? "Your last answer" : "The reply" },
     la ? lastAnswerEl(it) : null,
     rp ? h("p", { class: "ctx reply" + (long && !open ? " clamp" : ""), id: "rp-" + it.id }, "Reply: " + rp) : null,
-    long ? h("button", { class: "morebtn", type: "button", "aria-expanded": String(open), "aria-controls": "rp-" + it.id, onclick: () => { state.moreReply[it.id] = !open; repaint(it); } }, open ? "Less" : "More of the reply") : null);
+    long ? h("button", { class: "morebtn", id: "b-morerp-" + it.id, type: "button", "aria-expanded": String(open), "aria-controls": "rp-" + it.id, onclick: () => { state.moreReply[it.id] = !open; repaint(it); } }, open ? "Less" : "More of the reply") : null);
 }
-// The one list of top-level item fields is the itemFields block (the guard reads the same one). A missing or bad block reads as unknown: no warning.
+// The one list of top-level item fields is the itemFields block (the guard reads the same one). A missing, bad or empty block reads as unknown: no warning.
 const PAGE_ADDED = ["rawId", "optionsBad"]; // set by the page when it reads an item, never stored
 function itemFields() {
-  try { const l = JSON.parse($("itemFields").textContent); return Array.isArray(l) && l.every((f) => typeof f === "string") ? l : null; } catch (e) { return null; }
+  try { const l = JSON.parse($("itemFields").textContent); return Array.isArray(l) && l.length && l.every((f) => typeof f === "string") ? l : null; } catch (e) { return null; }
 }
 const ITEM_FIELDS = itemFields();
 const unknownFields = (it) => (ITEM_FIELDS ? Object.keys(it).filter((k) => !ITEM_FIELDS.includes(k) && !PAGE_ADDED.includes(k)) : []);
@@ -1169,7 +1170,8 @@ function buildCard(it) {
   if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));
   // A field outside itemFields is never drawn. It warns and never blocks Send.
   const odd = unknownFields(it);
-  if (odd.length) card.append(h("p", { class: "status", role: "status" }, "This item carries " + (odd.length === 1 ? "a field" : "fields") + " the page does not draw: " + odd.join(", ") + ". Ask the session to add " + (odd.length === 1 ? "it" : "each") + " to itemFields in the page or to remove " + (odd.length === 1 ? "it" : "each") + "."));
+  if (odd.length) card.append(h("div", { class: "status", role: "status" }, "This item carries " + (odd.length === 1 ? "a field" : "fields") + " the page does not draw.",
+    h("details", { class: "cmd-more" }, h("summary", {}, "Which " + (odd.length === 1 ? "field" : "fields")), h("p", {}, odd.join(", ") + ". Ask the session to add " + (odd.length === 1 ? "it" : "each") + " to itemFields in the page or to remove " + (odd.length === 1 ? "it" : "each") + "."))));
   if (saved) { card.append(receipt(it)); const th = threadEl(it); if (th) card.append(th); return card; }
   if (looseDesigns(it).length) card.append(designPreview(it));
   if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));

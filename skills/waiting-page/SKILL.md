@@ -88,6 +88,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     it writes `lastAnswer` again without `choice`: the old key may now name another option.
   - `lane` (a lane's branch slug) is set when an answer is filed while its lane is busy. The card shows "waits on lane <slug>"
     in its top row. The item stays open until the lane takes the answer, and then the writer closes it.
+  - Before writing `reply`, `lastAnswer` or `lane`, the writer checks that the page is current with `stale_pages.py`, the same
+    gate as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the three.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged.
@@ -298,7 +300,8 @@ item and leaves it open until the lane takes the answer. Then it closes the item
    home) says. When it is there, update the receipt with `filed` set to now.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
-   in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item.
+   in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
+   item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
 3. If the answer is `none`, write new `options`, `pick` and `why` from the
    owner's note (a `multi` item's new `pick` is a list), and set `added` to now. Write `lastAnswer` from the answer
    in the same update, without `choice`, because the new `options` replace the old keys. Then delete `answers/<id>` (pinned to its version), and
