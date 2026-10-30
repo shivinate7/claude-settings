@@ -100,7 +100,10 @@ they use. Interface the generator must meet. One home: the same generator, no se
   paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Other
   text stays as written, so a decision whose paragraph opens with bold text (the real
   one-shared-record-stamp does) keeps it. Debt: the What. Plan: the first line, its
-  leading # dropped.
+  leading # dropped. Frontmatter (A17-A22): a record that opens with `---` on line 1, key lines and a
+  closing `---` gives its `title:` as the gist, quotes dropped, when it has no ruling, question or
+  H1 to read. Frontmatter with no title gives way to the H1. A `---` block below line 1 is prose.
+  Not pinned: a title against a ruling, a question or an H1 in the same record.
 - No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer in force"
   or "Old ruling", in any case. The other five fail only where they open a block: the text of a
   heading, a paragraph, or a list item, after an optional list marker and emphasis marks around the
@@ -913,6 +916,18 @@ FENCED_KINDS = ("# T\n\n## The ruling\n\nIt is so.\n\n```\nKind: build\nPlan: <p
                 "Kind: process\nHome: rule:<id>\n```\n\nKind: process\nHome: lint/x.py\n")
 
 
+# The tail of a record in q_max's shape: YAML frontmatter comes first (fm_record), then a refs fence,
+# the Kind and Home lines, and plain prose with no H1.
+FM_TAIL = ("\n```refs\nentries: D-070, D-479\n```\n\nKind: process\nHome: rule:git-main-only-by-pr\n\n"
+           "The owner ruled on 2026-10-03, in chat: \"merge it\". The grant is one session's.\n\n"
+           "No other session holds it.\n")
+
+
+def fm_record(keys, tail=FM_TAIL):
+    """A record that opens with a frontmatter block on line 1. keys: its lines, joined by newlines."""
+    return "---\n%s\n---\n%s" % (keys, tail)
+
+
 class RecordsPage(Tree):
     def rows(self, extra=None):
         root = self.tree(with_records(extra))
@@ -1062,6 +1077,45 @@ class RecordsPage(Tree):
         code, out, err = generator(root)
         self.assertEqual(code, 0, out + err)
         self.assertEqual(listed(records_rows(self.records_text(root)))["Debts"], ["gap-one"])
+
+    def gist_of(self, rel, text):
+        """The one gist the page holds for the record at rel. A generator that refuses the record fails the case,
+        and its message names the file and the problem."""
+        slug = os.path.basename(rel)[:-3]
+        return {r["slug"]: r["gist"] for r in self.rows({rel: text})}[slug]
+
+    def test_a17_a_frontmatter_title_is_the_gist(self):
+        title = "The primary orchestrator alone holds a standing merge grant"
+        text = fm_record("id: D-705\nslug: fm-title\ntitle: %s\ndate: 2026-10-03" % title)
+        self.assertEqual(self.gist_of("decisions/fm-title.md", text), title)
+
+    def test_a18_a_quoted_frontmatter_title_loses_its_quotes(self):
+        # 211 of the 569 real q_max records quote the title. The gist must not carry the quotes.
+        text = fm_record('id: D-504\nslug: fm-quoted\ntitle: "A band around 80, outside the tier"\ndate: 2026-09-23')
+        self.assertEqual(self.gist_of("decisions/fm-quoted.md", text), "A band around 80, outside the tier")
+
+    def test_a19_frontmatter_with_a_title_and_no_body_gives_the_title(self):
+        text = fm_record("id: D-1\nslug: fm-bare\ntitle: A title with no body", tail="")
+        self.assertEqual(self.gist_of("decisions/fm-bare.md", text), "A title with no body")
+
+    def test_a20_frontmatter_with_no_title_falls_to_the_h1(self):
+        # Green pin: with no title to read, the H1 rule holds as it does with no frontmatter.
+        text = fm_record("id: D-9\nslug: fm-no-title\ndate: 2026-10-03",
+                         tail="\n# The H1 text\n\nThe first paragraph under the H1. A second sentence.\n\nKind: process\n")
+        self.assertEqual(self.gist_of("decisions/fm-no-title.md", text), "The first paragraph under the H1.")
+
+    def test_a21_a_dashed_block_below_line_1_is_no_frontmatter(self):
+        # Green pin: a `---` block after other text is prose. It names a title, and the gist must not take it.
+        text = ("# Real title\n\nThe first paragraph. It ends here.\n\n---\ntitle: A later block\n---\n\n"
+                "More text.\n\nKind: process\n")
+        self.assertEqual(self.gist_of("decisions/fm-late.md", text), "The first paragraph.")
+
+    def test_a22_a_title_with_comment_openers_and_a_lone_quote_stays_whole(self):
+        # Scanner case (building-scanner-respects-strings): `//`, `/*` and `#` in a quoted title are text, and the
+        # apostrophe in "Don't" opens no string.
+        title = "Don't write // or /* or # in a title"
+        text = fm_record('id: D-2\nslug: fm-openers\ntitle: "%s"' % title)
+        self.assertEqual(self.gist_of("decisions/fm-openers.md", text), title)
 
 
 class RecordsStale(Tree):
