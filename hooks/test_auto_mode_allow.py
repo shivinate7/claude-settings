@@ -35,9 +35,16 @@ SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 # (name, case-insensitive pattern) for each act an entry's "Never covers" sentence must name.
 PR_REFUSED = (("merge", "merg"), ("approve", "approv"), ("branch delete", "branch"),
               ("force push", "force[- ]push"),
-              ("another owner or outside", "another owner|outside"))
+              ("another owner or outside", "another owner|outside"),
+              ("--delete-branch", "--delete-branch"), ("auto-merge", "auto[- ]merge"))
 MESSAGE_REFUSED = (("permissions", "permission"), ("settings", "setting"),
-                   ("override", "override"), ("merge", "merg"))
+                   ("override", "override"), ("merge", "merg"),
+                   ("posted_to_shared_channel", "posted_to_shared_channel"))
+# (name, case-insensitive pattern) for each term an entry names before its "Never covers" sentence.
+PR_SCOPE = (("owner", "owned by shivinate7"),
+            ("coordinator or batch runner", "coordinator or batch runner"),
+            ("replaced, empty or batched", "replaced, empty or batched"))
+MESSAGE_SCOPE = (("own account", "own account"), ("Remote Control", "Remote Control"))
 
 
 def auto_mode():
@@ -56,10 +63,21 @@ def allow_entry(prefix):
     return hits[0] if len(hits) == 1 else None
 
 
+def never_covers_match(entry):
+    """The 'Never covers' match of an entry (any case), its sentence ending at a period, or None."""
+    return re.search(r"never covers[^.]*", entry or "", re.I)
+
+
 def never_covers(entry):
     """The 'Never covers' sentence of an entry, or None when it has none."""
-    found = re.search(r"Never covers[^.]*", entry or "")
+    found = never_covers_match(entry)
     return found.group(0) if found else None
+
+
+def bounds_text(entry):
+    """The entry's text before its 'Never covers' sentence, or all of it when it has none."""
+    found = never_covers_match(entry)
+    return (entry or "")[:found.start()] if found else (entry or "")
 
 
 def unnamed_terms(clause, terms):
@@ -113,6 +131,10 @@ class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
         missing = unnamed_terms(clause, PR_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
+    def test_scope_is_named_before_never_covers(self):
+        missing = unnamed_terms(bounds_text(allow_entry(OWNER_PR)), PR_SCOPE)
+        self.assertFalse(missing, "text before Never covers does not name %r" % missing)
+
 
 class OwnerSessionMessageIsAllowed(unittest.TestCase):
     def test_one_entry_names_the_owner_message(self):
@@ -128,6 +150,22 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the owner message entry")
         missing = unnamed_terms(clause, MESSAGE_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_scope_is_named_before_never_covers(self):
+        missing = unnamed_terms(bounds_text(allow_entry(OWNER_MESSAGE)), MESSAGE_SCOPE)
+        self.assertFalse(missing, "text before Never covers does not name %r" % missing)
+
+
+class NeverCoversSentence(unittest.TestCase):
+    def test_finds_the_clause_in_any_case(self):
+        self.assertEqual(never_covers("Ok. never covers a merge."), "never covers a merge")
+        self.assertEqual(never_covers("Ok. NEVER COVERS a merge."), "NEVER COVERS a merge")
+
+    def test_sentence_ends_at_its_period(self):
+        self.assertEqual(never_covers("Never covers a merge. Other text."), "Never covers a merge")
+
+    def test_none_without_a_clause(self):
+        self.assertIsNone(never_covers("Allowed, with no bound."))
 
 
 if __name__ == "__main__":
