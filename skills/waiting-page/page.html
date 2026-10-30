@@ -610,6 +610,33 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .sv-tip.on { opacity: 1; }
 .sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
 @media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
+/* Arbiter rulings: a section after the open tiers; each ruling is a quiet card with one Overturn toggle. */
+/* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
+.g.ruled { width: 10px; height: 10px; margin: 0 1px; border: 2px solid var(--muted); border-radius: 1px; transform: rotate(45deg); }
+/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading. */
+.tier.ruled { gap: 10px; }
+.tier.ruled > header { display: grid; gap: 2px; }
+.tier.ruled > header h2 { font: 700 17px/1.25 var(--body); }
+.rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
+.rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.rsub { margin: 0; font-size: 14px; color: var(--muted); }
+/* Not .rbody: the Status tab already uses that class. */
+.rlist { display: grid; gap: 10px; }
+/* A ruling card is quieter than an ask: a lighter ground, a smaller title, no tier edge. */
+.card.rcard { padding: 14px 16px; gap: 8px; }
+.card.rcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+.rcard .title { font-size: 17px; max-width: 60ch; }
+.rcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.ruledline { margin: 0; display: flex; gap: 10px; align-items: flex-start; font-size: 15.5px; }
+.ruledline .key { flex: none; max-width: none; }
+.ruledline b { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; padding-top: 1px; }
+.rwhy { margin: 0; max-width: 70ch; font-size: 14.5px; color: var(--muted); }
+.rfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.rfoot .dest { flex: 1 1 12rem; border: 0; padding: 0; }
+.rfoot .btn { min-width: 7.5rem; justify-content: center; }
 </style>
 
 <header class="hdr"><div class="in">
@@ -658,11 +685,14 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
-const choiceText = (k) => (k === NONE ? "none of these" : Array.isArray(k) ? k.join("+") : k);
+// "overturn" is no option key. It is the answer to an arbiter ruling: a closed item the arbiter's writer filed with `arbiter: true`.
+const OVERTURN = "overturn";
+const isRuling = (it) => it.status === "closed" && it.arbiter === true;
+const choiceText = (k) => (k === NONE ? "none of these" : k === OVERTURN ? "overturn" : Array.isArray(k) ? k.join("+") : k);
 // The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
 const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
 const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
@@ -814,7 +844,7 @@ const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t;
 // A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
 const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && !!pickKeys(it);
 const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by && validT(it.by) ? "due" : "calm");
-const mates = (it) => (it.group ? state.items.filter((x) => x.group === it.group) : [it]);
+const mates = (it) => (it.group && !isRuling(it) ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
 function sorted() {
@@ -835,16 +865,23 @@ function sorted() {
 
 /* ---------- Answers ---------- */
 const byId = (id) => state.items.find((i) => i.id === id);
-const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
+// Every item that can hold an answer: the open ones, and the rulings an Overturn may answer.
+const answerable = () => [...state.items, ...state.rulings];
+// The owner's saved answer. A ruling was an open item once, so a record under its id that is no overturn is stale and counts as none.
+const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) ? a : undefined; };
+const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
 // The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
-const stoodNow = (it) => standsOk(it) && !state.answers[it.id];
+const stoodNow = (it) => standsOk(it) && !savedOf(it);
 const eff = (it) => {
   const d = state.draft[it.id];
+  // A ruling holds one draft, overturn. A pick draft left from when the item was open is ignored.
+  if (isRuling(it)) return d && d.choice === OVERTURN ? d : undefined;
   if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: pickChoice(it), auto: true, stood: true };
   return d || (stoodNow(it) ? { choice: pickChoice(it), auto: true, stood: true } : undefined);
 };
 function draftReady(it) {
   const d = eff(it); if (!d || blocked(it)) return false;
+  if (isRuling(it)) return d.choice === OVERTURN;
   if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
   return isMulti(it) ? validKeys(it, d.choice) : (it.options || []).some((o) => o.key === d.choice);
@@ -875,6 +912,8 @@ function problem(it) {
   const okN = typeof it.n === "number" && isFinite(it.n);
   const fix = " Ask the session to fix " + (okN ? "item " + it.n : "this item") + ".";
   if (!okN) return { text: "This item has no number, so it cannot be answered." + fix, blocks: true };
+  // A ruling is closed: it has no picture, stake or option checks to pass. Only its id is read back.
+  if (isRuling(it)) return it.rawId !== it.id ? { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false } : null;
   if (it.kind !== "decision" && it.kind !== "task") return { text: "This item is neither a decision nor a task, so it cannot be answered." + fix, blocks: true };
   if (it.kind === "decision") {
     if (it.optionsBad) return { text: "The options of this decision are not a list, so it cannot be answered." + fix, blocks: true };
@@ -891,10 +930,10 @@ function problem(it) {
   return null;
 }
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
-const staged = () => state.items.filter((it) => !isSaved(it) && draftReady(it));
+const staged = () => answerable().filter((it) => !isSaved(it) && draftReady(it));
 // A changed answer whose draft the owner emptied: Send withdraws the saved record.
-const withdrawing = (it) => !!state.answers[it.id] && !!state.changing[it.id] && !state.draft[it.id];
-const withdrawn = () => state.items.filter(withdrawing);
+const withdrawing = (it) => !!savedOf(it) && !!state.changing[it.id] && !state.draft[it.id];
+const withdrawn = () => answerable().filter(withdrawing);
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
   if (!next.choice && !next.done && !next.unstood && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
@@ -930,7 +969,7 @@ function move(it, key, dir) {
 function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
-  if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
+  if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
   return body;
 }
 const edited = () => { state.barNote = ""; state.copyOffer = false; };
@@ -942,6 +981,7 @@ function arrow(dir) { const d = document.createElement("span"); d.innerHTML = '<
 function readyText(it) {
   const d = eff(it) || {};
   if (blocked(it)) return "This item cannot be sent.";
+  if (isRuling(it)) return d.choice === OVERTURN ? "Ready to send: overturn." : "";
   if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
@@ -1036,15 +1076,21 @@ function optCard(it, o, chosen) {
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 // A receipt from an earlier answer says nothing about a changed one, so only a receipt at or after the answer counts.
 function rcOf(it) {
-  const sv = state.answers[it.id], r = state.receipts[it.id] || {};
+  const sv = savedOf(it), r = state.receipts[it.id] || {};
   if (!sv) return r;
   const ok = (t) => !t || !(Date.parse(t) < Date.parse(sv.at));
   return { read: ok(r.read) ? r.read : undefined, filed: ok(r.filed) ? r.filed : undefined };
 }
+// The option or options the arbiter ruled, as letter chips and full labels, for a ruling card and its receipt.
+function ruledOf(it) {
+  const ks = pickKeys(it) || [], lab = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || k);
+  return { letters: ks.map((k) => letterOf(it, k)).join(", "), label: ks.length ? ks.map(lab).join(" and ") : "an option" };
+}
 function receipt(it) {
-  const sv = state.answers[it.id], rc = rcOf(it);
+  const sv = savedOf(it), rc = rcOf(it);
   let what, picks = null;
-  if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
+  if (isRuling(it) && sv.choice === OVERTURN) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
+  else if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
   else if (sv.choice === NONE) what = "None of these";
   else if (isMulti(it) && validKeys(it, sv.choice)) {
     what = it.ranked === true ? "You chose, in order:" : "You chose:";
@@ -1101,11 +1147,30 @@ function showOpt(o) {
   const r = o.getBoundingClientRect();
   if (r.top < document.querySelector(".hdr").getBoundingClientRect().bottom || r.bottom > $("bar").getBoundingClientRect().top) o.scrollIntoView({ block: "nearest" });
 }
+// A ruling card: the title, the option the arbiter ruled, why, where it is recorded, and one Overturn toggle. A press changes only the draft, until Send.
+function buildRuling(it) {
+  const saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it), armed = !saved && d.choice === OVERTURN, r = ruledOf(it);
+  const card = h("article", { class: "card rcard" + (saved ? " answered" : "") + (armed ? " armed" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
+  const num = h("span", { class: "num", "aria-label": "No. " + it.n + ", ruling, from the arbiter", title: "Ruled by the arbiter for " + it.owner }, "No. " + it.n);
+  card.append(h("div", { class: "top" }, num, saved
+    ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at)))
+    : h("span", {}, "ruled ", validT(it.ruled) ? h("time", { datetime: it.ruled }, fmt(it.ruled)) : "")), h("h3", { class: "title", id: "t-" + it.id }, it.title));
+  const bad = problem(it);
+  if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));
+  if (saved) { card.append(receipt(it)); return card; }
+  card.append(h("p", { class: "ruledline" }, h("span", { class: "sr" }, "The arbiter ruled "), r.letters ? h("span", { class: "key" }, r.letters) : null, h("b", {}, r.label)),
+    h("p", { class: "rwhy" }, it.why || ""),
+    h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it)),
+    h("div", { class: "rfoot" }, h("p", { class: "dest" }, "Recorded in " + it.home + "."),
+      h("button", { class: "btn dash overturn", type: "button", id: "b-over-" + it.id, disabled: blocked(it), "aria-pressed": String(armed), "aria-label": "Overturn the ruling on No. " + it.n, onclick: () => { edited(); setDraft(it, { choice: armed ? null : OVERTURN }); repaint(it); } }, "Overturn")));
+  return card;
+}
 function buildCard(it) {
+  if (isRuling(it)) return buildRuling(it);
   const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it);
   const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
-    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(state.answers[it.id].at))) : h("span", {}, waited(it.added)));
+    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
@@ -1272,6 +1337,25 @@ function bundleEl(slug) {
   b.head.replaceChildren(linkIcon(), h("b", {}, title), h("p", {}, g.why || ""));
   return b;
 }
+// The section after the open tiers: a disclosure head, a line of its own, and the rulings newest first. It is open on load.
+const ruledAt = (it) => Date.parse(it.ruled) || 0;
+const rulingEls = {};
+function rulingsEl() {
+  if (!rulingEls.el) {
+    rulingEls.ct = h("span", { class: "ct" });
+    rulingEls.head = h("button", { class: "rhead", type: "button", "aria-controls": "rb", onclick: () => { state.rulingsOpen = !state.rulingsOpen; render(); } }, h("span", { class: "chev", "aria-hidden": "true" }), glyph("ruled"), "Arbiter rulings", rulingEls.ct);
+    rulingEls.sub = h("p", { class: "rsub" });
+    rulingEls.list = h("div", { class: "rlist", id: "rb" });
+    rulingEls.el = h("section", { class: "tier ruled", id: "tier-ruled", "aria-labelledby": "th-ruled" }, h("header", {}, h("h2", { id: "th-ruled" }, rulingEls.head), rulingEls.sub), rulingEls.list);
+  }
+  const list = state.rulings.slice().sort((a, b) => ruledAt(b) - ruledAt(a) || b.n - a.n), on = state.rulingsOpen;
+  rulingEls.ct.textContent = String(list.length);
+  rulingEls.head.setAttribute("aria-expanded", String(on));
+  rulingEls.sub.textContent = "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".");
+  rulingEls.list.hidden = !on;
+  reconcile(rulingEls.list, list.map(cardFor));
+  return rulingEls.el;
+}
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
   if (!state.items.length) {
@@ -1294,7 +1378,8 @@ function renderList() {
     reconcile(te.el, [te.head, ...body]);
     want.push(te.el);
   });
-  const open = new Set(state.items.map((i) => i.id));
+  if (state.rulings.length) want.push(rulingsEl());
+  const open = new Set(answerable().map((i) => i.id));
   Object.keys(cards).forEach((id) => { if (!open.has(id)) delete cards[id]; });
   if (state.meta) {
     want.push(h("p", { class: "checked" }, "Checked against " + (state.meta.checked || "")));
@@ -1310,9 +1395,9 @@ function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smo
 const shortOf = (it) => typeof it.short === "string" && it.short.trim() && it.short.trim().length <= 24 ? it.short.trim() : it.title;
 function renderRail() {
   const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
-  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().length;
-  rail.hidden = !total;
-  const kids = [h("div", { class: "ov-prog" },
+  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().filter((i) => !isRuling(i)).length;
+  rail.hidden = !total && !state.rulings.length;
+  const kids = !total ? [] : [h("div", { class: "ov-prog" },
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
@@ -1328,6 +1413,8 @@ function renderRail() {
     });
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
+  // One row for the rulings: no chips, so a ruling never counts as open or sent.
+  if (state.rulings.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-ruled", "aria-label": state.rulings.length + (state.rulings.length === 1 ? " ruling" : " rulings") + ", Arbiter rulings", onclick: (e) => { e.preventDefault(); state.rulingsOpen = true; render(); jump("tier-ruled"); } }, glyph("ruled"), "Arbiter rulings", h("span", { class: "ct" }, String(state.rulings.length)))));
   rail.replaceChildren(...kids);
   if (focusId && $(focusId)) $(focusId).focus({ preventScroll: true });
 }
@@ -1335,11 +1422,11 @@ function renderRail() {
 /* ---------- Bar and Send ---------- */
 function renderBar() {
   const st = staged(), open = state.items.filter((i) => !isSaved(i)), sa = $("send");
-  const mine = st.filter((i) => (eff(i) || {}).auto && !(eff(i) || {}).stood).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - st.length;
+  const over = st.filter(isRuling).length, mine = st.filter((i) => (eff(i) || {}).auto && !(eff(i) || {}).stood).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over);
   const parts = [];
   if (state.barNote) parts.push(state.barNote);
   else {
-    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [mine && mine + " by Take my pick", stood && stood + " where my pick stands"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
+    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [mine && mine + " by Take my pick", stood && stood + " where my pick stands", over && over + " overturn"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
     if (left) parts.push(h("b", {}, String(left)), " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
@@ -1467,7 +1554,7 @@ async function undoSend() {
       if (w.prior) await ref.set(w.prior); else await ref.delete();
     } catch (e) { todo.slice(i).forEach((x) => failed.push(x.it.n)); state.barNote = "Undo failed (" + (e && e.code || "error") + "). Not undone: " + nList(failed) + "."; break; }
     if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
-    if (w.draft) state.draft[w.it.id] = w.draft; if (w.changing) state.changing[w.it.id] = true;
+    if (w.draft) { state.draft[w.it.id] = w.draft; if (isRuling(w.it)) state.rulingsOpen = true; } if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
     // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else, and the old receipt leaves the page state either way.
     if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); } catch (e) {} delete state.receipts[w.it.id]; }
@@ -1477,17 +1564,21 @@ async function undoSend() {
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
   if (told.length) {
     const can = await canTell();
-    await notifyClaude(noticeText(told.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
+    // An undone overturn leaves the ruling in force, so it is told apart from items that are open again.
+    const tell = (ws, tail) => ws.length ? notifyClaude(noticeText(ws.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", tail), can) : null;
+    const rul = told.filter((w) => isRuling(w.it)), rest = told.filter((w) => !isRuling(w.it));
+    await tell(rest, " are open again.");
+    await tell(rul, rul.length === 1 ? " ruling stands again." : " rulings stand again.");
   }
 }
 
 function answerLine() {
   const parts = [];
-  state.items.slice().sort((a, b) => a.n - b.n).forEach((it) => {
+  answerable().sort((a, b) => a.n - b.n).forEach((it) => {
     if (blocked(it)) return;
-    const a = state.answers[it.id], d = eff(it) || {};
+    const a = savedOf(it), d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
-    if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
+    if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "task") {
       const live = !!state.draft[it.id] && draftReady(it); // only a draft that would send replaces the saved answer
       const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : (a && a.note);
@@ -1697,7 +1788,11 @@ render();
   state.db = db;
   try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   const map = (s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); return m; };
-  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
+  db.collection("items").onSnapshot((s) => {
+    const all = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter(Boolean);
+    // A closed item stays hidden, unless the arbiter's writer filed it as a ruling.
+    state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.loaded = true; render();
+  }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});
