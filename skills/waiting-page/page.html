@@ -1331,6 +1331,19 @@ function releaseHeld(el) {
   if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - was);
 }
 const heldWatch = new IntersectionObserver((entries) => entries.forEach((e) => { if (!e.isIntersecting) releaseHeld(e.target); }));
+// Cards the owner just sent. The render that turns them into receipts lets their holds go at once, and the scroll moves with the layout, so nothing in the reading band jumps.
+let sentNow = [];
+function releaseSent() {
+  const ids = sentNow; sentNow = [];
+  const held = ids.map((id) => cards[id] && cards[id].el).filter((el) => el && el.isConnected && el.style.minHeight);
+  if (!held.length) return;
+  const band0 = document.querySelector(".hdr").getBoundingClientRect().bottom;
+  // A sent card that starts above the band is skipped: its top moves with the scroll, not with the layout. Cards before the anchor do not move.
+  const mark = [...document.querySelectorAll("article.card")].find((c) => { const r = c.getBoundingClientRect(); return r.bottom > band0 && !(held.includes(c) && r.top < band0); });
+  const before = mark ? mark.getBoundingClientRect().top : 0;
+  held.forEach((el) => { el.style.minHeight = ""; heldWatch.unobserve(el); });
+  if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - before);
+}
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
@@ -1565,6 +1578,7 @@ async function sendAll() {
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
+    sentNow = wrote.filter((w) => !w.withdrawn).map((w) => w.it.id);
     render();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
@@ -1841,7 +1855,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 function render() {
-  renderList(); renderRail(); renderBar(); renderSent();
+  renderList(); renderRail(); renderBar(); renderSent(); releaseSent();
   FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
   const nd = allDesigns().length;
   $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
