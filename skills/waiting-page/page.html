@@ -201,6 +201,27 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
 .btn.mv[aria-disabled="true"] svg { opacity: .5; }
 .btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* Links on an option card: optCard puts <div class="links"> after .how and before .tr. A card with no links gets <span class="nolinks">,
+   as .nopick does, so the subgrid rows still line up. buildCard adds "olinks" to .opts only when some option has links. */
+.opts.olinks .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.olinks .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opts.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
+/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. A flex item
+   is a block, and a screen reader puts a space between blocks, so the one span inside the link holds all its text:
+   the arrow's gap sits in CSS and the link's name is the label plus the hidden phrase. */
+.links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a [aria-hidden] { margin-inline-start: 4px; }
+/* A block-level .sr (position: absolute is one) gets a space before it in the link's name, so in a link it stays inline and takes no room. */
+.links a .sr { position: static; display: inline; font-size: 0; }
+/* Links on a ranked card: one more row than the ranked rows above. The label's ::after overlay covers the card, so the links row sits above it as .rank and .opic do. */
+.opt.ranked .links { position: relative; z-index: 2; }
+/* A press anywhere on a ranked card ticks it, so only the link itself is raised above the overlay. */
+.opt.ranked .links { pointer-events: none; }
+.opt.ranked .links a { pointer-events: auto; }
+.opts.ranked.olinks .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+.opts.ranked.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } .opts.ranked.pics.olinks .opt { grid-row: span 7; grid-template-rows: subgrid; } }
 
 .ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
 .ready.on { color: var(--good); font-weight: 600; }
@@ -228,6 +249,23 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .note.need textarea { border-color: var(--due); }
 ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+/* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
+.cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
+/* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
+.btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
+.cmd-copy > span { grid-area: 1 / 1; }
+.cmd-copy .ok, .cmd.copied .cmd-copy .go { visibility: hidden; }
+.cmd.copied .cmd-copy .ok { visibility: visible; }
+.cmd-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--acc); font-weight: 600; font-size: 14.5px; }
+.cmd-more[open] > summary { margin-bottom: 8px; }
+/* Each written line is one block. A long line wraps in the block, and its wrapped part hangs 2ch in. */
+.cmd-text { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.cmd-text code { font: inherit; }
+.cmd-text .ln { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+.cmd-text .ln:empty::after { content: " "; }
 .dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
 .status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
 .status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
@@ -959,6 +997,13 @@ function optPic(it, o, dif) {
 }
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
+// One home for a link on an option card and on a task card. The arrow is hidden from screen readers; a hidden phrase says where it opens.
+const linkEl = (l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, h("span", {}, l.label, h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab")));
+// `links` counts only as an Array; any other value renders no links row and no error.
+// A link that is not an object with a string url and label would draw an empty or broken anchor.
+const isLink = (l) => !!l && typeof l === "object" && typeof l.url === "string" && typeof l.label === "string";
+const linksOf = (x) => (Array.isArray(x.links) ? x.links.filter(isLink) : []);
+const hasOptLinks = (it) => (it.options || []).some((o) => linksOf(o).length);
 // An option that widens what a shared tool accepts (`widens`) breaks the owner's uniform ruling, topic t18; its card says so.
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key, m = marks(it, o), on = (f) => m.includes(f);
@@ -976,6 +1021,7 @@ function optCard(it, o, chosen) {
   const headKids = multi ? [h("span", { class: "tick" + (ranked ? "" : " mark"), "aria-hidden": "true" }, ranked && sel ? String(at + 1) : ""), key, lab] : [key, lab];
   const body = [
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
+    hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your uniform ruling (t18)")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
     pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" })];
   if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
@@ -1027,6 +1073,29 @@ function designPreview(it) {
   };
   draw(); return box;
 }
+// The command block of a task. Copy writes it.command as written, never the text on screen. A refused copy opens the command and selects it.
+function cmdBlock(it) {
+  const say = h("p", { class: "cmd-say", id: "cs-" + it.id, "aria-live": "polite" }, "Command");
+  const pre = h("pre", { class: "cmd-text", id: "cc-" + it.id }, h("code", {}, it.command.split("\n").map((l) => h("span", { class: "ln" }, l))));
+  const more = h("details", { class: "cmd-more" }, h("summary", {}, "Show the command"), pre);
+  let timer = 0;
+  const box = h("div", { class: "cmd", id: "cmd-" + it.id });
+  const copy = h("button", { class: "btn alt cmd-copy", type: "button", "aria-label": "Copy the command for No. " + it.n, "aria-controls": "cc-" + it.id, onclick: async () => {
+    clearTimeout(timer);
+    box.classList.remove("copied", "failed");
+    if (await copyText(it.command)) {
+      box.classList.add("copied"); say.replaceChildren("Command", h("span", { class: "sr" }, " Copied."));
+      timer = setTimeout(() => { box.classList.remove("copied"); say.textContent = "Command"; }, 2000);
+    } else {
+      box.classList.add("failed"); say.textContent = "Not copied. The text is selected; copy it by hand.";
+      more.open = true;
+      const r = document.createRange(); r.selectNodeContents(pre.firstChild);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    }
+  } }, h("span", { class: "go" }, "Copy"), h("span", { class: "ok", "aria-hidden": "true" }, "Copied"));
+  box.append(h("div", { class: "cmd-head" }, say, copy), more);
+  return box;
+}
 // Block "nearest" honours the scroll margins, so it would move an option already whole between the header and the bar.
 function showOpt(o) {
   const r = o.getBoundingClientRect();
@@ -1062,7 +1131,7 @@ function buildCard(it) {
   const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
   if (it.kind === "decision") {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
-    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : "") + (it.ranked === true ? " ranked" : ""), role: multi ? "group" : "radiogroup", "aria-label": "Options for No. " + it.n, "aria-describedby": multi ? "mh-" + it.id : null, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
+    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : "") + (it.ranked === true ? " ranked" : "") + (hasOptLinks(it) ? " olinks" : ""), role: multi ? "group" : "radiogroup", "aria-label": "Options for No. " + it.n, "aria-describedby": multi ? "mh-" + it.id : null, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
     if (multi) card.append(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
     card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
@@ -1073,7 +1142,8 @@ function buildCard(it) {
         pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); const r = $("o-" + it.id + "-" + pk[0]); if (r) { showOpt(r.closest(".opt")); r.focus({ preventScroll: true }); } } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
-    if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
+    if (typeof it.command === "string" && it.command.trim()) card.append(cmdBlock(it));
+    if (linksOf(it).length) card.append(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     card.append(ready, h("div", { class: "alts" },
       h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),
       addNote));
@@ -1427,10 +1497,12 @@ function answerLine() {
   });
   return parts.join(", ");
 }
+// One home for the clipboard write. A frame without permission refuses it, so each caller shows its own fallback.
+async function copyText(text) { try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; } }
 $("copy").addEventListener("click", async () => {
   const text = answerLine() || "No answers yet.", box = $("copyBox");
-  try { await navigator.clipboard.writeText(text); state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
-  catch (e) { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
+  if (await copyText(text)) { state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
+  else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
   renderBar();
 });
 $("send").addEventListener("click", sendAll);

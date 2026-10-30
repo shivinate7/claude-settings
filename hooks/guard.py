@@ -2622,6 +2622,117 @@ def widens_pick_hit(data) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ the owner acts in place
+#
+# docs/decisions/act-in-place.md, rules `press-link` and `command-in-item`, built against a named
+# incident (incident in the record): an option or step that asks the owner to press in a web app
+# carries a link to that exact page, and a step never sends him to a file for a command. Both are
+# read at the same ArtifactData call.
+PRESS_LINK_REASON = ("An option or step that asks the owner to press in a web app carries a link to "
+                     "that exact page. Put links: [{label, url}] on that option (a task: on the item), "
+                     "with the url of the page where he presses; for a pull request or an issue, the "
+                     "url of that number.")
+COMMAND_REASON = ("A step never sends the owner to a file for a command. Put the command in the item's "
+                  "`command` field, and say \"paste the command below\" in the step.")
+# A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
+# a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
+# pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
+# is not a press, and neither is a press of the waiting page's own buttons: it needs no link.
+_CLAUSE = r"(?:^|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
+_PAGE_BUTTON = r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b)"
+# An item or step number on the page, "item #47" or "step #2", is not a PR ref.
+_REF = r"(?<!\bitem\s)(?<!\bstep\s)(?<!\bitem)(?<!\bstep)#\s*(\d+)"
+PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|ed|ing)?"
+                        r"|click(?:s|ed|ing)?|tap(?:s|ped|ping)?)\b" + _PAGE_BUTTON +
+                        r"|" + _CLAUSE + r"(?:approve|merge|hit|turn\s+(?:it\s+)?on)\b"
+                        r"|\bmark(?:s|ed|ing)?\b[^.\n]*?(?:\bprs?\b|pull\s+requests?|" + _REF + r")[^.\n]*?\bready\b"
+                        r"|\bmark(?:s|ed|ing)?\b[^.\n]*?\bready\b(?:\s+for\s+review)?\s+(?:on|in|at)\s+"
+                        r"(?:the\s+)?(?:[\w./-]*" + _REF + r"|prs?\b|pull\s+requests?|github)",
+                        re.I | re.M)
+# A web page: GitHub, a PR, a pull request, a ref `home#374`, or Settings as a page name (capital S,
+# or "settings page"; never settings.json or claude-settings).
+WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|" + _REF +
+                        r"|(?-i:(?<![\w-])Settings\b(?!\.\w))|\bsettings\s+page\b", re.I)
+PRESS_REF = re.compile(_REF, re.I)
+_FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
+         r"|\b(?:plans|docs|notes)/[\w./-]+")
+COMMAND_FILE = re.compile(_FILE, re.I)
+# "the command in/from <file>" and "its command" (after a file step) point at a file. "run the
+# command" and the like count only with no `command` on the item; "the command below" never does.
+COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
+                             + _FILE + ")", re.I)
+COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
+COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b(?!\s+below)"
+                          r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
+
+
+def _flat_text(value) -> str:
+    """One string from a step or option field: a string as is, a dict's string values joined."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(v for v in value.values() if isinstance(v, str))
+    return ""
+
+
+def _press_field_ok(text, links, context="") -> bool:
+    """True when this field asks for no web press, or `links` holds a link to the exact page. The
+    press verb is read in `text`. The page, and each `#N` that needs a url with /pull/N or
+    /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
+    if not PRESS_VERB.search(text):
+        return True
+    page = text if WEB_MARKER.search(text) else context
+    if not WEB_MARKER.search(page):
+        return True
+    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    if not urls:
+        return False
+    return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
+               for n in PRESS_REF.findall(page))
+
+
+def press_link_hit(op, data) -> str:
+    """The matched text when this write names a press in a web app with no link to the exact page.
+    The link sits on the option that presses, or on the task. An update of `steps` with no `links`
+    cannot see the stored links and passes."""
+    if not isinstance(data, dict) or data.get("kind", "decision") not in ("decision", "task"):
+        return ""
+    options, steps = data.get("options"), data.get("steps")
+    if isinstance(options, list):
+        for o in options:
+            if not isinstance(o, dict):
+                continue
+            # label and how are one text: the ref may sit in one and the press in the other
+            text = _flat_text(o.get("label")) + ". " + _flat_text(o.get("how"))
+            if not _press_field_ok(text, o.get("links")):
+                return "option presses in a web app with no link to the page"
+    if isinstance(steps, list) and (op == "set" or "links" in data):
+        # the steps are one text, as command-in-item reads them: the page may sit in one step and
+        # the press in another. The title names the page only when the steps name none, and a
+        # title alone never makes a press.
+        joined = "\n".join(_flat_text(s) for s in steps)
+        if not _press_field_ok(joined, data.get("links"), _flat_text(data.get("title"))):
+            return "step presses in a web app with no link to the page"
+    return ""
+
+
+def command_in_item_hit(data) -> str:
+    """The matched text when a task's steps, joined, send the owner to a file for a command. A
+    `command` on the item does not excuse it: the step still points at the file."""
+    if not isinstance(data, dict) or data.get("kind", "task") != "task":
+        return ""
+    steps = data.get("steps")
+    if not isinstance(steps, list):
+        return ""
+    joined = "\n".join(_flat_text(s) for s in steps)
+    has_file = COMMAND_FILE.search(joined)
+    has_command = isinstance(data.get("command"), str) and data["command"].strip()
+    if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
+            or (has_file and not has_command and COMMAND_VERB.search(joined)):
+        return "steps send the owner to a file for a command"
+    return ""
+
+
 # ------------------------------------------------------------------ a task names why only the owner can do it
 #
 # docs/decisions/task-names-its-check.md, rule `task-names-check`, built against a named incident
@@ -2681,6 +2792,12 @@ def data_tool_hit(tool_input, cwd=""):
         hit = widens_pick_hit(data)
         if hit:
             return "uniform-pick", hit
+        hit = press_link_hit(op, data)
+        if hit:
+            return "press-link", hit
+        hit = command_in_item_hit(data)
+        if hit:
+            return "command-in-item", hit
         hit = task_check_hit(op, data)
         if hit:
             return "task-names-check", hit
@@ -3227,6 +3344,10 @@ def judge(payload) -> None:
             refuse(tool, "deny", "port-question", PORT_REASON, matched)
         if rule == "uniform-pick":
             refuse(tool, "deny", "uniform-pick", WIDENS_REASON, matched)
+        if rule == "press-link":
+            refuse(tool, "deny", "press-link", PRESS_LINK_REASON, matched)
+        if rule == "command-in-item":
+            refuse(tool, "deny", "command-in-item", COMMAND_REASON, matched)
         if rule == "task-names-check":
             refuse(tool, "deny", "task-names-check", TASK_REASON, matched)
         return
