@@ -1,0 +1,9 @@
+{
+  "title": "The coordinator's scope is compliance-only, recorded",
+  "status": "done",
+  "order": 103.3369,
+  "why": "shiv, Oct 30 13:22 and 13:25 CDT: the coordinator does compliance work in other repos, not their feature work.",
+  "note": "Landed in #863, batch 35 (#870): decision session-tiers names the scope. Banchi feature work such as the d4 Shelf build is not a claude-settings lane.",
+  "phase": "cleanup",
+  "updatedAt": "2026-10-30T20:16:00Z"
+}

@@ -1,0 +1,9 @@
+{
+  "title": "home, mailaudit and banchi each get one required rollup check",
+  "status": "doing",
+  "order": 103.33746,
+  "why": "shiv, Oct 30 15:03 CDT (item 87): the same kinds of checks in every repo, judged by the same outcomes, the count scaling with size; decision same-check-kinds. q_max #994 pick a, 15:08 CDT.",
+  "note": "One lane per repo (home, mailaudit, banchi) adds a single required all-jobs-passed check, as lane qmax-one-rollup-check does for q_max. Done check: each repo's main protection names one required check, all-jobs-passed.",
+  "phase": "cleanup",
+  "updatedAt": "2026-10-30T20:16:00Z"
+}

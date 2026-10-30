@@ -1,0 +1,9 @@
+{
+  "title": "The merge tool reads a standing_grant switch",
+  "status": "doing",
+  "order": 103.33744,
+  "why": "shiv, Oct 30 15:06 CDT (item 85 c): a true/false switch in the merge tool's settings instead of a CLAUDE.md line.",
+  "note": "Lane merge-grant-switch adds standing_grant: true to the merge tool's settings on main; the tool refuses a coordinator merge when it is false. It rewrites decision standing-merge-grant to name the switch. Done check: false refuses a coordinator merge, true allows it.",
+  "phase": "cleanup",
+  "updatedAt": "2026-10-30T20:16:00Z"
+}
