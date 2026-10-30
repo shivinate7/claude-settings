@@ -12973,8 +12973,16 @@ add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-p
     tool=LANE_TOOL, tags=["cs-build:lane"])
 add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium")
-add("lane-effort-pin: lane tag with the effort command padded by space and a newline is allowed",
-    "allow", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="  /effort medium\n")
+add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
+    "deny", "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="  /effort medium\n")
+add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\n")
+add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane "], prompt="do the task")
+add("lane-effort-pin: upper-case lane tag with a wrong prompt is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["CS-BUILD:LANE"], prompt="do the task")
+add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags="cs-build:lane", prompt="do the task")
 add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",

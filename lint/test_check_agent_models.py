@@ -25,10 +25,11 @@ LANE_RECORD = ("| Point | Model | Effort |\n|---|---|---|\n"
                "| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT | %s |\n")
 
 
-def verdict(relpath, model=None, closed=True, text=None):
+def verdict(relpath, model=None, closed=True, text=None, relative=False):
     """Write one fixture under this run's folder and return the check's (code, stdout).
 
-    An agent file with frontmatter, unless `text` gives the whole file (a record).
+    An agent file with frontmatter, unless `text` gives the whole file (a record). `relative` runs
+    the check from the fixture's folder with the path as given, as a run from a repository root does.
     """
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
         path = os.path.join(tmp, relpath)
@@ -39,8 +40,14 @@ def verdict(relpath, model=None, closed=True, text=None):
             else:
                 handle.write(text)
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            code = C.main([path])
+        before = os.getcwd()
+        if relative:
+            os.chdir(tmp)
+        try:
+            with contextlib.redirect_stdout(out):
+                code = C.main([relpath if relative else path])
+        finally:
+            os.chdir(before)
         return code, out.getvalue()
 
 
@@ -108,6 +115,11 @@ class LaneEffort(unittest.TestCase):
         # A medium later in the cell is not the lane effort: the cell must start with it.
         code, out = self.record("default, medium")
         self.assertEqual(code, 1, "a lane row whose cell only mentions medium passes: %r" % out)
+
+    def test_relative_record_path_with_default_row_fails(self):
+        # The check must read the record when the path is relative, as a run from the repository root gives it.
+        code, out = verdict(RECORD_RELPATH, text=LANE_RECORD % "default", relative=True)
+        self.assertEqual(code, 1, "a relative record path with a default lane row passes: %r" % out)
 
 
 class RunFolder(unittest.TestCase):
