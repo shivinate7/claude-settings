@@ -300,12 +300,12 @@ once as a note on its step (the item's home), never held for the lane. A chat an
 4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to
    its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
-   - `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
+   - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
    - A new `pick` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
      recommendation.
    - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
      "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
-     guard refuses an open decision update without it.
+     guard refuses an update with `kind` `decision` and `context` that lacks it.
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
