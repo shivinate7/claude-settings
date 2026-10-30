@@ -37,7 +37,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - the CI waits,
   - the merge tool runs,
   - archiving finished lanes.
-  The coordinator holds only lane state and talks with the owner.
+  The coordinator holds only lane state and talks with the owner. The batch runner runs the merge tool under the coordinator's merge grant (the Merge grant bullet). It holds no grant of its own.
 - **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. The coordinator starts it, only on demand (see "On demand" below). The coordinator holds only lane state and talks with the owner.
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
   - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the arbiter does not start with triage and the batch runner. It starts later, when the owner tells the coordinator "spawn arbiter". It is for long runs the owner does not want to sit through.
@@ -46,6 +46,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Home (lane default, not an owner ruling; rule `output-answer-has-a-home`, an answer has a home): an arbiter's ruling lands where an owner's would, in its question's record in that repo.
   - Which repos (same item): not every repo gets an arbiter, only a repo that asks. Today that is q_max.
   - Kind (same item): the arbiter is a standing session and an orchestrator, and runs Opus. It is rotated before it goes stale, like triage.
+- **Merge grant** (owner, 2026-10-29 16:47 CDT). The coordinator holds a standing merge grant in claude-settings and in the owner's other repos, until the owner withdraws it in chat. It never asks the owner to merge. The grant covers the merge act only and lifts no check: green CI, no merge during a batch CI run, fresh review and the net-value hold still apply. Record `standing-merge-grant` (the coordinator's standing merge grant) holds the words, the repos and the limits.
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
   - "... and want it so that u push back on me somehow being like by the way, im coordinator ..."
