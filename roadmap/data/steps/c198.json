@@ -1,9 +1,9 @@
 {
- "title": "the waiting page asks only what the owner can judge; the rest the session decides and shows",
- "phase": "cleanup",
- "status": "todo",
- "order": 103.338366,
- "why": "Item 34 (c95 step 2, Oct 28 13:40 CDT): shiv saved b with the note \"i really can't figure out how to decide\", after a plain-words rewrite. The question turned on CI internals he has no stake in; the failure is in how we ask, not in the wording.",
- "note": "Slug owner-judge-test (orchestrator, Oct 28). Next cloud lane, claude-settings only, in skills/waiting-page (SKILL.md and the writer's checks), after c190 and c194 (same files). Before a session puts an item on the page it asks: can the owner judge this from what he already knows? If the choice can be undone and turns on internals he has no stake in, the session takes its own pick and lists it as a pick that stands (the page's last section; he can change it) instead of asking. A question stays only when it touches his goals, his money, a risk he would care about, or a rule. The writer refuses a decision that sets none of: owner goal, money, risk, rule, or an irreversible act, unless it is marked a standing pick. Red first on item 34's shape (a CI-internals decision with a pick and no stake of the owner's). Port: yes, the skill installs everywhere. Needs no answer. Placed after c194 (triage 12, Oct 28).",
- "updatedAt": "2026-10-28T18:55:00Z"
+  "title": "the waiting page asks only what the owner can judge; the rest the session decides and shows",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.338366,
+  "why": "Item 34 (c95 step 2, Oct 28 13:40 CDT): shiv saved b with the note \"i really can't figure out how to decide\", after a plain-words rewrite. The question turned on CI internals he has no stake in; the failure is in how we ask, not in the wording.",
+  "note": "Slug owner-judge-test (orchestrator, Oct 28). Next cloud lane, claude-settings only, in skills/waiting-page (SKILL.md and the writer's checks), after c190 and c194 (same files). Before a session puts an item on the page it asks: can the owner judge this from what he already knows? If the choice can be undone and turns on internals he has no stake in, the session takes its own pick and lists it as a pick that stands (the page's last section; he can change it) instead of asking. A question stays only when it touches his goals, his money, a risk he would care about, or a rule. The writer refuses a decision that sets none of: owner goal, money, risk, rule, or an irreversible act, unless it is marked a standing pick. Red first on item 34's shape (a CI-internals decision with a pick and no stake of the owner's). Port: yes, the skill installs everywhere. Needs no answer. Placed after c194 (triage 12, Oct 28). Brief sent to the coordinator Oct 30 03:36 CDT, after c190 merged (batch 25).",
+  "updatedAt": "2026-10-30T08:36:00Z"
 }
