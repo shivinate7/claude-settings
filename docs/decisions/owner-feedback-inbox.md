@@ -34,6 +34,14 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   `stop_hook_active`, so it cannot loop, but it still counts that turn's messages. When the session's
   folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
   in one line.
+- **Answers.** `answer` (the message answers waiting-page item n): the home is `page:<n>`. The guard
+  checks it in every block that holds one, burst or not. It blocks until the transcript shows, after the
+  owner's message, a send_message or SendMessage naming n, or an ArtifactData write with `n` equal to the
+  item number in collection `items` (rule `questions-go-to-owner`). A missing transcript passes, with a
+  systemMessage. Risk kind: named incident. On 2026-10-30, item 98 was answered in a coordinator's chat at
+  15:41 and never sent to the page writer, who asked again at 16:07. Landed 2026-10-30. Known gap: a
+  session that never writes the `[answer]` item is not caught. The guard cannot know which owner messages
+  answer a page item.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
   home holds it for good. The guard stops asking for a closed standing id in the handoff.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
