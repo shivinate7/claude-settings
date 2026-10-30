@@ -363,8 +363,9 @@ MAKE_UI = re.compile(r"\bmake\s+(\S+\s+)*(ui-test|native-check)\b|\bsim-test\b")
 INFO_FLAGS = {"-version", "-showsdks", "-list", "-showBuildSettings", "-help"}  # xcodebuild prints and builds nothing
 TEST_ACTIONS = {"test", "test-without-building"}
 UI_BUNDLE = "bundle.ui-testing"
-# A shell word, or an operator that ends a command. A quote with no partner on its line is no word, so a lone one swallows no later text.
-SHELL_TOKEN = re.compile(r"""(?:[^\s"';&|]|"[^"]*"|'[^']*')+|&&|\|\||[;|&]""")
+# A word, or an operator that ends a command. Quotes are cut before the read: a quoted `run:` value and a `bash -c "..."`
+# argument hold commands, and an apostrophe in text (`it's`) has no partner to pair with and hide one.
+SHELL_TOKEN = re.compile(r"[^\s;&|]+|&&|\|\||[;|&]")
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
 DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*[\"']?[A-Z0-9]")
 
@@ -391,10 +392,10 @@ def make_recipes(text):
 
 def xcodebuild_runs(text):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
-    ends at `&&`, `||`, `;`, `|`, `&` or the line end, outside quotes."""
+    ends at `&&`, `||`, `;`, `|`, `&` or the line end. Quote marks are read as nothing."""
     runs = []
     for line in text.splitlines():
-        words = [re.sub(r"[\"']", "", t) for t in SHELL_TOKEN.findall(line)]
+        words = SHELL_TOKEN.findall(re.sub(r"[\"']", "", line))
         group = []
         for word in words + [";"]:
             if word in ("&&", "||", ";", "|", "&"):
@@ -417,22 +418,24 @@ def xcodegen_tests(text):
     template writes are read: `type:` under a target, and `test: targets:` as an inline list or `- name` items. Anything else
     is left out, so a run that needs it stays unresolved."""
     targets, schemes = {}, {}
-    top = first = entry = test = listing = None  # the open key, the entry indent, the entry, and the `test:` and `targets:` indents
+    top = first = entry = test = listing = inner = None  # the open key; the entry's indent and name; the `test:` and `targets:` indents; the indent of an entry's own keys
     for line in text.splitlines():
         if not line.strip():
             continue
         indent, body = len(line) - len(line.lstrip()), line.strip()
         key, _, value = body.partition(":")
         key, value = key.strip("\"'"), value.strip()
+        if first is not None and indent > first and inner is None:
+            inner = indent
         if indent == 0:
-            top, first, entry, test, listing = key, None, None, None, None
+            top, first, entry, test, listing, inner = key, None, None, None, None, None
         elif top not in ("targets", "schemes"):
             continue
         elif first is None or indent == first:
-            first, entry, test, listing = indent, key, None, None
+            first, entry, test, listing, inner = indent, key, None, None, None
             if top == "schemes":
                 schemes[entry] = []
-        elif top == "targets" and key == "type" and indent > first:
+        elif top == "targets" and key == "type" and indent == inner:  # a `type:` deeper down is a source's
             targets[entry] = value.strip("\"'")
         elif top == "schemes" and key == "test":
             test = indent

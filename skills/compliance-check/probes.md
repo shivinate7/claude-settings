@@ -114,6 +114,7 @@ parent clone. It calls the check's own readers: the path read, and the read of i
 anchors, record slugs and hook messages. A word the glossary brings back is gone from the next run. A
 `word (prose)` name is read in paths, anchors and slugs only, never in a code name. Prose is not read.
 A term of the child's own `GLOSSARY.md`, at its root, spans a retired word, as a claude-settings term does.
+Terms come only from a four-column `## Terms` table there. Another shape gives no terms.
 A child term that repeats a claude-settings term, or is the retired word, does not.
 
 The probe reads every tracked file, so it can take a minute on a large repo. The check reads hook

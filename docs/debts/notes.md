@@ -637,3 +637,5 @@
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
 - probe-design-screens-by-route-count: lint/compliance_probes.py probe_design grades "screens named" by route count, so a shoot.json with one route passes when an app has three views.
+- glossary-prepared-cache-by-identity: check_glossary `_PREPARED` caches by table identity and length, so an in-place edit of a table that keeps its length reads stale names. Production builds the table once (lint/check_glossary.py prepared).
+- words-deadline-late-by-one-scan: WORDS_DEADLINE is checked between files and inside name_problems, not inside one file's scan, so a stop can run late by one scan: 23 s on a 42 MB JSON (lint/compliance_probes.py probe_words).
