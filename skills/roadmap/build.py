@@ -1,12 +1,16 @@
 """Bake a repo's roadmap into one read-only page that opens straight from disk.
 
-    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch roadmap] [--out FILE]
+    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch roadmap] [--out FILE] [--block]
 
 The steps, topics and numbers come from the repo's record branch, under roadmap/data/. In a
 checkout that stands on the record branch, the builder reads the working tree and writes
 roadmap/roadmap.html there. In any other checkout it reads the branch through git (origin's copy
 first, else the local one) and writes to --out. The record homes (decisions, debts, plans and the
 rest) come from the checkout itself, at the paths lint/layout.py gives.
+
+With --block the builder writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
+never ROADMAP_DB) to --out. The one page of a repo is the waiting page: its writer splices that block into
+the live page and alone publishes (skills/waiting-page/splice.py). The builder publishes nothing.
 
 The viewer in page/index.html reads its data through the artifact database (window.claude.use('db')).
 The builder puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every JSON
@@ -538,6 +542,16 @@ def render(data, info):
     return head + sep + "\n" + stub + BUILD_BLOCK % as_script(info) + rest
 
 
+MARK_OPEN, MARK_CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
+
+
+def render_block(data, info):
+    """Only the marked data block of the one page: the two globals the Status tab reads, never ROADMAP_DB.
+    The waiting-page writer splices it into the live page (skills/waiting-page/splice.py)."""
+    return "%s\n<script>window.ROADMAP_DATA = %s; window.ROADMAP_BUILD = %s;</script>\n%s\n" % (
+        MARK_OPEN, as_script(data), as_script(info), MARK_CLOSE)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Bake a repo's roadmap into one read-only page.")
     ap.add_argument("--repo", default=".", help="the checkout to read (default: the current folder)")
@@ -545,9 +559,13 @@ def main(argv=None):
     ap.add_argument("--main-branch", default="main", help="the branch whose merges carry Step: trailers")
     ap.add_argument("--live", help="the publisher's live-work file: project threads, open pull requests and branches")
     ap.add_argument("--out", help="the page to write; needed unless the checkout stands on the record branch")
+    ap.add_argument("--block", action="store_true",
+                    help="write only the roadmap data block (needs --out), for the waiting-page writer to splice in")
     args = ap.parse_args(argv)
     repo = pathlib.Path(args.repo).resolve()
     source, why = record_source(repo, args.record_branch)
+    if args.block and not args.out:
+        raise SystemExit("--block writes the data block to a file, so name it with --out FILE.")
     if args.out:
         out = pathlib.Path(args.out)
     elif isinstance(source, Tree):
@@ -576,7 +594,7 @@ def main(argv=None):
                            "read": info["live"]["read"]})
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
                               "read": "unknown (%s)" % unread if unread else short(repo, ref) or "unknown (git could not name the commit)"})
-    out.write_text(render(data, info), encoding="utf-8")
+    out.write_text(render_block(data, info) if args.block else render(data, info), encoding="utf-8")
     if data is None:
         print(f"{out.name}: steps unknown ({why})")
         return

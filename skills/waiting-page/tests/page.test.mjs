@@ -8,6 +8,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { needEnv } from "../../../testing/skip-locally-fail-in-ci.mjs";
@@ -36,8 +37,13 @@ const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, 
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
-  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
+// dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
+// meta docs, which the status part must never read. window.__reads lists every read as
+// [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra = {} }) {
+  const { meta: metaExtra, ...otherExtra } = dbExtra;
+  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
+  window.__reads = []; window.__uses = [];
   const subs = {}, docSubs = {};
   window.__log = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
@@ -47,14 +53,17 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
     (docSubs[name + "/" + id] || []).forEach((cb) => cb(dsnap(name, id)));
   };
   window.__answers = () => data.answers;
+  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
+    doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
     collection: (name) => ({
-      onSnapshot: (cb) => { (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; },
+      onSnapshot: (cb) => listen(name, cb),
+      orderBy: () => ({ onSnapshot: (cb) => listen(name, cb) }),
       doc: (id) => ({
-        get: async () => dsnap(name, id),
+        get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
         set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
-        onSnapshot: (cb) => { (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
+        onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
     }),
   };
@@ -72,26 +81,26 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
-  window.claude = { use: async (cap) => (cap === "db" ? db : cap === "comments" ? (cm || null) : null) };
+  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? db : cap === "comments" ? (cm || null) : null; } };
 }
 
 let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
   t.after(() => page.close());
   await page.emulateMedia({ colorScheme: scheme });
-  const body = designData ? html.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : html;
+  const body = designData ? pageHtml.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : pageHtml;
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
@@ -427,7 +436,7 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    assert.equal(await page.title(), "Agent Q: waiting on you");
+    assert.equal(await page.title(), "Agent Q: Questions"); // one-page notes, choice 6: the title names the open tab
   });
 }
 
@@ -2461,6 +2470,105 @@ test("a decision card with no differs mark shows no stray null or undefined text
     return bad;
   }, DECISION.id);
   assert.deepEqual(stray, [], "stray text in the decision card");
+});
+
+// ---------------------------------------------------------------- one page: the Status tab (lane c136)
+// The roadmap data block is built by skills/roadmap/build.py --block and spliced into PAGE by
+// skills/waiting-page/splice.py, as the writer republishes it (tests/merged_page.py does both).
+// The status panel reads only window.ROADMAP_DATA, never the artifact database.
+
+const MERGED = path.join(HERE, "merged_page.py");
+function mergedPage(...flags) {
+  const r = spawnSync(process.env.PYTHON || "python3", [MERGED, "--page", PAGE, ...flags], { encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(r.status, 0, "the roadmap build or the splice failed: " + (r.stderr || r.error));
+  return r.stdout;
+}
+// Database content the status panel must never show: the roadmap's own collections in the live database.
+const LEAKED_STEP = "Leaked database step", LEAKED_TILE = "Leaked database tile";
+const LEAK = {
+  steps: { leak1: { title: LEAKED_STEP, status: "active", phase: "cleanup", order: 0, note: "n", updatedAt: "2026-10-26T00:00:00Z" } },
+  meta: { phases: { cleanup: { metrics: [{ label: LEAKED_TILE, value: "9 of 9" }] } }, cull: { stopRule: "leak" }, advisor: { text: "leak" } },
+};
+// The waiting part reads items, answers, groups, receipts and meta/page. A read of anything else is the status part's.
+const statusRead = (r) => r[0] === "steps" || r[0] === "topics" || (r[0] === "meta" && r[1] !== "page");
+const statusTab = (page) => page.getByRole("tab", { name: "Status", exact: true });
+async function openStatus(page) {
+  const tab = statusTab(page);
+  assert.equal(await tab.count(), 1, "the page has no Status tab (role=tab, name Status)");
+  const id = await tab.getAttribute("aria-controls");
+  assert.ok(id, "the Status tab does not name its panel with aria-controls");
+  const panel = page.locator("#" + id);
+  assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
+  await tab.click();
+  await panel.waitFor({ state: "visible" });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read would land here
+  return panel;
+}
+// Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
+const shows = async (page, re) => re.test(await page.locator("body").textContent());
+const waitingShape = (page) => page.evaluate(() => ({
+  tiers: [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id)]),
+  bar: document.getElementById("barStatus").textContent,
+  send: document.getElementById("send").textContent,
+}));
+// Waits for the title, then returns the real one, so a red run names what the title was.
+const titleOf = async (page, want) => { await page.waitForFunction((w) => document.title === w, want).catch(() => {}); return page.title(); };
+
+test("saved answers survive a rebuild and republish", async (t) => {
+  const page = await open(t, { pageHtml: mergedPage(), items: [DECISION], answers: SAVED_A, dbExtra: LEAK }); if (!page) return;
+  assert.match(await card(page, DECISION).locator(".receipt").textContent(), /You chose A: Red/);
+  assert.match((await card(page, DECISION).locator(".ans").textContent()).trim(), /^Answered, filing pending /);
+  const usesBefore = await page.evaluate(() => window.__uses.length);
+  const panel = await openStatus(page);
+  assert.match(await panel.textContent(), /Baked roadmap step zebra/, "the status panel does not show the baked roadmap");
+  assert.equal(await shows(page, /Leaked database/), false, "the status panel shows database content");
+  assert.deepEqual((await page.evaluate(() => window.__reads)).filter(statusRead), [], "the status part reads the live database");
+  assert.equal(await page.evaluate(() => window.__uses.length), usesBefore, "opening Status calls window.claude.use");
+  assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[1] === "answers"), [], "a document in answers/ was written or deleted");
+  assert.deepEqual(await answers(page), SAVED_A);
+});
+
+test("with no roadmap data the Status tab says unknown with a reason, and the waiting part is unchanged", async (t) => {
+  const items = [DECISION, TASK];
+  const shipped = await open(t, { items, dbExtra: LEAK }); if (!shipped) return; // PAGE as shipped: its roadmap block is empty
+  const built = await open(t, { pageHtml: mergedPage("--no-roadmap"), items, dbExtra: LEAK }); // ROADMAP_DATA = null
+  const before = await waitingShape(shipped);
+  assert.ok(before.tiers.length > 0 && before.send, "the waiting part drew nothing: " + JSON.stringify(before));
+  assert.deepEqual(await waitingShape(built), before, "the roadmap block changed the waiting part");
+  assert.equal(await statusTab(built).count(), 1, "the page has no Status tab (role=tab, name Status)");
+  assert.equal(await statusTab(built).isVisible(), true, "the tab row hides Status when no item has a design");
+  for (const [name, page] of [["as shipped", shipped], ["no record branch", built]]) {
+    const text = await (await openStatus(page)).textContent();
+    assert.match(text, /unknown/i, name + ": the status panel does not say unknown");
+    // The build knows why (no record branch), so its page says so. The shipped page has no build info to quote.
+    if (page === built) assert.match(text, /\bno\b[^.]{0,40}\b(roadmap|record branch)\b/i, name + ": the status panel gives no reason");
+    assert.doesNotMatch(text, /signed in/i, name + ": the status panel tells the owner to sign in, which is false here");
+    assert.equal(await shows(page, /Leaked database/), false, name + ": the status panel shows database content");
+    assert.deepEqual((await page.evaluate(() => window.__reads)).filter(statusRead), [], name + ": the status part reads the live database");
+  }
+});
+
+test("a note typed on an item survives a press of Status and back, because Status hides #qView and never removes it", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "keep this draft");
+  await page.evaluate(() => { window.__qView = document.getElementById("qView"); });
+  const panel = await openStatus(page);
+  assert.equal(await page.locator("#qView").count(), 1, "Status removed #qView");
+  assert.equal(await page.locator("#qView").isHidden(), true, "Questions still shows under Status");
+  await page.click("#tabQ");
+  await page.locator("#qView").waitFor({ state: "visible" });
+  assert.equal(await panel.isHidden(), true, "Status still shows on Questions");
+  assert.equal(await page.evaluate(() => document.getElementById("qView") === window.__qView), true, "#qView was rebuilt");
+  assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
+});
+
+test("the document title names the open tab: <repo>: Questions, then <repo>: Status", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
+  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+  await openStatus(page);
+  assert.equal(await titleOf(page, "Compass: Status"), "Compass: Status");
+  await page.click("#tabQ");
+  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
 });
 
 // ---------------------------------------------------------------- c135: a question that takes several answers
