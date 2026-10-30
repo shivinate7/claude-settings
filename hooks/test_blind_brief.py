@@ -28,6 +28,7 @@ Override the module under test with the env var BLIND_BRIEF_UNDER_TEST.
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -475,6 +476,66 @@ class Devices(unittest.TestCase):
                 self.assertIn("layout.py devices", text)
                 for name in names:
                     self.assertNotIn(name, text.lower())
+
+
+class DesignerSteps(unittest.TestCase):
+    """The designer loads a design skill before it draws and critiques its own mockup before it reports.
+
+    A plain text check of the body of agents/designer.md. Each step is bound to a line anchor, so a
+    step moved after the work it must precede fails. The sentence that orders a step must not be
+    negated ("never load", "skip"), and a word in an unrelated sentence orders nothing. A negated
+    sentence elsewhere in the same paragraph is fine.
+    """
+    DRAW = "For each screen the brief names"
+    REPORT = "Report once"
+    NEGATED = re.compile(r"\b(?:never|not|no|skip|skips|without)\b|n't", re.I)
+    # The blind-lane exception is a skip by nature, so a sentence that names it never orders the run.
+    SETUP = re.compile(r"\b(?:Setup|Launcher)\b")
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(HERE, "..", "agents", "designer.md"), encoding="utf-8") as h:
+            lines = h.read().splitlines()
+        fence = [i for i, line in enumerate(lines) if line == "---"]
+        cls.lines = lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
+
+    def at(self, anchor):
+        hits = [i for i, line in enumerate(self.lines) if line.startswith(anchor)]
+        self.assertTrue(hits, "agents/designer.md has no line starting %r" % anchor)
+        return hits[0]
+
+    def steps(self, stop, start=None):
+        """Each paragraph or list item from the line starting `start` up to the line starting `stop`, as sentences."""
+        lo = 0 if start is None else self.at(start)
+        units = re.split(r"\n\s*\n|\n(?=\s*[-*] )", "\n".join(self.lines[lo:self.at(stop)]))
+        return [re.split(r"(?<=[.!?])\s+", " ".join(u.split())) for u in units]
+
+    def orders_critique(self, sentence):
+        return (all(re.search(w, sentence, re.I) for w in (r"\brun\b", r"\bimpeccable\b", r"\bcritique\b"))
+                and not self.NEGATED.search(sentence) and not self.SETUP.search(sentence))
+
+    def skips_setup_in_a_blind_lane(self, sentence):
+        skip = re.search(r"\bskip\b", sentence, re.I)
+        return bool(skip and not self.NEGATED.search(sentence[:skip.start()]) and re.search(r"\bblind\b", sentence, re.I)
+                    and "Setup" in sentence and "Launcher unavailable" in sentence)
+
+    def test_loads_frontend_design_by_name_before_it_draws(self):
+        found = [s for step in self.steps(self.DRAW) for s in step
+                 if re.search(r"\bload\w*", s, re.I) and "frontend-design" in s and not self.NEGATED.search(s)]
+        self.assertTrue(found, "no sentence loads `frontend-design` before the line starting %r" % self.DRAW)
+
+    def test_critiques_its_own_mockup_with_impeccable_before_it_reports(self):
+        self.assertTrue(any(re.search(r"\bown mockup\b", " ".join(step), re.I)
+                            and any(self.orders_critique(s) for s in step) for step in self.steps(self.REPORT)),
+                        "no step has a sentence that runs `impeccable` `critique` on its own mockup before the line "
+                        "starting %r" % self.REPORT)
+
+    def test_a_blind_lane_critique_skips_impeccable_setup_and_its_launcher_fallback(self):
+        # Setup and the Launcher fallback read PRODUCT.md and DESIGN.md, which a blind lane may not read.
+        self.assertTrue(any(self.skips_setup_in_a_blind_lane(s)
+                            for step in self.steps(self.REPORT, start=self.DRAW) for s in step),
+                        "no sentence between the lines starting %r and %r skips impeccable's Setup and its "
+                        "Launcher fallback in a blind lane" % (self.DRAW, self.REPORT))
 
 
 class Hook(unittest.TestCase):
