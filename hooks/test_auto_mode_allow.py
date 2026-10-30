@@ -35,11 +35,11 @@ SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 # (name, case-insensitive pattern) for each act an entry's "Never covers" sentence must name.
 PR_REFUSED = (("merge", "merg"), ("approve", "approv"), ("branch delete", "branch"),
               ("force push", "force[- ]push"),
-              ("another owner or outside", "another owner|outside"),
-              ("--delete-branch", "--delete-branch"), ("auto-merge", "auto[- ]merge"))
+              ("another owner or outside", "another owner|outside"))
 MESSAGE_REFUSED = (("permissions", "permission"), ("settings", "setting"),
-                   ("override", "override"), ("merge", "merg"),
-                   ("posted_to_shared_channel", "posted_to_shared_channel"))
+                   ("override", "override"), ("merge", "merg"))
+PR_EXTRA_REFUSED = (("--delete-branch", "--delete-branch"), ("auto-merge", "auto[- ]merge"))
+MESSAGE_EXTRA_REFUSED = (("posted_to_shared_channel", "posted_to_shared_channel"),)
 # (name, case-insensitive pattern) for each term an entry names before its "Never covers" sentence.
 PR_SCOPE = (("owner", "owned by shivinate7"),
             ("coordinator or batch runner", "coordinator or batch runner"),
@@ -135,6 +135,12 @@ class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
         missing = unnamed_terms(bounds_text(allow_entry(OWNER_PR)), PR_SCOPE)
         self.assertFalse(missing, "text before Never covers does not name %r" % missing)
 
+    def test_never_covers_names_delete_branch_flag_and_auto_merge(self):
+        clause = never_covers(allow_entry(OWNER_PR))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the PR housekeeping entry")
+        missing = unnamed_terms(clause, PR_EXTRA_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
 
 class OwnerSessionMessageIsAllowed(unittest.TestCase):
     def test_one_entry_names_the_owner_message(self):
@@ -154,6 +160,12 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
     def test_scope_is_named_before_never_covers(self):
         missing = unnamed_terms(bounds_text(allow_entry(OWNER_MESSAGE)), MESSAGE_SCOPE)
         self.assertFalse(missing, "text before Never covers does not name %r" % missing)
+
+    def test_never_covers_names_shared_channel_post(self):
+        clause = never_covers(allow_entry(OWNER_MESSAGE))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the owner message entry")
+        missing = unnamed_terms(clause, MESSAGE_EXTRA_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
