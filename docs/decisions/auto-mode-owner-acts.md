@@ -2,13 +2,13 @@
 
 ## Ruling
 
-Owner, 2026-10-30 16:24 CDT, relayed by the coordinator session: the auto-mode classifier keeps refusing the coordinator's routine acts, which the owner always approves. Allow them. Owner, 16:37 CDT: keep one general record for which acts auto mode allows with no ask. This is that record.
+Owner, 2026-10-30 16:24 CDT, relayed by the coordinator session: the auto-mode classifier keeps refusing the coordinator's routine acts, which the owner always grants. Allow them. Owner, 16:37 CDT: keep one general record for which acts auto mode allows with no ask. This is that record.
 
 ### The test for a new entry
 
 An act gets an allow entry only if all three hold:
 
-- The owner always approves it. A named refusal shows it (`building-guard-needs-incident`).
+- The owner always grants it. A named refusal shows it (`building-guard-needs-incident`).
 - It can be undone, or it loses nothing.
 - The entry names the act in its narrow form, quotes the measured command, and ends with a "Never covers" sentence. Never a broad class, such as "any GitHub write".
 
@@ -25,7 +25,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 
 The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
 
-"Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a branch or ref delete, a force push, a PR nobody named, or a repo outside `shivinate7`. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge.
+"Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a PR with auto-merge on, since that merges it. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge. Nor a post people read, such as `visibility: posted_to_shared_channel`.
 
 ### Incidents for the two new entries
 
@@ -41,7 +41,7 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 - Not covered: the server's `elevated_session_untrusted_device` refusal is not the classifier. No entry can lift it. It also refused one of this lane's `send_message` calls to its coordinator.
 - Widens a shared tool (t18, the uniform ruling): yes. The owner chose this knowing it. `settings.json` installs into `~/.claude`, so the entries apply in every repo. The `shivinate7` and own-account bounds keep them to the owner's own things.
 - Home: the classifier reads `autoMode` only from `~/.claude/settings.json`, managed settings or `--settings`. `install.sh` links or copies this repo's `settings.json` there.
-- Check: `hooks/test_auto_mode_allow.py`, the one check for all `autoMode` entries. It fails until each entry exists once, quotes its incident, and names its bounds in a "Never covers" sentence. It also fails a list that drops `$defaults`.
+- Check: `hooks/test_auto_mode_allow.py`, the one check for `autoMode`. It pins each named entry: the entry exists once, quotes its incident, and names its bounds in its Covers text and in a "Never covers" sentence. A new entry adds its own pins there. It also fails a list that drops `$defaults`.
 - Cost: none at run time. The classifier already runs; each entry adds prose to its prompt.
 - Gap: the classifier sees the command, not who named the PR. A close on a misread task is still allowed when the conversation shows the PR named as replaced, empty or batched. A closed PR can be reopened.
 
