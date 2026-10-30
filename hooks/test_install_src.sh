@@ -3242,7 +3242,7 @@ caseL1() {
     bad "$name" "allow rules were written with no rules file: $(written_allow | tr '\n' ' ')"
   elif printf '%s\n' "$out" | grep -q "allow rules from\|merge/cloud_allow.json rules)"; then
     bad "$name" "the log claims rules that were not written: $(settings_lines)"
-  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge --confirm allow rules: $co at $sha has no merge/cloud_allow.json"; then
+  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge --confirm allow rules: $co at $sha has no rules in merge/cloud_allow.json"; then
     bad "$name" "no WARNING names the checkout and its commit: $(settings_lines)"
   else
     ok "$name"

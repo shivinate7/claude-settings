@@ -722,11 +722,11 @@ if [ "$CLOUD" = 1 ]; then
       if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
         log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n merge --confirm allow rules from $SRC at $SRC_SHA)"
       else
-        log "WARNING: wrote $TARGET_JSON with no merge --confirm allow rules: $SRC at $SRC_SHA has no merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/main, then resume the session."
+        log "WARNING: wrote $TARGET_JSON with no merge --confirm allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/main, then resume the session."
       fi
     else
       rm -f "$TARGET_JSON.tmp"
-      log "WARNING: could not write $TARGET_JSON from $SRC/settings.json; any file from an earlier run stays"
+      log "WARNING: could not write $TARGET_JSON from $SRC/settings.json and merge/cloud_allow.json; any file from an earlier run stays"
     fi
   else
     cp "$SRC/settings.json" "$TARGET_JSON"
