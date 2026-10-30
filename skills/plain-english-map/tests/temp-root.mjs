@@ -1,4 +1,4 @@
-// The temp folder of the skill's test suites (decision test-temp-standard, docs/decisions/test-temp-standard.md).
+// The temp folder of the skill's test suites (decision test-temp-standard).
 //
 // One temp root for this repository, and one run folder per test process, named `<pid>-<UUID>`. Every helper takes its
 // folder from the run folder. The first request of a process removes sibling run folders older than one day, which

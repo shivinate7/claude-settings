@@ -16,6 +16,8 @@
 //       `docs/map/<file>:<line>` of the fact or the home line. A value cause names the symbol and both values.
 //       A number in prose matches only as a whole number, so cite 5 with prose 15 fails.
 //       A numeric cite needs its number in the prose (owner pick 3a). A set or a list needs each item in the prose.
+//       Cause 6 (a digit outside backticks) exempts the leading `N.` of a trace step: that is structure, not a number.
+//       Digits in fact-line prose belong to cause 2, not cause 6.
 //
 //   scripts/lib/fact-readers.mjs
 //     readValues(requests, root) -> one result per request, in order. A request is { file, symbol }.
@@ -49,6 +51,8 @@ const CORE = 'docs/map/core.md';
 const HOMES = 'docs/map/homes.md';
 const TRACE = 'docs/map/traces/home.md';
 const posix = process.platform !== 'win32';
+// The no-python and shim cases need a bin folder with an extensionless git and python3, which only POSIX PATH lookup finds.
+const POSIX_ONLY = { skip: posix ? false : 'the bin folder links an extensionless git and python3, which only POSIX PATH lookup runs' };
 
 const out1500 = (r) => r.out.slice(0, 1500);
 const read = (dir, rel) => readFileSync(join(dir, rel), 'utf8');
@@ -277,7 +281,7 @@ test('R7. the regex reader returns 30 for RETRY_WAIT_S in a .go file, and a `//`
   assert.deepEqual(r, { file: 'src/retry.go', symbol: 'RETRY_WAIT_S', ok: true, value: 30 });
 });
 
-test('R8. with no python3 on PATH the python reader is ok: false and names python3, and never ok: true', async () => {
+test('R8. with no python3 on PATH the python reader is ok: false and names python3, and never ok: true', POSIX_ONLY, async () => {
   await readersModule();
   const script = `const m = await import(${JSON.stringify(pathToFileURL(READERS).href)});
 console.log(JSON.stringify(m.readValues([{ file: 'src/retry.py', symbol: 'RETRY_WAIT_S' }], ${JSON.stringify(FIXTURE)})));`;
@@ -416,7 +420,7 @@ test('M6. cause 6 controls: a digit in backticks, a fact line digit and a trace 
   assert.equal(verdicts(r.out), expected(), `these numbers are no unchecked number\n${out1500(r)}`);
 });
 
-test('M7. cause 7: with no python3 on PATH, MAP9 fails as unknown, names python3, and never reads PASS', () => {
+test('M7. cause 7: with no python3 on PATH, MAP9 fails as unknown, names python3, and never reads PASS', POSIX_ONLY, () => {
   needFile('scripts/map-check.mjs');
   const r = check(scratchRepo(), { PATH: gitOnlyBin() });
   assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
@@ -528,8 +532,6 @@ test('H3. a cite outside the Homes heading is no home, so a bad one there does n
 });
 
 // ---- Step 8: the cost of the Python reader ----
-
-const POSIX_ONLY = { skip: posix ? false : 'a POSIX shell shim is run by PATH lookup, and Windows has no such shim here' };
 
 test('C1. the python3 shim logs each start and runs the real interpreter, so the cost case below counts real starts', POSIX_ONLY, () => {
   const shim = pyShim();
