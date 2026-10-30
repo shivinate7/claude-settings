@@ -1,8 +1,8 @@
 # c146: checked-prose map
 
-**Brief.** Roadmap step c146, "The map says how the code fits together, in checked prose, in every repo". It comes from shiv's ask of Oct 27 15:28 CDT. All facts about main were checked against `e0f9e2d9` (origin/main, "Merge pull request #723").
+**Brief.** Roadmap step c146, "The map says how the code fits together, in checked prose, in every repo". It comes from shiv's ask of Oct 27 15:28 CDT. All facts about main were checked against `e0f9e2d9` (origin/main, "Merge pull request #723"), except the CI and glossary facts, which were re-checked against origin/main `b2fffc1f`.
 
-**Not read.** banchi's `docs/map.py` and its decision-context are the nearest working example. That repo is not available in this session, so this plan says nothing about how they work. See open question 5.
+**Banchi's map (read Oct 30, banchi at `1523820`).** banchi's `docs/map.py` is a pure-literal Python dict of prose strings plus decision and test id lists (`governed_by`, `tested_by`). A check reads its paths, status, id citations and orphan coverage. Its prose is checked by nothing. Its one value check is the `server concurrency` audit row (banchi's `scripts/docs_audit/code_invariants.py` → `check_server_concurrency`). That row demands the doc form `` `REQUEST_SLOTS = 4` ``. It was built after a substring test passed a 15 to 5 retune: a bare `5` matched inside `15`. Only an attributed `NAME = value` tells agreement from coincidence. So the fact-line form here matches banchi's working form. MAP9 compares whole numbers only. banchi's homes live in banchi's `scripts/docs_audit/capability_homes.py` → `CAPABILITY_HOMES`. banchi's `scripts/decision-context.py` is an advisory hook. It maps a file to its map entry, then to that entry's `governed_by` decisions, and it never blocks. Rollout converts banchi's map. Nothing in it maps to fact lines directly. The full read is in `plans/c146-banchi-map-read.md`.
 
 ## 1. Goal
 
@@ -42,11 +42,11 @@ The map is the first thing shiv and the AI read before they answer "how does X w
   - `verification-checked-reader-for-numbers` is `unmechanized`.
   - `building-one-home-per-capability` is `unmechanized` ("A hook would have to see two implementations…").
   - The pins are `UNMECHANIZED_EXPECTED = 66` and `JUDGMENT_EXPECTED = 24`.
-- **CI.** `.github/workflows/gates.yml` (still named `gates` on main):
-  - The map tests run only in the CI step "Mod and map-skill tests" (`.github/scripts/mod-tests.sh` → `phase_skill`, after `npm ci`).
+- **CI.** `.github/workflows/checks.yml`:
+  - The map tests run only in the CI step "Mod and map-skill tests" (`.github/scripts/mod-tests.sh` → `phase_skill`, after `npm ci`). The `checks`, `checks-macos` and `checks-windows` jobs each run that step.
   - That step runs only when `needs.scope.outputs.mods == 'true'`.
   - In `.github/scripts/ci-scope.sh`, a `*.md` path turns nothing on, except `skills/plain-english-map/*.md`.
-  - So a change to `docs/map/*.md` alone would run no map step. The `gates` job itself runs on every non-draft PR (it needs `scope`, which skips drafts).
+  - So a change to `docs/map/*.md` alone would run no map step. The `checks` job itself runs on every non-draft PR (it needs `scope`, which skips drafts).
 - **Local lint mode.** `lint/test_ci_job.py` → `LintMode` counts only single-line `python3 lint|actions/*.py` runs as lint steps. A `node` step is not part of `bin/ci-job --lint`.
 - **Glossary.** `GLOSSARY.md` uses "check" (passes or fails a change) and "guard" (a hook that refuses).
   - "claim" already has other senses in `CLAUDE.md`: "a failing test is a claim", "Claim the number at merge".
@@ -74,7 +74,7 @@ A fact line is an indented list line under a map line. It starts with a word, ne
 
 - **Value: `[file: ]SYMBOL = LITERAL`.**
   - With no file, the file is the parent map line's file.
-  - `LITERAL` is a JSON literal. `{…}` means an unordered set, and `[…]` means an ordered list.
+  - `LITERAL` is a JSON literal. `{…}` means that an unordered set, and `[…]` means that an ordered list.
   - For a `.json` file, `SYMBOL` is a dotted path with `[*]`, the same grammar as `rule_audit.py` → `_walk`.
 - **Relation: `uses FILE[:SYMBOL]`.** The parent file imports `FILE`. When `:SYMBOL` is given, the parent file also refers to that symbol.
 
@@ -88,7 +88,7 @@ The rule `building-scanner-respects-strings` asks for the language's own parser,
 |---|---|---|
 | `.py` | One `python3 -I` child for the whole run. It gets every (file, symbol) pair on stdin, and uses `ast.parse` plus `ast.literal_eval` on module-level `Assign`/`AnnAssign`. Imports and references come from `ast.Import`, `ast.ImportFrom`, `ast.Attribute` and `ast.Name`. A module name resolves to the one tracked file with that base name, which covers `sys.path.insert` imports such as `import _nowindow`. | 1 process start |
 | `.json` | `JSON.parse` plus the dotted path | none |
-| `.ts .tsx .mjs .js` | The `typescript` parser via `lazy-typescript.mjs`, loaded only when a fact cites such a file. Imports come from `importTargets`. | none extra |
+| `.ts .tsx .mjs .js` | The `typescript` parser through `lazy-typescript.mjs`, loaded only when a fact cites such a file. Imports come from `importTargets`. | none extra |
 | Any other extension (Swift, SQL, shell) | A line regex `^\s*(let\|const\|var\|readonly)?\s*SYMBOL\s*[:=]` over the `blankComments` text, then a literal parse. This is a stated limit, not a parser. | none |
 
 ### What MAP9 fails on (one `[FAIL] MAP9` line, every cause joined by `; `)
@@ -104,19 +104,19 @@ The rule `building-scanner-respects-strings` asks for the language's own parser,
 ### Format version and scope
 
 - **Format version.** `MAP_FORMAT_VERSION` goes up to 3, with a no-op upgrade step in `STEPS`. A pinned version 2 copy, such as q_max's, then refuses a version 3 map instead of passing it without reading the facts. That avoids a silent green.
-- **Scope.** One new optional key, `mapPaths`: a list of path prefixes that MAP1 and MAP2 cover, defaulting to the whole repo. It lets the pilot start small (open question 1). It is one form for every repo, not a variant for one repo, so it does not break the uniform ruling in t18.
+- **Scope.** One new optional key, `mapPaths`: a list of path prefixes that MAP1 and MAP2 cover, defaulting to the whole repo. It lets the pilot start small (question 1). It is one form for every repo, not a variant for one repo, so it does not break the uniform ruling in t18.
 
 ### Out of scope
 
-- Finding a second copy of a capability is not MAP9's job. Copies across repos belong to `lint/find_copies.py` (r5). Copies inside one repo stay a reviewer's call (open question 6).
+- Finding a second copy of a capability is not MAP9's job. Copies across repos belong to `lint/find_copies.py` (r5). Copies inside one repo stay a reviewer's call (question 6).
 - In claude-settings, hook roles stay in `docs/catalog.md`. The map adds homes, relations and facts. It does not restate the catalog.
 
 ## 4. Steps in build order
 
-Each step lands with its red run recorded first (`rule:roles-each-layer-proves-once`). All new map tests go in `skills/plain-english-map/tests/claims.test.mjs` unless named.
+Each step lands with its red run recorded first (`rule:roles-each-layer-proves-once`). Unless a step names another file, all new map tests go in `skills/plain-english-map/tests/fact-lines.test.mjs`.
 
-1. **Read banchi's map** (open question 5) before you fix the syntax. No files change.
-2. **Fact line parser.** Add `factLines(text)` and `homeLines(text)` to `scripts/map-check.mjs`.
+1. **Banchi's map.** Done Oct 30 (see the header). Its working form matches the fact-line form here, so the syntax stays. No files change.
+2. **Fact line parser.** Add `factLines(text)` and `homeLines(text)` to `scripts/map-check.mjs`. Test file: `tests/fact-lines.test.mjs`.
    - Red first: a case that parses a fixture fact line into {file, symbol, literal, prose, line}. It fails because the export is missing.
    - Red first: a second case asserts that `mapCodePaths` does not count a fact line as a map line.
 3. **Value readers.**
@@ -148,12 +148,12 @@ Each step lands with its red run recorded first (`rule:roles-each-layer-proves-o
     - New `map.config.json`: `codeExtensions` `["py","mjs","sh","js","ts"]`, with `mapPaths` set to the pilot files.
     - New `docs/map/lint.md`, `docs/map/hooks.md` and `docs/map/homes.md`.
     - About 6 files and 8 to 10 facts: `lint/find_copies.py` (MIN_LINES, CHILD_GROWTH, TEMPLATE_DIRS, uses `hooks/_nowindow.py:run`), `hooks/prose_judge.py` (MODEL_TIMEOUT = 40), `hooks/guard.py` (`_LOAD_WAIT_SECONDS = 5.0`), and `lazy-typescript.mjs` (the package.json pin).
-    - Add a "Map check" CI step to the `gates` job with no `if:`, so a `docs/map/*.md`-only change still runs it. Run `npm ci --ignore-scripts` before it only if MAP8 loads typescript there (measure this).
+    - Add a "Map check" CI step to the `checks` job with no `if:`, so a `docs/map/*.md`-only change still runs it. If MAP8 loads typescript there, run `npm ci --ignore-scripts` before it (measure this).
     - Red run: on a scratch copy, change `MIN_LINES` to 10. The step exits 1 with the MAP9 line. Record it.
 11. **Records.**
     - New `docs/decisions/map-facts-are-checked.md`, with kind, home, cost and the stated limits (the regex reader, in-repo copies).
-    - Fix `docs/decisions/map-skill-lives-here.md`: a host pins the install link, never a copy, as t18 rules. This is a stale-record change, so it waits for shiv's grant.
-    - If question 2 picks (b), add a `CLAUDE.md` anchor and a `lint/rule_mechanisms.json` row of kind `ci` naming "Map check". Keep `UNMECHANIZED_EXPECTED` unchanged, because the new row is not unmechanized.
+    - Fix `docs/decisions/map-skill-lives-here.md`: a host pins the install link, never a copy, as t18 rules. This waits on shiv's own grant; the Oct 30 16:09 CDT ruling does not cover it.
+    - Add a `CLAUDE.md` sentence with an anchor (question 2, pick b) and a `lint/rule_mechanisms.json` row of kind `ci` naming "Map check". Keep `UNMECHANIZED_EXPECTED` unchanged, because the new row is of kind `ci`.
 
 ## 5. Cost
 
@@ -164,7 +164,7 @@ Each step lands with its red run recorded first (`rule:roles-each-layer-proves-o
   - New in total: at most one start.
 - **Files written:** none. The check only reads.
 - **How often:**
-  - Once per CI run of the `gates` job: each PR push that is not a draft, each push to main, and the nightly cron `17 3 * * *`.
+  - Once per CI run of the `checks` job: each PR push that is not a draft, each push to main, the nightly cron `17 3 * * *`, and each manual run (`workflow_dispatch`).
   - Also when a session runs the skill's check command.
   - Never per commit, per tool call or per session. No hook and no githook are added (`rule:outcomes-mechanize-rules`).
 - **Runtime (estimate, step 8 measures it):**
@@ -177,16 +177,19 @@ Each step lands with its red run recorded first (`rule:roles-each-layer-proves-o
 
 **Yes, once the pilot has held green through one cull.** The reason is the same as the brief's. A repo's roll-out should carry the map that keeps it honest, and the format must be one format everywhere (t18, uniform ruling Oct 27).
 
-Each roll-out visit (r5, which comes after this step) does four things:
+Each roll-out visit (r5, which comes after this step) does five things:
 
 1. It points the repo at the install link, not a copy. q_max deletes `.claude/skills/plain-english-map` (o6 note: it differs in SKILL.md and four scripts), and `lint/find_copies.py` lists it as the checklist.
-2. It upgrades the repo's map to version 3.
-3. It moves each number in the repo's prose into a fact line.
-4. It adds the map check to the repo's CI.
+2. It gives the repo its own root `GLOSSARY.md` of its own domain terms. The file adds terms and never redefines one from claude-settings `GLOSSARY.md` (`rule:speak-one-name-per-thing`). `lint/compliance_probes.py` → `probe_words` already reads it, through `lint/check_glossary.py` → `child_spans`. Known gap: `child_spans` drops a child term that redefines a shared term without failing it. So "never redefines" is not checked yet. A check for it belongs in `lint/check_glossary.py`, not in the map skill.
+3. It upgrades the repo's map to version 3.
+4. Format version 3 makes MAP9 fail every digit outside backticks in the repo's map prose. So it moves each such number into a fact line before the repo's CI goes green.
+5. It adds the map check to the repo's CI.
 
-banchi converts its `docs/map.py` facts to the shared form, or the shared form takes banchi's syntax first (open question 5). For a repo in Swift or another language without a parser here, the regex reader is the stated limit.
+banchi converts its `docs/map.py` to the shared form at its roll-out. Nothing in that map maps to fact lines directly. For a repo in Swift or another language without a parser here, the regex reader is the stated limit.
 
 ## 7. Open questions for shiv
+
+Ruled by shiv, Oct 30 16:09 CDT: each pick below stands.
 
 1. **Pilot scope in claude-settings.**
    - (a) Map all 235 tracked code files. Gain: no new key. Loss: about 235 lines, and the hook roles repeat `docs/catalog.md`, so there are two homes.
@@ -205,7 +208,10 @@ banchi converts its `docs/map.py` facts to the shared form, or the shared form t
    - (a) Yes. Gain: an old pinned copy refuses a fact map and does not pass it silently. Loss: every repo runs the upgrade command once.
    - (b) No. Gain: no upgrade. Loss: a silent green in q_max until r5.
    - **Pick: (a).**
-5. **banchi's `docs/map.py` and decision-context (not read: the repo is not in this session).** What I need from it: its fact syntax, how it reads values, its failure text, and what decision-context links (decisions to code?).
+5. **banchi's `docs/map.py` and decision-context (read Oct 30).** The two facts that decide it:
+   - Its one value check is the `server concurrency` audit row. That row uses the attributed form `REQUEST_SLOTS = <n>`, which is the fact-line form here.
+   - Its map checks no value, so nothing in it maps to fact lines directly. banchi converts its map at its roll-out.
+   - The full facts are in the header.
    - (a) Read it before step 2 and adopt its syntax if it fits. Gain: one format, with no conversion for banchi. Loss: a short delay.
    - (b) Build this format and convert banchi at its roll-out. Gain: no wait. Loss: a possible rework if banchi's form is better.
    - **Pick: (a).**
@@ -224,4 +230,4 @@ banchi converts its `docs/map.py` facts to the shared form, or the shared form t
 - `skills/plain-english-map/scripts/lib/map-config.mjs`
 - `skills/plain-english-map/tests/helpers.mjs`
 - `skills/plain-english-map/SKILL.md`
-- `.github/workflows/gates.yml`
+- `.github/workflows/checks.yml`
