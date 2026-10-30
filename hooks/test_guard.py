@@ -11881,6 +11881,25 @@ ci("a step with a backticked word that is not a command is allowed", "allow", ci
 ci("an update with no command key and plain steps is allowed", "allow",
    {"steps": ["Read the summary on the page."]}, action="update")
 
+# A command on the item does not excuse a step that sends the owner to a file (decision act-in-place).
+ci("a file step and a run-the-command step with a command on the item are denied", "deny",
+   ci_task(["Open plans/c152.md", "Run the command"], command=CMD_BOTH_SHELLS))
+# A PowerShell string holds PowerShell only: a 2>/dev/null redirect or an export statement is bash.
+ci("a powershell line with a 2>/dev/null redirect is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "git push origin --delete a 2>/dev/null",
+                                 "mac": CMD_BOTH_SHELLS["mac"]}))
+ci("a powershell line that starts with export is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "export A=1; git push origin --delete a",
+                                 "mac": CMD_BOTH_SHELLS["mac"]}))
+# A known program with an argument in backticks is a shell line. A known program alone is prose.
+BACKTICK_RUNS = ["Run `make test`", "Run `pytest -q`", "Run `docker compose up`", "Run `mkdir out`",
+                 "Run `gcloud auth login`", "Run `bq ls`", "Run `winget install Tool.Id`", "Run `./cleanup.sh`"]
+for step in BACKTICK_RUNS:
+    ci("a step with a backticked command and an argument is denied: " + step, "deny", ci_task([step]))
+BACKTICK_PROSE = ["Check `git` is installed", "Confirm `node` is 20 or later", "Read the `npm` section"]
+for step in BACKTICK_PROSE:
+    ci("a step with a known program alone in backticks is allowed: " + step, "allow", ci_task([step]))
+
 
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
 FAMILY = "task-names-check"
