@@ -636,3 +636,4 @@
 - cloud-swap-old-left: a run killed between the two `mv` calls of the clone swap leaves `claude-settings.old.<pid>`, which the stale sweep (`claude-settings.clone.*` only) never removes (install.sh cloud clone).
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
+- probe-design-screens-by-route-count: lint/compliance_probes.py probe_design grades "screens named" by route count, so a shoot.json with one route passes when an app has three views.
