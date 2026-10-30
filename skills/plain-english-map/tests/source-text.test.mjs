@@ -234,7 +234,7 @@ test('import reader: importTargets keeps the type filter in a `.tsx` file whose 
   assert.deepEqual(importTargets('src/a.tsx', src, TRACKED, { types: false }), ['src/y.ts']);
 });
 
-// With the apostrophe on its own line, the string ends at the line break and the import below is read.
+// With the apostrophe on its own line, the string ends at the line break and the import below is read. JSX reading must keep this read.
 test("import reader: importTargets finds an import below the line of an apostrophe in JSX text", () => {
   const src = "const el = <p>Don't</p>;\nimport { v } from './x.ts';\nconst f = <p>It's</p>;\n";
   assert.deepEqual(importTargets('src/a.tsx', src, TRACKED), ['src/x.ts']);
