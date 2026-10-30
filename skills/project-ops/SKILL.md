@@ -53,11 +53,13 @@ that triage or the batch runner writes for its successor.
    required checks from this protection, so keep `merge.requiredChecks` at `"protection"`.
 7. **Report** the record branch, the files written, the protection set, and each placeholder the owner must still fill.
 
-## The roadmap page
+## The roadmap block
 
-`skills/roadmap` is the one home for building and publishing the page, for any checkout. This
-skill keeps no copy. Its `SKILL.md` says how to build and what `--live` passes. The scaffolded
-`roadmap/README.md` (`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.
+`skills/roadmap` is the one home for building the roadmap block, for any checkout. This skill
+keeps no copy. Its `SKILL.md` says how to build (`--block`) and what `--live` passes. The build
+publishes nothing: the waiting-page writer splices the block into the repo's one page and alone
+publishes it (skill `waiting-page`). The scaffolded `roadmap/README.md`
+(`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.
 An adopting repo keeps its record in `roadmap/data/` on the record branch, and the builder
 reads it there.
 

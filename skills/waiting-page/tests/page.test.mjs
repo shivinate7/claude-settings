@@ -2571,6 +2571,124 @@ test("the document title names the open tab: <repo>: Questions, then <repo>: Sta
   assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
 });
 
+// ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)
+// The rail's current phase carries a dot, so its name has the least room. From 320 to 540px of page
+// width, in light and dark, with each of the five real phases (Clean up, Organize, Design, Roll out,
+// Later) current in turn: no phase name may break inside a word, and the dot may not sit alone on a line
+// below its name (design notes, item 16: 5 columns only while each name with the dot sits on one line).
+// The sweep must cross the rail's change from 3 to 5 columns, or it pins nothing about where that change
+// sits. Each word is measured with a Range: more than one client rect is a word on two lines. The dot is
+// alone when its top is at or below the bottom of its name's last text line. The width is swept on one
+// page with setViewportSize, so the rail re-lays out as it does when a phone turns or a window is dragged.
+// The web fonts are blocked, so the rail is set in whatever fallback font the runner has, and a threshold
+// that holds for that font may fail in a wider one. So each case runs twice: in the runner's own font, and
+// with the page's --body forced to "DejaVu Sans", a wide font that the ubuntu CI images ship. The forced
+// run proves the font applied (installed, set on the rail, measured in the rail), and fails, never skips,
+// when it did not. The range reaches 540px so a threshold that rises for the wide font still shows 5 columns.
+
+const RAIL_WIDTHS = Array.from({ length: 540 - 320 + 1 }, (_, i) => 320 + i);
+const RAIL_FONTS = [{ label: "default", force: null }, { label: "DejaVu Sans", force: "DejaVu Sans" }];
+const RAIL_PHASES = [["cleanup", "Clean up"], ["organize", "Organize"], ["design", "Design"], ["rollout", "Roll out"], ["later", "Later"]];
+// Overrides --body on the page (the rail sets its text with var(--body)); the !important beats the :root rule.
+const forceRailFont = (page, family) => page.addStyleTag({ content: `:root { --body: "${family}", sans-serif !important; }` });
+// Measures "Organize" (a word of the rail) as the rail sets it, and again in a probe span with the same
+// weight and size but a named family. An installed family measures the same with a serif or a monospace
+// fallback; a missing one does not. The "no such font" pair shows the probe tells two fallbacks apart on
+// this runner.
+const railFontProbe = (page, family) => page.evaluate((family) => {
+  const nm = [...document.querySelectorAll(".prail .nm > span:first-child")].find((s) => s.textContent === "Organize");
+  const cs = getComputedStyle(nm);
+  const range = document.createRange();
+  range.selectNodeContents(document.createTreeWalker(nm, NodeFilter.SHOW_TEXT).nextNode());
+  const width = (fam) => {
+    const s = document.createElement("span");
+    s.textContent = "Organize";
+    s.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;letter-spacing:${cs.letterSpacing};font:${cs.fontWeight} ${cs.fontSize} ${fam}`;
+    document.body.append(s);
+    const w = s.getBoundingClientRect().width;
+    s.remove();
+    return w;
+  };
+  return {
+    family: cs.fontFamily, rail: range.getBoundingClientRect().width,
+    namedSerif: width(`"${family}", serif`), namedMono: width(`"${family}", monospace`),
+    noneSerif: width('"No Such Font 7f3a", serif'), noneMono: width('"No Such Font 7f3a", monospace'),
+  };
+}, family);
+const assertRailFont = async (page, family) => {
+  const f = await railFontProbe(page, family);
+  assert.ok(f.family.startsWith(`"${family}"`), `the rail's font-family is ${f.family}, not "${family}": the forced font did not reach the rail`);
+  assert.notEqual(f.noneSerif, f.noneMono, "the font probe cannot tell a serif fallback from a monospace one on this runner");
+  assert.ok(Math.abs(f.namedSerif - f.namedMono) < 0.01, `"${family}" is not installed on this runner (the probe fell back to another font), so this sweep would prove nothing about it`);
+  assert.ok(Math.abs(f.rail - f.namedSerif) < 0.05, `the rail sets "Organize" ${f.rail}px wide, but "${family}" sets it ${f.namedSerif}px: the rail is not rendered in the forced font`);
+};
+const railWords = (page) => page.evaluate(() => {
+  const words = [], split = [];
+  let dotAlone = false;
+  for (const nm of document.querySelectorAll(".prail .nm > span:first-child")) {
+    const walk = document.createTreeWalker(nm, NodeFilter.SHOW_TEXT);
+    let lastBottom = -Infinity;
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      for (const m of n.textContent.matchAll(/\S+/g)) {
+        const r = document.createRange();
+        r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        words.push(m[0]);
+        const rects = r.getClientRects();
+        if (rects.length > 1) split.push(m[0]);
+        for (const q of rects) lastBottom = Math.max(lastBottom, q.bottom);
+      }
+    }
+    const dot = nm.querySelector(".here");
+    if (dot && dot.getBoundingClientRect().top >= lastBottom) dotAlone = true;
+  }
+  const rail = document.querySelector(".prail");
+  return { words, split, dotAlone, cols: getComputedStyle(rail).gridTemplateColumns.split(" ").length, box: Math.round(rail.getBoundingClientRect().width) };
+});
+// "372-380px Organize current: dot alone on a line": the widths of each kind of hit as runs.
+const hitRuns = (hits) => {
+  const byKey = new Map();
+  for (const { w, key } of hits) byKey.set(key, [...(byKey.get(key) || []), w]);
+  return [...byKey].map(([key, ws]) => {
+    const runs = [];
+    for (const w of ws) { const last = runs[runs.length - 1]; if (last && last[1] === w - 1) last[1] = w; else runs.push([w, w]); }
+    return runs.map(([a, b]) => (a === b ? a : a + "-" + b) + "px").join(", ") + " " + key;
+  }).join("; ");
+};
+
+for (const scheme of ["light", "dark"]) {
+  for (const [phase, name] of RAIL_PHASES) {
+    for (const font of RAIL_FONTS) {
+      test(`no phase name breaks inside a word or leaves its dot alone at any page width from 320 to 540px, ${name} current, ${scheme} theme, ${font.label} font`, async (t) => {
+        const page = await open(t, { pageHtml: mergedPage("--current", phase), viewport: { width: RAIL_WIDTHS[0], height: 900 }, scheme }); if (!page) return;
+        if (font.force) await forceRailFont(page, font.force);
+        await openStatus(page);
+        assert.equal(await page.locator(".prail > button").count(), 5, "the rail does not hold the five phases");
+        assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+        assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), name, "the current phase is not " + name);
+        if (font.force) await assertRailFont(page, font.force);
+        const hits = [], cols = new Set();
+        for (const w of RAIL_WIDTHS) {
+          await page.setViewportSize({ width: w, height: 900 });
+          const m = await railWords(page); // the reads force a layout, so the container queries have resolved
+          assert.deepEqual(m.words, ["Clean", "up", "Organize", "Design", "Roll", "out", "Later"], `${w}px: the rail's words`);
+          cols.add(m.cols);
+          for (const word of m.split) hits.push({ w, key: `${name} current, ${font.label} font: "${word}" breaks inside the word`, box: m.box });
+          if (m.dotAlone) hits.push({ w, key: `${name} current, ${font.label} font: dot alone on a line`, box: m.box });
+        }
+        assert.deepEqual([...cols].sort(), [3, 5], "the sweep does not cross the rail's change from 3 to 5 columns, so it pins no threshold; columns seen: " + [...cols]);
+        assert.equal(hits.length, 0, `the rail breaks at ${hits[0] && hits[0].w}px page width (rail box ${hits[0] && hits[0].box}px), ${hits[0] && hits[0].key}; every hit: ${hitRuns(hits)}`);
+      });
+    }
+  }
+}
+
+test("merged_page.py refuses --current with --no-roadmap, since a repo with no roadmap has no current phase", () => {
+  const r = spawnSync(process.env.PYTHON || "python3", [MERGED, "--page", PAGE, "--no-roadmap", "--current", "organize"], { encoding: "utf8" });
+  assert.equal(r.status, 2, "exit status of the refusal: " + r.status);
+  assert.match(r.stderr, /--current needs a roadmap/);
+  assert.equal(r.stdout, "", "the refusal printed a page");
+});
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
