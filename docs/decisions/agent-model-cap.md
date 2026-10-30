@@ -7,7 +7,7 @@ Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's grant for that spawn.
 An audit Explore may run Opus on the owner's grant, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level grant and date, see its row). Any other spawn
 runs Opus only when the owner names it. A lane session or an arbiter session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
-claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows: an Agent
+claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling: an Agent
 or Task spawn that sets model opus asks, unless Plan, Explore, designer, design-reviewer or a builder's `Round 3 of 3` covers it.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
@@ -77,24 +77,15 @@ spot-checks findings before it acts on an audit.
 `lint/check_skill_model_rows.py` fails CI when a skill under `skills/` has no row, or a row names a
 missing skill. A skill's model is the model of the session that calls it.
 
-Reason the ceiling stays an ask: Claude Code emits no rank over models. A permission prompt cannot time out, so the guard allows Opus at round 3 and the owner's grant stays prose. The role row below denies a rank above the row. It ranks the three aliases `haiku`, `sonnet` and `opus` by substring, as the floor does. It reads each row live from this record, so it holds no copy of the table.
+Reason for prose alone at the ceiling: Claude Code emits no rank over models. A rank in a hook copies a
+list (`building-allow-list-is-the-constant`) and goes stale the day a model ships. A permission prompt
+cannot time out, so the guard allows Opus at round 3 and the owner's grant stays prose.
 
 **The floor.** Every role but the five Haiku roles has Sonnet as the floor. `HAIKU_ROLES` in
 `hooks/guard.py` is the one list. Guard rule `agent-model-floor` refuses an `Agent`, `Task`, `Workflow`
 `agent()` or `start_session` call whose `model` holds "haiku", unless the role is a Haiku role.
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
-
-**The role row.** Guard rule `agent-role-model` reads this table at each `Agent` or `Task` spawn, from the pointer checkout (the one `~/.claude/CLAUDE.md` names; `role_model_table` in `hooks/guard.py` is the one reader). A row names a role in its first cell and a model in the first word of its second cell. A first cell that holds more than role words (a qualifier such as `reviewer, rounds 2 and 3`, a skill, a hook) names no role, and the first row for a role wins.
-- A spawn that names a model above its role's row is denied, with the remedy "drop the model field, or name the role's model". Ranks run haiku, sonnet, opus. A role with no row passes.
-- Exempt: Explore, a reviewer whose brief holds a `Round 2 of 3` or `Round 3 of 3` marker (the same marker scan as the step-up), and every Opus spawn, which the ask above judges. Two points are unruled: the Explore exemption and the refusal of a reviewer's round 1 on sonnet. `ROLE_ABOVE_ROW_ROLES` and `ROLE_REVIEWER_FREE_ROUNDS` in `hooks/guard.py` each flip one.
-- A spawn that names no model is denied under two conditions. `CLAUDE_CODE_SUBAGENT_MODEL` is unset or empty in the guard's environment. No `agents/*.md` file in the pointer checkout names the role with a `model:` pin in its frontmatter. A spawn with no role counts as general-purpose. The remedy is "name the role's model", with the row's model beside it unless the row is haiku.
-- With no pointer checkout the rule stands down and logs nothing. A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one `agent-role-model-unread` line, which `lint/guard_log_report.py` counts as a note for that rule.
-- No override lifts it (`owner-override`, the model guards).
-
-Cost: one read of this record per spawn. A spawn with no model adds one read of the agent files. No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
-
-Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` has no pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
