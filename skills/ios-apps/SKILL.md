@@ -20,7 +20,7 @@ ios-adblock). Not q_max, banchi or joyous, which ship none.
 | Swift language mode | 6.0 in the project, and `swift-tools-version` 6 or later in each package, with no language mode 5. | `swift 6` |
 | Lowest iOS | iOS 26, unless a phone that must run the app is older. Write the reason in the repo either way. | by hand |
 | Fast checks on every PR | CI on the pinned `macos-26` image (or a larger runner of it) runs the package tests and compiles every app on each pull request. It skips drafts and docs-only changes. | `ci runner`, `ci checks` |
-| Slow tests (UI, full suite) | Once per batch, on the Mac, through `make native-check`. Its UI tests run through the shared `sim-test`, never in CI. | `slow tests` |
+| Slow tests (UI, full suite) | Once per batch, on the Mac, through `make native-check`. Its UI tests run through the shared `sim-test`, never in CI. `sim-test` passes `-collect-test-diagnostics never`, so a failed test starts no diagnose. | `slow tests`, `test diagnostics` |
 | Colours and spacing | One `tokens/tokens.json` per app. The Swift is generated from it, never typed by hand, and CI checks that it is current. | by hand |
 | Test style | Swift Testing for new tests, XCTest for UI tests. Old tests stay as they are. | by hand |
 
