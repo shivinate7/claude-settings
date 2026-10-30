@@ -32,7 +32,8 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 When the owner names the wrong tier, or brings work that belongs to another tier, the session
 says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
 
-A coordinator may work in another repo, by handoff or by its own lane PR there. Before it acts,
+A coordinator's work in another repo is compliance only, by handoff or by its own lane PR in that repo
+(claude-settings decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
 it checks whether that repo has an active coordinator: a live session tagged both
 `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`. It reads every page of
 `list_sessions` and filters the tags itself. If one is active, it coordinates with it.
@@ -59,8 +60,8 @@ parent, or miss a message while busy.
      those pages.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
   3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
-     `role-handoff.md`, with that time. The file names each wait it handed over, each open
-     waiting-page item, and each page to watch. It runs
+     `role-handoff.md`, with that time. The file names each wait it handed over, the home of
+     the open waiting-page items (the items collection, by URL, never each item), and each page to watch. It runs
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from
@@ -86,6 +87,8 @@ parent, or miss a message while busy.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   It ends each turn that leaves work in flight with a timed check-in, so a lost wake costs one gap.
+- A check-in's message names the home of each list it tracks (a page collection, a roadmap ref, a git
+  ref or a GitHub query), never a copy.
 
 ## Filing
 
