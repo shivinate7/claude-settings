@@ -44,11 +44,13 @@ The handoff holds these sections, in this order:
   `- P1 [ruling|measured|read|notes|assumed] <statement>. Source: <where>. Checked <date or never>.`
   The kinds and what each means: docs/decisions/premise-format.md. A fact with no source is
   `assumed`.
-- Where things stand: the branch, the head commit, open PRs, and their CI state.
+- Where things stand: the branch, the head commit, and the GitHub query for its open PRs and their CI state.
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
 - Next steps.
 - The files and commands that matter.
+
+For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
 
 ## 5. Check premises
 

@@ -38,6 +38,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
+  - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
+    The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
+    `home` the ruling's record id, `pick` the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
+    The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item stays hidden.
+    A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
+    the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
+    current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
     ranked items, oldest first. A group sits together at its best member's `rank`.
@@ -127,7 +134,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     whichever more of its pixels stand out on. A square icon reads best: a wide one shrinks to fit
     the 22px slot. The page never fetches a URL; any other value keeps the letter.
 
-The page hides an item with status `closed`. It shows an item as answered, in place, when
+The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered, in place, when
 `answers/<id>` exists: a green edge and the badge "Answered, filing pending" or "Answered, filed
 in <home>", never "waited". It stays on the page until the owning session closes the item.
 
@@ -136,7 +143,7 @@ in <home>", never "waited". It stays on the page until the owning session closes
 Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
 project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
-into `meta/page`.
+into `meta/page`. The writer watches the page ("Read the answers").
 
 - Every other session sends its question to the writer, which writes the item. A lane's question
   reaches the writer through its report to its orchestrator ("Add an item", step 0).
@@ -232,7 +239,7 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
    item in the reply, in one line. Give the page URL for an open item only: the page hides a closed
-   item. The owner already saw the question in chat, so open no new question box. A box stops the
+   item, except an arbiter ruling. The owner already saw the question in chat, so open no new question box. A box stops the
    session until the owner answers. Running work continues with no one to brake it. You may end the
    turn: each agent's end wakes the session.
 4. Keep working on what does not depend on the answer.
@@ -248,8 +255,13 @@ writer adds the answer and its time to the item's `context`, and the owning sess
 closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
 
-- A session that adds an item watches the page: `ArtifactComments` action `watch` with the page
-  URL. It stops watching when it has no open item: `ArtifactComments` action `watch` with `on: false` and the page URL.
+- A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
+  adds an item, takes the writer role, or inherits open items. A writer gets the URL from
+  `meta/page`, or from the `Watch:` line of the project-ops role handoff
+  (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
+  items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
+  It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
+  has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
@@ -276,8 +288,10 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
   answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
   `+`, in rank order when `ranked`.
+- `choice: "overturn"` is clear on an arbiter ruling only (an item with `arbiter: true`). It means the owner
+  overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
-  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`. On a `multi` item,
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`, or `overturn` on an arbiter ruling. On a `multi` item,
   `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
   A list on a pick-one item, or a string other than `none` on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
@@ -286,7 +300,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 
 ## Route and close
 
-Sort the answer first. A `none` answer takes step 3 only. A task answer with no `done` is a question
+Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
@@ -309,6 +323,15 @@ item and leaves it open until the lane takes the answer. Then it closes the item
    enough to write them, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
+5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
+   - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
+   - A new `pick` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
+     recommendation.
+   - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
+     "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
+     guard refuses an update with `kind` `decision` and `context` that lacks it.
+
+   Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
 ## Make a repo's page
 
