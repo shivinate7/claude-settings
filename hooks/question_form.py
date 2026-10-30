@@ -264,8 +264,8 @@ COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<")
 # A shell line in a step's backtick span or fence: it chains with an operator, or its first word is a
-# program the owner would run or a Verb-Noun cmdlet, with at least one more word. A lone backticked
-# word (`main`) or a file name is not a shell line.
+# program the owner would run or a Verb-Noun cmdlet. Any other backticked word (`main`) or a file name
+# is not a shell line.
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo"))
@@ -333,8 +333,8 @@ def _command_ok(command) -> bool:
 
 def _code_spans(text) -> list:
     """Each backtick span and fenced block in `text`, read in one pass. A run of n backticks opens a
-    span that the next run of exactly n closes; a run with no closer is plain text, so a lone
-    backtick never swallows the rest. A fence's first line is its info string and is dropped."""
+    span that the next run of exactly n closes, as Markdown pairs them; a run with no closer is plain
+    text. A fence's first line is its info string and is dropped."""
     spans, i, end = [], 0, len(text)
     while i < end:
         if text[i] != "`":
@@ -372,7 +372,7 @@ def _shell_line(span) -> bool:
         words = line.split()
         if SHELL_OPERATOR.search(line):
             return True
-        if len(words) >= 2 and (words[0] in SHELL_PROGRAMS or SHELL_CMDLET.fullmatch(words[0])):
+        if words and (words[0] in SHELL_PROGRAMS or SHELL_CMDLET.fullmatch(words[0])):
             return True
     return False
 
