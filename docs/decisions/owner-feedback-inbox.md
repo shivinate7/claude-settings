@@ -8,7 +8,16 @@ capture (owner, 2026-10-26 20:57 CDT, option A). Reason: a session acted on the 
 and lost the rest, and the old `fb` and `fb done` words were easy to forget.
 
 - **Capture.** The UserPromptSubmit hook appends each owner message verbatim, with its Central time,
-  to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git.
+  to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git. A note typed on a
+  waiting-page card is captured the same way (owner, 2026-10-26 20:57 CDT, option C). A PostToolUse
+  hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get` of `answers` only: the routing
+  session's re-read of `answers/<id>`, so an undone or withdrawn answer is never saved. Each answer
+  whose `data.note` is non-empty and not `accepted pick` is appended as one block, stamped with the
+  answer's `at` in Central, with the one-line text `Waiting page note, item <n> (<item>): <note>`.
+  The label adds no line, so a lone note is no burst. The file `<session_id>.inbox.pagenotes` holds
+  one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
+  start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
+  the inbox and the key file. A failed save tells the session to jot the note by hand.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Messages from other sessions are
   not captured.
