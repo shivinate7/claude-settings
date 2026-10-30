@@ -81,11 +81,16 @@ const insertCore = (dir, lines) => {
   write(dir, CORE, all.join('\n'));
 };
 
-/** Adds a tracked code file with its map line and its fact lines (each `prose — cite`), to a scratch repository. */
-const addCode = (dir, rel, body, facts = []) => {
+/** Adds a tracked file, with no map line, to a scratch repository. `git add -N` lists it for `git ls-files`. */
+const addFile = (dir, rel, body) => {
   mkdirSync(dirname(join(dir, rel)), { recursive: true });
   write(dir, rel, body);
   gitIn(dir, 'add', '-N', rel);
+};
+
+/** Adds a tracked code file with its map line and its fact lines (each `prose — cite`), to a scratch repository. */
+const addCode = (dir, rel, body, facts = []) => {
+  addFile(dir, rel, body);
   insertCore(dir, [`- \`${rel}\` — Holds the test values of this case.`, ...facts.map((f) => `  - ${f}`)]);
 };
 
@@ -145,6 +150,19 @@ const pyShim = () => {
 };
 const starts = (log) => readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
 
+/** A folder with a git first on PATH. The shim logs each `ls-files` start, then runs the real git. */
+const lsFilesShim = () => {
+  const real = (process.env.PATH ?? '').split(delimiter).map((d) => join(d, 'git')).find((p) => existsSync(p));
+  assert.ok(real, 'git must be on PATH for the cost case');
+  const bin = tmpFolder('pemap-gitshim-');
+  const log = join(bin, 'ls-files.log');
+  const sh = join(bin, 'git');
+  writeFileSync(sh, '#!/bin/sh\ncase "$*" in *ls-files*) echo ls-files >> "$LS_FILES_LOG";; esac\nexec "$LS_FILES_REAL" "$@"\n');
+  chmodSync(sh, 0o755);
+  writeFileSync(log, '');
+  return { log, env: { PATH: `${bin}${delimiter}${process.env.PATH}`, LS_FILES_LOG: log, LS_FILES_REAL: real } };
+};
+
 // ---- Step 2: the fact-line parser and the home lines ----
 
 test('F2a. factLines reads a value fact and a uses fact, with their line, parent map line, prose and cite', async () => {
@@ -169,11 +187,18 @@ test('F2a. factLines reads a value fact and a uses fact, with their line, parent
   ]);
 });
 
-test('F2b. a list line with no indent is no fact line, and an indented line that starts with a backtick is a map line', async () => {
+test('F2b. an unindented list line with a value cite is a fact line outside its map line, so MAP9 fails; an indented line that starts with a backtick is a map line', async () => {
   const { factLines, mapCodePaths } = await checkExports('factLines', 'mapCodePaths');
   const text = ['- `lint/find_copies.py` — Lists the copies.', '- Prose only — `MIN_LINES = 12`', '  - `lint/other.py` — Lists more.', ''].join('\n');
   assert.deepEqual(factLines(text), []);
   assert.deepEqual(mapCodePaths(text, /\.py$/), ['lint/find_copies.py', 'lint/other.py']);
+  const dir = scratchRepo();
+  insertCore(dir, ['- Prose only — `MIN_LINES = 12`']);
+  const r = check(dir);
+  const at = `${CORE}:${lineOf(dir, CORE, 'Prose only')}`;
+  const line = mapLine(r.out);
+  assert.match(line, /^\[FAIL\] MAP9/, `MAP9 must fail on a fact line outside its map line\n${out1500(r)}`);
+  assert.ok(line.includes(at) && line.includes('a fact line sits indented under a map line'), `MAP9 must name ${at} and say the fact line sits outside its map line\n${line}`);
 });
 
 test('F2c. mapCodePaths counts no fact line as a map line, even when the cite names a tracked file', async () => {
@@ -551,4 +576,153 @@ test('C2. cost: a map with 5 Python facts across 3 files starts python3 exactly 
   // The scope first: the five facts are read on this run, so MAP9 passes and the one start is the read of them.
   assert.equal(verdicts(r.out), expected(), `all five facts must read and pass\n${out1500(r)}`);
   assert.equal(starts(shim.log), 1, `python3 must start once for the whole run, and it started ${starts(shim.log)} time(s)`);
+});
+
+// ---- MAP9 cases: a uses symbol is a real reference, a fence hides nothing, numbers, a scalar cite, shell strings, git starts ----
+
+/** origin/main 997b849e: one map-check run on the fixture starts `git ls-files` this many times (measured with a logging git on PATH). */
+const MAIN_LS_FILES_STARTS = 13;
+const READER_LINES = ['- `src/reader.mjs` — Picks the code of an entry.', '  - It reads the code field. — `uses src/import-reader.mjs:code`'];
+
+test('V1a. uses: a file that holds only e.code, and imports the reader, never uses code, so MAP9 fails and says so', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addFile(dir, 'src/import-reader.mjs', 'export const other = 1;\n');
+  addFile(dir, 'src/reader.mjs', "import { other } from './import-reader.mjs';\nexport const pick = (e) => other + e.code;\n");
+  insertCore(dir, READER_LINES);
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
+  assert.match(mapLine(r.out), /never uses code/, 'MAP9 must say the file never uses the symbol');
+});
+
+test('V1b. uses: a file that holds code as a name of its own, and imports the reader, passes MAP9', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addFile(dir, 'src/import-reader.mjs', 'export const other = 1;\n');
+  addFile(dir, 'src/reader.mjs', "import { other } from './import-reader.mjs';\nconst code = 1;\nexport const pick = () => other + code;\n");
+  insertCore(dir, READER_LINES);
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('V1c. uses in Python: job.run on an object is no use of run from the module, so MAP9 fails and says so', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addFile(dir, 'src/_nowindow.py', 'def run(cmd):\n    return cmd\n');
+  addFile(dir, 'src/launcher.py', 'import _nowindow\n\n\ndef go(job):\n    return job.run()\n');
+  insertCore(dir, ['- `src/launcher.py` — Starts a job.', '  - It runs the no-window run. — `uses src/_nowindow.py:run`']);
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
+  assert.match(mapLine(r.out), /never uses run/, 'MAP9 must say the file never uses the symbol');
+});
+
+test('V1d. uses in Python: _nowindow.run after import _nowindow is a use of run, so MAP9 passes', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addFile(dir, 'src/_nowindow.py', 'def run(cmd):\n    return cmd\n');
+  addFile(dir, 'src/launcher.py', "import _nowindow\n\n\ndef go():\n    return _nowindow.run('x')\n");
+  insertCore(dir, ['- `src/launcher.py` — Starts a job.', '  - It runs the no-window run. — `uses src/_nowindow.py:run`']);
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('V2. an unclosed fence in a docs/map page hides no later fact line: a fact line after it that disagrees fails the check', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  const tail = '\n```\n\n  - Waits 40 s. — `src/retry.py: RETRY_WAIT_S = 30`\n';
+  write(dir, CORE, `${read(dir, CORE).replace(/\n*$/, '\n')}${tail}`);
+  const r = check(dir);
+  const at = `${CORE}:${lineOf(dir, CORE, 'Waits 40 s.')}`;
+  assert.notEqual(r.status, 0, `the command must exit non-zero\n${out1500(r)}`);
+  assert.ok(/unclosed/.test(r.out) || mapLine(r.out).includes(at), `MAP9 must read the fact line ${at}, or the unclosed fence must fail\n${out1500(r)}`);
+});
+
+test('V3a. a bare number is a digit token: python3 and sha256 in a map line are no bare number, so MAP9 passes', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addCode(dir, 'src/timing.py', 'TIMEOUT_S = 5\n');
+  edit(dir, CORE, 'Holds the test values of this case.', 'Waits on python3 and sha256 checks.');
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('V3b. a bare number is a digit token: 40s and 40 s in map lines are bare numbers, so MAP9 fails at each line', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addCode(dir, 'src/timing.py', 'TIMEOUT_S = 5\n');
+  edit(dir, CORE, 'Holds the test values of this case.', 'Waits 40s.');
+  addCode(dir, 'src/pause.py', 'PAUSE_S = 5\n');
+  edit(dir, CORE, 'Holds the test values of this case.', 'Waits 40 s.');
+  const r = check(dir);
+  const line = mapLine(r.out);
+  assert.match(line, /^\[FAIL\] MAP9/, `MAP9 must fail on a bare number\n${out1500(r)}`);
+  for (const needle of ['Waits 40s.', 'Waits 40 s.']) {
+    const at = `${CORE}:${lineOf(dir, CORE, needle)}`;
+    assert.ok(line.includes(at), `MAP9 must name the map line ${at}\n${line}`);
+  }
+});
+
+test('V4a. a scalar string cite: the prose must name the cited value, so prose that names sonnet while the cite says haiku fails', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addCode(dir, 'src/model.py', 'MODEL = "haiku"\n', ['The job runs the sonnet model. — `MODEL = "haiku"`']);
+  const r = check(dir);
+  const at = `${CORE}:${lineOf(dir, CORE, 'runs the sonnet model')}`;
+  const line = mapLine(r.out);
+  assert.match(line, /^\[FAIL\] MAP9/, `MAP9 must fail\n${out1500(r)}`);
+  assert.ok(line.includes(at), `MAP9 must name the fact line ${at}\n${line}`);
+  assert.ok(line.includes('haiku'), `MAP9 must name the cited value haiku\n${line}`);
+});
+
+test('V4b. a scalar string cite: prose that names haiku, the cited value, passes MAP9', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addCode(dir, 'src/model.py', 'MODEL = "haiku"\n', ['The job runs the haiku model. — `MODEL = "haiku"`']);
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('V6a. a prose number is compared as written: prose 3.1 with cite 3.10 fails, because the two numbers differ as written', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addCode(dir, 'src/gap.py', 'GAP_S = 3.10\n', ['The gap is 3.1 s. — `GAP_S = 3.10`']);
+  const r = check(dir);
+  const at = `${CORE}:${lineOf(dir, CORE, 'The gap is 3.1 s.')}`;
+  const line = mapLine(r.out);
+  assert.match(line, /^\[FAIL\] MAP9/, `MAP9 must fail\n${out1500(r)}`);
+  assert.ok(line.includes(at), `MAP9 must name the fact line ${at}\n${line}`);
+  for (const s of ['3.1', '3.10']) assert.ok(line.includes(s), `MAP9 must name ${s}\n${line}`);
+});
+
+test('V6b. a prose number is compared as written: prose 3.10 with cite 3.10 passes MAP9', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addCode(dir, 'src/gap.py', 'GAP_S = 3.10\n', ['The gap is 3.10 s. — `GAP_S = 3.10`']);
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('V7a. the regex reader on a shell file: a full-line # comment that holds a block opener or a template opener hides no value, so X=30 reads 30', async () => {
+  const { readValues } = await readersModule();
+  // The scanner reads C-style comments. Without the full-line `#` blank first, the `/*` and the backtick would run on to the closers below.
+  const dir = scratchFiles({ 'scripts/run.sh': '#!/bin/sh\n# a /* opens no block comment here\nX=30\nNOTE="*/"\n# a ` opens no template here\nNOTE2="`"\n' });
+  const [r] = readValues([{ file: 'scripts/run.sh', symbol: 'X' }], dir);
+  assert.deepEqual(r, { file: 'scripts/run.sh', symbol: 'X', ok: true, value: 30 });
+});
+
+test('V7b. the regex reader on a shell file: a double-quoted string over three lines holds no value, so the X=99 in it is text and X=30 reads 30', async () => {
+  const { readValues } = await readersModule();
+  const dir = scratchFiles({ 'scripts/run.sh': 'X=30\nNOTE="\nX=99\n"\n' });
+  const [r] = readValues([{ file: 'scripts/run.sh', symbol: 'X' }], dir);
+  assert.deepEqual(r, { file: 'scripts/run.sh', symbol: 'X', ok: true, value: 30 });
+});
+
+test('V8. cost: one map-check run starts git ls-files no more often than origin/main does, which is 13 times', POSIX_ONLY, () => {
+  needFile('scripts/map-check.mjs');
+  const shim = lsFilesShim();
+  const dir = scratchRepo();
+  const r = run([CHECK], dir, undefined, shim.env);
+  assert.equal(verdicts(r.out), expected(), `every check must pass, so every check reads the tree\n${out1500(r)}`);
+  const n = starts(shim.log);
+  assert.ok(n <= MAIN_LS_FILES_STARTS, `git ls-files must start at most ${MAIN_LS_FILES_STARTS} times, as on origin/main, and it started ${n} times`);
 });
