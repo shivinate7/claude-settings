@@ -170,8 +170,8 @@ def sh_doc(text):
     return flat(" ".join(block))
 
 
-def frontmatter_description(text):
-    """The `description` value of a SKILL.md frontmatter: plain, quoted, or a > or | block."""
+def frontmatter_description(text, key="description"):
+    """The `key` value of a frontmatter that starts at line 1: plain, quoted, or a > or | block."""
     lines = text.split("\n")
     if not lines or lines[0].rstrip() != "---":
         return ""
@@ -183,7 +183,7 @@ def frontmatter_description(text):
     else:
         return ""  # never closed: no frontmatter
     for i, line in enumerate(front):
-        found = re.match(r"description:[ \t]*(.*)$", line)
+        found = re.match(re.escape(key) + r":[ \t]*(.*)$", line)
         if not found:
             continue
         rest = []
@@ -617,22 +617,6 @@ def block_gist(block):
     return sentence(flat(re.sub(r"(?m)^[ \t]*>[ \t]?", "", raw)))
 
 
-def frontmatter_title(text):
-    """The `title:` of a `---` block that starts at line 1, one pair of matching quotes dropped, else "".
-    A plain line parse, so `//`, `#` and a lone quote stay text."""
-    lines = text.split("\n")
-    if lines[0].rstrip() != "---":
-        return ""
-    for line in lines[1:]:
-        if line.rstrip() == "---":
-            break
-        found = re.match(r"title:[ \t]*(.*?)[ \t]*$", line)
-        if found:
-            title = found.group(1)
-            return title[1:-1].strip() if len(title) > 1 and title[0] == title[-1] and title[0] in "\"'" else title
-    return ""
-
-
 def decision_gist(text):
     """The first block under `## Ruling` or `## The ruling`, else under `## The question`, else the first paragraph
     under the H1, else the H1 text, else the frontmatter title."""
@@ -664,7 +648,7 @@ def decision_gist(text):
     for i, block in enumerate(found):
         if block[1] == "heading" and level(i) == "#":
             return under(i) or flat(raw_of(block))
-    return frontmatter_title(text)
+    return frontmatter_description(text, "title")
 
 
 def debt_gist(text):
