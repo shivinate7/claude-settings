@@ -723,7 +723,7 @@ jobs:
         run: python3 hooks/test_call_judge.py
 
       - name: Question form fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_question_form.py
 
       - name: Remove-prompt answer fixture suite
@@ -1227,7 +1227,7 @@ jobs:
         run: python hooks/test_call_judge.py
 
       - name: Question form fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_question_form.py
 
       - name: Remove-prompt answer fixture suite
