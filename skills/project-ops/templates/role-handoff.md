@@ -9,11 +9,14 @@ From "<old session title>" at <the limit hit, or the slip>. Checked: main <commi
 
 ## State
 
-<What merged, what is in flight, each wait handed over and to whom, and the work order now, in words.>
+<What merged, what is in flight, and the work order now, in words. For each list (open items,
+waits), the home of the list: a page collection, a roadmap ref, a git ref or a GitHub query. Add only
+the items that have no home, each with whom it is handed to. Never copy a list that has a home.>
 
 ## Deferred for the owner
 
-<Each deferred step, and why. Do not ask.>
+<The home of the list of deferred steps: a page collection, a roadmap ref, a git ref or a GitHub
+query. Add only a deferred step that has no home, and why. Do not ask. Never copy the list.>
 
 ## Traps seen
 
@@ -27,10 +30,11 @@ Watches stopped at <time>
 answered each comment still open at that time, then wrote this file. The successor watches
 each one at once, and reads its comments since that time.>
 
-Open items: <n, ...> or none
+Open items: <items collection URL> or none
 
-<The number of each waiting-page item this role owns that is still open, or `none`. The successor
-rewrites `owner` on each one to itself.>
+<The URL of the page's items collection, where each open item this role owns is listed, or `none`.
+Never copy item ids here: a copy goes stale. The successor rewrites `owner` on each open item in
+that collection to itself.>
 
 Watch: <page URL>
 
