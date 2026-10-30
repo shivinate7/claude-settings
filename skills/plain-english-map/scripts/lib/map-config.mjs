@@ -22,7 +22,7 @@ export const boundSeamReader = () => seamReader;
 export const OPTIONAL_KEYS = Object.freeze(['screenKeys', 'modelSeam', 'workerStage', 'migrationsDir']);
 
 /** The map format this skill reads and writes. `map.config.json` holds `formatVersion`, and a missing key means version 1. Raise it with one step in `map-upgrade.mjs`. */
-export const MAP_FORMAT_VERSION = 2;
+export const MAP_FORMAT_VERSION = 3;
 
 /** The format version of a parsed config. A value that is no whole number, or a version newer than the skill, is an error. It never answers a version the skill cannot read. */
 export const readFormatVersion = (cfg) => {
@@ -74,7 +74,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
   if (!isObject(cfg)) bad('is not an object: the top level must be a JSON object');
   // The version first: a newer map may hold keys this skill does not know, and the refusal must say "update the skill", not "unknown key".
   if (readFormatVersion(cfg) < MAP_FORMAT_VERSION) bad(`"formatVersion" is ${readFormatVersion(cfg)}, and this skill reads version ${MAP_FORMAT_VERSION}. Run node <skill>/scripts/map-upgrade.mjs from the repository root, then run this command again.`);
-  known(cfg, ['formatVersion', 'title', 'codeExtensions', ...OPTIONAL_KEYS, 'requireAllKeys']);
+  known(cfg, ['formatVersion', 'title', 'codeExtensions', 'mapPaths', ...OPTIONAL_KEYS, 'requireAllKeys']);
   text(cfg, 'title', 'title');
   if ('requireAllKeys' in cfg && typeof cfg.requireAllKeys !== 'boolean') bad('"requireAllKeys" must be true or false');
   // With the flag on, a left-out optional key is an error, so a deleted key goes red and never skips in silence.
@@ -82,6 +82,17 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
   if (!Array.isArray(cfg.codeExtensions) || !cfg.codeExtensions.length || cfg.codeExtensions.some((e) => typeof e !== 'string' || !/^[a-z0-9]+$/.test(e)))
     bad('"codeExtensions" is required, and must be a non-empty list of extensions in lowercase letters and digits, with no dot');
   withGit.push(() => { for (const e of cfg.codeExtensions) if (!trackedFiles().some((f) => f.endsWith(`.${e}`))) bad(`"codeExtensions" names "${e}", and no tracked file has that extension`); });
+  // The scope of MAP1: path prefixes. A prefix keeps its trailing slash, so `src/` never matches `src2/`. It is not in `OPTIONAL_KEYS`: a repo that covers all of itself needs no key.
+  let mapPaths;
+  if ('mapPaths' in cfg) {
+    if (!Array.isArray(cfg.mapPaths) || !cfg.mapPaths.length || cfg.mapPaths.some((p) => typeof p !== 'string' || !p))
+      bad('"mapPaths" must be a non-empty list of path prefixes, each a non-empty string');
+    mapPaths = cfg.mapPaths.map((p) => {
+      if (path.isAbsolute(p) || /^[a-z]:/i.test(p) || p.split(/[\\/]/).includes('..')) bad(`"mapPaths" names ${p}, and a path must be relative, inside the repo, with no ".." segment`);
+      return posix(p) + (/[\\/]$/.test(p) ? '/' : '');
+    });
+    withGit.push(() => { for (const p of mapPaths) if (!trackedFiles().some((f) => f.startsWith(p))) bad(`"mapPaths" names ${p}, and no tracked file starts with it`); });
+  }
   const readTracked = (f) => readFileSync(path.join(root, f), 'utf8');
   if ('screenKeys' in cfg) {
     section('screenKeys', ['file', 'name']);
@@ -122,6 +133,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
     formatVersion: MAP_FORMAT_VERSION,
     title: cfg.title,
     codeExtensions: Object.freeze([...cfg.codeExtensions]),
+    ...(mapPaths && { mapPaths: Object.freeze(mapPaths) }),
     ...(cfg.requireAllKeys && { requireAllKeys: true }),
     ...('screenKeys' in cfg && { screenKeys: Object.freeze({ ...cfg.screenKeys }) }),
     ...('modelSeam' in cfg && { modelSeam: Object.freeze({ file: posix(cfg.modelSeam.file) }) }),
