@@ -712,3 +712,10 @@
 - blind-lane-on-redraw: the blind-brief hook refuses a directed designer with no `Blind lanes:` line, also on a redraw of a concept the owner picked. The lane must add a blind lane or quote the owner (lane d4-designer-critique). Decision: none.
 - scratchpad-shared-across-lanes: designer lanes of one session share its scratchpad, so a blind lane saw the directed lane's contrast script with its colours. It did not use them (lane d4-designer-critique). Decision: none.
 - impeccable-launcher-refused: guard `impeccable-review-only` refuses the impeccable launcher and detector. So the designer's critique runs in one context with no detector (lane d4-designer-critique). Decision: design-skills.
+- command-in-item-str-replace: an `ArtifactData` str_replace on a task skips guard rule `command-in-item`, so a one-string `command` can still be written that way (lane command-per-os). Decision: act-in-place.
+- command-scan-lone-backtick: a lone backtick earlier in a step pairs with the opening backtick of a real span, so the command in that span passes (lane command-per-os). Decision: act-in-place.
+- command-scan-plain-text: a command in plain step text, a `$ ` prompt span, an indented block or a `~~~` fence passes the step scan (lane command-per-os). Decision: act-in-place.
+- command-scan-false-alarms: a backticked `Read-Only`, `Actions | Workflows` or `ok; ship it` reads as a shell line. A reword clears each (lane command-per-os). Decision: act-in-place.
+- command-null-refused: `command: null` on an update is refused, so a session clears a command by writing both shells again (lane command-per-os). Decision: act-in-place.
+- command-steps-one-string: task `steps` given as one string skip the step scan, as on main, and the page cannot draw them (lane command-per-os). Decision: act-in-place.
+- mac-holds-powershell: a `mac` string that holds a PowerShell cmdlet passes (lane command-per-os). Decision: act-in-place.
