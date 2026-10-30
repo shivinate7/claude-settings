@@ -293,6 +293,8 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       mk("first", 1, { context: LONG, holds: "A lane waits.", options: [opt("a", "Red", withDesigns ? "s1" : undefined), opt("b", "Blue with a long label that cannot fit on one line of the ready note at 390 wide", withDesigns ? "s2" : undefined)] }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
+      // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
+      mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
     ];
     const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
     await noAnchor(page);
@@ -315,15 +317,24 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
     sent = true;
-    // A receipt holds its height only while in view (owner report 1, Oct 28 13:19 CDT, c193), so after Send only what is on screen is compared.
-    const onScreen = () => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.id, c.getBoundingClientRect()]).filter(([, r]) => r.bottom > 0 && r.top < innerHeight).map(([id, r]) => [id, Math.round(r.top), Math.round(r.height)]));
-    const seen = await onScreen();
+    // Send shrinks each receipt at once (shiv, 15:06 CDT Oct 30, receipt-tightens-at-once). The witness is the first card that stays and follows a sent
+    // receipt; the scroll correction holds its top. A card that stays keeps its height. The witness sits at 15% of the screen, so the page has room above it.
+    await placeAt(page, items[3], 0.15);
+    const before = await cardsNow(page);
     await send(page);
     await page.locator("#sent .stamp").waitFor();
     await page.evaluate(() => new Promise((r) => setTimeout(r, 600)));
-    const after = (await onScreen()).slice(0, seen.length); // scroll lands on whole pixels, so a fraction of one is allowed
-    assert.deepEqual(after.map((r) => r[0]), seen.map((r) => r[0]), "the cards on screen changed on Send");
-    seen.forEach((r, i) => { assert.ok(Math.abs(after[i][1] - r[1]) <= 1 && Math.abs(after[i][2] - r[2]) <= 1, "what was on screen moved on Send: " + JSON.stringify([r, after[i]])); });
+    const after = await cardsNow(page);
+    const witness = "item-" + items[3].id;
+    const was = before.find((c) => c.id === witness), settled = after.find((c) => c.id === witness);
+    assert.ok(was.top > 0 && was.top < innerHeight, "the witness is off screen before Send: " + was.top);
+    assert.equal(settled.receipt, false, "the witness became a receipt on Send");
+    assert.ok(Math.abs(settled.top - was.top) <= 1, `the witness moved on Send: ${was.top} to ${settled.top}`);
+    for (const b of before.filter((c) => c.bottom > 0 && c.top < innerHeight)) {
+      const a = after.find((c) => c.id === b.id);
+      if (a.receipt && !b.receipt) assert.ok(a.h < b.h - 1, `a receipt kept its height on Send: ${b.id} ${b.h} to ${a.h}`);
+      else if (!a.receipt) assert.ok(Math.abs(a.h - b.h) <= 1, `a card that stays changed height on Send: ${b.id} ${b.h} to ${a.h}`);
+    }
   });
 }
 
@@ -2264,27 +2275,74 @@ const SIZES = [2200, 1280, 390];
 const noAnchor = (page) => page.addStyleTag({ content: "*, html { overflow-anchor: none !important; }" });
 const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { context: LONG }));
 
+// Send shrinks a receipt at once (shiv, 15:06 CDT Oct 30, receipt-tightens-at-once), and the card below it keeps its top through the scroll correction.
+// The correction scrolls up by the shrink, and the page cannot scroll above 0, so each case first scrolls its card down the page.
+const LEADS = [1, 2, 3].map((n) => mk("lead-" + n, n, { context: LONG }));
+const frameWait = (page, n) => page.evaluate((k) => new Promise((resolve) => { const step = (i) => (i ? requestAnimationFrame(() => step(i - 1)) : resolve()); step(k); }), n);
+const placeAt = (page, it, frac) => page.evaluate(([id, f]) => { const el = document.getElementById("item-" + id); window.scrollTo({ top: scrollY + el.getBoundingClientRect().top - innerHeight * f, behavior: "instant" }); }, [it.id, frac]);
+const posOf = (page, its) => page.evaluate((ids) => Object.fromEntries(ids.map((id) => { const r = document.getElementById("item-" + id).getBoundingClientRect(); return [id, { top: r.top, bottom: r.bottom, h: r.height }]; })), its.map((i) => i.id));
+const cardsNow = (page) => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => { const r = c.getBoundingClientRect(); return { id: c.id, top: r.top, bottom: r.bottom, h: r.height, receipt: !!c.querySelector(":scope > .receipt") }; }));
+
+// One card, sent mid-screen with room above it: its receipt has its shrunk height at once, and the card below keeps its top.
+async function sentMidScreen(t, { width, height, scheme, anchored }) {
+  const target = mk("target", 4), below = mk("below", 5);
+  const page = await open(t, { items: [...LEADS, target, below, ...FILLER], scheme, viewport: { width, height } }); if (!page) return;
+  if (!anchored) await noAnchor(page);
+  await choose(page, target, "a");
+  await placeAt(page, target, 0.2);
+  const full = (await card(page, target).boundingBox()).height;
+  const at = (await posOf(page, [below]))[below.id].top;
+  assert.ok(at > 0 && at < height, `the card below is off screen before Send at ${at}`);
+  await send(page);
+  await card(page, target).locator(".receipt").waitFor();
+  // Read as soon as the receipt is in the page: no frame and no wait for the scroll to settle.
+  const atOnce = await posOf(page, [target, below]);
+  assert.ok(atOnce[target.id].h <= full - 100, `the receipt kept its open height of ${full}px at once; it is ${atOnce[target.id].h}px`);
+  assert.ok(Math.abs(atOnce[below.id].top - at) <= 1, `the card below moved on Send: ${at} to ${atOnce[below.id].top}`);
+  await frameWait(page, 2);
+  const settled = await posOf(page, [target, below]);
+  assert.ok(Math.abs(settled[target.id].h - atOnce[target.id].h) <= 1 && Math.abs(settled[below.id].top - at) <= 1, "the receipt or the card below moved after Send: " + JSON.stringify([atOnce, settled]));
+}
+
 for (const scheme of ["light", "dark"]) {
-  test(`an answered card keeps its height only while in view, then shrinks with nothing on screen moving, ${scheme} scheme`, async (t) => {
-    const target = mk("target", 2, { context: LONG });
-    const items = [mk("above", 1, { context: LONG }), target, ...FILLER];
-    const page = await open(t, { items, scheme, viewport: { width: 1280, height: 700 } }); if (!page) return;
-    await noAnchor(page);
-    const c = card(page, target);
-    const full = (await c.boundingBox()).height;
-    await choose(page, target, "a");
+  test(`an answered card drops its height at once and the card below keeps its top, ${scheme} scheme`, async (t) => {
+    await sentMidScreen(t, { width: 1280, height: 700, scheme, anchored: false });
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`a card sent mid-screen drops its height at once and the card below keeps its top, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sentMidScreen(t, { width, height: 800, scheme, anchored: false });
+  });
+  // Chromium's scroll anchoring also corrects for a height change above the anchor, so a page that corrects by hand as well shows a double shift here.
+  test(`a card sent mid-screen with scroll anchoring on keeps the card below in place, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sentMidScreen(t, { width, height: 800, scheme, anchored: true });
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`two cards sent together, one wholly above the screen, both drop their heights at once and the card below keeps its top, at ${width} wide, ${scheme} scheme`, async (t) => {
+    const above = mk("above", 4), on = mk("on", 5), below = mk("below", 6);
+    const page = await open(t, { items: [...LEADS, above, on, below], scheme, viewport: { width, height: 800 } }); if (!page) return;
+    await choose(page, above, "a");
+    await choose(page, on, "b");
+    const openH = await posOf(page, [above, on]);
+    // The first card ends 4px above the top edge, so the second starts on screen.
+    await page.evaluate((id) => { const b = document.getElementById("item-" + id).getBoundingClientRect().bottom; window.scrollTo({ top: scrollY + b + 4, behavior: "instant" }); }, above.id);
+    const pre = await posOf(page, [above, on, below]);
+    assert.ok(pre[above.id].bottom <= 0, "the first card is not wholly above the screen");
+    assert.ok(pre[on.id].bottom > 0 && pre[on.id].top < 800, "the second card is off screen");
+    assert.ok(pre[below.id].top > 0 && pre[below.id].top < 800, "the card below is off screen");
     await send(page);
-    await c.locator(".receipt").waitFor();
-    assert.ok((await c.boundingBox()).height >= full - 1, "the receipt gave up its height while still in view");
-    // Scroll the receipt out of view above the screen, with a card on screen as the witness.
-    const witness = card(page, FILLER[3]);
-    await witness.scrollIntoViewIfNeeded();
-    await page.evaluate(() => window.scrollBy(0, 300));
-    const top = () => witness.evaluate((e) => Math.round(e.getBoundingClientRect().top));
-    const at = await top();
-    await page.waitForFunction(() => document.getElementById("item-target").getBoundingClientRect().bottom < 0);
-    await page.waitForFunction(([id, h]) => document.getElementById(id).getBoundingClientRect().height < h - 100, ["item-target", full]);
-    assert.ok(Math.abs((await top()) - at) <= 1, "what was on screen moved when the receipt shrank");
+    await card(page, above).locator(".receipt").waitFor();
+    await card(page, on).locator(".receipt").waitFor();
+    const atOnce = await posOf(page, [above, on, below]);
+    assert.ok(atOnce[above.id].h <= openH[above.id].h - 100, `the first card kept its open height at once: ${atOnce[above.id].h}px`);
+    assert.ok(atOnce[on.id].h <= openH[on.id].h - 100, `the second card kept its open height at once: ${atOnce[on.id].h}px`);
+    assert.ok(Math.abs(atOnce[below.id].top - pre[below.id].top) <= 1, `the card below moved on Send: ${pre[below.id].top} to ${atOnce[below.id].top}`);
+    await frameWait(page, 2);
+    const settled = await posOf(page, [above, on, below]);
+    assert.ok(Math.abs(settled[below.id].top - pre[below.id].top) <= 1, "the card below moved after Send: " + JSON.stringify([atOnce[below.id], settled[below.id]]));
   });
 }
 
