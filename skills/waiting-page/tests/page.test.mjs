@@ -2793,7 +2793,7 @@ test("the document title names the repo and the open tab: <repo> Queue, then <re
   assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
 });
 
-// With no identity name the title is the tab's part name alone (shiv ruling, Oct 30 14:33 CDT).
+// With no identity name the title is the page name alone, "Queue" (shiv ruling, Oct 30 14:33 CDT).
 test("with no identity name the document title is Queue, then Queue · Status", async (t) => {
   const page = await open(t); if (!page) return;
   assert.equal(await titleOf(page, "Queue"), "Queue");
@@ -2801,7 +2801,7 @@ test("with no identity name the document title is Queue, then Queue · Status", 
   assert.equal(await titleOf(page, "Queue · Status"), "Queue · Status");
 });
 
-// The static <title> in page.html is the bare part name; setTitle adds the repo name at run time (shiv ruling, Oct 30 14:33 CDT).
+// The static <title> in page.html is the page name, "Queue"; setTitle adds the repo name at run time (shiv ruling, Oct 30 14:33 CDT).
 test("page.html's static title is Queue", () => {
   const staticTitle = html.match(/<title>([^<]*)<\/title>/);
   assert.ok(staticTitle, "page.html has no static <title>");
