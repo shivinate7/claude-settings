@@ -131,6 +131,18 @@ refused `reviewer`, `designer` and `builder` as unknown types. A process started
 loaded all of them. Unknown: whether the cloud thread harness itself, as against a headless run in
 the same container, reads the same order.
 
+**The install's first home is the cloud environment's setup script** (owner, 2026-10-30 15:09 CDT,
+waiting item 77, pick a). The setup script runs `cloud-setup.sh` before Claude Code starts, so
+`agents/*.md` and `settings.json` are in `~/.claude` before the first agent spawn. The second home is
+the SessionStart refresh hook that install.sh writes. It refreshes the files, but it runs too late for
+the first spawn: a builder with no pin then ran Opus. The setup script cannot read the environment's
+saved variables or secrets. So `cloud-setup.sh` fetches the public file first, and then copies from a
+checkout of this repo that the environment attached. It always exits 0 and prints one verdict line.
+The owner pastes the setup-script text once per environment; the text is in the README, under Cloud
+sessions. Until an environment has it, each builder spawn there sets model sonnet. Unmeasured: whether
+the harness accepts the session's checkout after install.sh moves it to main during setup. Test
+`hooks/test_cloud_setup.sh` proves exit 0 and the install offline.
+
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's grant, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role Explore (the
@@ -171,3 +183,4 @@ Kind: process
 Home: lint/check_agent_models.py
 Home: lint/check_skill_model_rows.py
 Home: settings.json
+Home: cloud-setup.sh
