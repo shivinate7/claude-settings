@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10 and 2026-10-29 16:47 CDT: the coordinator holds a standing merge grant in claude-settings and in the owner's other repos. The other repos are banchi, q_max, home, degen, mailaudit, ios-adblock and joyous (the coordinator's list, 2026-10-29). Each build has one holder. In a build with a coordinator, the coordinator holds the grant. A session with no coordinator (solo or one lane) in claude-settings holds the 2026-10-10 grant there. A lane session that a coordinator started never merges. The grant holds "for now", until the owner withdraws it in chat. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
+Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT and 2026-10-29 20:33 CDT: the coordinator holds a standing merge grant in claude-settings and in the owner's other repos. The other repos are banchi, q_max, home, degen, mailaudit, ios-adblock and joyous (the coordinator's list, 2026-10-29). Each build has one holder. In a build with a coordinator, the coordinator holds the grant. A session with no coordinator (solo or one lane) in claude-settings holds the 2026-10-10 grant there. A lane session that a coordinator started never merges. The grant holds "for now", until the owner withdraws it in chat. This is the repo grant that `git-main-only-by-pr` (main moves only by pull request) names.
 
 The owner's words, 2026-10-29 16:47 CDT, in web chat:
 
@@ -11,7 +11,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 
 - The coordinator merges by pull request with the merge tool of each repo, on green checks and a done review where one is required. It never asks the owner to merge.
 - The batch runner still builds the batches. It may run the merge tool under the coordinator's grant. It holds no grant of its own.
-- While another owner repo's own sessions are not working, the claude-settings coordinator may run that repo's work end to end. It uses the agents it starts in its own session to build, review and batch. It merges under the same grant and the same checks. It never widens what that repo's tools accept. Process-only (owner, 2026-10-29 20:33 CDT, paraphrased): the owner's other repos are not working, so the coordinator may complete any of that work end to end.
+- While another owner repo's own sessions are not working, the claude-settings coordinator may complete that repo's work end to end. A repo is not working when the session list shows no live session for it. The coordinator uses the agents it starts in its own session to build, review and batch. It merges under the same grant and the same checks. It never widens what that repo's tools accept, because a shared tool never grows a second form (decision `uniform-over-variants`: a repo matches a shared format). Process-only (owner, 2026-10-29 20:33 CDT, paraphrased): the owner's other repos are not working, so the coordinator may complete any of that work end to end.
 - The grant covers the merge act only. It lifts no check. These limits still apply:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).
   - Nothing merges while a batch's integration PR has a CI run in progress (`git-no-merge-during-batch-ci`: no merge during a batch CI run).
