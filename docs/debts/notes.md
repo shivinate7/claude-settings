@@ -639,3 +639,5 @@
 - probe-design-screens-by-route-count: lint/compliance_probes.py probe_design grades "screens named" by route count, so a shoot.json with one route passes when an app has three views.
 - glossary-prepared-cache-by-identity: check_glossary `_PREPARED` caches by table identity and length, so an in-place edit of a table that keeps its length reads stale names. Production builds the table once (lint/check_glossary.py prepared).
 - words-deadline-late-by-one-scan: WORDS_DEADLINE is checked between files and inside name_problems, not inside one file's scan, so a stop can run late by one scan: 23 s on a 42 MB JSON (lint/compliance_probes.py probe_words).
+- ios-probe-quoted-name-with-space: the iOS probe reads quote marks as nothing, so `-scheme "Tally UI"` reads as `Tally`; when `Tally` is a unit-only scheme, a UI run passes. The starter bars spaces in names, so only a legacy repo hits it (lint/compliance_probes.py xcodebuild_runs).
+- ios-probe-quoted-separator: a quoted `;`, `|` or `&` inside an xcodebuild argument splits the command, so `-destination "a;b" test` drops `test`. No xcodebuild flag takes one (lint/compliance_probes.py xcodebuild_runs).
