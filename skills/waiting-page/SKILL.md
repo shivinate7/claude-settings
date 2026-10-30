@@ -78,10 +78,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
-  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`
-    (a number, or text such as `3 min`). The item shows `command` in a closed "Show the command" disclosure with a Copy
-    button that works while it is closed. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
-    A step never sends the owner to a file for a command: put it in `command` and say "paste the command below"
+  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
+    strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
+    `<<` or `<<<`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
+    button that works while it is closed, PowerShell first on Windows. A stored one-string `command` shows as one block
+    with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
+    A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
+    command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
     (guard rule `command-in-item`).
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
