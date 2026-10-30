@@ -68,7 +68,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
     `gain` and `lose`. The writer refuses a decision without it (guard rules `question-form` and `owner-judge`). A decision with
-    `status: "closed"` needs none, and a `stands: true` pick may write `Problem: <text>` with no stake. An update that
+    `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`

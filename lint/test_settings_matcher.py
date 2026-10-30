@@ -238,15 +238,18 @@ class ModsAutoUpdate(unittest.TestCase):
 # pinned to an Opus id, the rubric in the hook prompt. It replaces the prompt judge and
 # hooks/question_outcome.py. A failed or timed-out model call lets the question through. Code reads the
 # form lines and the marks on each option (hooks/question_form.py), so the prompt text is the only home of
-# the four items code cannot decide, and these cases pin that text.
+# the items code cannot decide, and these cases pin that text.
 # An agent hook takes only these keys (probed on Claude Code 2.1.296 on Windows). The prompt
 # hooks beside it carry `continueOnBlock`, which is not one of them.
 COMMAND_HOOK_KEYS = {"type", "command", "if", "timeout", "statusMessage", "once", "async"}
 OPUS_PREFIX = "claude-opus-"
 # Each rubric item the prompt must name, with the patterns that must all match the prompt. The prompt is
-# whitespace-folded and matched without case. The Goal, Problem and Based on lines are code's: the prompt
-# names none of them (question_form.chat_hit reads them).
+# whitespace-folded and matched without case. Code reads that the Goal, Problem and Based on lines are there
+# (question_form.chat_hit); the prompt judges how they read, and never names a line.
 RUBRIC = {
+    "goal in the owner's terms": [r"\bgoal\b.{0,40}\bowner.s terms\b"],
+    "problem is one plain sentence": [r"\bproblem\b.{0,60}\bplain\b.{0,60}\bneeds? his word\b"],
+    "premises in plain words": [r"\bpremises?\b.{0,40}\bplain words\b"],
     "gain and lose are plain": [r"\bgains?\b.{0,80}\bplain\b|\bplain\b.{0,80}\bgains?\b", r"\blos(?:e|es|ing|s)\b"],
     "no unexplained ids": [r"\bunexplained\b.{0,40}\b(?:ids?|names?|identifiers?)\b"
                            r"|\b(?:ids?|identifiers?)\b.{0,80}\b(?:(?:un)?explain\w*|(?:un)?gloss\w*|plain)\b"],
@@ -255,6 +258,9 @@ RUBRIC = {
 }
 # One sentence per item: a prompt that meets the rubric, and the mutants the check must see.
 SAMPLE = {
+    "goal in the owner's terms": "The Goal is in the owner's terms.",
+    "problem is one plain sentence": "The Problem is one plain sentence that says why it needs his word.",
+    "premises in plain words": "Each premise is in plain words.",
     "gain and lose are plain": "Each option's gain and lose are plain effects on the owner.",
     "no unexplained ids": "Reject unexplained ids.",
     "nothing outside the box": "Nothing points outside the box.",

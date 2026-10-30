@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit; hooks/guard.py data_tool_hit calls item_hit after
-its url and collection gate. Nothing here writes a file or starts a process.
+its url and collection check. Nothing here writes a file or starts a process.
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
 
@@ -55,7 +55,8 @@ GOAL_LINE = re.compile(r"^[ \t]*Goal:[ \t]*\S", re.I | re.M)
 PROBLEM_LABEL = re.compile(r"^[ \t]*Problem\b", re.I | re.M)
 PROBLEM_LINE = re.compile(r"^[ \t]*Problem[ \t]*\((?:%s)\):[ \t]*\S" % _STAKES, re.I | re.M)
 PROBLEM_STOOD_LINE = re.compile(r"^[ \t]*Problem(?:[ \t]*\((?:%s)\))?:[ \t]*\S" % _STAKES, re.I | re.M)
-BASED_LABEL = re.compile(r"^[ \t]*Based on\b", re.I | re.M)
+# A Based on line starts `Based on (` or `Based on:`; prose that starts "Based on the log" is not one.
+BASED_LABEL = re.compile(r"^[ \t]*Based on[ \t]*[(:]", re.I | re.M)
 BASED_LINE = re.compile(r"^[ \t]*Based on[ \t]*\(([^()\n]*)\):[ \t]*\S", re.I | re.M)
 GAIN_TEXT = re.compile(r"\bGain:[ \t]*(?!Lose:)\S", re.I)
 LOSE_TEXT = re.compile(r"\bLose:[ \t]*\S", re.I)
@@ -64,10 +65,11 @@ BASED_MAX = 3
 FORM_REASON = ("A question to the owner states the form, in this order: a line \"Goal: <the goal, in his "
                "terms>\", a line \"Problem (<stake>): <the problem in one plain sentence, and why it needs "
                "his word>\" where stake is one of %s, and one to three lines \"Based on (<kind>): <one "
-               "premise>\" where kind is one of %s. Each option states its gain and its loss. If no stake "
-               "fits, take your own pick and set stands: true." % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
+               "premise>\" where kind is one of %s. Each option states its gain and its loss."
+               % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
-                                  "non-empty `gain` and `lose`.")
+                                  "non-empty `gain` and `lose`. If no stake fits, take your own pick and set "
+                                  "stands: true.")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
@@ -80,13 +82,19 @@ def _lines_hit(text, stands=False):
     """(rule, matched) when `text` lacks a form line or holds a malformed one. The first miss, in the
     order of the form."""
     if not GOAL_LINE.search(text):
-        return FORM_RULE, "decision with no Goal line"
+        return FORM_RULE, "no Goal line"
     state = _problem_state(text, stands)
     if state == "missing":
-        return FORM_RULE, "decision with no Problem line"
+        return FORM_RULE, "no Problem line"
     if state == "malformed":
         return STAKE_RULE, "Problem line with no stake, or a stake outside the set"
-    return _based_hit(text)
+    hit = _based_hit(text)
+    if hit[0]:
+        return hit
+    goal, problem, based = (rx.search(text).start() for rx in (GOAL_LINE, PROBLEM_LABEL, BASED_LABEL))
+    if not goal < problem < based:
+        return FORM_RULE, "lines out of order: Goal, then Problem, then Based on"
+    return PASS
 
 
 def _problem_state(text, stands):
@@ -99,7 +107,7 @@ def _problem_state(text, stands):
 def _based_hit(text):
     labels = BASED_LABEL.findall(text)
     if not labels:
-        return FORM_RULE, "decision with no Based on line"
+        return FORM_RULE, "no Based on line"
     if len(labels) > BASED_MAX:
         return FORM_RULE, "%d Based on lines, one to %d allowed" % (len(labels), BASED_MAX)
     kinds = [m.group(1).strip().lower() for m in BASED_LINE.finditer(text)]
@@ -248,6 +256,7 @@ COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|t
 COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
 COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b(?!\s+below)"
                           r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
+EFFECT_TEXT = re.compile(r"\b(?:Gain|Lose):.*?(?=\b(?:Gain|Lose):|$)", re.I | re.S)
 CHAT_URL = re.compile(r"https://[^\s)>\]\"']+", re.I)
 
 
@@ -461,7 +470,8 @@ def _chat_question_hit(question, options):
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]
-        if not _press_field_ok(label + ". " + desc, links):
+        # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
+        if not _press_field_ok(label + ". " + EFFECT_TEXT.sub("", desc), links):
             return "press-link", "option presses in a web app with no url to the page"
     hit = _lines_hit(str(question.get("question") or ""))
     if hit[0]:

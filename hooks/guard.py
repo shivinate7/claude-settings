@@ -2520,7 +2520,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `task-names-check`, `owner-judge`, `question-form`). This gate runs them only for a
+# `command-in-item`, `task-names-check`, `owner-judge`, `question-form`). This check runs them only for a
 # write to this repo's waiting page.
 DATA_TOOL = "ArtifactData"
 WAITING_ITEMS = "items"
@@ -3109,19 +3109,19 @@ def judge(payload) -> None:
         if rule:
             import question_form
         if rule == "port-question":
-            refuse(tool, "deny", "port-question", question_form.PORT_REASON, matched)
+            refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
         if rule == "uniform-pick":
-            refuse(tool, "deny", "uniform-pick", question_form.WIDENS_REASON, matched)
+            refuse(tool, "deny", "uniform-pick", question_form.PAGE_REASONS["uniform-pick"], matched)
         if rule == "press-link":
-            refuse(tool, "deny", "press-link", question_form.PRESS_LINK_REASON, matched)
+            refuse(tool, "deny", "press-link", question_form.PAGE_REASONS["press-link"], matched)
         if rule == "command-in-item":
-            refuse(tool, "deny", "command-in-item", question_form.COMMAND_REASON, matched)
+            refuse(tool, "deny", "command-in-item", question_form.PAGE_REASONS["command-in-item"], matched)
         if rule == "task-names-check":
-            refuse(tool, "deny", "task-names-check", question_form.TASK_REASON, matched)
+            refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
         if rule == "owner-judge":
-            refuse(tool, "deny", "owner-judge", question_form.STAKE_REASON, matched)
+            refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
         if rule == "question-form":
-            refuse(tool, "deny", "question-form", question_form.PAGE_FORM_REASON, matched)
+            refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
         return
 
     if tool in SHELL_TOOLS:
