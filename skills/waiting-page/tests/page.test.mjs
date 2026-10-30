@@ -2417,8 +2417,13 @@ async function answerWithoutSend(t, { width, scheme }) {
   const held = await cardMap(page);
   assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
   assert.ok(Math.abs(held[B].top - pre[B].top) <= 1, `an answer without a Send moved the card below: ${pre[B].top} to ${held[B].top}`);
+  // The card wholly off the screen drops its height, and the card below, still on screen, keeps its top.
   await page.evaluate((id) => { const b = document.getElementById(id).getBoundingClientRect().bottom; window.scrollBy(0, b + 4); }, I);
+  const scrolled = await cardMap(page);
+  assert.ok(scrolled[B].bottom > 0 && scrolled[B].top < 800,`fixture: the card below is off the screen after the scroll at ${scrolled[B].top}`);
   await page.waitForFunction(([id, h]) => document.getElementById(id).getBoundingClientRect().height < h - 100, [I, pre[I].h]);
+  const dropped = await cardMap(page);
+  assert.ok(Math.abs(dropped[B].top - scrolled[B].top) <= 1, `the card below moved when the held card dropped: ${scrolled[B].top} to ${dropped[B].top}`);
 }
 
 for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
@@ -2457,6 +2462,45 @@ for (const scheme of ["light", "dark"]) {
 for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
   test(`an answer that arrives without a Send keeps its height while in view, and drops once wholly off the screen, at ${width} wide, ${scheme} scheme`, async (t) => {
     await answerWithoutSend(t, { width, scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of SIZES) {
+  test(`the rail's related-item frames and chips fit the rail at ${width}px wide, ${scheme} scheme`, async (t) => {
+    const long = "A very long title that runs across the whole width of the rail and then some more ";
+    const items = [1, 2, 3].map((n) => mk("pr-" + n, n, { group: "pair", title: long + n })).concat([mk("alone", 4, { title: long + "alone" })]);
+    const page = await open(t, { items, scheme, viewport: { width, height: 900 }, groups: { pair: { title: "Answer these together", why: "Linked." } } }); if (!page) return;
+    const m = await page.evaluate(() => {
+      const r = (e) => { const b = e.getBoundingClientRect(); return { l: b.left, r: b.right }; };
+      const rail = document.querySelector(".rail"), ov = rail.getBoundingClientRect();
+      const frames = [...rail.querySelectorAll(".pairchips")].map(r), chips = [...rail.querySelectorAll(".nchip")].map(r);
+      return { rail: r(rail), railW: ov.width, frames, chips, list: r(document.querySelector(".list")), sw: document.documentElement.scrollWidth, iw: innerWidth, stacked: innerWidth <= 960 };
+    });
+    assert.ok(m.frames.length >= 1, "no related-item frame in the rail");
+    const slack = 1;
+    for (const f of m.frames) assert.ok(f.l >= m.rail.l - slack && f.r <= m.rail.r + slack, `a frame runs past the rail: ${JSON.stringify(f)} in ${JSON.stringify(m.rail)}`);
+    for (const c of m.chips) assert.ok(c.l >= m.rail.l - slack && c.r <= m.rail.r + slack, `a chip runs past the rail: ${JSON.stringify(c)} in ${JSON.stringify(m.rail)}`);
+    if (!m.stacked) { assert.ok(m.railW <= 240 + slack, "the rail grew past 240px: " + m.railW); assert.ok(m.rail.r <= m.list.l + slack, "the rail overlaps the cards"); }
+    assert.ok(m.sw <= m.iw, "the page scrolls sideways");
+  });
+
+  for (const [kind, extra] of [["declared size", { size: { w: 390, h: 844 } }], ["no declared size", {}], ["a focused part", { focus: "#hero", size: { w: 300, h: 200 } }]]) test(`an option's picture (${kind}) sits inside its option card at ${width}px wide, ${scheme} scheme`, async (t) => {
+    const it = mk("fit-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, ...extra })) });
+    const phone = (k) => `<body style="margin:0"><div id="hero" style="width:300px;height:200px;background:#9cf">${k}</div><div style="height:644px;width:390px;background:#eee"></div></body>`;
+    const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, phone(o.design)]));
+    const page = await open(t, { items: [it], designData, scheme, viewport: { width, height: 900 } }); if (!page) return;
+    await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt`)].map((o) => {
+      const b = o.getBoundingClientRect(), pw = o.querySelector(".dfitwrap"), w = pw.getBoundingClientRect();
+      const text = [...o.querySelectorAll(".how, .lab, .tr, .pick, .nopick, .dwarn")].map((x) => x.getBoundingClientRect()).filter((x) => x.height > 0);
+      return { card: [b.left, b.top, b.right, b.bottom], wrap: [w.left, w.top, w.right, w.bottom], text: text.map((x) => [x.top, x.bottom]) };
+    }), it.id);
+    for (const o of m) {
+      assert.ok(o.wrap[0] >= o.card[0] - 1 && o.wrap[2] <= o.card[2] + 1, "the picture runs past the sides of its card: " + JSON.stringify(o));
+      assert.ok(o.wrap[1] >= o.card[1] - 1 && o.wrap[3] <= o.card[3] + 1, "the picture runs past the bottom of its card: " + JSON.stringify(o));
+      for (const [tt, tb] of o.text) assert.ok(tt >= o.wrap[3] - 1 || tb <= o.wrap[1] + 1, "the picture covers text: " + JSON.stringify(o));
+    }
   });
 }
 
