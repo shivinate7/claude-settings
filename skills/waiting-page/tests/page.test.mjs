@@ -147,7 +147,7 @@ test("a rule question starts blank, my pick is starred in its card, and a tap on
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
   const a = (await answers(page))[DECISION.id];
-  assert.deepEqual([a.item, a.n, a.choice], [DECISION.id, 27, "a"]);
+  assert.deepEqual([a.item, a.n, a.choice, a.note], [DECISION.id, 27, "a", ""]);
 });
 
 test("the list has three tiers read from holds and by, then Pick stands last", async (t) => {
@@ -220,7 +220,7 @@ test("one Send writes every ready answer in the old record shape and leaves the 
   const a = await answers(page);
   assert.deepEqual(Object.keys(a).sort(), ["d-one", "d-two", TASK.id]);
   assert.deepEqual([a["d-one"].item, a["d-one"].n, a["d-one"].choice, a["d-one"].note], ["d-one", 1, "b", ""]);
-  assert.equal(a["d-two"].choice, "a");
+  assert.deepEqual([a["d-two"].choice, a["d-two"].note], ["a", ""]);
   assert.equal(a[TASK.id].done, true);
   assert.ok(!Number.isNaN(Date.parse(a["d-one"].at)), "at is an ISO time");
   assert.equal(await page.evaluate(() => window.__log.filter((l) => l[0] === "set").length), 3);
@@ -389,7 +389,6 @@ test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   assert.equal((await answers(page))[DECISION.id].choice, "b");
 });
 
-// The pick is B, not the first option, so a fix that focuses the first radio of the card fails.
 // ---------------------------------------------------------------- repo colour
 
 const BRANDS = ["#b45f06", "#3d5af1", "#0a84ff", "#f47820", "#6f5ca6", "#27553f", "#0b5fff", "#ffffff", "#000000", "#ffff00", "#ff0000", "#00ff00", "#808080", "#4b5a6b", "#e6e6e6", "#1a1a1a", "#ff00ff", "#00ffff", "#7f7f00"];
@@ -1579,7 +1578,7 @@ test("a pick is named by the option's title in the ready line, shortened with an
   await takePick(page, it);
   const ready = await card(page, it).locator(".ready").textContent();
   assert.doesNotMatch(ready, /VALUE|value\)/, "the ready line shows the raw key: " + ready);
-  assert.match(ready, /^Ready to send: Value for the card.*…, /, ready);
+  assert.match(ready, /^Ready to send: Value for the card.*…, your choice\.$/, ready);
   await choose(page, it, "watch");
   assert.equal(await card(page, it).locator(".ready").textContent(), "Ready to send: Watch, your choice.");
 });
@@ -3009,13 +3008,14 @@ test("a tap on the stars of a multi item and a ranked item writes each whole pic
   assert.deepEqual(await ticked(page, m), ["a", "c"]);
   assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
   for (const [k, n] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, r, k), rank(n, 3), `rank of ${k}`);
-  assert.match(await card(page, m).locator(".ready").textContent(), /^Ready to send: /);
+  assert.match(await card(page, m).locator(".ready").textContent(), /^Ready to send: .+, your choice\.$/);
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
   await send(page);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
   const a = await answers(page);
   assert.deepEqual(a[m.id].choice, ["a", "c"]);
   assert.deepEqual(a[r.id].choice, ["c", "a", "d"]);
+  assert.deepEqual([a[m.id].note, a[r.id].note], ["", ""]);
 });
 
 test("a note on a multi item with nothing ticked is choice none plus the note; with ticks it rides on the list", async (t) => {
@@ -3201,7 +3201,7 @@ for (const viewport of [{ width: 390, height: 800 }, { width: 1280, height: 900 
     assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
     await tick(page, it, "f"); await takePick(page, it);
     const mine = await readyFit(page, it);
-    assert.match(mine.text, /^Ready to send: .+\.$/);
+    assert.match(mine.text, /^Ready to send: .+, your choice\.$/);
     assert.ok(mine.clip <= 0 && mine.need <= mine.box + 1, `the ready line cuts its tail (box ${mine.box}px, text needs ${mine.need}px)`);
     assert.deepEqual(await geo(page), base, "a card moved on a tap on the star");
   });
@@ -3289,9 +3289,10 @@ test("a pick that is not a valid list shows no star; a valid list does", async (
 test("a tap on the star readies each card, and no card draws a Take my pick button", async (t) => {
   const single = mk("nb-single", 70), multiPick = digest(), rk = ranked("nb-rank", 71), stood = mk("nb-stood", 72, { stands: true });
   const page = await open(t, { items: [single, multiPick, rk, stood] }); if (!page) return;
-  for (const it of [single, multiPick, rk]) {
+  const endings = [[single, /^Ready to send: .+, your choice\.$/], [multiPick, /^Ready to send: .+, your choice\.$/], [rk, /^Ready to send: .+, your order\.$/]];
+  for (const [it, ending] of endings) {
     await takePick(page, it);
-    assert.match(await card(page, it).locator(".ready").textContent(), /^Ready to send: /, `${it.id}: a tap on the star did not ready the card`);
+    assert.match(await card(page, it).locator(".ready").textContent(), ending, `${it.id}: a tap on the star did not ready the card`);
   }
   assert.equal(await page.locator('[id^="b-take-"]').count(), 0, "a card draws a Take my pick button");
   assert.equal(await page.locator(".takepick").count(), 0, "a card draws a takepick button");
