@@ -1259,6 +1259,41 @@ def case_page_note_write_failure_says_not_saved():
     check("page note write failure: the note is to be jotted by hand", "jot" in ctx.lower(), ctx)
 
 
+# str.splitlines() also breaks on U+2028 and U+0085. A JSON line may carry either raw, so a
+# document's line must be read whole, and the keys file must not split a key.
+def case_page_note_u2028_in_note_saves_verbatim():
+    note = "keep the slot then confirm it"
+    cfg, sid = new_cfg(), "pn-u2028-note"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(note=note))]))
+    check("page note U+2028 in note: the mode ran", ran_page_note(p), p.desc())
+    check("page note U+2028 in note: one block, the note verbatim",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", note)], captured_texts(cfg, sid))
+
+
+def case_page_note_u0085_in_note_saves_verbatim():
+    note = "keep the slot\u0085then confirm it"
+    cfg, sid = new_cfg(), "pn-u0085-note"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(note=note))]))
+    check("page note U+0085 in note: the mode ran", ran_page_note(p), p.desc())
+    check("page note U+0085 in note: one block, the note verbatim",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", note)], captured_texts(cfg, sid))
+
+
+def case_page_note_u2028_in_at_saves_once():
+    # `at` is then not an ISO time, so the stamp falls back to the clock. The case checks the
+    # save and the dedup on a second get, not the stamp.
+    cfg, sid = new_cfg(), "pn-u2028-at"
+    resp = response_of([("a-7k2", answer_data(at="2026-01-15T18:04:00.000Z "))])
+    p = page_note(cfg, sid, resp)
+    check("page note U+2028 in at: the mode ran", ran_page_note(p), p.desc())
+    check("page note U+2028 in at: one block, the note verbatim",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)], captured_texts(cfg, sid))
+    again = page_note(cfg, sid, resp)
+    check("page note U+2028 in at: the same get again saves nothing more",
+          ran_page_note(again) and captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          captured_texts(cfg, sid))
+
+
 # Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
@@ -1331,6 +1366,9 @@ CASES = (
     case_page_note_prints_no_time_line,
     case_page_note_text_is_fenced_and_verbatim,
     case_page_note_write_failure_says_not_saved,
+    case_page_note_u2028_in_note_saves_verbatim,
+    case_page_note_u0085_in_note_saves_verbatim,
+    case_page_note_u2028_in_at_saves_once,
 )
 
 
