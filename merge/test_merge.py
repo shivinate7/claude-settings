@@ -4019,6 +4019,25 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
+    def test_a_required_all_jobs_passed_that_only_skipped_reads_pending(self):
+        # A draft's run skips all-jobs-passed on the head. The ready run that passes it has not run yet, so the head waits; it is not green.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("pass", "")]}, ["all-jobs-passed"])
+        self.assertEqual(red, [])
+        self.assertEqual(pending, ["all-jobs-passed"])
+
+    def test_a_required_all_jobs_passed_with_a_pass_beside_its_skip_reads_green(self):
+        # Two runs of one name: the pass settles it, so the skip is not pending.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", ""), ("pass", "")]}, ["all-jobs-passed"])
+        self.assertEqual((red, pending), ([], []))
+
+    def test_a_skip_only_all_jobs_passed_beside_a_passing_check_does_not_merge(self):
+        # The draft's skip must not merge. The wait holds for the ready run, then stops at the deadline with the check named.
+        self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "pass", "")]])
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("Still pending: all-jobs-passed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
     def test_a_head_where_no_check_ran_is_unproven_not_green(self):
         # Every check skipped: the synchronize run skipped as a draft.
         red, pending, _ = merge.Host.classify({"checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
