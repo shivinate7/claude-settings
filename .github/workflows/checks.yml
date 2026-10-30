@@ -36,7 +36,7 @@ env:
 
 jobs:
   # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
-  # needs it. An error in the script turns every flag on, never off. A gated job always runs; its steps skip when its flag is off.
+  # needs it. An error in the script turns every flag on, never off. A job behind a scope flag always runs; its steps skip when the flag is off.
   # A draft PR skips this job, so every job that needs it skips too (decision draft-until-reviewed).
   scope:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
@@ -230,7 +230,7 @@ jobs:
       - name: Windows split guard
         run: python3 lint/test_windows_split.py
 
-      - name: All-jobs-passed rollup guard
+      - name: all-jobs-passed needs every pull-request job
         run: python3 lint/test_all_jobs_passed.py
 
       - name: Scope detector fixture suite
