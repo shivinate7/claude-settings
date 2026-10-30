@@ -1,0 +1,9 @@
+{
+  "title": "A waiting-page question passes the same shape check as a chat question",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33744,
+  "why": "shiv, Oct 30 12:46 CDT (item 92 note): page questions read lower in quality than chat questions. Read on main: hooks/guard.py checks a page item write for port-question, uniform-pick, press-link, command-in-item, task-names-check and owner-judge, but not the chat question shape (Goal line, Problem line, Based on lines; output style rules style-question-restates-goal, style-question-states-problem, style-question-based-on). Item 92 shows the cost: its trade-offs were unclear.",
+  "note": "Ruling, Oct 30 12:50 CDT (shiv, chat): yes; merge the two into one question form, rewritten to be better, not two kinds of checks appended. Fix: one question shape and one check for both the chat question box and a page item write (ArtifactData on items): a Goal line in his terms, a Problem line saying why it needs his word, one to three Based on lines with premise kinds, each option's gain and loss, plus the page rules that still earn their place (why yours, can he judge it, links). Rewrite the rules and the output style lines as one, not as a page copy of the chat rules. Done check: red on item 92's first text, green on a rewrite; the chat box passes the same check. Needs no answer. Port: yes, everywhere. Placed ahead of c95 (triage 12, Oct 30): every question passes it.",
+  "updatedAt": "2026-10-30T17:55:00Z"
+}
