@@ -2765,26 +2765,56 @@ const linkedMulti = (id, n, over = {}) => multi(id, n, { options: [
 ], ...over });
 const linkedRanked = (id, n, over = {}) => linkedMulti(id, n, { ranked: true, pick: ["c", "a"], ...over });
 
-for (const [kind, make, pics] of [["multi", linkedMulti, false], ["ranked", linkedRanked, false], ["ranked with pictures", linkedRanked, true]]) {
-  test(`option links on a ${kind} card show after the how text, and the cards' rows line up`, async (t) => {
+// Each card's rows are checked at a phone width, where the cards stack, and at a desktop width, where they sit side by side.
+for (const width of [390, 1280]) for (const [kind, make, pics] of [["multi", linkedMulti, false], ["ranked", linkedRanked, false], ["ranked with pictures", linkedRanked, true]]) {
+  test(`option links on a ${kind} card show after the how text, and the cards' rows line up, at ${width} wide`, async (t) => {
     const it = make("lk-" + kind.replace(/\W/g, ""), 40);
     if (pics) it.options = it.options.map((o, i) => (i < 2 ? { ...o, design: "s1" } : o));
-    const page = await open(t, { items: [it], designData: pics ? DESIGNS : null, viewport: { width: 1280, height: 900 } }); if (!page) return;
+    const page = await open(t, { items: [it], designData: pics ? DESIGNS : null, viewport: { width, height: 900 } }); if (!page) return;
     await needBoxes(page, it, 3);
     await need(card(page, it).locator(`#k-${it.id}-a`), "no links row on option a");
     assert.equal(await page.getByRole("link", { name: LINK.label + ", opens in a new tab", exact: true }).count(), 1, "the link is not named for where it opens");
     assert.equal(await card(page, it).locator(".opts.olinks").count(), 1, "the options do not take the olinks class");
     assert.equal(await card(page, it).locator(`.opt:has(#o-${it.id}-b) span.nolinks`).count(), 1, "an option with no link has no nolinks span");
     if (it.ranked) assert.equal(await card(page, it).locator(".opts.ranked.olinks").count(), 1, "the ranked options lost a class");
-    // Pinned rows (pick, rank) compare by bottom edge, as the pick box is pinned to the bottom of its row.
-    const rows = await page.evaluate((id) => ["a", "b"].map((k) => {
-      const o = document.querySelector(`#item-${id} .opt:has(#o-${id}-${k})`);
-      const top = (sel) => Math.round(o.querySelector(sel).getBoundingClientRect().top);
-      const r = o.querySelector(".rank");
-      return { how: top(".how"), links: top(".links, .nolinks"), gain: top(".tr"), pick: Math.round(o.querySelector(".pick, .nopick").getBoundingClientRect().bottom), rank: r ? Math.round(r.getBoundingClientRect().bottom) : 0, own: Math.round(o.getBoundingClientRect().height) };
+    // Each child box, as offsets from its card: top rows from the top edge, pinned rows (pick, rank) from the bottom edge.
+    // `abs` is the page position, which compares rows across cards that sit side by side.
+    const cards = await page.evaluate((id) => ["a", "b", "c"].map((k) => {
+      const o = document.querySelector(`#item-${id} .opt:has(#o-${id}-${k})`), ob = o.getBoundingClientRect();
+      const child = (sel) => {
+        const e = o.querySelector(sel);
+        if (!e) return null;
+        const b = e.getBoundingClientRect();
+        return { top: b.top - ob.top, bottom: ob.bottom - b.bottom, abs: b.top, box: [b.left, b.top, b.right, b.bottom], inside: b.top >= ob.top - 1 && b.bottom <= ob.bottom + 1 && b.left >= ob.left - 1 && b.right <= ob.right + 1 };
+      };
+      return { top: ob.top, height: ob.height, head: child(".head"), how: child(".how"), links: child(".links, .nolinks"), tr: child(".tr"), pic: child(".opic"), pick: child(".pick, .nopick"), rank: child(".rank") };
     }), it.id);
-    for (const row of ["how", "links", "gain", "pick", "rank", "own"]) assert.ok(Math.abs(rows[0][row] - rows[1][row]) <= 1, `${kind}: the ${row} rows are not level: ${rows[0][row]} and ${rows[1][row]}`);
-    assert.ok(rows[0].links > rows[0].how && rows[0].gain > rows[0].links, `${kind}: the links row is not between the how text and the timing rows`);
+    const near = (x, y) => Math.abs(x - y) <= 1;
+    let sideBySide = 0;
+    cards.forEach((c, i) => {
+      const k = "abc"[i];
+      for (const row of ["how", "links", "tr", "pick"]) assert.ok(c[row], `${kind}: option ${k} has no ${row} box`);
+      if (it.ranked) assert.ok(c.rank, `${kind}: option ${k} has no rank box`);
+      if (pics) assert.ok(c.pic, `${kind}: option ${k} has no picture box`);
+      for (const row of ["head", "how", "links", "tr", "pic", "pick", "rank"]) if (c[row]) assert.ok(c[row].inside, `${kind}: the ${row} box of option ${k} sits outside its own card, at ${width} wide`);
+      // Rows stack without overlap: a row that runs into the next one would put a button over the pick text.
+      const kids = ["head", "how", "links", "tr", "pic", "pick", "rank"].filter((n) => c[n]);
+      for (let x = 0; x < kids.length; x++) for (let y = x + 1; y < kids.length; y++) {
+        const [a, b] = [c[kids[x]].box, c[kids[y]].box];
+        const overlap = a[0] < b[2] - 1 && b[0] < a[2] - 1 && a[1] < b[3] - 1 && b[1] < a[3] - 1;
+        assert.ok(!overlap, `${kind}: the ${kids[x]} and ${kids[y]} boxes of option ${k} overlap, at ${width} wide`);
+      }
+      assert.ok(c.links.top > c.how.top && c.tr.top > c.links.top, `${kind}: option ${k}: the links row is not between the how text and the timing rows`);
+    });
+    for (let i = 0; i < cards.length; i++) for (let j = i + 1; j < cards.length; j++) {
+      const p = cards[i], q = cards[j], pair = `options ${"abc"[i]} and ${"abc"[j]}`;
+      for (const row of ["pick", "rank"]) if (p[row] && q[row]) assert.ok(near(p[row].bottom, q[row].bottom), `${kind}: the ${row} rows of ${pair} are not level, at ${width} wide`);
+      if (!near(p.top, q.top)) continue; // stacked cards each run their own top rows, which follow their own text and pictures
+      sideBySide++;
+      for (const row of ["how", "links", "tr", "pic"]) if (p[row] && q[row]) assert.ok(near(p[row].abs, q[row].abs), `${kind}: the ${row} rows of ${pair} are not level, at ${width} wide`);
+      assert.ok(near(p.height, q.height), `${kind}: the cards of ${pair} differ in height, at ${width} wide`);
+    }
+    if (width === 1280) assert.ok(sideBySide > 0, `${kind}: the cards do not sit side by side at 1280, so the level check compared nothing`);
   });
 }
 
@@ -2797,11 +2827,26 @@ test("a press on an option's link opens it and ticks nothing, on a multi card an
     const link = card(page, it).locator(`#k-${it.id}-a a`);
     await need(link, `${it.id}: no link on option a`);
     // A real press at the link's centre: on a ranked card the label's overlay must not take it.
-    const [tab] = await Promise.all([page.context().waitForEvent("page", { timeout: 5000 }), link.click()]);
+    const [tab] = await Promise.all([page.context().waitForEvent("page", { timeout: 5000 }).catch(() => assert.fail(`${it.id}: a press on the link did not open it`)), link.click()]);
     await tab.close();
     assert.deepEqual(await ticked(page, it), [], `${it.id}: a press on the link ticked the option`);
     assert.equal(await card(page, it).locator(".opt.sel").count(), 0, `${it.id}: a press on the link selected the card`);
     await tick(page, it, "a");
     assert.deepEqual(await ticked(page, it), ["a"], `${it.id}: a press on the label did not tick the option`);
   }
+});
+
+for (const width of [390, 1280]) test(`a press on the empty part of a ranked option's links row ticks the option, at ${width} wide`, async (t) => {
+  // A short link leaves an empty part of the row to its right at both widths; the long link fills the row at 1280.
+  const r = linkedRanked("lk-empty-r", 43, { options: [{ ...opt("a", "Red"), how: "A short way to put it.", links: [{ label: "Repo", url: LINK.url }] }, opt("b", "Blue"), opt("c", "Green")] });
+  const page = await open(t, { items: [r], viewport: { width, height: 900 } }); if (!page) return;
+  await needBoxes(page, r, 3);
+  const row = card(page, r).locator(`#k-${r.id}-a`), link = row.locator("a");
+  await need(row, `${r.id}: no links row on option a`);
+  const rb = await row.boundingBox(), lb = await link.boundingBox();
+  // 20px in from the row's right edge, past the link: the press must land on the row's empty part, not on the link.
+  const x = rb.x + rb.width - 20, y = rb.y + rb.height / 2;
+  assert.ok(x < lb.x || x > lb.x + lb.width, `${r.id}: the press point is over the link`);
+  await page.mouse.click(x, y);
+  assert.deepEqual(await ticked(page, r), ["a"], `${r.id}: a press on the empty part of the links row did not tick the option, at ${width} wide`);
 });
