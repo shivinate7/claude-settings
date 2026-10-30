@@ -304,6 +304,37 @@ class Stale(unittest.TestCase):
         with open(out, encoding="utf-8", newline="") as f:
             self.assertEqual(f.read(), set_body(PAGE, STALE_BODY))
 
+    def write_out(self, live_text):
+        """Run --page <live> --write OUT against page.html; (OUT text, the run). OUT is read without newline changes."""
+        live = write_text(os.path.join(self.fetched, "live.html"), live_text)
+        out = os.path.join(self.tmp.name, "republish.html")
+        r = self.page_run(live, "--main", TEMPLATE, "--write", out)
+        self.assertTrue(os.path.isfile(out), r.stdout + r.stderr)
+        with open(out, encoding="utf-8", newline="") as f:
+            return f.read(), r
+
+    def test_write_carries_the_live_designdata_and_roadmap_blocks_byte_for_byte(self):
+        # The writer republishes OUT: a roadmap block left empty here gives a blank Status tab, and stale_pages
+        # still reads the page current because its compare empties that block.
+        def crlf(text):  # CRLF inside the block: a carry that re-serializes it would change these bytes
+            return text.replace(ROADMAP_BODY, ROADMAP_BODY.replace("\n", "\r\n"), 1)
+        live_text = crlf(with_both_blocks(ALTERED))  # behind: differs from page.html outside the blocks
+        self.assertIn(ROADMAP_BODY.replace("\n", "\r\n"), live_text)
+        out, r = self.write_out(live_text)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(ROADMAP_RE.findall(out), ROADMAP_RE.findall(live_text), "OUT lost the live roadmap block")
+        self.assertEqual(DESIGN_BLOCK.findall(out), DESIGN_BLOCK.findall(live_text), "OUT lost the live designData block")
+        self.assertEqual(out, crlf(with_both_blocks(PAGE)), "OUT is not page.html with the two live blocks")
+
+    def test_write_of_a_page_with_no_roadmap_block_keeps_the_live_designs_and_the_templates_empty_block(self):
+        live_text = ROADMAP_RE.sub("", set_body(ALTERED, DESIGN_BODY), count=1)  # a page from before the roadmap block
+        self.assertNotIn(OPEN, live_text)
+        out, r = self.write_out(live_text)
+        self.assertNotEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(DESIGN_BLOCK.findall(out), DESIGN_BLOCK.findall(live_text), "OUT lost the live designData block")
+        self.assertEqual(ROADMAP_RE.findall(out), ROADMAP_RE.findall(PAGE), "OUT lost the template's empty roadmap block")
+        self.assertEqual(out, set_body(PAGE, DESIGN_BODY), "OUT is not page.html with the live designData")
+
     def test_current_page_with_mockups_is_current_and_check_mode_writes_nothing(self):
         mocked = write_text(os.path.join(self.fetched, "mocked.html"), set_body(PAGE, MOCK_BODY))
         before = self.snapshot()

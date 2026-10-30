@@ -29,7 +29,7 @@ Single-page mode (the writer, at each wake and before each republish):
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
 or more than one, main's page.html cannot be read, or --write fails. --write, on current or behind,
-saves main's page with the live designData body kept; unknown writes nothing. The template is
+saves main's page with the live designData and roadmap blocks kept (splice.carry); unknown writes nothing. The template is
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
@@ -228,8 +228,11 @@ def single_page(argv):
         return 2
     current = matches(template, live)
     if args.write:
-        # Slicing, never re.sub: a mockup body holds < and backslashes that a replacement string would read.
-        text = template[:spot.start(2)] + live_blocks[0][1] + template[spot.end(2):]
+        try:
+            text = splice.carry(template, live)  # the one carry home: live designData and roadmap blocks, byte for byte
+        except SystemExit as err:  # a template or live page whose roadmap markers carry cannot place
+            print("unknown: the --write file cannot be built (%s)" % err)
+            return 2
         try:
             with open(args.write, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
