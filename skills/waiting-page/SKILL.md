@@ -122,7 +122,7 @@ in <home>", never "waited". It stays on the page until the owning session closes
 Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
 project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
-into `meta/page`.
+into `meta/page`. The writer watches the page ("Read the answers").
 
 - Every other session sends its question to the writer, which writes the item. A lane's question
   reaches the writer through its report to its orchestrator ("Add an item", step 0).
@@ -233,8 +233,13 @@ relays an answer. An answer typed in the chat counts the same. A chat answer to 
 writer adds the answer and its time to the item's `context`, and the owning session routes and
 closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 
-- A session that adds an item watches the page: `ArtifactComments` action `watch` with the page
-  URL. It stops watching when it has no open item: `ArtifactComments` action `watch` with `on: false` and the page URL.
+- A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
+  adds an item, takes the writer role, or inherits open items. A writer gets the URL from
+  `meta/page`, or from the `Watch:` line of the project-ops role handoff
+  (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
+  items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
+  It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
+  has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
