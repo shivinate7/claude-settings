@@ -37,7 +37,7 @@ Each state draws the iPhone Duo folded first, then unfolded, in its own frame.
    screen.
    Pick: **my pick**. Owner grant: yes (departs from the house tab bar, `tokens.md`).
 4. **A place shows as a divider and a count, not as card 147.** The count row draws card tops
-   from the front, with the divider tab and the target filled. Front means the end of the box
+   from the front, with the divider tab and the target filled. The front is the end of the box
    with its name label.
    Gain: the helper counts 5 cards, not 147. The count is still true after a pull, because pulls
    go from the back of the box first (item 5).
@@ -54,7 +54,7 @@ Each state draws the iPhone Duo folded first, then unfolded, in its own frame.
    Loss: it needs the photos of the cards on each side, which the sitting already holds.
    Pick: all concepts.
 7. **Pull acts at once, with Undo.** A and B use one press, "Pulled and packed". C uses two:
-   "It's in my hand", then "It's in the envelope". The answer shows at the press, with Undo,
+   the "in my hand" button, then the "in the envelope" button. The answer shows at the press, with Undo,
    because a pull moves every card behind it up one place.
    Gain: no ask in the helper's way. One wrong press is easy to undo.
    Loss: C uses two presses for each card.
@@ -133,9 +133,9 @@ Each state draws the iPhone Duo folded first, then unfolded, in its own frame.
   actions; floats at the bottom), toolbars and segmented-controls. Caption 2 is not used.
 - Checks: `check_ios_mockup.py` exits 0. `label_once.py` on each rendered state names "rares"
   twice in B `find`. That is the seller's divider name in the box view and on the divider tab,
-  which is data. A headless render of all 31 states in both themes gave no script error, no
-  element past its screen or pane edge, no text or control in the fold strip, and no button under
-  44 × 44. Each focus id in the table shows once. The fold and target checks went red on a copy
+  which is data. A headless render of all 31 states in both themes gave no script error. It found
+  no element past its screen or pane edge, and no text or control in the fold strip. It found no
+  button under 44 × 44. Each focus id in the table shows once. The fold and target checks went red on a copy
   with a 36 px segmented control and an unsplit keyboard.
 - Unfolded with the keyboard open, the drawn keyboard is split at the fold. The real system
   keyboard on this pose is not measured.
