@@ -4,7 +4,7 @@
     python3 check_handoff.py <handoff file>
 
 A save of the waiting page wakes only a session that watches the page. A successor with no watch hears
-no answer on the items it inherits. Reason: measured incident, the owner's two test saves, 2026-10-30
+no answer on the items it inherits. Reason: measured incident, the owner's two test saves
 (rule building-guard-needs-incident). The check reads the `## Pages` section of the hand-off
 (templates/role-handoff.md). It needs an `Open items:` line, which is `none` or the item numbers.
 With open items, it needs at least one `Watch: <page URL>` line, with an http(s) URL.

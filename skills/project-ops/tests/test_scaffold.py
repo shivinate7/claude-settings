@@ -283,7 +283,7 @@ def problems(text):
 
 class HandoffCheck(TempDest):
     """A save of the waiting page wakes only a session that watches it. A successor that inherits open items
-    and gets no Watch line hears nothing (the owner's two test saves, 2026-10-30). The check judges the hand-off file."""
+    and gets no Watch line hears nothing (the owner's two test saves). The check judges the hand-off file."""
 
     def test_open_items_without_a_watch_line_is_one_problem(self):
         for items in ("12, 14, 15", "7"):
