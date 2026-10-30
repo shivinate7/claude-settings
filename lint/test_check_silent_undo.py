@@ -798,6 +798,188 @@ class Green(unittest.TestCase):
         self.assertEqual(r.verdict(), [])
 
 
+WORKFLOW_YML = """\
+name: {name}
+on:
+  pull_request:
+  push:
+    branches: [main]
+{perm}jobs:
+  gate:
+    runs-on: ubuntu-latest
+{t_build}    steps:
+{pins}      - name: Check out
+        uses: actions/checkout@v4
+      - name: Run the gate
+        run: python3 lint/run_gate.py
+      - name: Run the unit tests
+        run: python3 -m unittest discover -s lint
+      - name: Report the result
+        run: python3 lint/report.py --format json
+  lint:
+    runs-on: ubuntu-latest
+{t_lint}    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Lint the shell and the YAML
+        run: python3 lint/run_lint.py --strict
+"""
+PERM = "permissions: read-all\n"
+TIMEOUT = "    timeout-minutes: 15\n"
+PIN = "      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0\n"
+PIN_BUMPED = "      - uses: actions/setup-python@f3e1a7c9d2b45a60e8d1c4b7a9f20e3d5c6b8a71 # v5.4.0\n"
+PINS = PIN + "".join("      - uses: actions/%s@%s # %s\n" % x for x in (
+    ("cache", "6849a6489940f00c2f30c0fb92c6274307ccb58a", "v4.1.2"),
+    ("upload-artifact", "b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882", "v4.4.3")))
+
+
+def workflow(name="gates", perm="", t_build="", t_lint="", pins=""):
+    """The workflow file as the base has it. Each block keyword is what main's earlier PR adds."""
+    return WORKFLOW_YML.format(name=name, perm=perm, t_build=t_build, t_lint=t_lint, pins=pins)
+
+
+def after_51(**edits):
+    """The workflow once PR 51 has landed: a unique line, three pin lines, and one line added in two jobs."""
+    return workflow(**dict(dict(perm=PERM, t_build=TIMEOUT, t_lint=TIMEOUT, pins=PINS), **edits))
+
+
+class RenamedFile(unittest.TestCase):
+    """Under --no-renames a rename reads as a delete plus an add, so the file it left looks reverted.
+    A renamed file must get the verdict the same edits get in place: green for what the rename carries,
+    refused for what it drops. Incident: joyous 53 renamed gates.yml to checks.yml, then bumped pins that
+    PR 51 had added to gates.yml. The check refused with `hunk reversed`, and nothing was lost.
+    PR 51 adds, in separate hunks: PERM (one line), PINS (three lines), and TIMEOUT in two jobs."""
+    OLD, NEW = ".github/workflows/gates.yml", ".github/workflows/checks.yml"
+
+    def setUp(self):
+        r = self.r = Repo()
+        r.put(self.OLD, workflow())
+        r.commit("base")
+        r.push()
+
+    def land_51(self):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "pr51")
+        r.put(self.OLD, after_51())
+        r.commit("add the pins and the limits")
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #51", "pr51")
+        r.push()
+
+    def rename(self, text):
+        r = self.r
+        r.sh("mv", self.OLD, self.NEW)
+        r.put(self.NEW, text)
+        r.commit("rename gates to checks")
+
+    def paired(self):
+        """Status letters git gives the branch against main with renames on: R when it pairs the file, A and D when not."""
+        return sorted(line[0] for line in self.r.sh("diff", "-M", "--name-status", "origin/main", "HEAD").splitlines())
+
+    def assertRefused(self, got):
+        self.assertTrue(any(("gates.yml" in p or "checks.yml" in p) and "undoing" in p for p in got), got)
+
+    def test_a_pure_rename_of_a_file_main_added_lines_to_is_green(self):
+        self.land_51()
+        self.r.sh("checkout", "-q", "-b", "ren")
+        self.rename(after_51())
+        self.assertEqual(self.paired(), ["R"])
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_rename_with_a_name_edit_and_a_pin_bump_is_green(self):
+        """The incident. Control: the same two edits in place are green (next test), so the rename alone decides."""
+        self.land_51()
+        self.r.sh("checkout", "-q", "-b", "ren")
+        self.rename(after_51(name="checks", pins=PINS.replace(PIN, PIN_BUMPED)))
+        self.assertEqual(self.paired(), ["R"])
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_the_same_name_edit_and_pin_bump_in_place_is_green(self):  # control
+        self.land_51()
+        self.r.sh("checkout", "-q", "-b", "bump")
+        self.r.put(self.OLD, after_51(name="checks", pins=PINS.replace(PIN, PIN_BUMPED)))
+        self.r.commit("edit the name and bump a pin")
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_rename_that_deletes_a_line_main_added_is_refused(self):
+        self.land_51()
+        self.r.sh("checkout", "-q", "-b", "ren")
+        self.rename(after_51(perm=""))
+        self.assertEqual(self.paired(), ["R"])
+        self.assertRefused(self.r.verdict())
+
+    def test_a_rename_that_drops_one_of_two_identical_added_lines_is_refused(self):
+        """Main added the line twice. One copy stays in the new path, and that copy is no move for the one that went."""
+        self.land_51()
+        self.r.sh("checkout", "-q", "-b", "ren")
+        self.rename(after_51(t_lint=""))
+        self.assertEqual(self.paired(), ["R"])
+        self.assertRefused(self.r.verdict())
+
+    def test_a_rename_git_does_not_pair_that_drops_a_line_main_added_is_refused(self):
+        """Under 50 percent alike git reports a delete and an add. The check fails closed: the drop still shows."""
+        self.land_51()
+        self.r.sh("checkout", "-q", "-b", "ren")
+        notes = "".join("  # step %d: a note the old file does not hold, with a long tail of its own %s\n" % (i, "x" * 60) for i in range(30))
+        self.rename(after_51(name="checks", perm="").replace("jobs:\n", notes + "jobs:\n"))
+        self.assertEqual(self.paired(), ["A", "D"])
+        self.assertRefused(self.r.verdict())
+
+    def cut_rename_then_merge_main(self):
+        """A branch cut before PR 51 renames the file, then merges main: git carries PR 51's lines to the new path."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "ren")
+        self.rename(workflow(name="checks"))
+        r.sh("checkout", "-q", "main")
+        self.land_51()
+        r.sh("checkout", "-q", "ren")
+        r.sh("merge", "-q", "--no-edit", "origin/main")
+        self.assertEqual(r.sh("show", "HEAD:" + self.NEW), after_51(name="checks").strip(), "the merge must carry PR 51 across the rename")
+
+    def test_a_rename_then_a_merge_of_main_is_green(self):
+        """The lost-line read: the merge holds every line PR 51 added, under the new name."""
+        self.cut_rename_then_merge_main()
+        self.assertEqual(self.paired(), ["R"])
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_rename_then_a_merge_of_main_then_a_pin_bump_is_green(self):
+        self.cut_rename_then_merge_main()
+        self.r.put(self.NEW, after_51(name="checks", pins=PINS.replace(PIN, PIN_BUMPED)))
+        self.r.commit("bump a pin")
+        self.assertEqual(self.r.verdict(), [])
+
+    def conflicted_limit(self, renamed):
+        """Main moves the limit 10 to 15; the branch moves it to 20, renamed or not; the merge resolves to 30, a third value."""
+        r, limit = self.r, lambda n: workflow(t_build="    timeout-minutes: %d\n" % n)
+        r.put(self.OLD, limit(10))
+        r.commit("set a limit")
+        r.push()
+        r.sh("checkout", "-q", "-b", "ren")
+        if renamed:
+            r.sh("mv", self.OLD, self.NEW)
+        r.put(self.NEW if renamed else self.OLD, limit(20))
+        r.commit("move the limit to 20")
+        r.sh("checkout", "-q", "main")
+        r.put(self.OLD, limit(15))
+        r.commit("move the limit to 15")
+        r.push()
+        r.sh("checkout", "-q", "ren")
+        r.sh("merge", "--no-edit", "origin/main", ok=False)  # both sides moved the line: a conflict
+        r.put(self.NEW if renamed else self.OLD, limit(30))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "--no-edit")
+
+    def test_a_rename_then_a_merge_that_resolves_a_changed_line_to_a_third_value_is_green(self):
+        """The lost-line read for a line main changed, not added. In place a third value is a rewrite (the next test)."""
+        self.conflicted_limit(renamed=True)
+        self.assertEqual(self.paired(), ["R"])
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_the_same_merge_with_a_third_value_in_place_is_green(self):  # control
+        self.conflicted_limit(renamed=False)
+        self.assertEqual(self.r.verdict(), [])
+
+
 class Unknown(unittest.TestCase):
     def test_no_upstream_is_unknown(self):
         r = Repo()
