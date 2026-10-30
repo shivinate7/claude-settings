@@ -384,18 +384,22 @@ def _filled(value) -> bool:
 def form_str_replace_hit(entry):
     """(rule, matched) when a str_replace on `context` removes a Goal, Problem or Based on line, or swaps
     the Problem line for a malformed one. It carries no `data`, so it is read from old_str and new_str.
-    The stored `stands` is unseen, so a Problem line with no stake counts as whole."""
+    The stored `stands` is unseen, so new_str may drop a stake only where old_str had none."""
     if entry.get("field") != "context":
         return PASS
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if GOAL_LINE.search(old) and not GOAL_LINE.search(new):
         return FORM_RULE, "context edit that removes the Goal line"
-    if _problem_state(old, True) == "ok":
-        state = _problem_state(new, True)
-        if state == "missing":
-            return FORM_RULE, "context edit that removes the Problem line"
-        if state == "malformed":
+    # A stake in old_str stays a stake: a stood pick's bare `Problem:` is unseen here, so only a line that
+    # had no stake may stay without one.
+    if PROBLEM_LINE.search(old) and not PROBLEM_LINE.search(new):
+        if PROBLEM_LABEL.search(new):
             return STAKE_RULE, "context edit that leaves a Problem line with no stake, or one outside the set"
+        return FORM_RULE, "context edit that removes the Problem line"
+    if PROBLEM_STOOD_LINE.search(old) and not PROBLEM_STOOD_LINE.search(new):
+        if PROBLEM_LABEL.search(new):
+            return STAKE_RULE, "context edit that leaves a Problem line with no stake, or one outside the set"
+        return FORM_RULE, "context edit that removes the Problem line"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
     return PASS
