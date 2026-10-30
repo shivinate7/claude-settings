@@ -14,7 +14,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { blankComments, blankCommentsAndStrings, stripComments, stripCommentsAndStrings } from '../scripts/lib/source-text.mjs';
 import { importEntries, importTargets } from '../scripts/lib/import-reader.mjs';
-import { plainWordsNotes, stageSitesOf } from '../scripts/map-check.mjs';
+import { plainWordsNotes, seamHasCallSite, stageSitesOf } from '../scripts/map-check.mjs';
+import { lookAlikes } from '../scripts/map-picture.mjs';
 
 const READERS = { blankComments, blankCommentsAndStrings, stripComments, stripCommentsAndStrings };
 // These two blank the text of a string. The other two keep it as written.
@@ -253,7 +254,7 @@ test('import reader: a string and a comment are no import in a `.tsx` file, and 
   assert.deepEqual(importTargets('src/a.ts', src, TRACKED), ['src/x.ts']);
 });
 
-// ---- The two readers in `scripts/map-check.mjs` that pass the file name on. Each is red before for a `.tsx` name.
+// ---- The readers in `scripts/` that pass the file name on. Each is red before for a `.tsx` name.
 test('map-check: stageSitesOf finds a stage literal after an apostrophe in JSX text, only when it gets a `.tsx` name', () => {
   const stage = { variable: 'stage', callback: 'setStage' };
   const src = "export const V = () => <p>Don't</p>; stage = 'queued';\nsetStage('done');\n";
@@ -266,4 +267,21 @@ test('map-check: plainWordsNotes finds a note after an apostrophe in JSX text in
   const src = "const el = <p>Don't</p>; // In plain words: it shows a note.\nconst keep = 1;\n";
   assert.deepEqual(plainWordsNotes({ 'a.tsx': src }), ['a.tsx:1']);
   assert.deepEqual(plainWordsNotes({ 'a.ts': src }), [], "a `.ts` name keeps today's read");
+});
+
+// The `/*` in JSX text opens no block comment, so the import and the `export` below it are read. Without JSX it hides them.
+test('map-check: seamHasCallSite finds the import of the seam below a `/*` in JSX text in a `.tsx` caller', () => {
+  const seam = 'src/services/seam.ts';
+  const src = "export const Panel = () => <p>/* not a comment</p>;\nimport { metered } from '../services/seam.ts';\n";
+  const sites = () => [{ line: 2 }];
+  assert.equal(seamHasCallSite(seam, ['src/ui/Panel.tsx'], () => src, sites), true);
+  assert.equal(seamHasCallSite(seam, ['src/ui/Panel.ts'], () => src, sites), false, "a `.ts` name keeps today's read");
+});
+
+test('map-picture: lookAlikes reads the exports below a `/*` in JSX text in a `.tsx` file', () => {
+  const src = 'export const View = () => <p>/* not a comment</p>;\nexport const Shared = 1;\n';
+  const node = (p) => ({ k: 'code', p, a: 'area', j: 0 });
+  const read = (one, two) => lookAlikes({ nodes: [node(one), node(two)] }, { [one]: src, [two]: src }).names.map((n) => n.name);
+  assert.deepEqual(read('src/a/One.tsx', 'src/b/Two.tsx'), ['Shared', 'View']);
+  assert.deepEqual(read('src/a/One.ts', 'src/b/Two.ts'), ['View'], "a `.ts` name keeps today's read: the `/*` hides `Shared`");
 });
