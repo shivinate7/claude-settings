@@ -15,8 +15,9 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
 - **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
-  Only triage publishes the roadmap page, from the head of the record branch, with `--live` at each
-  publish (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
+  At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
+  and `--live`. Triage, as the waiting-page writer, splices it into the repo's one page and
+  publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
@@ -53,7 +54,7 @@ parent, or miss a message while busy.
 - Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
   re-asked question, a reply that contradicts the roadmap, or a missed ruling.
 - On a rotation, in this order. The coordinator tells the session to rotate.
-  1. The old session stops watching each page its role owns (the roadmap page, the project's
+  1. The old session stops watching each page its role owns (the repo's one page, the project's
      waiting page). It notes the time, then answers each comment still open at that time on
      those pages.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.

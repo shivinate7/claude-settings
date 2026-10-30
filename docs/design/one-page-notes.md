@@ -102,8 +102,14 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
 15. Each disclosure (read-at, Live work, "What the build said") shows an open or closed marker, ▸ or ▾.
 16. The status part reads its box. Its 340, 640 and 1000 breakpoints are container queries on its
     wrapper, not the media queries of the roadmap page (`ux-component-reads-its-box`). Below 340,
-    each view button is as wide as its label and the phase rail has 3 columns, so no label is cut.
-    Departs from: this mockup, which cuts a label with an ellipsis and keeps 5 columns.
+    each view button is as wide as its label, so no label is cut. The phase rail keeps 5 columns
+    only while each phase name, with the current-phase dot on any phase, sits on one line. Below
+    that box width the rail has 3 columns. The rail sweep test in
+    `skills/waiting-page/tests/page.test.mjs` pins the threshold. It sweeps 320 to 540, light and
+    dark, in the runner's font and in DejaVu Sans, a wide fallback. At each width no phase name
+    breaks inside a word and the dot never sits alone on a line. Pick: 3 columns, not 5 with the dot on its own line, because at 360 to 400 px a
+    lone dot reads as a stray mark and drops its chip's count. Departs from:
+    this mockup, which cuts a label with an ellipsis and keeps 5 columns.
 17. The waiting part is main's, with no change. The order in each tier is the writer's `rank`, then
     age, as main's `sorted()` gives it. Card details that other lanes change now are not drawn.
 
