@@ -481,33 +481,61 @@ class Devices(unittest.TestCase):
 class DesignerSteps(unittest.TestCase):
     """The designer loads a design skill before it draws and critiques its own mockup before it reports.
 
-    A plain text check of agents/designer.md. Each step is bound to a line anchor, so a step moved
-    after the work it must precede fails. The critique counts only when `impeccable` and `critique`
-    stand in one sentence, so the word `critique` in an unrelated sentence never satisfies it.
+    A plain text check of the body of agents/designer.md. Each step is bound to a line anchor, so a
+    step moved after the work it must precede fails. A step is one sentence, or for the critique one
+    paragraph or list item. A negated sentence ("never load", "skip") orders the opposite, and a
+    word in an unrelated sentence orders nothing, so neither counts.
     """
     DRAW = "For each screen the brief names"
     REPORT = "Report once"
+    NEGATED = re.compile(r"\b(?:never|not|no|skip|skips|without)\b|n't", re.I)
+    # The blind-lane carve-out is a skip by nature, so its sentence is exempt from the negation bar.
+    CARVE_OUT = re.compile(r"\b(?:Setup|Launcher)\b")
 
     @classmethod
     def setUpClass(cls):
         with open(os.path.join(HERE, "..", "agents", "designer.md"), encoding="utf-8") as h:
-            cls.lines = h.read().splitlines()
+            lines = h.read().splitlines()
+        fence = [i for i, line in enumerate(lines) if line == "---"]
+        cls.lines = lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
 
-    def before(self, anchor):
+    def steps(self, anchor):
+        """Each paragraph or list item before the line starting `anchor`, wrapped lines joined, as sentences."""
         starts = [i for i, line in enumerate(self.lines) if line.startswith(anchor)]
         self.assertTrue(starts, "agents/designer.md has no line starting %r" % anchor)
-        return self.lines[:starts[0]]
+        units = re.split(r"\n\s*\n|\n(?=\s*[-*] )", "\n".join(self.lines[:starts[0]]))
+        return [re.split(r"(?<=[.!?])\s+", " ".join(u.split())) for u in units]
+
+    def critique_steps(self):
+        """The steps before the report that order impeccable's critique of the designer's own mockup."""
+        found = []
+        for step in self.steps(self.REPORT):
+            text = " ".join(step)
+            named = all(re.search(w, text, re.I) for w in (r"\bimpeccable\b", r"\bcritique\b", r"\bown mockup\b"))
+            negated = any(self.NEGATED.search(s) and re.search(r"\b(?:impeccable|critique)\b", s, re.I)
+                          and not self.CARVE_OUT.search(s) for s in step)
+            if named and not negated:
+                found.append(step)
+        return found
 
     def test_loads_frontend_design_by_name_before_it_draws(self):
-        self.assertTrue(any("frontend-design" in line for line in self.before(self.DRAW)),
-                        "no mention of `frontend-design` before the line starting %r" % self.DRAW)
+        found = [s for step in self.steps(self.DRAW) for s in step
+                 if re.search(r"\bload\w*", s, re.I) and "frontend-design" in s and not self.NEGATED.search(s)]
+        self.assertTrue(found, "no sentence loads `frontend-design` before the line starting %r" % self.DRAW)
 
     def test_critiques_its_own_mockup_with_impeccable_before_it_reports(self):
-        # A blank line or a list item ends a unit; a wrapped line does not.
-        units = re.split(r"\n\s*\n|\n(?=\s*[-*] )", "\n".join(self.before(self.REPORT)))
-        sentences = [s for u in units for s in re.split(r"(?<=[.!?])\s+", " ".join(u.split()))]
-        self.assertTrue(any(re.search(r"\bimpeccable\b", s) and re.search(r"\bcritique\b", s) for s in sentences),
-                        "no sentence names both `impeccable` and `critique` before the line starting %r" % self.REPORT)
+        self.assertTrue(self.critique_steps(),
+                        "no step names `impeccable`, `critique` and its own mockup before the line starting %r"
+                        % self.REPORT)
+
+    def test_a_blind_lane_critique_skips_impeccable_setup_and_its_launcher_fallback(self):
+        # Setup and the Launcher fallback read PRODUCT.md and DESIGN.md, which a blind lane may not read.
+        steps = self.critique_steps()
+        self.assertTrue(steps, "no critique step to hold the blind-lane exception")
+        self.assertTrue(any(re.search(r"\bblind\b", " ".join(step), re.I)
+                            and any(re.search(r"\bskip\b", s, re.I) and "Setup" in s and "Launcher unavailable" in s
+                                    for s in step) for step in steps),
+                        "the critique step names no blind-lane skip of impeccable's Setup and its Launcher fallback")
 
 
 class Hook(unittest.TestCase):
