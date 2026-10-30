@@ -174,6 +174,10 @@ b { font-weight: 600; }
   display: grid; place-items: center; font-size: 17px; color: var(--text); box-shadow: 0 1px 0 var(--line);
 }
 .kbd-cap { font-size: 12px; line-height: 16px; color: var(--text-muted); }
+/* Unfolded, the keyboard is split at the fold: the fold strip holds no key and no text. */
+.frame.unfolded.kb .kbd { display: grid; grid-template-columns: 455.5px 40px 455.5px; padding: 0; }
+.kbd-half { display: flex; flex-direction: column; gap: var(--space-2); align-items: center; padding: var(--space-2); }
+.kbd-fold { background: repeating-linear-gradient(90deg, var(--hatch) 0 1px, transparent 1px 6px), var(--surface-sunk); }
 
 /* ---------- App primitives (inside a screen or a pane) ---------- */
 .scr {
@@ -231,7 +235,7 @@ b { font-weight: 600; }
 
 /* Segmented control */
 .seg-ctl { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--surface-sunk); border-radius: var(--radius); padding: 2px; }
-.seg-ctl button { min-height: 36px; border: 0; background: none; border-radius: 6px; font-size: 15px; color: var(--text); }
+.seg-ctl button { min-height: 44px; border: 0; background: none; border-radius: 6px; font-size: 15px; color: var(--text); }
 .seg-ctl button[aria-pressed="true"] { background: var(--surface-raised); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); }
 
 /* Inset grouped list */
@@ -667,7 +671,9 @@ function sendSummary() {
     <div class="row"><i class="sh sh-wait"></i><span class="t-body">2 wait for you</span><button class="nav-btn">Name them</button></div>
   </div>`;
 }
-const kbdRows = () => ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'].map(r => `<div class="kbd-row">${[...r].map(k => `<span>${k}</span>`).join('')}</div>`).join('') + '<span class="kbd-cap">System keyboard</span>';
+const keyRows = rows => rows.map(r => `<div class="kbd-row">${[...r].map(k => `<span>${k}</span>`).join('')}</div>`).join('');
+const kbdRows = () => keyRows(['qwertyuiop', 'asdfghjkl', 'zxcvbnm']) + '<span class="kbd-cap">System keyboard</span>';
+const kbdSplit = () => `<div class="kbd-half">${keyRows(['qwert', 'asdfg', 'zxcv'])}</div><div class="kbd-fold"></div><div class="kbd-half">${keyRows(['yuiop', 'hjkl', 'bnm'])}<span class="kbd-cap">System keyboard, split at the fold</span></div>`;
 
 /* ================= Concept A: Tabs ================= */
 function tabsA(active, pose) {
@@ -719,7 +725,7 @@ const A = {
       } },
     { id: 'empty', who: 'Helper', label: 'Nothing to pull', newPart: 'empty Pull tab', desc: 'Every sold card is packed. One sentence, one control.',
       f: pose => {
-        const e = scr(nav({ large: 'Pull' }) + body(`<div class="big-check">${svg(P.check, 44)}</div><p class="t-t3">All 17 cards are packed.</p><p class="t-body muted">New orders show here when a card sells.</p>${btn('Check for orders now', 'tint')}`, 'center') + tabsA('pull', pose));
+        const e = scr(nav({ large: 'Pull' }) + body(`<div class="big-check">${svg(P.check, 44)}</div><p class="t-t3">All 17 cards are packed, and new orders show here when a card sells.</p>${btn('Check for orders now', 'tint')}`, 'center') + tabsA('pull', pose));
         if (pose === 'folded') return e;
         return { l: e, r: scr(nav({ title: 'Packed today' }) + body(`<div class="group">${['R', 'K', 'M', 'B', 'T', 'C', 'D'].map(b => `<div class="row"><span style="color:var(--done)">${I.env}</span><span class="t-body">${buyer(b)}</span><span class="t-fn muted">${buyerCards(b).length} card${buyerCards(b).length > 1 ? 's' : ''}</span></div>`).join('')}</div><p class="t-fn muted">And 7 more envelopes.</p>`)) };
       } },
@@ -818,7 +824,7 @@ const B = {
       } },
     { id: 'empty', who: 'Helper', label: 'Nothing to pull', newPart: 'dark shelf', desc: 'No box is lit. One sentence, one control.',
       f: pose => {
-        const s = scr(nav({ large: 'Shelf' }) + body(`<p class="t-body">Nothing to pull. A box lights up here when one of its cards sells.</p>${btn('Check for orders now', 'tint')}${shelfB({}, pose)}`) + bottomB('orders', pose));
+        const s = scr(nav({ large: 'Shelf' }) + body(`<p class="t-body">A box lights up here when one of its cards sells.</p>${btn('Check for orders now', 'tint')}${shelfB({}, pose)}`) + bottomB('orders', pose));
         if (pose === 'folded') return s;
         return { l: s, r: scr(nav({ title: 'Today' }) + body(`<div class="big-check">${svg(P.check, 44)}</div><p class="t-t3">17 cards packed for 14 orders.</p>`, 'center')) };
       } },
@@ -985,7 +991,7 @@ function render() {
   document.getElementById('caption').innerHTML = `<p class="t-hl">${con.name}</p><p class="t-sh">${con.pitch}</p><p class="t-sh"><b>${st.label}.</b> ${st.desc}</p><span class="tag-new">New: ${st.newPart}</span><p class="t-fn muted">Deep link: <a href="#c=${con.id}&amp;s=${st.id}">#c=${con.id}&amp;s=${st.id}</a> (add &amp;t=dark or &amp;t=light)</p>`;
   const ff = document.getElementById('frame-folded'), fu = document.getElementById('frame-unfolded');
   ff.classList.toggle('kb', !!st.kb); fu.classList.toggle('kb', !!st.kb);
-  ff.querySelector('.kbd').innerHTML = st.kb ? kbdRows() : ''; fu.querySelector('.kbd').innerHTML = st.kb ? kbdRows() : '';
+  ff.querySelector('.kbd').innerHTML = st.kb ? kbdRows() : ''; fu.querySelector('.kbd').innerHTML = st.kb ? kbdSplit() : '';
   document.getElementById('cap-folded').textContent = st.kb ? 'iPhone Duo, folded, keyboard open: content 466 × 250.' : 'iPhone Duo, folded: frame 466 × 678, safe content 382 × 644, trailing inset 84, bottom inset 34.';
   document.getElementById('cap-unfolded').textContent = st.kb ? 'iPhone Duo, unfolded, keyboard open: content 951 × 263. Fold strip 455.5 to 495.5 holds nothing.' : 'iPhone Duo, unfolded: 951 wide, fold strip 455.5 to 495.5 holds nothing. Height 644 is not measured.';
   document.getElementById('screen-folded').innerHTML = st.f('folded');

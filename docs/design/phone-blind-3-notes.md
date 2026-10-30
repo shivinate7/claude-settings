@@ -133,5 +133,9 @@ Each state draws the iPhone Duo folded first, then unfolded, in its own frame.
   actions; floats at the bottom), toolbars and segmented-controls. Caption 2 is not used.
 - Checks: `check_ios_mockup.py` exits 0. `label_once.py` on each rendered state names "rares"
   twice in B `find`. That is the seller's divider name in the box view and on the divider tab,
-  which is data. A headless render of all 31 states in both themes gave no script error and no
-  element past its screen or pane edge.
+  which is data. A headless render of all 31 states in both themes gave no script error, no
+  element past its screen or pane edge, no text or control in the fold strip, and no button under
+  44 × 44. Each focus id in the table shows once. The fold and target checks went red on a copy
+  with a 36 px segmented control and an unsplit keyboard.
+- Unfolded with the keyboard open, the drawn keyboard is split at the fold. The real system
+  keyboard on this pose is not measured.
