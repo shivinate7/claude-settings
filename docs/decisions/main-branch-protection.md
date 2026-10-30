@@ -2,16 +2,21 @@
 
 ## The ruling
 
-`main` of shivinate7/claude-settings requires one check: `all-jobs-passed`, the fan-in job in
+`main` of shivinate7/claude-settings requires one check: `all-jobs-passed`, the job in
 `.github/workflows/checks.yml` that runs the shared action `actions/all-jobs-passed`. Owner ruling,
-2026-10-30 15:03 CDT (waiting-page item 87, record same-check-kinds): every repo requires that one check.
+2026-10-30 15:03 CDT (waiting-page item 87): branch protection requires that one check. Record
+same-check-kinds (PR #877) holds the ruling for every repo.
 `.github/stamp.json` `merge.requiredChecks` is `"protection"`, so the `merge` tool reads the name from the
 protection. GitHub's branch protection setting is the owner's to change.
 
-- `all-jobs-passed` needs every job that runs on a pull request. It fails when a needed job failed, was
-  cancelled or was skipped. `lint/test_all_jobs_passed.py` goes red when a job that runs on a pull request is
-  missing from its `needs`.
-- A job that a scope flag turns off skips its steps, not the job, so it ends green, not skipped.
+- `all-jobs-passed` needs every job that runs on a pull request, except `ci-done`, which needs it. It fails
+  when a needed job failed, was cancelled or was skipped. `lint/test_all_jobs_passed.py` goes red when such a
+  job is missing from its `needs`.
+- `all-jobs-passed` runs only on a pull request. The five Windows shard jobs run only off a pull request, so
+  they are not in its `needs`. On main their own job results are the verdict.
+- A job that a scope flag turns off skips its steps, not the job, so it ends green, not skipped. Cost: a
+  pull request that turns every flag off starts 11 runners (6 Windows, 2 macOS, 3 Linux) that skip every
+  step.
 - A draft PR runs no CI: `scope` skips on a draft, and every other job skips with it.
 - A merge needs a pull request and no approval.
 - `strict` is false: GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base).
