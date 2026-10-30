@@ -1209,6 +1209,20 @@ test("the note box is open on every open card, with no Add a note button, and a 
   assert.equal(await page.locator(`#n-${DECISION.id}`).isVisible(), true, "a sent card under Change shows no note box");
 });
 
+// The send bar is fixed at the bottom of the viewport. The page is scrolled so the note box starts 2px above the bar's top.
+test("a focused note box at 390 wide ends above the send bar", async (t) => {
+  const it = mk("note-low", 62, { context: LONG });
+  const page = await open(t, { items: [mk("filler-a", 60, { context: LONG }), it, mk("filler-b", 61, { context: LONG })], viewport: { width: 390, height: 844 } }); if (!page) return;
+  const edge = (id) => page.evaluate((k) => ({ bottom: document.getElementById(k).getBoundingClientRect().bottom, barTop: document.getElementById("bar").getBoundingClientRect().top }), id);
+  await page.evaluate((k) => window.scrollBy(0, document.getElementById(k).getBoundingClientRect().top - document.getElementById("bar").getBoundingClientRect().top + 2), `n-${it.id}`);
+  const before = await edge(`n-${it.id}`);
+  assert.ok(before.bottom > before.barTop, `setup: the note box ends at ${Math.round(before.bottom)}, not under the send bar at ${Math.round(before.barTop)}`);
+  await page.locator(`#n-${it.id}`).focus();
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  const at = await edge(`n-${it.id}`);
+  assert.ok(at.bottom <= at.barTop, `the focused note box ends at ${Math.round(at.bottom)}, under the send bar at ${Math.round(at.barTop)}`);
+});
+
 test("a note with no option picked is an answer: choice none plus the note", async (t) => {
   const page = await open(t); if (!page) return;
   await addNote(page, DECISION, "Green please");
@@ -2008,6 +2022,7 @@ test("a blocked card says it cannot be sent, disables its controls, and Copy ans
   assert.equal(await c.locator(".takepick").isDisabled(), true);
   assert.equal(await c.locator(".nonebtn").isDisabled(), true);
   assert.equal(await c.locator(".opts input").first().isDisabled(), true);
+  assert.equal(await page.locator("#n-dup-keys").isDisabled(), true, "the note box of a blocked card is open");
   await takePick(page, { id: "good" });
   assert.equal(await page.evaluate(() => answerLine()), "43 a");
 });
