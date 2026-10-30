@@ -1111,6 +1111,9 @@ class PickGuardTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("Pick guard", out["reason"])
                 self.assertIn("question box", out["reason"])
+                # Catches: the refusal naming the box as allowed only with nothing running.
+                self.assertRegex(out["reason"], r"question box[^.]*only with nothing running|"
+                                                r"only with nothing running[^.]*question box")
 
     def test_pk_red_option_forms_block(self):
         rows = [
@@ -1134,13 +1137,26 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNotNone(self.verdict(self.PICK, [self.page_set()]))
 
     def test_pk_red_agent_calls_do_not_count(self):
+        # An agent's box and write do not count. With no link in the reply, the pick still blocks
+        # (decisions-reach-a-clickable-pick).
         calls = [("AskUserQuestion", {}, True), ("ArtifactData", self.page_set()[1], True)]
-        self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, calls))
+        self.assertIsNotNone(self.verdict(self.PICK, calls))
 
-    def test_pk_red_wrong_collection_or_action_blocks(self):
-        for call in (self.page_set(collection="notes"), self.page_set(action="get")):
+    def test_pk_red_pick_with_no_link_blocks_whatever_the_calls(self):
+        # With no link in the reply, the pick blocks whatever the calls: another collection, a get, or
+        # an items update (decisions-reach-a-clickable-pick).
+        for call in (self.page_set(collection="notes"), self.page_set(action="get"),
+                     self.page_set(action="update")):
             with self.subTest(call=call):
-                self.assertIsNotNone(self.verdict(self.PICK + "\n" + self.PAGE, [call]))
+                self.assertIsNotNone(self.verdict(self.PICK, [call]))
+
+    def test_pk_green_link_passes_whatever_the_calls(self):
+        # A reply that holds this repo's waiting page URL passes, whatever ArtifactData calls the
+        # turn made (decisions-reach-a-clickable-pick).
+        reply = self.PICK + "\n" + self.PAGE
+        for calls in ([], [self.page_set(collection="notes")], [self.page_set(action="get")]):
+            with self.subTest(calls=calls):
+                self.assertIsNone(self.verdict(reply, calls))
 
     def test_pk_red_unknown_page_only_the_box_passes(self):
         bare = os.path.join(self.tmp.name, "bare")
@@ -1156,11 +1172,89 @@ class PickGuardTests(unittest.TestCase):
         reply = self.PICK + "\n" + self.PAGE
         self.assertIsNone(self.verdict(reply, [self.page_set(action="update")]))
         self.assertIsNone(self.verdict(reply, [batch]))
-        self.assertIsNotNone(self.verdict(reply, [other]))
+        self.assertIsNone(self.verdict(reply, [other]))
+        self.assertIsNotNone(self.verdict(self.PICK, [other]))
 
     def test_pk_green_controls_pass(self):
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)]))
         self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE, [self.page_set()]))
+
+    def assert_pick_blocked(self, reply, repo=None):
+        out = self.verdict(reply, repo=repo)
+        self.assertIsNotNone(out, "the pick passed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Pick guard", out["reason"])
+
+    def test_pk_green_reply_links_this_repos_page_with_no_write_passes(self):
+        # Chat first, then the page (questions-go-to-owner): the session sends the question to the
+        # page's writer, so its reply links the page and it writes nothing itself.
+        self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE))
+
+    def test_pk_green_five_minute_wait_names_the_page_with_no_box_passes(self):
+        # Chat first, then the page (questions-go-to-owner): after 5 minutes unanswered in chat, the
+        # question goes to the page.
+        for phrase in ("5 min", "5 minutes", "5-minute", "five minutes"):
+            with self.subTest(phrase=phrase):
+                reply = ("> **Done** OTHER read the code\n"
+                         "> **Input Needed** Two ways. Ask in chat; after %s unanswered it goes to the "
+                         "waiting page.\n> A (my pick): fold the guard\n> B: add a second hook\n"
+                         "> **Next** wait") % phrase
+                self.assertIsNone(self.verdict(reply))
+
+    def test_pk_red_wait_needs_both_words_blocks(self):
+        # Catches: a 5-minute wait with no page word, and a page word with no 5-minute wait.
+        only_wait = ("> **Done** OTHER read the code\n"
+                     "> **Input Needed** Two ways. After 5 minutes unanswered I send it on.\n"
+                     "> A (my pick): fold the guard\n> B: add a second hook\n> **Next** wait")
+        only_page = ("> **Done** OTHER read the code\n"
+                     "> **Input Needed** Two ways. I put it on the waiting page.\n"
+                     "> A (my pick): fold the guard\n> B: add a second hook\n> **Next** wait")
+        for reply in (only_wait, only_page):
+            with self.subTest(reply=reply):
+                self.assert_pick_blocked(reply)
+
+    def test_pk_red_wait_outside_input_needed_blocks(self):
+        # Catches: the 5-minute wait and the page named in Done or Next, not in the Input Needed item.
+        in_done = ("> **Done** OTHER read the code; after 5 minutes unanswered it goes to the waiting page.\n"
+                   "> **Input Needed** Two ways:\n> A (my pick): fold the guard\n> B: add a second hook\n"
+                   "> **Next** wait")
+        in_next = ("> **Done** OTHER read the code\n"
+                   "> **Input Needed** Two ways:\n> A (my pick): fold the guard\n> B: add a second hook\n"
+                   "> **Next** after 5 minutes unanswered, the waiting page.")
+        for reply in (in_done, in_next):
+            with self.subTest(reply=reply):
+                self.assert_pick_blocked(reply)
+
+    def test_pk_red_wait_without_a_waiting_page_blocks(self):
+        # Catches: the 5-minute wait and the page words in a repo whose layout gives no waiting page,
+        # with no extras file and with an extras file that has no waiting-page key.
+        reply = ("> **Done** OTHER read the code\n"
+                 "> **Input Needed** Two ways. After 5 minutes unanswered it goes to the waiting page.\n"
+                 "> A (my pick): fold the guard\n> B: add a second hook\n> **Next** wait")
+        bare = os.path.join(self.tmp.name, "bare")
+        os.makedirs(os.path.join(bare, ".git"))
+        self.assert_pick_blocked(reply, repo=bare)
+        nokey = os.path.join(self.tmp.name, "nokey")
+        os.makedirs(os.path.join(nokey, ".git"))
+        os.makedirs(os.path.join(nokey, ".claude"))
+        with open(os.path.join(nokey, ".claude", "layout-extras.json"), "w") as f:
+            json.dump({"kinds": {}}, f)
+        self.assert_pick_blocked(reply, repo=nokey)
+
+    def test_pk_red_other_minute_counts_block(self):
+        # Catches: the five-minute wait read inside a longer number, such as 15, 25 or 35, or a
+        # spelled-out twenty-five or fifty-five.
+        for n in ("15 minutes", "25 minutes", "35 minutes", "twenty-five minutes",
+                  "twenty five minutes", "fifty-five minutes"):
+            with self.subTest(n=n):
+                self.assert_pick_blocked(
+                    "> **Done** OTHER read the code\n"
+                    "> **Input Needed** Two ways. After %s unanswered it goes to the waiting page.\n"
+                    "> A (my pick): fold the guard\n> B: add a second hook\n> **Next** wait" % n)
+
+    def test_pk_red_another_repos_link_in_reply_blocks(self):
+        # Catches: another repo's waiting page link, with no write, read as this repo's page.
+        self.assert_pick_blocked(self.PICK + "\n\nSee " + self.OTHER)
 
     def test_pk_green_no_false_alarm(self):
         rows = [
