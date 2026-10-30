@@ -327,9 +327,10 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
    phone width for a web app. Draw it at the width of the first device that
-   `python3 lint/layout.py devices <repo root>` prints. Where no size is written, draw at the
-   page's default width (`FIT_W` in `page.html`) and leave `drawn` unset. Set `drawn` whenever you
-   draw at another width. The page scales it to the card. A picture taller
+   `python3 ~/.claude/lint/layout.py devices <repo root>` prints. Where it prints `unknown` or no
+   size, draw at the page's default width (`FIT_W` in `page.html`; read it once with
+   `grep -n 'const FIT_W' <skill folder>/page.html`) and leave `drawn` unset. Set `drawn` whenever
+   you draw at another width. The page scales it to the card. A picture taller
    than the card's 480px box scrolls inside the box. The full mockup stays one tap away ("Open full size").
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
