@@ -555,6 +555,30 @@ class Ios(unittest.TestCase):
                 repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + command)
                 self.red(repo, "ci checks: gap - no workflow compiles the app")
 
+    SUBSHELL = ("x=$(%s)", "(%s)", "x=`%s`", 'echo "$(%s)"', "x=$( %s )")  # `$(`, `(` and a backtick open a command
+
+    def test_a_command_in_a_subshell_or_backticks_is_read(self):
+        for form in self.SUBSHELL:
+            command = form % "xcodebuild test -scheme TallyUITests"
+            with self.subTest(command=command):
+                self.red(self.step(self.gold(), command), "slow tests: gap - " + self.FLOW)
+        for form in self.SUBSHELL:  # the open and close marks narrow nothing: a unit-only run stays a pass
+            command = form % "xcodebuild test -scheme Tally -only-testing:TallyTests"
+            with self.subTest(command=command):
+                self.assertEqual(self.grade(self.step(self.both(), command), "slow tests"), "pass")
+
+    def test_a_compile_in_a_subshell_or_backticks_counts_and_an_info_call_there_does_not(self):
+        for form in self.SUBSHELL:
+            command = form % "xcodebuild build -scheme Tally"
+            with self.subTest(command=command):
+                repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + command)
+                self.assertEqual(self.grade(repo, "ci checks"), "pass")
+        for form in self.SUBSHELL:
+            command = form % "xcodebuild -showsdks"
+            with self.subTest(command=command):
+                repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + command)
+                self.red(repo, "ci checks: gap - no workflow compiles the app")
+
     def nested_type(self, repo, target):
         """`repo` with the sources of `target` written as a path entry that carries its own `type: folder`."""
         return self.edit(repo, self.PROJ, "sources: [%s]" % target, "sources:\n      - path: %s\n        type: folder" % target)
