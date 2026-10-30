@@ -58,7 +58,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
       `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
-      On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. `why` stays one text.
+      On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
       A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
@@ -69,7 +69,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
   a note with no `done`. "Take my pick", and a pick that
   stands, write `choice` equal to `pick`, with the note `accepted pick`. On a `multi` item `choice` is a
-  list of option keys, in rank order when `ranked`, and "Take my pick" writes the whole `pick` list. "None of these" writes
+  list of option keys, in rank order when `ranked` and in option order otherwise. "Take my pick" writes the whole `pick` list in that order. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
