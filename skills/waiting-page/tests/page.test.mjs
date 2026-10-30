@@ -830,14 +830,12 @@ for (const width of [390, 1440]) {
 }
 
 // Owner ruling (waiting-page item 84 pick b, option 5B), round 2: at 1065 wide the option column binds, so a scrolling picture is column less 2 less the gutter.
-// Read at fractional pixels, so a box that passes its column by under a pixel still fails. The 0.5px slack is the only one allowed.
+// The column is read from its rect, not clientWidth, which rounds up. The budget is floor(rect width) less 2 and the gutter (docs/design/c204-sizes.md item 7).
+// The box sits inside the column's edges to 0.01px, and its sizer and picture fit the budget.
 const strictBox = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
-  const o = w.parentElement, cs = getComputedStyle(o), r = o.getBoundingClientRect();
-  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), borderX = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+  const r = w.parentElement.getBoundingClientRect(), wr = w.getBoundingClientRect();
   return {
-    wrapR: w.getBoundingClientRect().right,
-    colR: r.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight),
-    colW: r.width - borderX - padX,
+    wrapL: wr.left, wrapR: wr.right, colL: r.left, colR: r.right, colRectW: r.width,
     sizerW: w.querySelector(".dsizer").getBoundingClientRect().width,
     fw: w.querySelector("iframe").getBoundingClientRect().width,
     g: w.offsetWidth - w.clientWidth - 2,
@@ -850,11 +848,12 @@ test("a tall picture that scrolls at 1065 wide stays inside its column: the box,
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1065, height: 900 } }); if (!page) return;
   await frameSettled(page, 2400);
   await settleFit(page, it.id);
-  const s = await strictBox(page, it.id), room = s.colW - 2 - s.g;
+  const s = await strictBox(page, it.id), budget = Math.floor(s.colRectW) - 2 - s.g;
   assert.ok(/scroll/.test(s.cls), "the picture does not scroll");
-  assert.ok(s.wrapR <= s.colR + 0.5, `the box ends at ${s.wrapR}, past its column's content edge ${s.colR}`);
-  assert.ok(s.sizerW <= room + 0.5, `the sizer is ${s.sizerW} wide, past the column ${s.colW} less 2 and the gutter ${s.g} = ${room}`);
-  assert.ok(Math.abs(s.fw - room) <= 1, `the picture is ${s.fw} wide, not the column ${s.colW} less 2 and the gutter ${s.g} = ${room.toFixed(1)}`);
+  assert.ok(s.wrapL >= s.colL - 0.01, `the box starts at ${s.wrapL}, left of its column at ${s.colL}`);
+  assert.ok(s.wrapR <= s.colR + 0.01, `the box ends at ${s.wrapR}, past its column's right edge ${s.colR}`);
+  assert.ok(s.sizerW <= budget + 0.01, `the sizer is ${s.sizerW} wide, over floor(${s.colRectW}) less 2 and the gutter ${s.g} = ${budget}`);
+  assert.ok(Math.abs(s.fw - budget) <= 1, `the picture is ${s.fw} wide, not ${budget}`);
 });
 
 test("a picture that differs from its siblings and scrolls at 1065 wide stays inside its column, its 3px border in the gutter", async (t) => {
@@ -863,11 +862,12 @@ test("a picture that differs from its siblings and scrolls at 1065 wide stays in
   await frameSettled(page, 2400);
   await settleFit(page, it.id);
   assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif") && getComputedStyle(w).borderLeftWidth === "3px"), "the picture is not a differing picture with a 3px left border");
-  const s = await strictBox(page, it.id), room = s.colW - 2 - s.g;
+  const s = await strictBox(page, it.id), budget = Math.floor(s.colRectW) - 2 - s.g;
   assert.ok(/scroll/.test(s.cls), "the differing picture does not scroll");
-  assert.ok(s.wrapR <= s.colR + 0.5, `the box ends at ${s.wrapR}, past its column's content edge ${s.colR}`);
-  assert.ok(s.sizerW <= room + 0.5, `the sizer is ${s.sizerW} wide, past the column ${s.colW} less 2 and the gutter ${s.g} = ${room}`);
-  assert.ok(Math.abs(s.fw - room) <= 1, `the picture is ${s.fw} wide, not the column ${s.colW} less 2 and the gutter ${s.g} = ${room.toFixed(1)}`);
+  assert.ok(s.wrapL >= s.colL - 0.01, `the box starts at ${s.wrapL}, left of its column at ${s.colL}`);
+  assert.ok(s.wrapR <= s.colR + 0.01, `the box ends at ${s.wrapR}, past its column's right edge ${s.colR}`);
+  assert.ok(s.sizerW <= budget + 0.01, `the sizer is ${s.sizerW} wide, over floor(${s.colRectW}) less 2 and the gutter ${s.g} = ${budget}`);
+  assert.ok(Math.abs(s.fw - budget) <= 1, `the picture is ${s.fw} wide, not ${budget}`);
 });
 
 test("a resize or a repaint keeps the owner's scroll, the same box, and the scroll hint in the picture's name", async (t) => {
