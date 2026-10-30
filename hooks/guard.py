@@ -2806,6 +2806,71 @@ def stake_str_replace_hit(entry) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ an item field the page renders
+#
+# docs/decisions/item-field-rendered.md, rule `item-field-rendered`, built against a named incident
+# (incident in the record): 37 live items carried `reply` and the page drew none. A write of a waiting
+# item names only top-level fields that the page's own block lists, <script type="application/json"
+# id="itemFields">. That block is the one list: this code reads it and holds no copy.
+ITEM_FIELDS_SEAM = "GUARD_ITEM_FIELDS_PAGE"
+ITEM_FIELDS_PAGE = os.path.join(_HERE, "..", "skills", "waiting-page", "page.html")
+ITEM_FIELDS_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
+                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
+                      "that block, or leave it out of the write. An update may remove a stored field "
+                      "with {\"__delete__\": true}.")
+
+
+def _item_fields(path):
+    """The list in the page's itemFields block, found with an HTML parser (script text is data, so a
+    string or a template literal holds no block). None when the file, the block or the list does not read."""
+    from html.parser import HTMLParser
+
+    class Block(HTMLParser):
+        text, done = None, False
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script" and self.text is None and dict(attrs).get("id") == "itemFields":
+                self.text = []
+
+        def handle_data(self, data):
+            if self.text is not None and not self.done:
+                self.text.append(data)
+
+        def handle_endtag(self, tag):
+            if tag == "script" and self.text is not None:
+                self.done = True
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            block = Block()
+            block.feed(f.read())
+            block.close()
+        fields = json.loads("".join(block.text or []))
+    except Exception:
+        return None
+    return fields if isinstance(fields, list) and all(isinstance(x, str) for x in fields) else None
+
+
+def item_field_hit(op, entry, data) -> str:
+    """The matched text when this write of a waiting item names a top-level field outside the page's
+    itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
+    field in `field`. A page with no readable block reads as unknown, and the write passes."""
+    fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
+    if fields is None:
+        return ""
+    if op == "str_replace":
+        field = entry.get("field")
+        top = field.split(".", 1)[0] if isinstance(field, str) else ""
+        return "str_replace on " + top if top and top not in fields else ""
+    if not isinstance(data, dict):
+        return ""
+    for key, value in data.items():
+        if key in fields or (op == "update" and isinstance(value, dict) and value.get("__delete__") is True):
+            continue
+        return "field " + str(key)
+    return ""
+
+
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
@@ -2819,6 +2884,9 @@ def data_tool_hit(tool_input, cwd=""):
     if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
         return "", ""
     for op, entry in writes:
+        hit = item_field_hit(op, entry, _write_data(entry))
+        if hit:
+            return "item-field-rendered", hit
         if op == "str_replace":
             hit = task_str_replace_hit(entry)
             if hit:
@@ -3397,6 +3465,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "task-names-check", TASK_REASON, matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", STAKE_REASON, matched)
+        if rule == "item-field-rendered":
+            refuse(tool, "deny", "item-field-rendered", ITEM_FIELDS_REASON, matched)
         return
 
     if tool in SHELL_TOOLS:
