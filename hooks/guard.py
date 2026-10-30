@@ -2632,8 +2632,10 @@ PRESS_LINK_REASON = ("An option or step that asks the owner to press in a web ap
                      "that exact page. Put links: [{label, url}] on that option (a task: on the item), "
                      "with the url of the page where he presses; for a pull request or an issue, the "
                      "url of that number.")
-COMMAND_REASON = ("A step never sends the owner to a file for a command. Put the command in the item's "
-                  "`command` field, and say \"paste the command below\" in the step.")
+COMMAND_REASON = ("A step never sends the owner to a file for a command, and never holds one. Put the "
+                  "command in the item's `command` field as {powershell, mac}: a PowerShell 5.1-safe "
+                  "string (no &&, ||, << or <<<) and a bash or zsh string for the Mac, both non-empty. "
+                  "Say \"paste the command below\" in the step.")
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
 # pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
@@ -2664,6 +2666,19 @@ COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|t
 COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
 COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b(?!\s+below)"
                           r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
+# A task's `command` is {powershell, mac}, each a non-empty string, so the owner's own shell gets a
+# block that runs in it. PowerShell 5.1 has none of the bash operators below: a line holding one
+# fails there.
+COMMAND_SHELLS = ("powershell", "mac")
+PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<")
+# A shell line in a step's backtick span or fence: it chains with an operator, or its first word is a
+# program the owner would run or a Verb-Noun cmdlet, with at least one more word. A lone backticked
+# word (`main`) or a file name is not a shell line.
+SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
+                            "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
+                            "ls", "cat", "echo", "export", "sudo"))
+SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
+SHELL_OPERATOR = re.compile(r"&&|<<<|[|;]")
 
 
 def _flat_text(value) -> str:
@@ -2716,20 +2731,81 @@ def press_link_hit(op, data) -> str:
     return ""
 
 
+def _command_ok(command) -> bool:
+    """True when `command` is {powershell, mac} with both a non-empty string."""
+    return isinstance(command, dict) and all(isinstance(command.get(k), str) and command[k].strip()
+                                             for k in COMMAND_SHELLS)
+
+
+def _code_spans(text) -> list:
+    """Each backtick span and fenced block in `text`, read in one pass. A run of n backticks opens a
+    span that the next run of exactly n closes; a run with no closer is plain text, so a lone
+    backtick never swallows the rest. A fence's first line is its info string and is dropped."""
+    spans, i, end = [], 0, len(text)
+    while i < end:
+        if text[i] != "`":
+            i += 1
+            continue
+        j = i
+        while j < end and text[j] == "`":
+            j += 1
+        run, k, close = j - i, j, -1
+        while k < end:
+            if text[k] != "`":
+                k += 1
+                continue
+            m = k
+            while m < end and text[m] == "`":
+                m += 1
+            if m - k == run:
+                close = k
+                break
+            k = m
+        if close < 0:
+            i = j
+            continue
+        body = text[j:close]
+        if run >= 3 and "\n" in body:
+            body = body.split("\n", 1)[1]
+        spans.append(body)
+        i = close + run
+    return spans
+
+
+def _shell_line(span) -> bool:
+    """True when a line of this code span is a shell line (see SHELL_PROGRAMS)."""
+    for line in span.splitlines():
+        words = line.split()
+        if SHELL_OPERATOR.search(line):
+            return True
+        if len(words) >= 2 and (words[0] in SHELL_PROGRAMS or SHELL_CMDLET.fullmatch(words[0])):
+            return True
+    return False
+
+
 def command_in_item_hit(data) -> str:
-    """The matched text when a task's steps, joined, send the owner to a file for a command. A
-    `command` on the item does not excuse it: the step still points at the file."""
+    """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
+    holds a bash operator, when its steps, joined, send the owner to a file for a command, or when a
+    step holds a shell line in backticks. A `command` on the item does not excuse a file step: the
+    step still points at the file. An update with no `command` key leaves the stored one alone."""
     if not isinstance(data, dict) or data.get("kind", "task") != "task":
         return ""
+    has_command = _command_ok(data.get("command"))
+    if "command" in data and not has_command:
+        return "command is not {powershell, mac}"
+    if has_command and PS_BASH_OPERATOR.search(data["command"]["powershell"]):
+        return "powershell command holds a bash operator"
     steps = data.get("steps")
     if not isinstance(steps, list):
         return ""
-    joined = "\n".join(_flat_text(s) for s in steps)
+    texts = [_flat_text(s) for s in steps]
+    joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
-    has_command = isinstance(data.get("command"), str) and data["command"].strip()
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
             or (has_file and not has_command and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
+    if any(_shell_line(span) for text in texts for span in _code_spans(text)):
+        return "step holds a shell line"
     return ""
 
 
