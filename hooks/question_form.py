@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The one question form and the one check for both places a session asks the owner a question: the
+"""The one question form and the one guard for both places a session asks the owner a question: the
 chat question box (AskUserQuestion) and a write of a waiting-page item (ArtifactData). Decision
 question-form holds the ruling; rule `style-question-form` holds the text.
 
@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit; hooks/guard.py data_tool_hit calls item_hit after
-its url and collection check. Nothing here writes a file or starts a process.
+its url and collection guard. Nothing here writes a file or starts a process.
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
 

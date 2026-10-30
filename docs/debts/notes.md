@@ -714,3 +714,6 @@
 - blind-lane-on-redraw: the blind-brief hook refuses a directed designer with no `Blind lanes:` line, also on a redraw of a concept the owner picked. The lane must add a blind lane or quote the owner (lane d4-designer-critique). Decision: none.
 - scratchpad-shared-across-lanes: designer lanes of one session share its scratchpad, so a blind lane saw the directed lane's contrast script with its colours. It did not use them (lane d4-designer-critique). Decision: none.
 - impeccable-launcher-refused: guard `impeccable-review-only` refuses the impeccable launcher and detector. So the designer's critique runs in one context with no detector (lane d4-designer-critique). Decision: design-skills.
+- question-form-goal-not-first: prose before the Goal line passes, because only the order of the three form lines is checked (hooks/question_form.py). Decision: question-form.
+- ci-scope-question-form-unpinned: lint/test_ci_scope.py pins git_reads.py in the guard arm, but not question_form.py or precompact_handoff.py. Decision: question-form.
+- question-form-import-fails-open: an import defect in hooks/question_form.py or hooks/precompact_handoff.py turns off the six page rules (guard-crash) and the whole chat judge. Decision: question-form.
