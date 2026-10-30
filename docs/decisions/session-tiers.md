@@ -42,8 +42,9 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
   - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the arbiter does not start with triage and the batch runner. It starts later, when the owner tells the coordinator "spawn arbiter". It is for long runs the owner does not want to sit through.
   - Effort (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): by default the arbiter runs at high effort for its model.
-  - Ruling (same item): an arbiter's answer counts as a ruling inside its own repo. It ranks below the owner, and the owner can overrule it.
+  - Ruling (same item): an arbiter's answer counts as a ruling inside its own repo. It ranks below the owner, and the owner can overturn it.
   - Home (lane default, not an owner ruling; rule `output-answer-has-a-home`, an answer has a home): an arbiter's ruling lands where an owner's would, in its question's record in that repo.
+  - On the page (owner, 2026-10-30 12:44 CDT, waiting item 86, pick a): each ruling the arbiter makes adds a closed item to the waiting page, with an Overturn choice. The arbiter hands the ruling to the page's writer, which writes the item (skill `waiting-page`). An Overturn reopens the question to the item's owning session.
   - Which repos (same item): not every repo gets an arbiter, only a repo that asks. Today that is q_max.
   - Kind (same item): the arbiter is a standing session and an orchestrator, and runs Opus. It is rotated before it goes stale, like triage.
 - **Merge grant** (owner, 2026-10-29 16:47 CDT). The coordinator holds a standing merge grant in claude-settings and in the owner's other repos, until the owner withdraws it in chat. It never asks the owner to merge. The grant covers the merge act only and lifts no check: green CI, no merge during a batch CI run, fresh review and the net-value hold still apply. Record `standing-merge-grant` (the coordinator's standing merge grant) holds the words, the repos and the limits.

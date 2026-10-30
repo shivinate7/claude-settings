@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arbiter rulings mockup</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No item, number, ruling, record or time on this page is real.</div>
+<header class="tool">
+  <h1>Waiting page: arbiter rulings with Overturn</h1>
+  <div class="row" id="rowS"><span>State</span>
+    <button data-s="collapsed">A: collapsed on load (pick)</button>
+    <button data-s="open">B: open on load</button>
+    <button data-s="pressed">Overturn pressed, not sent</button>
+    <button data-s="sent">Overturn sent</button>
+    <button class="hide" data-hide="collapsed">Hide A</button>
+    <button class="hide" data-hide="open">Hide B</button>
+  </div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button data-lab="1" id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=collapsed|open|pressed|sent</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=collapsed,open</code>.
+    The Overturn button works in every frame: press it to see the pending state, press again to undo it.
+    The sample store also holds closed item No. 88, answered by the owner. The page hides it, as today.</p>
+</header>
+<main id="stage"></main>
+
+<script type="text/plain" id="pagecss">
+/* page.html's <style>, word for word, at 5d8ca121. */
+/* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
+   repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
+:root {
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+/* The repo's own icon sits on a tile chosen so most of its drawn pixels stand out (applyIcon). */
+.mark.icon { background: var(--tile, var(--on-hdr)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-hdr) 28%, transparent); }
+.mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.stands { border-radius: 50%; background: var(--gold-ink); }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
+.pairchips { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.pairchips .nchip { height: 32px; width: 48px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .chips-n { gap: 4px; }
+  .pairchips { display: flex; }
+  .nchip.sent::before { flex: none; margin-right: 0; }
+  .nchip, .pairchips .nchip { width: 100%; height: 32px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; scroll-margin-top: 64px; scroll-margin-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic .dfitwrap { justify-self: center; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+/* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { border-left: 0; margin-left: 0; padding: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .dfitwrap { border-left: 3px solid var(--acc); }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+/* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
+.multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
+.tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
+.opt.sel .tick { background: var(--acc); border-color: var(--acc); }
+.opt.sel .tick.mark::before { content: ""; width: 6px; height: 12px; border: solid var(--on-acc); border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
+/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down, View and the marked rows sit above the label. */
+.opt.ranked { cursor: default; }
+.opt.ranked > label.head { cursor: pointer; }
+.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); z-index: 1; }
+.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 2; }
+.opts.ranked .opt { grid-template-rows: auto auto 1fr auto auto; }
+.opts.ranked.pics .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked .opt { grid-row: span 5; grid-template-rows: subgrid; } .opts.ranked.pics .opt { grid-row: span 6; } }
+.opt .rank { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.opt .rank.gone { visibility: hidden; }
+.btn.mv { position: relative; min-height: 44px; min-width: 44px; padding: 8px 12px; background: var(--surface); color: var(--acc); }
+.btn.mv svg { flex: none; }
+/* At an end of the order the button stays in place and focusable. It is marked off by a dashed border, and the reason shows on hover and focus. */
+.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
+.btn.mv[aria-disabled="true"] svg { opacity: .5; }
+.btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* Links on an option card: optCard puts <div class="links"> after .how and before .tr. A card with no links gets <span class="nolinks">,
+   as .nopick does, so the subgrid rows still line up. buildCard adds "olinks" to .opts only when some option has links. */
+.opts.olinks .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.olinks .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opts.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
+/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. A flex item
+   is a block, and a screen reader puts a space between blocks, so the one span inside the link holds all its text:
+   the arrow's gap sits in CSS and the link's name is the label plus the hidden phrase. */
+.links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a [aria-hidden] { margin-inline-start: 4px; }
+/* A block-level .sr (position: absolute is one) gets a space before it in the link's name, so in a link it stays inline and takes no room. */
+.links a .sr { position: static; display: inline; font-size: 0; }
+/* Links on a ranked card: one more row than the ranked rows above. The label's ::after overlay covers the card, so the links row sits above it as .rank and .opic do. */
+.opt.ranked .links { position: relative; z-index: 2; }
+/* A press anywhere on a ranked card ticks it, so only the link itself is raised above the overlay. */
+.opt.ranked .links { pointer-events: none; }
+.opt.ranked .links a { pointer-events: auto; }
+.opts.ranked.olinks .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+.opts.ranked.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } .opts.ranked.pics.olinks .opt { grid-row: span 7; grid-template-rows: subgrid; } }
+
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+/* A multi item names its picks, so its line may wrap. Hidden copies of its longest possible lines share the live line's grid cell,
+   so the cell is always as tall as the longest line at the current width: the tail is never cut and the cards never move. */
+.readybox { display: grid; }
+.readybox > * { grid-area: 1 / 1; min-width: 0; }
+.ready.multi, .readyfit { white-space: normal; overflow: visible; }
+.readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
+.ready.on::before, .readyfit::before { content: "\2713  "; }
+/* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.alts .sp { flex: 1 1 0; }
+.alts .gone { visibility: hidden; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+/* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
+.cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
+/* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
+.btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
+.cmd-copy > span { grid-area: 1 / 1; }
+.cmd-copy .ok, .cmd.copied .cmd-copy .go { visibility: hidden; }
+.cmd.copied .cmd-copy .ok { visibility: visible; }
+.cmd-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--acc); font-weight: 600; font-size: 14.5px; }
+.cmd-more[open] > summary { margin-bottom: 8px; }
+/* Each written line is one block. A long line wraps in the block, and its wrapped part hangs 2ch in. */
+.cmd-text { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.cmd-text code { font: inherit; }
+.cmd-text .ln { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+.cmd-text .ln:empty::after { content: " "; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 8px; }
+.receipt .line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-height: 44px; font-size: 15.5px; }
+.receipt .line > .g { grid-column: 1; grid-row: 1; }
+.receipt .line b { grid-column: 2; grid-row: 1; }
+.receipt .line .read { grid-column: 2; grid-row: 2; }
+.receipt .line .changebtn { grid-column: 3; grid-row: 1; }
+.receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
+.receipt .line b { overflow-wrap: anywhere; color: var(--good); }
+.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* A multi answer lists each pick with its letter and title, in order. */
+.receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
+.receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
+.receipt ol.picks li { grid-template-columns: 2ch auto minmax(0, 1fr); }
+.receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
+.receipt .picks .key { color: var(--ink); }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
+.parked ul { margin: 6px 0 0; padding-left: 20px; }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
+.sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
+.sent-what { min-width: 0; display: grid; gap: 8px; }
+.sent-line { margin: 0; }
+.stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
+@keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
+.sent-list li { display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
+.dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
+#undoBtn { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+
+/* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
+.dprev { display: grid; gap: 8px; }
+.dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dprev .dbar .sp { flex: 1; }
+.dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
+.dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap.inert .dframe { pointer-events: none; }
+/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
+:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
+.dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }
+.dfitwrap .dtop, .dfitwrap .dcue { display: none; }
+.dfitwrap.scroll { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; }
+.dfitwrap.scroll .dtop { display: block; position: sticky; top: 0; z-index: 1; height: 12px; margin-bottom: -12px; background: linear-gradient(rgb(22 27 34 / 0.28), rgb(22 27 34 / 0)); opacity: 0; pointer-events: none; }
+.dfitwrap.scroll.scrolled .dtop { opacity: 1; }
+.dfitwrap.scroll .dcue { display: flex; position: sticky; bottom: 0; z-index: 1; height: 40px; margin-top: -40px; align-items: flex-end; justify-content: center; padding-bottom: 8px; background: linear-gradient(rgb(22 27 34 / 0), rgb(22 27 34 / 0.28)); pointer-events: none; }
+.dfitwrap.scroll.at-end .dcue { opacity: 0; }
+.dfitwrap .dmore { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--pic-cue); color: var(--on-pic-cue); box-shadow: 0 0 0 1px var(--on-pic-cue); font: 600 12px/1 var(--body); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+.dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
+body.sheet-open { overflow: hidden; }
+
+/* Status tab: the roadmap's layout in this page's tokens, under .sv. The names page.html also uses
+   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) are renamed here, so no rule above reaches status. */
+.tabs .tl { display: flex; gap: 4px; }
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+.tabs #qCount:empty { display: inline-block; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+:where(.sv) button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+:where(.sv) button:disabled { cursor: default; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.readat { font-size: 14px; color: var(--muted); min-width: 0; }
+.readat summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.readat li { overflow-wrap: anywhere; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+
+.live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.live summary .lh { font-weight: 700; }
+.live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); padding: 0; }
+.live h4 { padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.live ul { list-style: none; margin: 0; padding: 0; }
+.live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.live li .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.livenone { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 8px 14px; display: grid; gap: 2px; font-size: 14.5px; }
+.livenone .lh { font-weight: 700; }
+.livenone details { font-size: 14px; color: var(--muted); }
+.livenone summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.livenone pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.live a { color: var(--acc); text-decoration: none; }
+.live a:hover { text-decoration: underline; }
+@container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-working { color: var(--acc); }
+.tag.st-blocked, .tag.blk { color: var(--holds); }
+.tag.st-review_ready, .tag.landed { color: var(--good); }
+.tag.st-failed, .tag.st-stopped { color: var(--due); }
+.tag.st-done { color: var(--muted); }
+.tag.next { color: var(--muted); border-style: dashed; }
+
+.now { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.now > div { background: var(--surface); padding: 12px 14px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.now .ph { font: 700 19px/1.2 var(--body); }
+.now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+.now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
+.now li .id { flex: none; font-size: 13px; color: var(--muted); }
+.now li .tx { min-width: 0; min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.now li .tx:hover, .lnk:hover { text-decoration: underline; }
+.now li.none { color: var(--muted); }
+.now .ix { flex: none; width: 12px; font: 13px var(--mono); color: var(--muted); }
+.now .offt .ic { flex: none; font-size: 12px; font-weight: 700; color: var(--holds); border: 1.5px solid currentColor; border-radius: 4px; padding: 0 5px; }
+@container (min-width: 640px) { .now { grid-template-columns: 1fr 1fr; } }
+@container (min-width: 1000px) { .now { grid-template-columns: 1.1fr 1.4fr 1.6fr 1.6fr; } }
+
+.segbar { height: 6px; display: flex; gap: 2px; border-radius: 3px; overflow: hidden; }
+.segbar i { flex: 1; background: var(--line); }
+.segbar i.done { background: var(--acc); }
+.segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
+.segbar i.blk { background: var(--holds); }
+
+/* The view switch sits right above the view it changes. What every view shares sits above the switch. */
+.views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
+/* Below 340px four equal columns cut "Reference": each column takes its label's width, and the rest is shared. */
+@container (max-width: 339px) {
+  .views { grid-template-columns: repeat(4, auto); }
+  .views button { padding-inline: 4px; font-size: 14px; }
+}
+.views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.sview { display: grid; gap: 14px; min-width: 0; }
+
+.prail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.prail button { display: grid; gap: 6px; min-width: 0; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
+.prail button[aria-pressed="true"] { border-color: var(--acc); box-shadow: inset 0 3px 0 var(--acc); }
+.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); white-space: nowrap; }
+.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); }
+.prail .here { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
+@container (max-width: 639px) {
+  .prail { gap: 4px; }
+  .prail button { padding: 6px 5px; }
+  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
+  .prail .nm > span:first-child { overflow-wrap: anywhere; }
+}
+/* Five chips keep each phase name and the current-phase dot on one line from a 452px box in DejaVu Sans, a wide fallback if the web font fails, and from a 410px box in the web font (Organize current is the widest). Five columns start at 464px, a 12px margin over the wide font. Below that the rail wraps to three columns. */
+@container (max-width: 463px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
+.side { display: grid; gap: 12px; min-width: 0; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.box > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box > header h3 { font: 700 15px/1.3 var(--body); }
+.sv .lbl { font-size: 13px; color: var(--muted); }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px; }
+.ph-head h3 { font: 700 18px/1.25 var(--body); }
+.ph-head .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.ph-head .prog .segbar { width: 110px; }
+@container (max-width: 639px) { .ph-head .prog { margin-left: 0; width: 100%; } .ph-head .prog .segbar { flex: 1; } }
+.asof { font-size: 13px; color: var(--muted); padding: 0 14px 8px; }
+.howto { display: inline-flex; align-items: center; min-height: 32px; margin-left: 4px; font-size: 13px; font-weight: 600; color: var(--acc); }
+.howbody { font-size: 13.5px; color: var(--muted); padding: 0 14px 10px; }
+.foot { font-size: 13px; color: var(--muted); padding: 6px 14px; border-bottom: 1px solid var(--line); }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+.tile { background: var(--surface); padding: 10px 14px; display: grid; gap: 4px; min-width: 0; align-content: start; text-align: left; }
+button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surface)); }
+.tile .tl { font-size: 13.5px; color: var(--muted); }
+.tile .row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tile .v { font: 600 20px/1.1 var(--mono); overflow-wrap: anywhere; }
+.tile .v small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.tile .goal { font-size: 13px; color: var(--muted); }
+.tile svg { display: block; width: 100%; height: 30px; overflow: visible; }
+.tile .ft { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
+.tile .rule { display: none; font-size: 13.5px; color: var(--ink); border-top: 1px dashed var(--line); padding-top: 5px; margin-top: 2px; }
+.tile[aria-expanded="true"] .rule { display: block; }
+.tiles .none { grid-column: 1 / -1; background: var(--surface); padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.dl { font: 500 12px var(--mono); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.dl.good { color: var(--good); background: var(--good-soft); }
+.dl.bad { color: var(--holds); background: color-mix(in srgb, var(--holds) 14%, var(--surface)); }
+.dl.flat { color: var(--muted); background: var(--chip); }
+.meter { display: flex; gap: 2px; height: 8px; }
+.meter i { flex: 1; background: var(--line); border-radius: 2px; }
+.meter i.on { background: var(--acc); }
+.one { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.one::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.rsteps { list-style: none; margin: 0; padding: 0; }
+.rsteps > li + li { border-top: 1px solid var(--line); }
+.rrow { display: grid; grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rrow .ttl { min-width: 0; overflow-wrap: anywhere; }
+.rrow .id { font-size: 13px; color: var(--muted); }
+.rrow .meta { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.rrow .chev { font-size: 11px; color: var(--muted); }
+.rsteps li.open .chev, .donefold.open > .fold .chev { transform: rotate(90deg); }
+.rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
+.rsteps .active .ttl { font-weight: 700; }
+.rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
+.rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
+.rsteps li.open .rbody { display: block; }
+.rbody dl { margin: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px 10px; }
+.rbody dt { font-size: 13px; padding-top: 2px; }
+.rbody dd { margin: 0; overflow-wrap: anywhere; min-width: 0; color: var(--ink); }
+.ask { display: flex; gap: 8px; align-items: flex-start; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 13px var(--mono); color: var(--ink); }
+.ask span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; max-height: 12em; overflow: auto; }
+.copy { flex: none; min-height: 44px; padding: 0 12px; border-radius: var(--r); background: var(--acc); color: var(--on-acc); font: 600 14px var(--body); }
+.sv .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.more { min-height: 32px; font-size: 13.5px; font-weight: 600; color: var(--acc); }
+.noneyet { padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
+.fold { display: flex; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; text-align: left; }
+.donefold .fb { display: none; border-top: 1px solid var(--line); }
+.donefold.open .fb { display: block; }
+@container (max-width: 639px) {
+  .rrow { grid-template-columns: 16px 40px minmax(0, 1fr) 12px; gap: 4px 8px; padding-inline: 10px; }
+  .rrow .meta { grid-column: 3; grid-row: 2; justify-content: flex-start; }
+  .rrow .chev { grid-column: 4; grid-row: 1; }
+  .rbody { padding: 2px 10px 12px; }
+}
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-top: 1px solid var(--line); background: var(--ground); }
+.pager .pc { font-size: 13.5px; color: var(--muted); text-align: center; }
+.pager button { min-height: 44px; padding: 4px 12px; font-size: 13.5px; font-weight: 600; color: var(--acc); border: 1px solid var(--line); background: var(--surface); border-radius: 8px; white-space: nowrap; }
+.pager button:disabled { color: var(--muted); opacity: .5; }
+.box > .pager:last-child { border-radius: 0 0 12px 12px; }
+
+.feed { list-style: none; margin: 0; padding: 4px 0; }
+.feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
+.feed .when, .ev .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
+.lnk { display: inline; min-height: 32px; color: var(--ink); text-align: left; }
+.lnk .id { color: var(--muted); }
+.morelink { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--acc); }
+.trend { padding: 8px 14px 10px; display: grid; gap: 8px; }
+.trow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.trow .k { font-size: 13px; color: var(--muted); line-height: 1.2; }
+.trow svg { width: 100%; height: 30px; display: block; overflow: visible; }
+.trow .r { text-align: right; line-height: 1.15; }
+.trow .r .num { font-size: 13px; font-weight: 600; display: block; }
+.legend { display: flex; gap: 12px; font-size: 13px; color: var(--muted); padding: 0 14px 10px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; border-top: 1px dashed var(--muted); vertical-align: middle; margin-right: 4px; }
+.burn { padding: 10px 14px 12px; display: grid; gap: 6px; }
+.burn svg { width: 100%; height: 110px; display: block; overflow: visible; }
+.dot { width: 8px; height: 8px; display: inline-block; flex: none; border-radius: 2px; background: var(--acc); }
+
+.day h3 { padding: 10px 14px; font: 700 15px/1.3 var(--body); display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); background: var(--chip); }
+.day:not(:first-child) h3 { border-top: 1px solid var(--line); }
+.day h3 .lbl { font-weight: 400; }
+.ev { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.day h3 + .ev { border-top: 0; }
+.ev .rg { margin-top: 3px; }
+.ev .gist { color: var(--muted); font-size: 13.5px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ev.done .t { text-decoration: line-through; text-decoration-color: var(--line); }
+.lead { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+.gcard { margin-bottom: 16px; }
+.gcard ol { margin: 0; padding: 0 0 0 18px; font-size: 14px; }
+.gcard ol li { padding: 2px 0; }
+.tp > button { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; gap: 8px; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); align-items: baseline; }
+.tp:first-of-type > button { border-top: 0; }
+.tp > button:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.tp .id { font-size: 13px; color: var(--muted); }
+.tp .sm { display: block; font-size: 13px; color: var(--muted); }
+.tp .tb { display: none; padding: 0 14px 12px 52px; min-width: 0; }
+.tp.open .tb { display: block; }
+.tp.open .chev { transform: rotate(90deg); }
+.tp .chev { font-size: 11px; color: var(--muted); }
+.tp ul { margin: 0; padding-left: 16px; font-size: 14px; color: var(--ink); }
+.tp ul li { margin: 3px 0; }
+.tp .ask { margin-top: 6px; }
+.tp .ask span { max-height: 16em; }
+.tp .blbl { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.src { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13.5px; margin-top: 8px; }
+.hl, .rc { list-style: none; margin: 0; padding: 0; }
+.hl li, .rc li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.hl li:first-child, .rc li:first-child { border-top: 0; }
+.hl .k { color: var(--muted); font-weight: 600; }
+.rc li { grid-template-columns: 72px minmax(0, 1fr); }
+.rc .when { font: 13px var(--mono); color: var(--muted); padding-top: 2px; }
+.rc a, .hl a { color: var(--acc); text-decoration: none; }
+.rc a:hover, .hl a:hover { text-decoration: underline; }
+.rc .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.count { font: 600 22px var(--mono); padding: 10px 14px 2px; }
+@container (max-width: 559px) { .hl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* No roadmap: unknown, why, and one control that leads on. */
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
+.nob p { max-width: 62ch; }
+.nob details { font-size: 14px; color: var(--muted); }
+.nob summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.nob pre, .nob textarea { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nob textarea { width: 100%; background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.sv-tip { position: fixed; z-index: 12; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 4px 7px; border-radius: 4px; max-width: 240px; opacity: 0; transition: opacity .08s; left: 0; top: 0; }
+.sv-tip.on { opacity: 1; }
+.sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
+@media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
+</script>
+<script type="text/plain" id="newcss">
+/* ---- New: arbiter rulings ---- */
+/* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
+.g.ruled { width: 10px; height: 10px; margin: 0 1px; border: 2px solid var(--muted); border-radius: 1px; transform: rotate(45deg); }
+/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading. */
+.tier.ruled { gap: 10px; }
+.tier.ruled > header { display: grid; gap: 2px; }
+.tier.ruled > header h2 { font: 700 17px/1.25 var(--body); }
+.rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
+.rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.rsub { margin: 0; font-size: 14px; color: var(--muted); }
+/* Not .rbody: the Status tab already uses that class. */
+.rlist { display: grid; gap: 10px; }
+/* A ruling card is quieter than an ask: a lighter ground, a smaller title, no tier edge. */
+.card.rcard { padding: 14px 16px; gap: 8px; }
+.card.rcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+.rcard .title { font-size: 17px; max-width: 60ch; }
+.rcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.ruledline { margin: 0; display: flex; gap: 10px; align-items: flex-start; font-size: 15.5px; }
+.ruledline .key { flex: none; max-width: none; }
+.ruledline b { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; padding-top: 1px; }
+.rwhy { margin: 0; max-width: 70ch; font-size: 14.5px; color: var(--muted); }
+.rfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.rfoot .dest { flex: 1 1 12rem; border: 0; padding: 0; }
+.rfoot .btn { min-width: 7.5rem; justify-content: center; }
+/* Sample labels: dashed "Today:" for what exists, "New:" for what this step adds. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+
+<script>
+// page.html's fmt, word for word: US Central, 24-hour, with the zone's short name.
+function fmt(iso, withDay = true) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(d);
+  const g = (t) => (p.find((x) => x.type === t) || {}).value;
+  return (withDay ? g("month") + " " + g("day") + ", " : "") + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
+}
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
+const SPARK = '<b class="spark" aria-label="My pick" title="My pick"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg></b>';
+
+// The sample store, in the item JSON shape. Each ruling follows the lane's contract:
+// kind "decision", status "closed", arbiter true, home = the ruling's record id, options, pick, why, ruled.
+const STORE = [
+  { id: "report-home", n: 12, kind: "decision", status: "open", owner: "lane report-home", home: "c231", added: "2026-10-30T07:10:00-05:00",
+    title: "Where should the nightly report land?", context: "Your stake: goal — you read the report each morning.\nThe report is a file in the repo today.", ref: "c231, the nightly report",
+    options: [{ key: "repo", label: "A file in the repo", how: "As today.", gain: "Nothing new.", lose: "One more file to open." }, { key: "status", label: "The Status tab of this page", how: "The report shows on this page.", gain: "One place to look.", lose: "The tab grows." }],
+    pick: "status", why: "You open this page each morning anyway." },
+  { id: "sign-in-mac", n: 14, kind: "task", status: "open", owner: "lane mac-builds", home: "c233", added: "2026-10-30T08:40:00-05:00",
+    title: "Sign in to the build Mac once", context: "The overnight build needs a signed-in user.", ref: "c233, overnight builds", steps: ["Open the Mac's login screen", "Sign in with the build account"], minutes: 2 },
+  { id: "preview-life", n: 91, kind: "decision", status: "closed", arbiter: true, owner: "lane preview-server", home: "preview-server-life",
+    added: "2026-10-30T12:31:00-05:00", ruled: "2026-10-30T12:44:00-05:00",
+    title: "How long does a lane keep its preview server?",
+    options: [{ key: "lane", label: "Until the lane ends" }, { key: "hour", label: "One hour, then it stops" }],
+    pick: "hour", why: "A server left on holds a port that the next lane needs. A lane starts a new one in seconds." },
+  { id: "shot-home", n: 90, kind: "decision", status: "closed", arbiter: true, owner: "lane review-shots", home: "screenshot-home",
+    added: "2026-10-29T15:50:00-05:00", ruled: "2026-10-29T16:05:00-05:00",
+    title: "Where do a review's screenshots go?",
+    options: [{ key: "pr", label: "In the pull request only" }, { key: "repo", label: "In the repo's design folder" }],
+    pick: "pr", why: "A screenshot proves one review. The repo keeps the mockup, which stays true." },
+  // Closed, but not by the arbiter: the page hides it, as today.
+  { id: "old-question", n: 88, kind: "decision", status: "closed", owner: "lane old", home: "c201", title: "An answered question", options: [{ key: "a", label: "A" }], pick: "a", why: "" },
+];
+const isRuling = (it) => it.status === "closed" && it.arbiter === true;
+// The page's filter, extended: an open item, or a ruling. Every other closed item stays hidden.
+const SHOWN = STORE.filter((it) => it.status !== "closed" || isRuling(it));
+const OPEN = SHOWN.filter((it) => !isRuling(it));
+// Rulings, newest first: a new ruling shows at the top of its section.
+const RULINGS = SHOWN.filter(isRuling).sort((a, b) => Date.parse(b.ruled) - Date.parse(a.ruled));
+const SENT_AT = "2026-10-30T12:58:00-05:00";
+
+/* ---------- The drawn screen ---------- */
+function openCard(it) {
+  const top = `<div class="top"><span class="num" aria-label="No. ${it.n}, ${it.kind}, from ${esc(it.owner)}" title="From ${esc(it.owner)}">No. ${it.n}</span><span>waited ${it.n === 12 ? "6 hours" : "4 hours"}</span>${it.minutes ? `<span>about ${it.minutes} min</span>` : ""}</div><h3 class="title" id="t-${it.id}">${esc(it.title)}</h3>`;
+  let body = `<p class="ctx">${esc(it.context)}</p><p class="about">${esc(it.ref)}</p>`;
+  if (it.kind === "decision") {
+    body += `<div class="opts" role="radiogroup" aria-label="Options for No. ${it.n}">${it.options.map((o) => `<label class="opt"><input type="radio" name="g-${it.id}" value="${o.key}"><span class="head"><span class="key">${letterOf(it, o.key)}</span><span class="lab">${esc(o.label)}</span></span><p class="how">${esc(o.how)}</p><div class="tr"><div class="gain"><span class="s" aria-label="You gain">+</span><span>${esc(o.gain)}</span></div><div class="lose"><span class="s" aria-label="You lose">−</span><span>${esc(o.lose)}</span></div></div>${o.key === it.pick ? `<div class="pick">${SPARK}${esc(it.why)}</div>` : '<span class="nopick"></span>'}</label>`).join("")}</div>`;
+    body += `<p class="ready" aria-live="polite"></p><div class="alts"><button class="btn dash nonebtn" type="button" aria-pressed="false">None of these</button><button class="btn quiet notebtn" type="button">Add a note</button><button class="btn alt takepick" type="button">Take my pick (${esc(it.options.find((o) => o.key === it.pick).label)})</button></div>`;
+  } else {
+    body += `<ol class="steps">${it.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol><p class="ready" aria-live="polite"></p><div class="alts"><button class="btn dash donebtn" type="button" aria-pressed="false">Mark done</button><button class="btn quiet notebtn" type="button">Add a note</button></div>`;
+  }
+  body += `<p class="dest">Lands in ${esc(it.home)}. Added ${fmt(it.added)}.</p>`;
+  return `<article class="card calm" id="item-${it.id}" aria-labelledby="t-${it.id}">${top}${body}</article>`;
+}
+// A ruling card. armed: Overturn pressed, waiting for Send. sent: the overturn is saved.
+function rulingCard(it, st, first) {
+  const o = it.options.find((x) => x.key === it.pick), L = letterOf(it, it.pick);
+  const num = `<span class="num" aria-label="No. ${it.n}, ruling, from the arbiter" title="Ruled by the arbiter for ${esc(it.owner)}">No. ${it.n}</span>`;
+  const title = `<h3 class="title" id="t-${it.id}">${esc(it.title)}</h3>`;
+  if (st === "sent") {
+    // As a sent pick: the page's answered style, the ans pill and the receipt line with Change.
+    return `<article class="card rcard answered" id="item-${it.id}" aria-labelledby="t-${it.id}"><div class="top">${num}<span class="ans"${first ? ' data-today="answered style"' : ""}>Answered, filing pending <span class="t">${fmt(SENT_AT)}</span></span></div>${title}
+      <div class="receipt"><div class="line"><span class="g done" aria-hidden="true"></span><b${first ? ' data-new="receipt words"' : ""}>You overturned ${L}: ${esc(o.label)}.</b><button class="btn quiet changebtn" type="button">Change</button></div></div></article>`;
+  }
+  const armed = st === "armed";
+  return `<article class="card rcard${armed ? " armed" : ""}" id="item-${it.id}" aria-labelledby="t-${it.id}" data-ruling="${it.id}">
+    <div class="top">${num}<span>ruled <time datetime="${it.ruled}">${fmt(it.ruled)}</time></span></div>${title}
+    <p class="ruledline"${first ? ' data-new="the option ruled"' : ""}><span class="sr">The arbiter ruled </span><span class="key">${L}</span><b>${esc(o.label)}</b></p>
+    <p class="rwhy">${esc(it.why)}</p>
+    <p class="ready${armed ? " on" : ""}" aria-live="polite">${armed ? "Ready to send: overturn." : ""}</p>
+    <div class="rfoot"><p class="dest">Recorded in ${esc(it.home)}.</p><button class="btn dash overturn" type="button" id="b-over-${it.id}" aria-pressed="${armed}" aria-label="Overturn the ruling on No. ${it.n}"${first ? ' data-new="Overturn"' : ""}>Overturn</button></div>
+  </article>`;
+}
+function rulingsSection(s) {
+  const openSec = s !== "collapsed";
+  const cards = RULINGS.map((it, i) => rulingCard(it, s === "pressed" && i === 0 ? "armed" : s === "sent" && i === 0 ? "sent" : "", i === 0)).join("");
+  const newest = fmt(RULINGS[0].ruled);
+  return `<section class="tier ruled" id="tier-ruled" aria-labelledby="th-ruled" data-new="section after the open tiers">
+    <header><h2 id="th-ruled"><button class="rhead" type="button" aria-expanded="${openSec}" aria-controls="rb"><span class="chev" aria-hidden="true"></span><span class="g ruled" aria-hidden="true"></span>Arbiter rulings<span class="ct">${RULINGS.length}</span></button></h2>
+    <p class="rsub">Each stands unless you overturn it.${openSec ? "" : " Newest " + newest + "."}</p></header>
+    <div class="rlist" id="rb"${openSec ? "" : " hidden"}>${cards}</div></section>`;
+}
+function rail(s) {
+  const total = OPEN.length;
+  let out = `<div class="ov-prog"><div class="big"><b>0</b>of ${total} sent</div><div class="sub none"><i class="sw"></i>0 ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:0%"></i><i class="r" style="width:0%"></i></div></div>`;
+  out += `<div class="ov-tier"><a class="ov-head" href="#tier-calm" aria-label="${total} open, Whenever"><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">${total}</span></a><div class="chips-n">${OPEN.map((it) => `<button type="button" class="nchip" aria-label="No. ${it.n}, ${esc(it.title)}, open" title="${esc(it.title)}"><span class="no">${it.n}</span><span class="nt">${esc(it.title)}</span></button>`).join("")}</div></div>`;
+  out += `<div class="ov-tier" data-new="rulings row, no chips"><a class="ov-head" href="#tier-ruled" aria-label="${RULINGS.length} rulings, Arbiter rulings"><span class="g ruled" aria-hidden="true"></span>Arbiter rulings<span class="ct">${RULINGS.length}</span></a></div>`;
+  return `<nav class="rail" id="rail" aria-label="Overview">${out}</nav>`;
+}
+function bar(s) {
+  const armed = s === "pressed";
+  const st = armed ? `<b>1</b> ready (1 overturn). <b>${OPEN.length}</b> stay open.` : `<b>${OPEN.length}</b> stay open.`;
+  const sent = s === "sent" ? `<div class="sent" id="sent"><div class="in" id="sentIn"><div class="sent-head"><span class="stamp">Sent<small>${fmt(SENT_AT, false)}</small></span><div class="sent-what"><p class="sent-line"><b>1 answer sent. </b><span id="sentStatus">Claude was told.</span></p><ul class="sent-list"><li title="Goes to ${esc(RULINGS[0].owner)}"><span class="no">No. ${RULINGS[0].n}</span></li></ul></div></div><div class="row"><button class="btn alt" type="button" id="undoBtn" data-today="Undo send">Undo send (6)</button><button class="btn quiet" type="button" id="sentClose">Close</button></div></div></div>` : "";
+  return `<div class="bar" id="bar">${sent}<div class="in"><span class="st" id="barStatus">${st}</span><button class="btn send" type="button" id="send"${armed ? "" : " disabled"}${armed ? ' data-today="Send"' : ""}>${armed ? "Send 1 answer" : "Send answers"}</button></div></div>`;
+}
+function screen(s, theme, lab) {
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Questions</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1></div></div></header>
+<nav class="in tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" role="tab" aria-selected="true">Questions <span class="cnt">${OPEN.length}</span></a><a href="#" role="tab" aria-selected="false" tabindex="-1">Status</a></div></nav>
+<div class="in main">${rail(s)}<div class="list" id="list">
+<section class="tier" id="tier-calm" aria-labelledby="th-calm"><header><h2 id="th-calm"><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">${OPEN.length}</span></h2></header>${OPEN.map(openCard).join("")}</section>
+${rulingsSection(s)}
+<p class="checked">Checked against 5d8ca121</p></div></div>
+${bar(s)}</body></html>`;
+}
+
+/* ---------- Harness ---------- */
+const STATES = ["collapsed", "open", "pressed", "sent"];
+const P = { s: "open", w: "all", t: "", lab: "on", hide: [] };
+function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter((x) => x === "collapsed" || x === "open"); else if (k in P) P[k] = v; }); if (!STATES.includes(P.s)) P.s = "open"; }
+function writeHash() { const q = new URLSearchParams({ s: P.s, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(",")); history.replaceState(null, "", "#" + q); }
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function frame(w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : w === 800 ? "Mid" : "Wide") + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "Waiting page at " + w + " wide"; f.style.width = w + "px";
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 900;
+    // The sent panel is fixed over the page's foot; the frame adds its height so no card hides under it.
+    try { hgt = f.contentDocument.documentElement.scrollHeight + (P.s === "sent" ? (f.contentDocument.getElementById("sent") || {}).offsetHeight || 0 : 0); } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { wire(f.contentDocument, fit); fit(); setTimeout(fit, 200); });
+  f.srcdoc = screen(P.s, theme(), P.lab !== "off");
+  addEventListener("resize", fit);
+}
+// In the frame: Overturn toggles the pending state, as a second press on a picked option clears it. The head opens and closes the section.
+function wire(doc, fit) {
+  const status = doc.getElementById("barStatus"), send = doc.getElementById("send"), open = OPEN.length;
+  const sync = () => {
+    const n = doc.querySelectorAll(".overturn[aria-pressed='true']").length;
+    status.innerHTML = n ? `<b>${n}</b> ready (${n} overturn). <b>${open}</b> stay open.` : `<b>${open}</b> stay open.`;
+    send.disabled = !n; send.textContent = n ? "Send " + n + (n === 1 ? " answer" : " answers") : "Send answers";
+  };
+  doc.querySelectorAll(".overturn").forEach((b) => b.addEventListener("click", () => {
+    const on = b.getAttribute("aria-pressed") !== "true", card = b.closest(".rcard");
+    b.setAttribute("aria-pressed", String(on)); card.classList.toggle("armed", on);
+    const r = card.querySelector(".ready"); r.classList.toggle("on", on); r.textContent = on ? "Ready to send: overturn." : "";
+    sync();
+  }));
+  const head = doc.querySelector(".rhead");
+  if (head) head.addEventListener("click", () => { const on = head.getAttribute("aria-expanded") !== "true"; head.setAttribute("aria-expanded", String(on)); doc.getElementById("rb").hidden = !on; fit(); });
+}
+function render() {
+  if (P.hide.includes(P.s)) P.s = STATES.find((s) => !P.hide.includes(s));
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { b.textContent = (P.hide.includes(b.dataset.hide) ? "Show " : "Hide ") + (b.dataset.hide === "collapsed" ? "A" : "B"); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  document.getElementById("labBtn").textContent = P.lab === "off" ? "Labels off" : "Labels on";
+  document.getElementById("labBtn").setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  (P.w === "all" ? [390, 800, 1280] : [Number(P.w) || 390]).forEach(frame);
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.dataset.lab) P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const k = b.dataset.hide; P.hide = P.hide.includes(k) ? P.hide.filter((x) => x !== k) : [...P.hide, k]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+readHash(); render();
+</script>
+</body>
+</html>
