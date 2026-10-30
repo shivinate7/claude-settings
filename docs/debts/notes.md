@@ -715,3 +715,4 @@
 - still-after-tap-cannot-catch-scroll: the 8 stillAfterTap cases fire DOM clicks, and no page code scrolls on a tap, so they catch a page-code scroll only and never a native focus scroll (skills/waiting-page/tests/page.test.mjs)
 - send-bar-tall-covers-note: for 20 s after a Send, the send bar is 221px tall at 390 wide and 165px at 1280 (closeTimer). Scroll-padding-bottom stays 96px, so a focused note can sit under the bar. This predates lane note-always-open (skills/waiting-page/page.html)
 - near-cards-comments-stale: the NEAR_CARDS cases name a 64px option scroll margin and a header gap guard that the page lacks, so their 10px cases pass trivially (skills/waiting-page/tests/page.test.mjs)
+- nao-builder-ran-opus: in lane note-always-open, the round-2 builder ran opus. The model table sets sonnet for round 2 and opus only on a third try, and the brief named no model (PR #872)
