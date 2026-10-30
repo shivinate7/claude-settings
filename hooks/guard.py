@@ -2767,6 +2767,44 @@ def task_str_replace_hit(entry) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ a decision names what it costs the owner
+#
+# docs/decisions/owner-judge-test.md, rule `owner-judge`, built against a named incident (incident in
+# the record): a decision about CI internals reached the owner, who had no stake in it. A decision
+# carries a "Your stake: <kind> <text>" line in `context`. Only that line counts.
+OWNER_STAKES = ("goal", "money", "risk", "rule", "cannot undo")
+STAKE_LINE = re.compile(r"^[ \t]*Your stake:[ \t]*(?:%s)[ \t]+\S" % "|".join(OWNER_STAKES), re.I | re.M)
+STAKE_REASON = ("A decision is the owner's only when he can judge it. Add a line to context that starts "
+                "\"Your stake: <kind> <text>\", where kind is one of %s, and the text says what the pick "
+                "costs him. If no kind fits, take your own pick and set stands: true." % ", ".join(OWNER_STAKES))
+
+
+def owner_judge_hit(op: str, data) -> str:
+    """The matched text when this write of a waiting-page decision has no Your stake line. A stood pick
+    and a port (its Departs from line is the stake) pass. An update is judged only when it carries both
+    kind decision and context."""
+    if not isinstance(data, dict) or data.get("stands") is True or data.get("port") is True:
+        return ""
+    if op == "set":
+        judged = data.get("kind") in (None, "decision")
+    else:
+        judged = data.get("kind") == "decision" and "context" in data
+    if judged and not STAKE_LINE.search(str(data.get("context") or "")):
+        return "decision with no Your stake line"
+    return ""
+
+
+def stake_str_replace_hit(entry) -> str:
+    """The matched text when a str_replace on `context` removes the Your stake line. It carries no
+    `data`, so it is read from old_str and new_str."""
+    if entry.get("field") != "context":
+        return ""
+    old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
+    if STAKE_LINE.search(old) and not STAKE_LINE.search(new):
+        return "context edit that removes the Your stake line"
+    return ""
+
+
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
@@ -2784,6 +2822,9 @@ def data_tool_hit(tool_input, cwd=""):
             hit = task_str_replace_hit(entry)
             if hit:
                 return "task-names-check", hit
+            hit = stake_str_replace_hit(entry)
+            if hit:
+                return "owner-judge", hit
             continue
         data = _write_data(entry)
         hit = port_item_hit(op, data)
@@ -2801,6 +2842,9 @@ def data_tool_hit(tool_input, cwd=""):
         hit = task_check_hit(op, data)
         if hit:
             return "task-names-check", hit
+        hit = owner_judge_hit(op, data)
+        if hit:
+            return "owner-judge", hit
     return "", ""
 
 
@@ -3350,6 +3394,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "command-in-item", COMMAND_REASON, matched)
         if rule == "task-names-check":
             refuse(tool, "deny", "task-names-check", TASK_REASON, matched)
+        if rule == "owner-judge":
+            refuse(tool, "deny", "owner-judge", STAKE_REASON, matched)
         return
 
     if tool in SHELL_TOOLS:

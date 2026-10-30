@@ -66,6 +66,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
       On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
       A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
+  - A decision carries a line in `context` that starts "Your stake: <kind> <text>". The kind is one of `goal`, `money`,
+    `risk`, `rule` or `cannot undo`. The text says what the pick costs the owner. The writer refuses a decision with no
+    such line (guard rule `owner-judge`). A decision with `stands: true` or `port: true` needs none. An update that
+    carries `kind: decision` and `context` carries the line again: the guard cannot see the stored field.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`
     (a number, or text such as `3 min`). The item shows `command` in a closed "Show the command" disclosure with a Copy
     button that works while it is closed. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
@@ -188,6 +192,10 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
    unique key, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
+   - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
+     An undoable choice on internals he has no stake in is not asked. Take your own pick and set `stands: true`.
+     A question stays only when it touches his goals, his money, a risk he would care about, a rule, or an act that
+     cannot be undone. Name which in the "Your stake:" line of `context`. The writer refuses a decision with no such line.
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
