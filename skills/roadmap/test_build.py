@@ -85,7 +85,7 @@ def build_info(page):
 
 
 def iso_ago(minutes):
-    """An ISO UTC time this many minutes before now, shaped as the publisher writes readAt."""
+    """An ISO UTC time this many minutes before now (after it when negative), shaped as readAt."""
     when = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -168,6 +168,10 @@ class Fixture(unittest.TestCase):
 
     def panel(self, page, name="Live work"):
         return {p["name"]: p for p in build_info(page)["panels"]}[name]
+
+    def use_origin(self, slug):
+        """Point the fixture repo's origin at GitHub, so github_slug reads `slug`."""
+        git(self.repo, "remote", "add", "origin", "git@github.com:%s.git" % slug)
 
 
 class TodaysPage(Fixture):
@@ -332,7 +336,7 @@ class RecordsAndHealth(Fixture):
             git(self.repo, "add", "-A")
             git(self.repo, "commit", "-q", "-m", "d%d" % n)
         (self.repo / "decisions" / ".hidden").write_text("x", encoding="utf-8")
-        git(self.repo, "remote", "add", "origin", "git@github.com:owner/fixture.git")
+        self.use_origin("owner/fixture")
 
     def records(self, page):
         return {r["kind"]: r for r in build_info(page)["records"]}
@@ -531,6 +535,16 @@ class StaleInProgress(Fixture):
     `<id> (set to todo)`, `<id> (set to done: landed in #N)`, or one `unknown (<why>)` when unreadable."""
 
     ROW = "in progress with no live lane or open PR"
+    SLUG = "owner/fixture"
+    REPO = "cs-repo:" + SLUG
+
+    def setUp(self):
+        super().setUp()
+        self.use_origin(self.SLUG)
+
+    def session_in_repo(self, sid, status, *tags):
+        """A sessions row for this fixture repo, carrying the cs-repo tag the builder checks."""
+        return session_row(sid, status, self.REPO, *tags)
 
     def commit_step(self, sid, **fields):
         """Write a step on the record branch and commit it, where a build from main reads it."""
@@ -566,7 +580,7 @@ class StaleInProgress(Fixture):
         self.commit_step("c2", status="doing", order=2)  # no session, so it is listed and an empty row cannot pass
         for status in ("SESSION_STATUS_RUNNING", "SESSION_STATUS_IDLE"):
             with self.subTest(status=status):
-                self.publish(sessions=[session_row("session_test01", status, "cs-step:c1")])
+                self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
                 count, entries = self.stale(self.out_with_live())
                 self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
@@ -588,12 +602,12 @@ class StaleInProgress(Fixture):
 
     def test_archived_session_does_not_keep_its_step_live(self):
         self.commit_step("c1", status="doing")
-        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_ARCHIVED", "cs-step:c1")])
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_ARCHIVED", "cs-step:c1")])
         self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
 
     def test_step_page_does_not_match_tag_or_branch_page_name_queue(self):
         self.commit_step("page", status="doing", note="Lane page-name-queue: draft PR #874")
-        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-step:page-name-queue")],
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:page-name-queue")],
                      pulls=[{"number": 874, "title": "Page name queue", "branch": "page-name-queue"}])
         self.assertEqual(self.stale(self.out_with_live()), (1, "page (set to todo)"))
 
@@ -642,7 +656,7 @@ class StaleInProgress(Fixture):
 
     def test_malformed_session_rows_are_skipped_named_and_read_the_row_unknown(self):
         self.commit_step("c1", status="doing")
-        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1"),
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1"),
                                {"id": "session_test02", "session_status": "SESSION_STATUS_RUNNING", "tags": "cs-step:c2"},
                                "session_test03"])
         page, out = self.build_from_main("--live", str(self.live))
@@ -673,6 +687,59 @@ class StaleInProgress(Fixture):
         count, entries = self.stale(self.out_with_live())
         self.assertEqual(count, 1)
         self.assertTrue(entries.startswith("unknown ("), entries)
+
+    def test_read_at_more_than_five_minutes_ahead_reads_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[], read_at=iso_ago(-10))
+        self.assertEqual(self.stale(self.out_with_live()), (1, "unknown (the live file's readAt is in the future)"))
+        with self.subTest("two minutes ahead is within the tolerance"):
+            self.publish(sessions=[], read_at=iso_ago(-2))
+            self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+
+    def test_session_outside_running_and_idle_is_not_live(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        for status in ("SESSION_STATUS_STOPPED", "SESSION_STATUS_COMPLETED"):
+            with self.subTest(status=status):
+                self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
+                count, entries = self.stale(self.out_with_live())
+                self.assertEqual((count, sorted(self.listed_ids(entries))), (2, ["c1", "c2"]))
+
+    def test_session_counts_only_with_this_repos_cs_repo_tag(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        rows = {
+            "this repo's tag keeps c1 live": (session_row("session_test01", "SESSION_STATUS_RUNNING",
+                                                          self.REPO, "cs-step:c1"), ["c2"]),
+            "no cs-repo tag leaves c1 listed": (session_row("session_test01", "SESSION_STATUS_RUNNING",
+                                                            "cs-step:c1"), ["c1", "c2"]),
+            "another repo's tag leaves c1 listed": (session_row("session_test01", "SESSION_STATUS_RUNNING",
+                                                                "cs-repo:other/repo", "cs-step:c1"), ["c1", "c2"]),
+        }
+        for name, (row, listed) in rows.items():
+            with self.subTest(name):
+                self.publish(sessions=[row])
+                count, entries = self.stale(self.out_with_live())
+                self.assertEqual((count, sorted(self.listed_ids(entries))), (len(listed), listed))
+        git(self.repo, "remote", "remove", "origin")
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")])
+        self.assertEqual(self.stale(self.out_with_live()),
+                         (1, "unknown (the repo's GitHub name could not be read)"))
+
+    def test_skipped_pull_rows_make_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[], pulls=[{"number": 9, "title": "ok"}, {"number": "10", "title": "bad number"},
+                                         {"number": 11}])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "unknown (2 pull rows skipped)"))
+
+    def test_open_step_with_an_unknown_status_is_listed_with_that_status(self):
+        self.commit_step("c1", status="waiting")
+        self.commit_step("c2", status="doing", order=2)  # control: listed as todo
+        self.publish(sessions=[])
+        count, entries = self.stale(self.out_with_live())
+        self.assertEqual(count, 2)
+        self.assertIn('c1 (unknown status "waiting")', entries)
+        self.assertIn("c2 (set to todo)", entries)
 
 
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
