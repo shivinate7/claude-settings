@@ -112,6 +112,20 @@ const answers = (page) => page.evaluate(() => window.__answers());
 // A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
 const takePick = (page, it) => card(page, it).getByRole("button", { name: /Take my pick/ }).click();
+// The keyboard way to take a pick: focus the button and press Enter. Resolves to what holds focus one frame later, so a fix that focuses in a frame still counts.
+// `place` is an optional step that scrolls the page between the focus and the key press.
+const enterTakePick = async (page, it, place) => {
+  await page.locator(`#b-take-${it.id}`).focus();
+  if (place) await place();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  return page.evaluate(() => ({ tag: document.activeElement.tagName, id: document.activeElement.id }));
+};
+// After Take my pick hides, focus belongs on the input of the pick's first key, as the A to C key handler leaves it.
+const assertFocusOnFirstPick = (at, it, key) => {
+  assert.notEqual(at.tag, "BODY", `${it.id}: focus fell to BODY after Enter on Take my pick`);
+  assert.equal(at.id, `o-${it.id}-${key}`, `${it.id}: focus is not on the first key of the pick`);
+};
 const addNote = async (page, it, text) => { await card(page, it).getByRole("button", { name: "Add a note" }).click(); await page.fill(`#n-${it.id}`, text); };
 const send = (page) => page.click("#send");
 const written = (page) => page.waitForFunction(() => window.__log.some((l) => l[0] === "set"));
@@ -382,6 +396,15 @@ test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   await page.keyboard.press("Control+Enter");
   await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
   assert.equal((await answers(page))[DECISION.id].choice, "b");
+});
+
+// The pick is B, not the first option, so a fix that focuses the first radio of the card fails.
+test("Enter on Take my pick puts focus on the pick's input, on a pick-one card", async (t) => {
+  const it = mk("take-focus", 40, { pick: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const at = await enterTakePick(page, it);
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
 });
 
 // ---------------------------------------------------------------- repo colour
@@ -3123,6 +3146,83 @@ test("Undo puts a list pick back as a draft, in its order", async (t) => {
   assert.match(await rankText(page, r, "c"), rank("1st", 2), "Undo lost the order");
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
 });
+
+// The first option is in no pick, so a fix that focuses the first box of the card fails. An unranked pick shows in option order, so ["c","b"] starts with B: a fix that reads it.pick[0] fails. The ranked pick starts with C, so a fix that reads option order fails.
+test("Enter on Take my pick puts focus on the first key of the pick, on a multi card", async (t) => {
+  const it = multi("take-focus-multi", 41, { pick: ["c", "b"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["b", "c"], "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
+});
+
+test("Enter on Take my pick puts focus on the first key of the pick, in rank order, on a ranked card", async (t) => {
+  const it = ranked("take-focus-ranked", 42);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["a", "c", "d"], "Enter did not take the pick");
+  assert.match(await rankText(page, it, "c"), rank("1st", 3), "the pick's first key is not ranked 1st");
+  assertFocusOnFirstPick(at, it, "c");
+});
+
+// At 390 wide a card is taller than the screen and Take my pick sits below its options, so the focused option can end under the sticky header (.hdr) or the fixed bar (.bar).
+// The pick starts with A in both cards: the option is far above the button, and the page must show it whole.
+const SPOTS = {
+  "just above the bar": (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.bottom - (document.querySelector(".bar").getBoundingClientRect().top - 8)); },
+  centred: (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.top + b.height / 2 - innerHeight / 2); },
+};
+const FILL = [mk("take-fill-1", 50), mk("take-fill-2", 51), mk("take-fill-3", 52)];
+const TAKE_CARDS = {
+  "pick-one": () => mk("take-clear", 43, { options: COLOURS, pick: "a" }),
+  "multi A and D": () => multi("take-clear-multi", 44, { options: COLOURS, pick: ["a", "d"] }),
+};
+for (const [kind, build] of Object.entries(TAKE_CARDS)) for (const [spot, scrollTo] of Object.entries(SPOTS)) {
+  test(`Enter on Take my pick keeps the focused option clear of the header and the bar, ${kind}, button ${spot}, at 390 wide`, async (t) => {
+    const it = build();
+    const page = await open(t, { items: [it, ...FILL], viewport: { width: 390, height: 800 } }); if (!page) return;
+    const at = await enterTakePick(page, it, () => page.evaluate(scrollTo, it.id));
+    assertFocusOnFirstPick(at, it, "a");
+    const m = await page.evaluate(() => {
+      const o = document.activeElement.closest(".opt"), r = o && o.getBoundingClientRect();
+      return { top: r && Math.round(r.top), bottom: r && Math.round(r.bottom), hdr: Math.round(document.querySelector(".hdr").getBoundingClientRect().bottom), bar: Math.round(document.querySelector(".bar").getBoundingClientRect().top) };
+    });
+    assert.ok(m.top !== null && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A is not between the header and the bar: ${JSON.stringify(m)}`);
+  });
+}
+
+// "Nothing on the page moves" (page.html, top comment): an option already between the header and the bar needs no scroll, so Enter on Take my pick leaves scrollY as it was.
+// `gap` is the px from the header's bottom to option A's top. A scroll that moves the page, even by 10px, fails.
+const stillAfterTake = async (t, it, width, gap, buttonInView) => {
+  const page = await open(t, { items: [it, ...FILL], viewport: { width, height: 800 } }); if (!page) return;
+  let m;
+  const at = await enterTakePick(page, it, async () => {
+    m = await page.evaluate(({ id, gap }) => {
+      const hdr = document.querySelector(".hdr").getBoundingClientRect().bottom, bar = document.querySelector(".bar").getBoundingClientRect().top;
+      const o = document.getElementById(`o-${id}-a`).closest(".opt");
+      scrollBy(0, o.getBoundingClientRect().top - (hdr + gap));
+      const r = o.getBoundingClientRect(), b = document.getElementById("b-take-" + id).getBoundingClientRect();
+      return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), btnTop: Math.round(b.top), btnBottom: Math.round(b.bottom), hdr: Math.round(hdr), bar: Math.round(bar) };
+    }, { id: it.id, gap });
+  });
+  assert.ok(m.y > 0 && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A was not placed in view with the page scrolled: ${JSON.stringify(m)}`);
+  if (buttonInView) assert.ok(m.btnTop >= m.hdr && m.btnBottom <= m.bar, `${it.id}: Take my pick was not placed in view: ${JSON.stringify(m)}`);
+  assertFocusOnFirstPick(at, it, "a");
+  assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: Enter on Take my pick scrolled the page`);
+};
+// Option A starts 56px under the 44px header, so 100px from the top of the screen: whole and clear of the 64px scroll margin. A scroll that centres it moves the page.
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(TAKE_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 56, false));
+}
+// Option A is fully visible 10px under the header, inside the 64px scroll margin, and Take my pick is in view too. These cards hold two options, so both fit at 390 wide.
+const NEAR_CARDS = {
+  "pick-one": () => mk("take-near", 45, { pick: "a" }),
+  "multi A and B": () => multi("take-near-multi", 46, { options: COLOURS.slice(0, 2), pick: ["a", "b"] }),
+};
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(NEAR_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option sits 10px under the header, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 10, true));
+}
 
 test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
   const it = { ...picItem("multi-pics", 33), multi: true, pick: ["a", "c"] };

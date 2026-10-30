@@ -652,3 +652,5 @@
 - merge-role-skips-raw-merge: raw `gh pr merge` (permission-allowed) and the GitHub MCP merge tool skip the merge role check (hooks/guard_merge.py). Decision: session-tiers.
 - merge-remedy-hits-role-refusal: the remedy text of hooks/guard_merge.py (`merge <pr> --confirm`) now sends a cloud lane into the merge role refusal (hooks/guard_merge.py). Decision: session-tiers.
 - merge-role-self-declared: `merge --role` records a tier the session declares itself. The tool cannot read the cs-build tag, so the only backstop for a lane that misreads its tier is the classifier on the `--role` command (unmeasured) (merge/merge.py). Decision: session-tiers.
+- take-pick-header-edge-untested: no test puts the picked option partly under the header, so a showOpt edit that reads top < 0 for the header bottom passes (skills/waiting-page/tests/page.test.mjs)
+- opt-scroll-margin-no-safe-area: .opt scroll-margin-top is 64px with no top safe-area inset, while .hdr sits at that inset; same as .card and .tier (skills/waiting-page/page.html)
