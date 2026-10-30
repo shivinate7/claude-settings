@@ -218,6 +218,9 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .links a .sr { position: static; display: inline; font-size: 0; }
 /* Links on a ranked card: one more row than the ranked rows above. The label's ::after overlay covers the card, so the links row sits above it as .rank and .opic do. */
 .opt.ranked .links { position: relative; z-index: 2; }
+/* A press anywhere on a ranked card ticks it, so only the link itself is raised above the overlay. */
+.opt.ranked .links { pointer-events: none; }
+.opt.ranked .links a { pointer-events: auto; }
 .opts.ranked.olinks .opt { grid-template-rows: auto auto auto 1fr auto auto; }
 .opts.ranked.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto auto; }
 @supports (grid-template-rows: subgrid) { .opts.ranked.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } .opts.ranked.pics.olinks .opt { grid-row: span 7; grid-template-rows: subgrid; } }
