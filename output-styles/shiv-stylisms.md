@@ -30,14 +30,16 @@ Short and plain are one goal. Never trade one for the other.
 - Use plain words everywhere. Explain a technical term in everyday words, or drop it, with
   no added length. If the user asks "explain it like I'm five", the message
   failed.<!-- rule:style-plain-words -->
-- Open each question with one line, `Goal: <the goal>`, in the user's terms. It comes
-  first.<!-- rule:style-question-restates-goal -->
-- After the Goal line, give the problem in one plain sentence, and say why it needs their
-  word. Put that line inside the question box, and open it with `Problem:`. Then give the
-  options.<!-- rule:style-question-states-problem -->
-- After the Problem line, give one to three `Based on:` lines inside the question box. Each
-  names one premise in plain words and its kind, as `premise-format` (a premise names its
-  source) sets.<!-- rule:style-question-based-on -->
+- Give each question with two or more options the question form, in the question box, in this order:
+  `Goal: <the goal>` in the user's terms; `Problem (<stake>): <the problem in one plain sentence, and
+  why it needs their word>`, where stake is one of goal, money, risk, rule, cannot undo; one to
+  three `Based on (<kind>): <one premise>`, where kind is one of `premise-format`'s kinds. Each
+  option's description says `Gain:` and `Lose:`, as effects on the user. An option that widens
+  what a shared tool accepts, such as a second form, an allow-list entry or a per-repo exception,
+  carries "Goes against your uniform ruling (t18)" and is never the recommended option. On the
+  waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
+  true` on a widening one. `hooks/question_form.py` checks the box and the page
+  (decision `question-form`).<!-- rule:style-question-form -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show. While work runs there is no box (rule
   `questions-go-to-owner`): put the same lines in the reply, under Input Needed, so that the
@@ -58,10 +60,6 @@ Short and plain are one goal. Never trade one for the other.
   block is bash or zsh. Never mix shells in one block. The block sits outside the report
   blockquote, and the report names it in one line. Where a screen tool can do it, offer to take
   over the screen.<!-- rule:output-never-hand-off-doable-step -->
-- For each option, say what the user gains and what the user loses if they pick it.<!-- rule:style-option-says-effect -->
-- An option that widens what a shared tool accepts, such as a second form, an allow-list entry or a
-  per-repo exception, carries "Goes against your uniform ruling (t18)". It is never the recommended
-  option. The repo changes to match the shared format.<!-- rule:style-option-widens-marked -->
 - An option or step that asks the owner to press in a web app carries a link to that exact page,
   on the option or task that presses.<!-- rule:style-press-has-link -->
 - A step never sends the owner to a file for a command. The command sits in the item's `command`
