@@ -696,3 +696,5 @@
 - layout-test-worktree-prune: lint/test_layout.py Identity runs `git worktree prune` on the real repo's git folder, which also drops stale worktree records of other sessions; unmeasured race. Decision: one-layout-every-repo.
 - wp-fit-w-scan-equal-value: the FIT_W restatement scan (skills/waiting-page/tests/page.test.mjs) flags an unrelated number equal to FIT_W. Its message gives no remedy for that case. 0 hits at 390, 2-43 at other common widths (measured). Decision: none.
 - feedback-guard-agent-burst: hooks/feedback_guard.py classes an agent hand-back as an owner burst and blocks Stop until it gets an item line (two blocks in lane wp-fit-w-one-home). Decision: none.
+- chat-press-scan-after-lose: the chat press scan strips from `Gain:` to the end of the description, so a press written after `Lose:` passes with no link (hooks/question_form.py). Decision: question-form.
+- chat-own-merge-press-link: a chat option that names the session's own merge with no url refuses as press-link; this is the page's known press-link-own-acts limit (hooks/question_form.py). Decision: question-form.

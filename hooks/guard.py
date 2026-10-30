@@ -3108,6 +3108,7 @@ def judge(payload) -> None:
         rule, matched = data_tool_hit(tool_input, cwd)
         if rule:
             import question_form
+        # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
         if rule == "port-question":
             refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
         if rule == "uniform-pick":
