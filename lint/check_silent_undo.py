@@ -21,6 +21,9 @@ Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
 
+A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
+are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
+
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
 excuses its path. A trailer or line with no reason excuses nothing. Each use prints
@@ -159,12 +162,32 @@ def raw_files(cwd, *revs):
     return res
 
 
+def renamed(cwd, old, new, files):
+    """{old path: (new path, old blob, new blob)} for the files git pairs as renamed between two revs. `files` is
+    raw_files(old, new): with no deleted path there is no rename to read, and git is not asked. -M is explicit, so
+    diff.renames in a config never moves the verdict; the 50 percent similarity is git's own, a file below it stays
+    a delete and an add. A rename entry of `-z --raw` holds two paths, so this read cannot share raw_files' stride."""
+    if not any(b == ZERO for _, b in files.values()):
+        return {}
+    _, out = git(cwd, "diff-tree", "-r", "-M", "-z", "--raw", "--no-abbrev", old, new)
+    t, res, i = out.split("\0"), {}, 0
+    while i < len(t) - 1:
+        bits = t[i].split()
+        if len(bits) < 5:
+            break  # not a raw entry: the read is out of step, so no pair is better than a wrong one
+        if bits[4][0] == "R":
+            res[t[i + 1]] = (t[i + 2], bits[2], bits[3])
+        i += 3 if bits[4][0] in "RC" else 2
+    return res
+
+
 # ------------------------------------------------------------------ lost lines
 
 
 def pool_of(cwd, p, m):
-    """Lines M holds more of than parent p, across all files: where a moved line went."""
-    _, out = git(cwd, "diff", "-U0", "--no-color", "--no-renames", p, m)
+    """Lines M holds more of than parent p, across all files: where a moved line went. A renamed file gains only
+    its edits, so its surviving lines are no gain elsewhere."""
+    _, out = git(cwd, "diff", "-U0", "--no-color", "-M", p, m)
     return counts("\n".join(l[1:] for l in out.splitlines() if l.startswith("+") and not l.startswith("+++")))
 
 
@@ -362,9 +385,12 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
     paths = set()
     for b in bases:
         paths |= set(raw_files(cwd, b, p))
-    paths &= set(raw_files(cwd, p, m))  # a path whose blob is the same in p and m loses nothing
+    changed_pm = raw_files(cwd, p, m)
+    paths &= set(changed_pm)  # a path whose blob is the same in p and m loses nothing
+    pairs = renamed(cwd, p, m, changed_pm)
     for path in sorted(paths):
-        text_m = blobs.get(m, path)
+        dst = pairs[path][0] if path in pairs else path  # a renamed file is read at its new name
+        text_m = blobs.get(m, dst)
         flat = " ".join(text_m.split())  # a re-wrapped line still reads as a run of this
         in_p, in_m = counts(blobs.get(p, path)), counts(text_m)
         in_b = [counts(blobs.get(b, path)) for b in bases]
@@ -378,7 +404,7 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
             moved = min(missing, pool[l])
             pool[l] -= moved
             if missing > moved:
-                hs = hunks(cwd, p, m, path) if hs is None else hs
+                hs = (hunks(cwd, pairs[path][1], pairs[path][2]) if path in pairs else hunks(cwd, p, m, path)) if hs is None else hs
                 mod = any(l in hn and ho for b in bases for ho, hn in hunks(cwd, b, p, path))
                 if not rewritten(l, hs, in_b, mod):
                     lost.append(l)
@@ -395,12 +421,13 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
 _hunks = {}
 
 
-def hunks(cwd, old, new, path):
+def hunks(cwd, old, new, path=None):
     """-U0 hunks of old->new on path as (old lines, new lines), whitespace-normalized. A hunk
-    with no change after normalizing, or with no letter or digit, is dropped."""
+    with no change after normalizing, or with no letter or digit, is dropped. With no path,
+    old and new are two blobs: the edits of a renamed file, read across its two names."""
     key = (cwd, old, new, path)
     if key not in _hunks:
-        _, out = git(cwd, "diff", "-U0", "--no-color", "--no-renames", old, new, "--", path)
+        _, out = git(cwd, "diff", "-U0", "--no-color", "--no-renames", old, new, *(() if path is None else ("--", path)))
         res, cur = [], None
         for l in out.splitlines():
             if l.startswith("@@"):
@@ -477,14 +504,17 @@ progress = None  # a caller may set a callable(done, total): called before each 
 def reversals(cwd, old, new, files, earlier):
     """[(path, how, earlier commit)] where old->new undoes a change an earlier commit made.
     A change with no non-blank difference is no undo, and neither is a removal whose lines
-    old->new adds to another file (a move)."""
+    old->new adds to another file (a move). A file git pairs as renamed is judged on its edits across the
+    rename, as it would be in place; the finding keeps the old path, the one earlier commits name."""
     found = []
     elsewhere = None
+    pairs = renamed(cwd, old, new, files)
     for i, (path, (a, b)) in enumerate(sorted(files.items())):
         if progress:
             progress(i + 1, len(files))
         touched = [e for e in earlier if path in e.files]
-        mine = hunks(cwd, old, new, path) if touched else []
+        dst, b = (pairs[path][0], pairs[path][2]) if path in pairs else (None, b)  # the target is the new blob, not 0000
+        mine = (hunks(cwd, a, b) if dst else hunks(cwd, old, new, path)) if touched else []
         for e in touched if mine else []:
             ea, eb = e.files[path]
             whole = ea == b and eb == a and a != b
@@ -497,7 +527,7 @@ def reversals(cwd, old, new, files, earlier):
             gone = collections.Counter(l for o, _ in mine for l in o if any(l in n for _, n in theirs))
             if gone and all(avail[l] >= k for l, k in gone.items()):
                 continue
-            found.append((path, "whole file restored" if whole else "hunk reversed", e))
+            found.append((path, ("whole file restored" if whole else "hunk reversed") + (" (renamed to %s)" % dst if dst else ""), e))
     return found
 
 

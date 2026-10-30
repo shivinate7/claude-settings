@@ -11541,6 +11541,62 @@ add("uniform pick: the refusal names the ruling and what to pick", "deny", "unif
     carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="banchi-titles", data=up_item())
 
+# Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
+# option keys. The list never holds a key of an option marked `widens: true`, as a string pick never does.
+UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
+            "lose": "l"}
+UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
+
+up("a multi item whose list pick holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+up("a multi item whose list pick holds the widening option last is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c", "a"]))
+up("a multi item whose list pick is the widening option alone is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a"]))
+up("a multi item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"]))
+up("a multi item with a widening option offered and not in the list pick is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["c"], why="One form."))
+up("a multi item whose widening option has widens false is allowed", "allow",
+   up_item(multi=True, options=[dict(UP_WIDE, widens=False), UP_MATCH, UP_THIRD], pick=["a", "b"]))
+up("a ranked item whose list pick holds the widening option is denied", "deny",
+   up_item(ranked=True, options=UP_THREE, pick=["b", "a"]))
+up("a ranked item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(ranked=True, options=UP_THREE, pick=["c", "b"]))
+up("a stood multi pick that holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "c"], stands=True))
+up("a stood multi pick of non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"], stands=True))
+up("an update that carries options and a widening list pick is denied", "deny",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
+up("an update that carries options and a non-widening list pick is allowed", "allow",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
+up("a task with a list pick is not judged", "allow",
+   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"]))
+# A list that holds a non-string member still names its string members. The page reads such a list as
+# not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
+up("a multi item whose list pick holds the widening key and a null is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", None]))
+up("a multi item whose list pick holds a number and a widening key is denied", "deny",
+   up_item(multi=True, options=[dict(UP_WIDE, key="w"), UP_MATCH, UP_THIRD], pick=[1, "w"]))
+# A widening option with no key is named by no pick. An item with no pick, or a null pick, picks nothing, so
+# the missing pick never reads as the key None.
+UP_KEYLESS = {k: v for k, v in UP_WIDE.items() if k != "key"}
+up("a widening option with no key and an item with no pick is allowed", "allow",
+   up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+up("a widening option with no key and an item with a null pick is allowed", "allow",
+   dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+up("a widening option with no key and a multi item with no pick is allowed", "allow",
+   up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
+add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
+    "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
+             "data": up_item(multi=True, options=UP_THREE, pick=["a", "b"])}])
+add("uniform pick: the refusal of a widening list pick names the ruling and what to pick", "deny",
+    "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    action="set", collection="items", doc_id="banchi-titles",
+    data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+
 
 # --------------------------------------------------------------------------- a press in a web app carries its link
 FAMILY = "press-link"
