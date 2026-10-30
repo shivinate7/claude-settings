@@ -12232,6 +12232,10 @@ for _name, _verdict, _script in (
          _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
         ("builder Round 3 on opus", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
+        ("builder Round 3 after a role word on line one, on sonnet", "deny",
+         _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'sonnet'")),
+        ("builder Round 3 after a role word on line one, on opus", "allow",
+         _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'opus'")),
         ("builder Round 3 as a prompt key on sonnet", "deny",
          "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
         ("builder Round 2 on sonnet", "allow",
@@ -12340,6 +12344,71 @@ for _role, _brief in (
         ("builder", "Plan: Try 3 of 3 later, after the review.")):
     add("ceiling: Agent %s on opus with the brief %r asks" % (_role, _brief[:24]), "ask", CEILING,
         tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
+# A brief may open with a role word before the marker, or wrap the marker in markup. The first
+# non-blank line counts when it holds the marker anywhere, word-bounded. A later line counts only
+# when it starts with the marker. Failure classes: a false ask (a third-try builder on opus asks
+# because a word or markup sits before the marker), a false allow (a middle-step marker, a near-miss
+# like "of 30", or the marker in later prose earns the grant; a reviewer behind a role word dodges
+# its step-up).
+FIRST_LINE_BRIEF = "Builder, Round 3 of 3. Lane c204 fix the marker scan.\nFiles: hooks/guard.py."
+add("first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed",
+    "allow", tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with blank lines ahead of that first line is allowed",
+    "allow", tool="Agent", prompt="\n \t\n" + FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: the same brief on sonnet is denied by the step-up", "deny", STEP_UP,
+    tool="Agent", prompt=FIRST_LINE_BRIEF, model="sonnet", subagent_type="builder")
+for _label, _first in (("a role word and a dash", "Builder — Round 3 of 3"),
+                       ("bold markup", "**Round 3 of 3**"),
+                       ("a heading mark", "## Round 3 of 3")):
+    add("first-line marker: builder on opus whose first line is %s around the marker is allowed" % _label,
+        "allow", tool="Agent", prompt=_first + "\nLane c204 fix the marker scan.", model="opus",
+        subagent_type="builder")
+add("first-line marker: builder on opus with the marker on its own line two is allowed", "allow",
+    tool="Agent", prompt="Builder, lane c204: don't skip the scan.\nRound 3 of 3\nFiles: hooks/guard.py.",
+    model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with Round 2 of 3 on line one asks", "ask", CEILING,
+    tool="Agent", prompt="Builder, Round 2 of 3. Lane c204 continue the fix.", model="opus",
+    subagent_type="builder")
+add("first-line marker: builder on opus with Round 3 of 3 only in later prose asks", "ask", CEILING,
+    tool="Agent", model="opus", subagent_type="builder",
+    prompt="Builder, lane c204: fix the marker scan.\nFiles: hooks/guard.py.\n"
+           "Notes: the review said Round 3 of 3 is next, after this pass.")
+for _label, _first in (("a longer total", "Builder, Round 3 of 30. Lane c204 fix the marker scan."),
+                       ("a longer word before it", "Builder, Subround 3 of 3. Lane c204 fix the marker scan.")):
+    add("first-line marker: builder on opus with %s on line one asks" % _label, "ask", CEILING,
+        tool="Agent", prompt=_first, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with no marker in the brief asks, and says what was missing",
+    "ask", CEILING, tool="Agent", prompt="Builder. Lane c204 fix the marker scan.\nFiles: hooks/guard.py.",
+    model="opus", subagent_type="builder",
+    carries=("Round 3 of 3", ("first line", "first non-blank line")))
+add("first-line marker: reviewer with no model and Round 2 of 3 after a role word on line one is denied",
+    "deny", STEP_UP, tool="Agent", prompt="Reviewer, Round 2 of 3. Lane c204 re-check the diff.",
+    subagent_type="reviewer")
+# On the first line only the leftmost marker counts. A second marker later on that line is prose
+# about another step, so it never earns the grant, never adds a step-up deny, and never hides the
+# leftmost one.
+TWO_MARKERS = "Builder, Round 2 of 3. Do not jump to Round 3 of 3 yet."
+add("first-line marker: builder on opus with a later marker on line one after Round 2 of 3 asks", "ask",
+    CEILING, tool="Agent", prompt=TWO_MARKERS, model="opus", subagent_type="builder")
+add("first-line marker: the same brief on sonnet is allowed", "allow", tool="Agent",
+    prompt=TWO_MARKERS, model="sonnet", subagent_type="builder")
+add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 3 later asks, no step-up deny",
+    "ask", CEILING, tool="Agent", model="opus", subagent_type="reviewer",
+    prompt="Round 3 of 3. The Round 2 of 3 report found one defect.")
+add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="Round 1 of 3: check that Round 3 of 3 logic works")
+# A first line that already starts with a marker, in any case or spelling, is read by that start alone.
+# A first line whose leftmost marker-shaped text is the old spelling adds nothing either. A later
+# marker on the line is prose in both.
+for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("lowercase at the start", "round 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("the old spelling after a role word", "Builder, Try 2 of 3. Round 3 of 3 later.")):
+    add("first-line marker: builder on opus with %s and a later Round 3 of 3 asks" % _label, "ask", CEILING,
+        tool="Agent", prompt=_first, model="opus", subagent_type="builder")
+add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="round 1 of 3: check Round 2 of 3 logic")
 # Text that only names opus is no model.
 add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
     tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",
