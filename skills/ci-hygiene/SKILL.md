@@ -35,8 +35,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 5. **Cap each job's time.** Set each cap at about 2x the slowest measured run. Decision `ci-job-caps`
    (each job's cap) holds the rule, the table and how to measure again. A new job's provisional cap
    is 60 min. Mark it `# provisional` until it has 5 green runs. The owner may set another
-   provisional cap. The merge
-   tool's `warn` mode flags a job past 70% of its cap. A job that ends at its cap with no red CI
+   provisional cap. Keep `merge.deadlineMinutes` in `.github/stamp.json` at least the largest cap
+   plus 5. The merge tool's `warn` mode flags a job past 70% of its cap. A job that ends at its cap with no red CI
    step is re-capped or split. It is never left. A timeout stays red, labelled "re-cap or split".
    Give a network step, such as a browser install, its own short cap. When a job nears its cap,
    split its slowest suite by family into its own job. Give the measured CI time before and after.
@@ -163,7 +163,8 @@ Branch protection decides what counts as passing. Decision `same-check-kinds` (e
 same check kinds) sets the rule. Branch protection requires one check: the `all-jobs-passed` rollup.
 That job lists every other job in `needs:`, and its `if:` holds `always()`. The rollup fails a
 needed job that failed, was cancelled or was skipped. Without the rollup, a skipped job reads as
-passing. So a scoped-out suite skips at its CI step, and its job still runs and passes. The rollup
+passing. So a scoped-out suite skips at its CI step, and its job still runs and passes, pending
+the owner's ruling in step 19. The rollup
 skips on a draft, and a draft cannot merge (step 11). Read the protection rule first:
 `snippets.md`, section 3b.
 
