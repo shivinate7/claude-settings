@@ -100,6 +100,13 @@ Other tools, in `judge` order:
                        passes. The shell form reads the targets frozen-path reads, after a
                        leading `cd`. An override lifts it.
                        (an-agent-outside-its-home-tree-must-stop)
+  session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
+                       checkout, and a write (Write family or shell) that lands in the primary's own
+                       files. Its record is `<primary>/.git/session-homes/<session_id>`, written by a
+                       call with no `agent_id` from a `.claude/worktrees/<name>` folder, cleared by that
+                       session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
+                       `.git`, a target outside the clone, reads and non-writing shell pass. An
+                       override lifts it. It adds no git spawn beyond what the call already spends.
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -232,7 +239,7 @@ while True:
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
-            in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -2930,6 +2937,188 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ the session's own worktree
+#
+# Rule session-home. The harness removes a session's linked worktree and branch while the session
+# runs on, and its shell falls back to the primary checkout. A write there lands on the clone's
+# default branch, behind everything. The record `<primary>/.git/session-homes/<session_id>` holds the
+# worktree path, so a later call can tell "never had a worktree" from "its worktree is gone". Only a
+# call with no `agent_id` writes or clears it: an agent shares its session's id. The primary is found
+# by path shape and a stat walk, never by git, so the rule adds no git spawn beyond what the call
+# already spends. A git verb in the primary is read off the command text with `git_calls`.
+SESSION_HOME_DIR = "session-homes"
+# The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
+# is left out in session_home_git_hit.
+SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
+                          "stash", "cherry-pick", "revert", "am", "apply")
+SESSION_HOME_REASON = (
+    "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
+    "checkout. "
+    "Remedy: call the EnterWorktree tool first. It branches from origin's default branch. Then "
+    "write inside that worktree."
+)
+
+
+def session_home_place(cwd: str):
+    """Return (primary, lane) for a call's cwd, by path shape and a stat walk. `lane` is the
+    `<primary>/.claude/worktrees/<name>` folder holding cwd, or '' when cwd sits in the primary's own
+    files. (None, '') when neither shape fits: no checkout, a linked worktree elsewhere, or no
+    `.git` directory at the primary."""
+    if not cwd:
+        return None, ""
+    try:
+        folder = os.path.realpath(cwd)
+    except Exception:
+        return None, ""
+    while True:
+        parent = os.path.dirname(folder)
+        grand = os.path.dirname(parent)
+        if (os.path.basename(parent) == "worktrees" and os.path.basename(grand) == ".claude"
+                and os.path.isdir(os.path.join(os.path.dirname(grand), ".git"))):
+            return os.path.dirname(grand), folder
+        if os.path.isdir(os.path.join(folder, ".git")):
+            return folder, ""
+        if os.path.exists(os.path.join(folder, ".git")) or parent == folder:
+            return None, ""
+        folder = parent
+
+
+def session_home_agent_tree(lane: str) -> bool:
+    """True when LANE has an agent worktree's shape, `.claude/worktrees/agent-<agent_id>` (rule
+    worktree-home). A top-level call there is the session inspecting an agent's tree, not its home."""
+    name = os.path.basename(lane)
+    return name.startswith("agent-") and bool(AGENT_ID.match(name[len("agent-"):]))
+
+
+def session_home_record(payload, primary: str):
+    """The record's path for this session, or '' when the call carries no valid session id."""
+    sid = payload.get("session_id") if isinstance(payload, dict) else None
+    if not isinstance(sid, str) or not SESSION_ID_RE.match(sid):
+        return ""
+    return os.path.join(primary, ".git", SESSION_HOME_DIR, sid)
+
+
+def session_home_keep(payload, tool: str, cwd: str) -> None:
+    """Write the session's record from a lane call, only when it is missing or different. The
+    session's own ExitWorktree deletes it. An agent call does neither."""
+    if not isinstance(payload, dict) or payload.get("agent_id"):
+        return
+    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    primary, lane = session_home_place(where)
+    record = session_home_record(payload, primary) if primary else ""
+    if not record:
+        return
+    try:
+        try:
+            with open(record, encoding="utf-8") as handle:
+                held = handle.read().strip()
+        except OSError:
+            held = ""
+        if tool == "ExitWorktree":
+            # An exit ends a record whose worktree still stands, from any cwd. A record whose
+            # worktree is gone stays, and the guard keeps judging.
+            if held and os.path.isdir(held):
+                os.remove(record)
+            return
+        if not lane or held == lane or session_home_agent_tree(lane):
+            return
+        import tempfile   # lazy: only a first or changed record reaches here
+        folder = os.path.dirname(record)
+        os.makedirs(folder, exist_ok=True)
+        handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(lane)
+            os.replace(temp, record)  # one step: a reader never sees a half-written path
+        except BaseException:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            raise
+    except Exception:
+        pass  # an unwritable record means no refusal later, never a failed call
+
+
+def session_home_git_hit(command: str, where: str, in_primary) -> str:
+    """The verb of a git call in COMMAND that changes the primary's files or branch and runs in the
+    primary checkout, else ''. A leading `cd` and `git -C <path>` name the folder it runs in; a folder
+    that holds a variable is unknown and passes."""
+    ends = []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        verbs = [(verb, args) for verb, args in git_calls(segment) if verb in SESSION_HOME_GIT_VERBS]
+        if not verbs:
+            continue
+        folder = dir_before_segment(segments, number, where, ends)
+        tokens = segment_tokens(segment)
+        named = _segment_git_c_target(tokens) if tokens else None
+        if named is not None:
+            folder = None if _unexpanded(named) else shell_abs(named, folder)
+        if not folder:
+            continue
+        for verb, args in verbs:
+            if verb == "stash" and args[:1] in (["list"], ["show"]):
+                continue
+            if in_primary(folder, folder):
+                return verb
+    return ""
+
+
+def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule session-home: the log detail when a session whose recorded worktree is gone writes into
+    the primary checkout, else ''. Only a call with no `agent_id` and a cwd in the primary's own files
+    is judged. A missing, empty or unreadable record is unknown and passes. The clone's `.git`,
+    `.claude/worktrees/`, and a target outside the clone pass. Liftable by an owner override."""
+    if not isinstance(payload, dict) or payload.get("agent_id"):
+        return ""
+    if tool in WRITE_TOOLS:
+        targets = write_targets(tool_input)
+    elif tool in SHELL_TOOLS:
+        targets = None
+        command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
+        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
+        if not writes and "git" not in command:
+            return ""
+    else:
+        return ""
+    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    primary, lane = session_home_place(where)
+    record = session_home_record(payload, primary) if primary and not lane else ""
+    if not record:
+        return ""
+    try:
+        with open(record, encoding="utf-8") as handle:
+            home = handle.read().strip()
+    except OSError:
+        return ""
+    if not home or os.path.isdir(home):
+        return ""
+    lanes = os.path.join(primary, ".claude", "worktrees")
+    clone_git = os.path.join(primary, ".git")
+
+    def in_primary(target, at):
+        try:
+            resolved = _resolved(target, at)
+        except Exception:
+            return False
+        return (path_is_inside(resolved, primary) is True
+                and path_is_inside(resolved, clone_git) is not True
+                and (path_is_inside(resolved, lanes) is not True
+                     or path_is_inside(resolved, home) is True))  # the gone home path is the primary's too
+
+    if targets is None:
+        verb = session_home_git_hit(command, where, in_primary)
+        if verb:
+            return "git " + verb + " in the primary checkout"
+        hit = _shell_write_hit(command, where, in_primary, follow_cd=True) if writes else ""
+        return "shell write into the primary checkout: " + hit if hit else ""
+    for target in targets:
+        if in_primary(target, where):
+            return "write target in the primary checkout: " + target
+    return ""
+
+
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
@@ -2969,6 +3158,7 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
@@ -2978,6 +3168,11 @@ def judge(payload) -> None:
     other_hit = other_checkout_hit(tool, tool_input, cwd)
     if other_hit:
         refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)
+    # 0, session-home. A session whose own worktree is gone writes nowhere in the primary checkout. An
+    # override lifts it, and it is not in never_lifted: the owner may mean the write.
+    session_hit = session_home_hit(payload, tool, tool_input, cwd)
+    if session_hit:
+        refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
