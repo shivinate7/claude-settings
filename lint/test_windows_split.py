@@ -5,7 +5,8 @@ Proves: (1) each suite command in REQUIRED runs in exactly one `windows-latest` 
 dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry those suites.
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
 slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
-Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag.
+Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A gated job has no job-level if: its gate sits in each step
+(read_gate, step_rest), so a step cannot run outside the gate.
 
 Why not rule_audit.py: it reads step names only. This needs job boundaries and `run:` lines.
 Line-based parse, stdlib only, like rule_audit. Only single-line `run: <cmd>` steps count.
@@ -123,6 +124,8 @@ SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_s
 SHOOT_JOB = "checks-shoot"
 # The scope flag each job skips on when the flag is not its own name.
 FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot"}
+# The rollup is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
+ROLLUP_JOB = "all-jobs-passed"
 
 
 def key(st):
@@ -181,7 +184,7 @@ def placement_problems(text):
 
 # Steps whose `shell:` is pinned. Any other REQUIRED step must set none.
 SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_action.sh": "bash"}
-# Steps whose whole `if:` is pinned (the mutation test must stay off pull_request and on its scope flag).
+# Steps whose own condition (the part after the gate) is pinned: the mutation test stays off pull_request and on its scope flag.
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}",
           # The full merge suite runs on every event but pull_request; the slice only on it.
@@ -197,48 +200,139 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
          "code", "guard", "sweep", "shoot"]
 
 
-def eval_if(expr, event, flag_value):
-    """Evaluate a job-level `if:` for an event with every scope output set to flag_value.
-    Reads only !cancelled(), &&, ||, parentheses, ==, != on github.event_name and needs.scope.outputs.*."""
+def eval_if(expr, event, flag_value, draft=False):
+    """Evaluate an `if:` (a job's, a step's or a gate) for an event with every scope output set to flag_value and
+    github.event.pull_request.draft set to draft. Reads only !cancelled(), success(), always(), &&, ||, !, parentheses,
+    == and != on github.event_name, github.event.pull_request.draft and needs.scope.outputs.*."""
     e = expr.strip()
     if e.startswith("${{") and e.endswith("}}"):
         e = e[3:-2]
+    e = e.replace("github.event.pull_request.draft", repr(draft))
     e = e.replace("!cancelled()", "True").replace("success()", "True").replace("always()", "True")
     e = e.replace("&&", " and ").replace("||", " or ")
     e = e.replace("github.event_name", repr(event))
     e = re.sub(r"needs\.scope\.outputs\.\w+", repr(flag_value), e)
+    e = re.sub(r"!(?!=)", " not ", e)
     return bool(eval(e, {"__builtins__": {}}))
 
 
+def yaml_scalar(raw):
+    """A YAML value without its trailing comment or outer quotes. `#` starts a comment only after a space and outside
+    quotes, so `'a # b'` and `${{ x == '#' }}` keep their `#`, and a lone quote in plain text (`Don't`) is text."""
+    s = (raw or "").strip()
+    if s[:1] in ("'", '"'):
+        end = s.find(s[0], 1)
+        return s[1:end] if end != -1 else s
+    m = re.search(r"(?:^|\s)#", s)
+    return (s[:m.start()] if m else s).rstrip()
+
+
+def unwrap(raw):
+    """A value's expression with `${{ }}` removed, or None when the value is absent."""
+    if raw is None:
+        return None
+    s = yaml_scalar(raw)
+    return s[3:-2].strip() if s.startswith("${{") and s.endswith("}}") else s
+
+
+def step_if(st):
+    """A step's `if:` expression, or None when the step has none."""
+    return unwrap(st.get("if"))
+
+
+def paren_prefix(expr):
+    """X when expr reads `(X) && ...` with X closed by its own parenthesis, else None. A paren inside single quotes is text."""
+    if not expr or expr[0] != "(":
+        return None
+    depth, quoted = 0, False
+    for i, ch in enumerate(expr):
+        if ch == "'":
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return expr[1:i] if expr[i + 1:].startswith(" && ") else None
+    return None
+
+
+def gate_rest(expr, gate):
+    """What a step's `if` adds to the gate: "" for the bare gate, E for `(gate) && E`, None when the step lacks the gate."""
+    if gate is None or expr is None:
+        return None
+    if expr == gate:
+        return ""
+    lead = f"({gate}) && "
+    rest = expr[len(lead):] if expr.startswith(lead) else ""
+    return rest or None
+
+
+def read_gate(job):
+    """G, the gate a gated job's steps carry. Each step with an `if` gives a candidate: its `(X)` prefix, else the whole
+    if. None when no step carries an `if`, or when the candidates differ."""
+    cands = {paren_prefix(expr) or expr for expr in map(step_if, job["steps"]) if expr is not None}
+    return cands.pop() if len(cands) == 1 else None
+
+
+def step_rest(st, gate, shard=False):
+    """A step's own condition E. A shard job has no gate, so E is its whole if. Otherwise E is what the gate leaves:
+    "" for the bare gate, None when the step lacks the gate."""
+    if shard:
+        return step_if(st) or ""
+    return gate_rest(step_if(st), gate)
+
+
+def gate_property_problems(name, gate, flag=None):
+    """G keeps the gate's rules: it reads the job's own scope flag, it is one disjunction (a `&&` in it means a step's E
+    was not parenthesised, so E runs inside the gate), it is true on push, schedule and dispatch with every flag false,
+    true on pull_request with every flag true, and false on pull_request with every flag false."""
+    own = flag or name.replace("-", "_")
+    problems = []
+    if f"needs.scope.outputs.{own}" not in gate:
+        problems.append(f"{name}: gate does not read needs.scope.outputs.{own}: {gate}")
+    if "&&" in gate:
+        problems.append(f"{name}: gate has &&, so a step's condition is not parenthesised: {gate}")
+    try:
+        for ev in ("push", "schedule", "workflow_dispatch"):
+            if not eval_if(gate, ev, "false"):
+                problems.append(f"{name}: gate skips on {ev}: {gate}")
+        if not eval_if(gate, "pull_request", "true"):
+            problems.append(f"{name}: gate skips on pull_request with every flag true: {gate}")
+        if eval_if(gate, "pull_request", "false"):
+            problems.append(f"{name}: gate runs on pull_request with every flag false: {gate}")
+    except Exception as ex:
+        problems.append(f"{name}: gate is not in the allowed form ({ex!r}): {gate}")
+    return problems
+
+
+def gate_step_problems(name, job, gate):
+    """Every step of a gated job carries the gate: bare, or as `(gate) && E`."""
+    return [f"{name}: step {st.get('name') or st.get('uses') or st.get('run')} lacks the gate: {step_if(st)}"
+            for st in job["steps"] if gate_rest(step_if(st), gate) is None]
+
+
 def job_check_problems(name, job, flag=None):
-    """`needs: scope`, and a job-level if that (a) reads needs.scope.outputs.<own flag>, (b) is true on push,
-    schedule and workflow_dispatch even when every flag is 'false', (c) is true on pull_request with every flag
-    'true' and false with every flag 'false'. The lint job `checks` needs scope and has no if. `flag` names the
-    scope output for a job whose flag is not its own name (FLAG_OF)."""
+    """`needs: scope`. A shard past the first keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint job
+    `checks` has no gate. A gated job has no job-level if: its gate G is the one its steps carry (read_gate), every step
+    carries G (gate_step_problems), and G keeps the gate rules (gate_property_problems). `flag` names the scope output
+    for a job whose flag is not its own name (FLAG_OF)."""
     problems = []
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
-    if shard_base(name):  # a shard past the first: every event but pull_request, whatever the flags
+    if shard_base(name):
         return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
-    if expr is None and name != "checks":
-        return problems + [f"{name}: no job-level if"]
-    own = flag or name.replace("-", "_")
-    if name == "checks":  # the lint job runs on every PR: no job-level if
+    if name == "checks":  # the lint job runs on every PR: no job-level if, no gate
         return problems + ([f"checks: job-level if: {expr}"] if expr is not None else [])
-    if f"needs.scope.outputs.{own}" not in expr:
-        problems.append(f"{name}: job-level if does not read needs.scope.outputs.{own}: {expr}")
-    try:
-        for ev in ("push", "schedule", "workflow_dispatch"):
-            if not eval_if(expr, ev, "false"):
-                problems.append(f"{name}: job-level if skips on {ev}: {expr}")
-        if not eval_if(expr, "pull_request", "true"):
-            problems.append(f"{name}: job-level if skips on pull_request with every flag true: {expr}")
-        if eval_if(expr, "pull_request", "false"):
-            problems.append(f"{name}: job-level if runs on pull_request with every flag false: {expr}")
-    except Exception as ex:
-        problems.append(f"{name}: job-level if is not in the allowed form ({ex!r}): {expr}")
-    return problems
+    if expr is not None:
+        return problems + [f"{name}: gated job keeps a job-level if, its gate belongs in its steps: {expr}"]
+    gate = read_gate(job)
+    if gate is None:
+        return problems + [f"{name}: its steps carry no one gate (none carries one, or they disagree)"]
+    return problems + gate_property_problems(name, gate, flag) + gate_step_problems(name, job, gate)
 
 
 def scope_problems(text):
@@ -260,14 +354,14 @@ def scope_problems(text):
     for name, job in jobs.items():
         # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
         # alone (actions/ci-done-comment/test_comment.py checks its needs and if).
-        if name not in ("scope", "ci-done"):
+        if name not in ("scope", "ci-done", ROLLUP_JOB):
             problems += job_check_problems(name, job, FLAG_OF.get(name))
     return problems
 
 
 def hardening_problems(text):
-    """A carrying job has `needs: scope`, a job-level if of the allowed form, and setup-python; a REQUIRED step keeps
-    `!cancelled()`, its pinned shell and its pinned if."""
+    """A carrying job has `needs: scope`, its gate in its steps (job_check_problems) and setup-python; a REQUIRED step
+    keeps `!cancelled()`, its pinned shell and its pinned condition (the part after the gate)."""
     problems = []
     n = text.count("MERGE_TESTS")  # one mention only: the slice step's env. Job, workflow or $GITHUB_ENV copies would slice every run.
     if n != 1:
@@ -292,10 +386,10 @@ def hardening_problems(text):
                 continue
             if cmd in slice_envs and st["env"] != slice_envs[cmd]:
                 problems.append(f"{name}: slice env is {st['env']}, want {slice_envs[cmd]}")
-            if "!cancelled()" not in st.get("if", ""):
-                problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {st.get('if')}")
-            if cmd in IF_PIN and st.get("if") != IF_PIN[cmd]:
-                problems.append(f"{name}: {cmd!r} if is not the pinned text: {st.get('if')}")
+            if "!cancelled()" not in (step_if(st) or ""):
+                problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {step_if(st)}")
+            if cmd in IF_PIN and step_rest(st, read_gate(job), bool(shard_base(name))) != unwrap(IF_PIN[cmd]):
+                problems.append(f"{name}: {cmd!r} condition is not the pinned text: {step_if(st)}")
             if st.get("shell") != SHELL.get(cmd):
                 problems.append(f"{name}: {cmd!r} shell is {st.get('shell')}, want {SHELL.get(cmd)}")
     return problems
@@ -322,14 +416,14 @@ def guard_problems(text):
     for cmd in (GUARD_CMD, GUARD_SLICE):
         if cmd not in steps:
             problems.append(f"{GUARD_JOB} has no step {cmd!r}")
-    if GUARD_CMD in steps and steps[GUARD_CMD].get("if") != IF_PIN[GUARD_CMD]:
-        problems.append(f"{GUARD_JOB}: full guard if is not the pinned text: {steps[GUARD_CMD].get('if')}")
+    if GUARD_CMD in steps and step_rest(steps[GUARD_CMD], read_gate(job)) != unwrap(IF_PIN[GUARD_CMD]):
+        problems.append(f"{GUARD_JOB}: full guard condition is not the pinned text: {step_if(steps[GUARD_CMD])}")
     if GUARD_SLICE in steps:
         st = steps[GUARD_SLICE]
         if st.get("env") != GUARD_SLICE_ENV:
             problems.append(f"{GUARD_JOB}: slice env is {st.get('env')}, want {GUARD_SLICE_ENV}")
-        if st.get("if") != IF_PIN[GUARD_SLICE]:
-            problems.append(f"{GUARD_JOB}: slice if is not the pinned text: {st.get('if')}")
+        if step_rest(st, read_gate(job)) != unwrap(IF_PIN[GUARD_SLICE]):
+            problems.append(f"{GUARD_JOB}: slice condition is not the pinned text: {step_if(st)}")
     g = text.count("GUARD_TESTS")  # one mention only: the slice step's env
     if g != 1:
         problems.append(f"GUARD_TESTS appears {g} times in checks.yml, want exactly 1 (the guard slice step's env)")
@@ -353,9 +447,9 @@ def mutate_problems(text):
 
 
 def shoot_problems(text, required):
-    """The shoot suite runs in SHOOT_JOB on Linux and in no other job, with no step-level if, so a job
-    that runs cannot skip the suite and read green. No other job installs a browser. SHOOT_JOB is a
-    required check (`required`: stamp.json merge.requiredChecks)."""
+    """The shoot suite runs in SHOOT_JOB on Linux and in no other job. Every step of that job carries the gate, and the
+    suite's own step carries the gate alone, so no step can skip the suite and read green. No other job installs a
+    browser. SHOOT_JOB is a required check (`required`: stamp.json merge.requiredChecks)."""
     jobs = all_jobs(text)
     homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == SHOOT_CMD]
     problems = []
@@ -365,7 +459,10 @@ def shoot_problems(text, required):
     if job:
         if not (job["os"] or "").startswith("ubuntu"):
             problems.append(f"{SHOOT_JOB} runs on {job['os']}, want ubuntu-latest")
-        problems += [f"{SHOOT_JOB}: step {st} has a step-level if" for st in job["steps"] if "if" in st]
+        gate = read_gate(job)
+        problems += gate_step_problems(SHOOT_JOB, job, gate)
+        problems += [f"{SHOOT_JOB}: the suite step adds its own condition, it must carry the gate alone: {step_if(st)}"
+                     for st in job["steps"] if st.get("run") == SHOOT_CMD and step_rest(st, gate) != ""]
     # The raw job text, so an install inside a `run: |` block counts too.
     installs = [n for n in jobs if n != SHOOT_JOB and "playwright install" in (job_block(text, n) or "")]
     if installs:
@@ -395,19 +492,31 @@ class WindowsSplit(unittest.TestCase):
         self.assertEqual(shoot_problems(self.text, required if isinstance(required, list) else None), [])  # "protection": whether the job is required is unknown here
 
     def test_the_shoot_checker_sees_its_defects(self):
-        good = (f"jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n      - name: lint\n        run: ruff\n"
-                f"  {SHOOT_JOB}:\n    runs-on: ubuntu-latest\n    steps:\n"
-                f"      - name: Install Chromium\n        run: playwright install chromium\n"
-                f"      - name: shoot fixture suite\n        run: {SHOOT_CMD}\n")
+        gate = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
+
+        def doc(lint_run="ruff", install_if=f"${{{{ {gate} }}}}", suite_if=f"${{{{ {gate} }}}}", suite_run=SHOOT_CMD,
+                runs_on="ubuntu-latest", extra=""):
+            install = f"        if: {install_if}\n" if install_if else ""
+            suite = f"        if: {suite_if}\n" if suite_if else ""
+            return ("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                    f"      - name: lint\n        run: {lint_run}\n" + extra
+                    + f"  {SHOOT_JOB}:\n    runs-on: {runs_on}\n    needs: scope\n    steps:\n"
+                    + f"      - name: Install Chromium\n{install}        run: playwright install chromium\n"
+                    + f"      - name: shoot fixture suite\n{suite}        run: {suite_run}\n")
+
+        good = doc()
         self.assertEqual(shoot_problems(good, [SHOOT_JOB]), [])
-        bad = {"back in checks": good.replace("        run: ruff\n", f"        run: ruff\n      - name: s\n        run: {SHOOT_CMD}\n"),
-               "install in checks": good.replace("run: ruff", "run: playwright install --with-deps chromium"),
-               "install in a checks block": good.replace("run: ruff", "run: |\n          ruff\n          playwright install chromium"),
-               "step-level if": good.replace(f"        run: {SHOOT_CMD}", f"        if: false\n        run: {SHOOT_CMD}"),
-               "on windows": good.replace(f"  {SHOOT_JOB}:\n    runs-on: ubuntu-latest", f"  {SHOOT_JOB}:\n    runs-on: windows-latest"),
-               "suite dropped": good.replace(f"        run: {SHOOT_CMD}\n", "        run: true\n")}
+        bad = {"back in checks": doc(extra=f"      - name: s\n        run: {SHOOT_CMD}\n"),
+               "install in checks": doc(lint_run="playwright install --with-deps chromium"),
+               "install in a checks block": doc(lint_run="|\n          ruff\n          playwright install chromium"),
+               "suite step adds its own condition": doc(suite_if=f"${{{{ ({gate}) && false }}}}"),
+               "suite step lacks the gate": doc(suite_if=None),
+               "install step lacks the gate": doc(install_if=None),
+               "on windows": doc(runs_on="windows-latest"),
+               "suite dropped": doc(suite_run="true")}
         for label, text in bad.items():
-            self.assertTrue(shoot_problems(text, [SHOOT_JOB]), label)
+            with self.subTest(defect=label):
+                self.assertTrue(shoot_problems(text, [SHOOT_JOB]), label)
         self.assertTrue(shoot_problems(good, []), "not required")
 
     def test_scope_job_checks_every_other_job(self):
@@ -420,19 +529,34 @@ class WindowsSplit(unittest.TestCase):
             self.assertEqual(job_check_problems(name, jobs[name], FLAG_OF[name]), [])
 
     def test_the_check_form_sees_its_defects(self):
-        ok = "${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}"
-        job = {"needs": "scope", "if": ok}
-        self.assertEqual(job_check_problems("checks-macos", job), [])
-        self.assertEqual(job_check_problems("checks", {"needs": "scope", "if": None}), [])
-        self.assertTrue(job_check_problems("checks", {"needs": None, "if": None}))
-        bad = {"pr_only": "${{ needs.scope.outputs.checks_macos == 'true' }}",  # skips on push when the flag is false
-               "not_pr_always": "${{ github.event_name != 'pull_request' }}",  # never reads the flag
-               "other_flag": ok.replace("checks_macos", "checks_windows"),
-               "always_on_pr": "${{ !cancelled() || needs.scope.outputs.checks_macos == 'true' }}"}
-        for label, expr in bad.items():
-            self.assertTrue(job_check_problems("checks-macos", dict(job, **{"if": expr})), label)
-        self.assertTrue(job_check_problems("checks-macos", dict(job, needs="checks")))
-        self.assertTrue(job_check_problems("checks-macos", dict(job, **{"if": None})))
+        gate = "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'"
+
+        def job(steps=None, job_if=None, needs="scope"):
+            if steps is None:
+                steps = [{"name": "setup", "if": f"${{{{ {gate} }}}}"},
+                         {"name": "lint", "if": f"${{{{ ({gate}) && !cancelled() }}}}"}]
+            return {"needs": needs, "if": job_if, "steps": steps}
+
+        self.assertEqual(job_check_problems("checks-macos", job()), [])
+        self.assertEqual(job_check_problems("checks", {"needs": "scope", "if": None, "steps": []}), [])
+        self.assertTrue(job_check_problems("checks", {"needs": None, "if": None, "steps": []}))
+        bad = {
+            "job-level if kept": job(job_if=f"${{{{ {gate} }}}}"),
+            "pr_only": job([{"if": "${{ needs.scope.outputs.checks_macos == 'true' }}"}]),  # skips on push when the flag is false
+            "not_pr_always": job([{"if": "${{ github.event_name != 'pull_request' }}"}]),  # never reads the flag
+            "other_flag": job([{"if": f"${{{{ {gate.replace('checks_macos', 'checks_windows')} }}}}"}]),
+            "always_on_pr": job([{"if": "${{ !cancelled() || needs.scope.outputs.checks_macos == 'true' }}"}]),  # runs on PR with every flag false
+            "parens dropped, one step": job([{"if": f"${{{{ {gate} && !cancelled() }}}}"}]),
+            "parens dropped, beside a bare gate": job([{"if": f"${{{{ {gate} && !cancelled() }}}}"}, {"if": f"${{{{ {gate} }}}}"}]),
+            "one step missing the gate": job([{"if": f"${{{{ {gate} }}}}"}, {"name": "bare"}]),
+            "steps disagree": job([{"if": f"${{{{ {gate} }}}}"},
+                                   {"if": f"${{{{ ({gate.replace('checks_macos', 'shell_macos')}) && !cancelled() }}}}"}]),
+            "no step carries a gate": job([{"name": "a"}]),
+            "wrong needs": job(needs="checks"),
+        }
+        for label, j in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(job_check_problems("checks-macos", j), label)
 
     def test_suites_keep_their_conditions(self):
         self.assertEqual(hardening_problems(self.text), [])
@@ -452,24 +576,25 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(placement_problems(doc(REQUIRED[:8], REQUIRED[7:14], REQUIRED[14:])))
 
     def test_checker_sees_the_merge_slice_defects(self):
-        full_if = "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}"
-        slice_if = full_if.replace("!=", "==")
+        gate = "needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request'"
+        full_e = "!cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true'"
+        slice_e = full_e.replace("!=", "==")
 
-        def doc(full_if=full_if, slice_if=slice_if, env="windows-slice", with_full=True):
-            full = (f"      - name: Full\n        if: {full_if}\n        run: python merge/test_merge.py\n"
-                    if with_full else "")
-            return ("jobs:\n  checks-windows-merge:\n    runs-on: windows-latest\n    needs: scope\n"
-                    "    if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}\n    steps:\n"
-                    "      - uses: actions/setup-python@abc # v6\n" + full +
-                    f"      - name: Slice\n        if: {slice_if}\n        env:\n          MERGE_TESTS: {env}\n"
-                    "        run: python merge/test_merge.py\n")
+        def doc(full=full_e, slice_=slice_e, env="windows-slice", with_full=True):
+            full_step = (f"      - name: Full\n        if: ${{{{ ({gate}) && {full} }}}}\n"
+                         "        run: python merge/test_merge.py\n") if with_full else ""
+            return ("jobs:\n  checks-windows-merge:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n"
+                    f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {gate} }}}}\n" + full_step
+                    + f"      - name: Slice\n        if: ${{{{ ({gate}) && {slice_} }}}}\n        env:\n"
+                    f"          MERGE_TESTS: {env}\n        run: python merge/test_merge.py\n")
+
         self.assertEqual(hardening_problems(doc()), [])
         self.assertIn("'python merge/test_merge.py' runs 0 times on windows-latest: []",
                       placement_problems(doc(with_full=False)))  # full run removed
         self.assertNotIn("'python merge/test_merge.py' runs 0 times on windows-latest: []", placement_problems(doc()))
-        self.assertTrue(hardening_problems(doc(slice_if=full_if)))  # slice runs on push
-        self.assertTrue(hardening_problems(doc(full_if=slice_if)))  # full run on pull_request
-        self.assertTrue(hardening_problems(doc(slice_if=slice_if.replace("!cancelled() && ", ""))))
+        self.assertTrue(hardening_problems(doc(slice_=full_e)))  # slice runs on push
+        self.assertTrue(hardening_problems(doc(full=slice_e)))  # full run on pull_request
+        self.assertTrue(hardening_problems(doc(slice_=slice_e.replace("!cancelled() && ", ""))))
         self.assertTrue(hardening_problems(doc(env="full")))  # slice env not pinned
         good = doc()
         for bad in (good.replace("    runs-on: windows-latest\n", "    runs-on: windows-latest\n    env:\n      MERGE_TESTS: windows-slice\n"),
@@ -477,20 +602,25 @@ class WindowsSplit(unittest.TestCase):
                     good.replace("    steps:\n", "    steps:\n      - run: echo MERGE_TESTS=windows-slice >> $GITHUB_ENV\n")):
             self.assertTrue(any("MERGE_TESTS appears 2 times" in p for p in hardening_problems(bad)), bad)
         self.assertFalse(any("MERGE_TESTS appears" in p for p in hardening_problems(good)))
-        self.assertTrue(hardening_problems(doc(full_if=full_if.replace(" && needs.scope.outputs.code == 'true'", ""))))
+        self.assertTrue(hardening_problems(doc(full=full_e.replace(" && needs.scope.outputs.code == 'true'", ""))))
 
     def test_checker_sees_the_shard_defects(self):
-        full_if = IF_PIN[GUARD_CMD]
-        base_if = "${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}"
+        gate = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
+        full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
 
-        def job(name, shard, job_if=SHARD_JOB_IF, slice_=False):
-            return (f"  {name}:\n    runs-on: windows-latest\n    needs: scope\n    if: {job_if}\n    steps:\n"
-                    "      - uses: actions/setup-python@abc # v6\n"
-                    f"      - name: Full\n        if: {full_if}\n"
+        def job(name, shard, base=False, slice_=False):
+            # The base job is gated: the gate sits in each step. A shard keeps its job-level if and its steps' own ifs.
+            def cond(e):
+                return f"${{{{ ({gate}) && {e} }}}}" if base else f"${{{{ {e} }}}}"
+
+            head = f"  {name}:\n    runs-on: windows-latest\n    needs: scope\n" + ("" if base else f"    if: {SHARD_JOB_IF}\n")
+            setup = "      - uses: actions/setup-python@abc # v6\n" + (f"        if: ${{{{ {gate} }}}}\n" if base else "")
+            full = (f"      - name: Full\n        if: {cond(full_e)}\n"
                     + (f"        env:\n          GUARD_SHARD: {shard}\n" if shard else "")
-                    + "        run: python hooks/test_guard.py\n"
-                    + (f"      - name: Slice\n        if: {IF_PIN[GUARD_SLICE]}\n        env:\n"
-                       "          GUARD_TESTS: windows-slice\n        run: python hooks/test_guard.py\n" if slice_ else ""))
+                    + "        run: python hooks/test_guard.py\n")
+            sl = (f"      - name: Slice\n        if: {cond(slice_e)}\n        env:\n          GUARD_TESTS: windows-slice\n"
+                  "        run: python hooks/test_guard.py\n") if slice_ else ""
+            return head + "    steps:\n" + setup + full + sl
 
         def doc(*jobs):
             return "jobs:\n" + "".join(jobs)
@@ -498,23 +628,23 @@ class WindowsSplit(unittest.TestCase):
         def place(text):
             return [p for p in placement_problems(text) if "test_guard" in p]
 
-        base = job("checks-windows-guard", "1/3", base_if, slice_=True)
+        base = job("checks-windows-guard", "1/3", base=True, slice_=True)
         good = doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "3/3"))
         self.assertEqual(place(good), [])
         self.assertEqual(guard_problems(good), [])
-        self.assertEqual(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": SHARD_JOB_IF}), [])
+        self.assertEqual(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": SHARD_JOB_IF, "steps": []}), [])
         bad = {
             "a shard dropped": doc(base, job("checks-windows-guard-2", "2/3")),
             "a shard doubled": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "2/3")),
             "a shard unset": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "")),
             "n disagrees": doc(base, job("checks-windows-guard-2", "2/2"), job("checks-windows-guard-3", "3/3")),
-            "a lone shard": doc(job("checks-windows-guard", "1/2", base_if, slice_=True)),
+            "a lone shard": doc(job("checks-windows-guard", "1/2", base=True, slice_=True)),
             "a stray job name": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-rest", "3/3")),
         }
         for label, text in bad.items():
             self.assertTrue(place(text) or guard_problems(text), label)
         # A shard job that runs on pull_request, or runs the slice, takes the PR verdict out of the required check.
-        self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": base_if}))
+        self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": f"${{{{ {gate} }}}}", "steps": []}))
         self.assertTrue(guard_problems(doc(base, job("checks-windows-guard-2", "2/3", slice_=True),
                                            job("checks-windows-guard-3", "3/3"))))
         # A shard value set for the whole job or workflow would cut the PR slice too.
@@ -534,23 +664,24 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(bad)
 
     def test_checker_sees_the_guard_slice_and_mutate_defects(self):
-        full_if, slice_if = IF_PIN[GUARD_CMD], IF_PIN[GUARD_SLICE]
-        good_job_if = "${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}"
+        gate = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
+        full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
 
-        def doc(full_if=full_if, slice_if=slice_if, env="windows-slice", job_if=good_job_if, extra="", more=""):
+        def doc(full=full_e, slice_=slice_e, env="windows-slice", gate_=gate, job_if=None, extra="", more=""):
             return ("jobs:\n  checks-windows-guard:\n    runs-on: windows-latest\n    needs: scope\n"
-                    f"    if: {job_if}\n{extra}    steps:\n"
-                    "      - uses: actions/setup-python@abc # v6\n"
-                    f"      - name: Full\n        if: {full_if}\n        run: python hooks/test_guard.py\n"
-                    f"      - name: Slice\n        if: {slice_if}\n        env:\n          GUARD_TESTS: {env}\n"
-                    "        run: python hooks/test_guard.py\n" + more)
+                    + (f"    if: {job_if}\n" if job_if else "") + extra + "    steps:\n"
+                    f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {gate_} }}}}\n"
+                    f"      - name: Full\n        if: ${{{{ ({gate_}) && {full} }}}}\n        run: python hooks/test_guard.py\n"
+                    f"      - name: Slice\n        if: ${{{{ ({gate_}) && {slice_} }}}}\n        env:\n"
+                    f"          GUARD_TESTS: {env}\n        run: python hooks/test_guard.py\n" + more)
         self.assertEqual(guard_problems(doc()), [])
-        self.assertTrue(guard_problems(doc(slice_if=full_if)))  # slice runs on push
-        self.assertTrue(guard_problems(doc(full_if=slice_if)))  # full suite runs on pull_request
+        self.assertTrue(guard_problems(doc(slice_=full_e)))  # slice runs on push
+        self.assertTrue(guard_problems(doc(full=slice_e)))  # full suite runs on pull_request
         self.assertTrue(guard_problems(doc(env="full")))  # slice env not pinned
         self.assertTrue(guard_problems(doc(extra="    env:\n      GUARD_TESTS: windows-slice\n")))  # job-level env
-        self.assertTrue(guard_problems(doc(job_if=good_job_if.replace("guard", "checks_windows"))))  # wrong flag
-        self.assertTrue(guard_problems(doc(job_if="${{ needs.scope.outputs.guard == 'true' }}")))  # skips on push
+        self.assertTrue(guard_problems(doc(job_if=gate)))  # a job-level if on the gated job
+        self.assertTrue(guard_problems(doc(gate_=gate.replace("guard", "checks_windows"))))  # wrong flag
+        self.assertTrue(guard_problems(doc(gate_="needs.scope.outputs.guard == 'true'")))  # skips on push
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
@@ -562,6 +693,34 @@ class WindowsSplit(unittest.TestCase):
                                         "      - run: python3 hooks/mutate_guard.py\n"
                                         "  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n"
                                         "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
+
+
+class ScanCases(unittest.TestCase):
+    """The line scanner's cases: a comment opener inside quotes is text, a lone quote in text is text, a paren inside
+    quotes does not close the gate, and a line in a block body is not a key."""
+
+    def test_a_comment_opener_inside_quotes_is_text(self):
+        self.assertEqual(yaml_scalar("'a # b' # note"), "a # b")
+        self.assertEqual(yaml_scalar('"x #y" # z'), "x #y")
+        self.assertEqual(yaml_scalar("${{ x == '#' }}"), "${{ x == '#' }}")
+        self.assertEqual(yaml_scalar("# only a comment"), "")
+
+    def test_a_lone_quote_in_text_is_text(self):
+        self.assertEqual(yaml_scalar("echo Don't # note"), "echo Don't")
+        self.assertEqual(yaml_scalar("Don't"), "Don't")
+
+    def test_a_paren_inside_quotes_does_not_close_the_gate(self):
+        self.assertEqual(paren_prefix("(a == ')') && !cancelled()"), "a == ')'")
+        self.assertIsNone(paren_prefix("a == 'x' && !cancelled()"))
+
+    def test_a_block_body_line_is_not_a_key(self):
+        text = ("jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - name: body\n        run: |\n"
+                "          # if: not a key\n          needs: not a key\n          echo \"Don't # stop\"\n"
+                "        if: ${{ needs.scope.outputs.code == 'true' }}\n")
+        job = all_jobs(text)["a"]
+        self.assertIsNone(job["if"])
+        self.assertIsNone(job["needs"])
+        self.assertEqual(step_if(job["steps"][0]), "needs.scope.outputs.code == 'true'")
 
 
 # Mod and map-skill tests: one step in each of the jobs checks (Linux), checks-windows and checks-macos, on
@@ -604,12 +763,14 @@ def job_mod_step_problems(text, job):
     steps = step_blocks(job_block(text, job))
     i = steps.index(st)
     problems = []
-    cond = step_key(st, "if") or ""
+    cond = unwrap(step_key(st, "if")) or ""
+    gate = paren_prefix(cond)  # the job's gate is checked with the job; the event may read there, not in the step
+    own = cond[len(f"({gate}) && "):] if gate is not None else cond
     if "!cancelled()" not in cond:
         problems.append(f"{job}: mod step if lacks !cancelled(): {cond}")
     if f"needs.scope.outputs.{MOD_FLAG} == 'true'" not in cond:
         problems.append(f"{job}: mod step if does not read needs.scope.outputs.{MOD_FLAG}: {cond}")
-    if "github.event_name" in cond:
+    if "github.event_name" in own:
         problems.append(f"{job}: mod step if reads the event; the {MOD_FLAG} flag alone decides: {cond}")
     if step_key(st, "shell") != "bash":
         problems.append(f"{job}: mod step shell is {step_key(st, 'shell')}, want bash")
