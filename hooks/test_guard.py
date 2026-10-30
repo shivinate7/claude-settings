@@ -101,7 +101,7 @@ FAMILIES = {
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
-    "owner-judge": "the waiting-page writer: a decision carries a Your stake line (goal, money, risk, rule or cannot undo), or stands as the session's own pick",
+    "owner-judge": "the waiting-page writer: a decision carries a Your stake line (goal, money, risk, rule or cannot undo), or is a stood pick, a port or a closed decision",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -11920,10 +11920,10 @@ FAMILY = "owner-judge"
 # pick and a why. He saved b with "i really can't figure out how to decide". A decision carries a line
 # in `context`, at a line start, in any case: "Your stake: <kind> <text>". <kind> is one of goal,
 # money, risk, rule, cannot undo, and text follows it. Only that line counts: the same words in the
-# title, an option, why or elsewhere in context never do. `stands: true` (a standing pick) and
+# title, an option, why or elsewhere in context never do. `stands: true` (a stood pick) and
 # `port: true` (its Departs from line is the stake) pass, as do a task, a status-only or rank-only
-# update, and another artifact's page. The rule is read last, so each older rule keeps naming its
-# own refusals. The red cases are the ones that expect a deny named owner-judge.
+# update, another artifact's page, and a decision with status closed (the chat-answer flow writes one
+# already answered). The rule is read last, so each older rule keeps naming its own refusals.
 
 OJ_KINDS = ("goal", "money", "risk", "rule", "cannot undo")
 OJ_DOC = "ci-check-job"
@@ -12007,7 +12007,7 @@ oj("a Your stake line with more lines after it is allowed", "allow",
    oj_item(context=OJ_CTX + "\n" + OJ_STAKE + "\nThe test job runs longer."))
 oj("a decision with a Your stake line is allowed", "allow", oj_item(context=OJ_GOOD))
 
-# Standing-pick class: the session's own pick stands, so the owner has no stake to weigh.
+# Stood-pick class: the session's own pick stands, so the owner has no stake to weigh.
 oj("a stood pick with no Your stake line is allowed", "allow", oj_item(stands=True))
 oj("a port with a Departs from line and no Your stake line is allowed", "allow",
    oj_item(port=True, context=OJ_CTX + "\n" + PQ_DEPARTS))
@@ -12030,6 +12030,22 @@ oj("an update that carries kind decision and no context is allowed", "allow",
    {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
 oj("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 oj("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
+
+# A closed decision asks the owner nothing. The writer's chat-answer flow (skills/waiting-page) writes a
+# decision already answered: status closed, the answer and its time in context, no Your stake line. An
+# open decision with the same context is still judged.
+OJ_ANSWERED = OJ_CTX + "\nAnswer from chat, 10:42: keep the check in the lint job."
+oj("a closed decision with the chat answer in context and no Your stake line is allowed", "allow",
+   oj_item(status="closed", context=OJ_ANSWERED))
+oj("a closed decision with no options and no Your stake line is allowed", "allow",
+   {"id": OJ_DOC, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
+    "context": OJ_ANSWERED})
+oj("an update that carries kind decision, status closed and context, no Your stake line, is allowed", "allow",
+   {"kind": "decision", "status": "closed", "context": OJ_ANSWERED}, action="update")
+oj("an open decision with the chat answer in context and no Your stake line is denied", "deny",
+   oj_item(status="open", context=OJ_ANSWERED))
+oj("an update that carries kind decision, status open and context, no Your stake line, is denied", "deny",
+   {"kind": "decision", "status": "open", "context": OJ_ANSWERED}, action="update")
 
 # A str_replace on context is judged when old_str holds the line and new_str does not.
 oj_replace("that drops the Your stake line from context is denied", "deny", "context", OJ_GOOD, OJ_CTX)
@@ -12057,8 +12073,12 @@ oj_batch("with a str_replace that drops the Your stake line is denied", "deny",
            "old_str": OJ_GOOD, "new_str": OJ_CTX}])
 oj_batch("of decisions that each carry the Your stake line is allowed", "allow",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second", context=OJ_GOOD))])
-oj_batch("with a stood decision and no Your stake line is allowed", "allow",
+oj_batch("with a stood pick and no Your stake line is allowed", "allow",
          [oj_write(oj_item(stands=True))])
+oj_batch("with a closed decision and no Your stake line is allowed", "allow",
+         [oj_write(oj_item(status="closed", context=OJ_ANSWERED))])
+oj_batch("with a closed decision, then an open one with no Your stake line, is denied", "deny",
+         [oj_write(oj_item(status="closed", context=OJ_ANSWERED)), oj_write(oj_item(id="second"))])
 
 # file_path data is read as `data` is.
 os.makedirs(os.path.join(ROOT, "oj"), exist_ok=True)
