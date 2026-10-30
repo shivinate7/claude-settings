@@ -867,9 +867,11 @@ function sorted() {
 const byId = (id) => state.items.find((i) => i.id === id);
 // Every item that can hold an answer: the open ones, and the rulings an Overturn may answer.
 const answerable = () => [...state.items, ...state.rulings];
-const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
+// The owner's saved answer. A ruling was an open item once, so a record under its id that is no overturn is stale and counts as none.
+const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) ? a : undefined; };
+const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
 // The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
-const stoodNow = (it) => standsOk(it) && !state.answers[it.id];
+const stoodNow = (it) => standsOk(it) && !savedOf(it);
 const eff = (it) => {
   const d = state.draft[it.id];
   // A ruling holds one draft, overturn. A pick draft left from when the item was open is ignored.
@@ -930,7 +932,7 @@ function problem(it) {
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
 const staged = () => answerable().filter((it) => !isSaved(it) && draftReady(it));
 // A changed answer whose draft the owner emptied: Send withdraws the saved record.
-const withdrawing = (it) => !!state.answers[it.id] && !!state.changing[it.id] && !state.draft[it.id];
+const withdrawing = (it) => !!savedOf(it) && !!state.changing[it.id] && !state.draft[it.id];
 const withdrawn = () => answerable().filter(withdrawing);
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
@@ -1074,7 +1076,7 @@ function optCard(it, o, chosen) {
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 // A receipt from an earlier answer says nothing about a changed one, so only a receipt at or after the answer counts.
 function rcOf(it) {
-  const sv = state.answers[it.id], r = state.receipts[it.id] || {};
+  const sv = savedOf(it), r = state.receipts[it.id] || {};
   if (!sv) return r;
   const ok = (t) => !t || !(Date.parse(t) < Date.parse(sv.at));
   return { read: ok(r.read) ? r.read : undefined, filed: ok(r.filed) ? r.filed : undefined };
@@ -1085,7 +1087,7 @@ function ruledOf(it) {
   return { letters: ks.map((k) => letterOf(it, k)).join(", "), label: ks.length ? ks.map(lab).join(" and ") : "an option" };
 }
 function receipt(it) {
-  const sv = state.answers[it.id], rc = rcOf(it);
+  const sv = savedOf(it), rc = rcOf(it);
   let what, picks = null;
   if (isRuling(it) && sv.choice === OVERTURN) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
   else if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
@@ -1151,7 +1153,7 @@ function buildRuling(it) {
   const card = h("article", { class: "card rcard" + (saved ? " answered" : "") + (armed ? " armed" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
   const num = h("span", { class: "num", "aria-label": "No. " + it.n + ", ruling, from the arbiter", title: "Ruled by the arbiter for " + it.owner }, "No. " + it.n);
   card.append(h("div", { class: "top" }, num, saved
-    ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(state.answers[it.id].at)))
+    ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at)))
     : h("span", {}, "ruled ", validT(it.ruled) ? h("time", { datetime: it.ruled }, fmt(it.ruled)) : "")), h("h3", { class: "title", id: "t-" + it.id }, it.title));
   const bad = problem(it);
   if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));
@@ -1168,7 +1170,7 @@ function buildCard(it) {
   const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it);
   const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
-    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(state.answers[it.id].at))) : h("span", {}, waited(it.added)));
+    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
@@ -1574,7 +1576,7 @@ function answerLine() {
   const parts = [];
   answerable().sort((a, b) => a.n - b.n).forEach((it) => {
     if (blocked(it)) return;
-    const a = state.answers[it.id], d = eff(it) || {};
+    const a = savedOf(it), d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "task") {
