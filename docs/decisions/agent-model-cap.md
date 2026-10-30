@@ -139,9 +139,12 @@ the first spawn: a builder with no pin then ran Opus. The setup script cannot re
 saved variables or secrets. So `cloud-setup.sh` fetches the public file first, and then copies from a
 checkout of this repo that the environment attached. It always exits 0 and prints one verdict line.
 The owner pastes the setup-script text once per environment; the text is in the README, under Cloud
-sessions. Until an environment has it, each builder spawn there sets model sonnet. Unmeasured: whether
-the harness accepts the session's checkout after install.sh moves it to main during setup. Test
-`hooks/test_cloud_setup.sh` proves exit 0 and the install offline.
+sessions. Until an environment has it, the caller names model sonnet on each builder spawn there,
+because `settings.json` with the variable lands only with the install. The setup script runs when a new
+session starts (the environment's docs); whether it runs again on resume is unmeasured. Also unmeasured: whether the environment's repositories are cloned before the
+setup script runs; the private-repo fallback needs that. Unmeasured too: whether the harness accepts
+the session's checkout after install.sh moves it to main during setup. Test `hooks/test_cloud_setup.sh`
+proves exit 0 and the install offline.
 
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's grant, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under

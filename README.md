@@ -73,8 +73,18 @@ before Claude Code starts, so the first agent spawn reads `agents/*.md` (decisio
 
 ```bash
 f=$(mktemp)
-curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/main/cloud-setup.sh -o "$f" || cp /home/user/claude-settings/cloud-setup.sh "$f" 2>/dev/null || { echo "claude-settings setup: no source: GitHub down, or the repo is private and not under the environment's Repositories"; f=""; }
-[ -z "$f" ] || bash "$f" || true
+if ! curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/main/cloud-setup.sh -o "$f"; then
+  : > "$f"
+  for d in ${CLAUDE_SETTINGS_SEARCH_ROOTS:-/home/user /root}; do
+    for c in "$d"/*/cloud-setup.sh; do
+      case "$(git -C "${c%/*}" config --get remote.origin.url 2>/dev/null)" in
+        *github.com[/:]shivinate7/claude-settings|*github.com[/:]shivinate7/claude-settings.git) cp "$c" "$f" && break 2 ;;
+      esac
+    done
+  done
+fi
+if [ -s "$f" ]; then bash "$f" || true; else echo "claude-settings setup: no source: GitHub down, or the repo is private and not under the environment's Repositories"; fi
+rm -f "$f"
 exit 0
 ```
 
