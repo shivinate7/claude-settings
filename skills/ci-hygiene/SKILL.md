@@ -48,7 +48,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Pin the audit tool's version too. Read its changelog before a bump (rule
    `verification-newest-that-passes`, take the newest version that passes). zizmor 1.30.1 added the
    `self-repository` audit, which fails a local workflow call written `uses: ./.github/workflows/x.yml`.
-   A floating zizmor version turned a q_max PR red on 2026-10-30.
+   A floating version once turned a PR red.
    Pins of claude-settings' `ste-lint` action follow the session's tools (decision
    `action-pins-follow-sessions`). `bin/ste-changed` reads that pin. It prints drift and exits 3. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
@@ -107,28 +107,23 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     worktree) and PR 360 (rm rules beside a redirect).
 12. **Cheap checks first.** Give each expensive job `needs:` the cheap static job. A red static check
     then stops the shards from starting.
-13. **Merge tiny jobs (private repos).** Each job bills whole minutes, rounded up, plus its own setup.
-    Put checks under about a minute into one job. This saves money in private repos only. Standard
+13. **Merge tiny jobs (private repos).** Each job bills its minutes rounded up, plus its setup
+    (measured; GitHub does not document per-job rounding). Put checks under about a minute into one job. This saves money in private repos only. Standard
     hosted runners are free in public repos. Measure billed minutes and wall time before and after.
-    Merged jobs can make the wait longer. Per-job rounding is measured, not a documented rule. For
-    wall time, see step 15.
+    Merged jobs can make the wait longer. For wall time, see step 15.
 14. **Cache the install.** Cache the package install. For example, `actions/setup-node` with
     `cache: npm`. Measure the CI step before and after.
 15. **Split the slowest job for wall time.** Use it where minutes are free, as in a public repo.
     Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
-    `lint/test_windows_split.py` checks that each suite runs in exactly one job. In this repo, the
-    longest Windows job took 6m24s in CI run 37675874835 (2026-10-07) of PR 293, the Windows
-    merge-test slice.
+    `lint/test_windows_split.py` checks that each suite runs in exactly one job.
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's CI step `if:`,
     `shell:` and `!cancelled()`, with no env override. The `MERGE_TESTS` gap, found in review of
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly. In this repo, the Windows merge slice took 1m13s in CI run 37675874835 of
-    PR 293.
+    on main and nightly.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
-    under 20%, stop. In this repo, setup was 31% of the time, and setup reuse saved about 9% (merge
-    test setup).
+    under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
     A scope skip sits on the CI step that runs the suite or lint, never on the job. A job-level `if:`
     holds only the draft guard. A job that runs only off pull requests, such as a push-only job, also
@@ -138,10 +133,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `snippets.md`, section 19.
     A job whose CI steps all skip still starts a runner. It bills its setup minutes (step 13).
     Unmeasured: the size of that cost in this repo.
-    Two jobs may share a flag. In this repo, `checks-mutate-guard` and `checks-windows-guard` both
-    read `guard`. A docs-only PR skips the code suites. `checks` still runs its lint CI steps. An
-    unreadable diff or an unmapped path runs everything. In this repo, `checks` has no job-level
-    `if:`. Its CI steps carry the flags.
+    Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
+    unreadable diff or an unmapped path runs everything.
+    This repo's checks.yml does not yet follow this; the per-repo audit fixes it.
 
 ## Public repos
 
@@ -168,8 +162,7 @@ passing. So a scoped-out suite skips at its CI step, and its job still runs and 
 skips on a draft, and a draft cannot merge (step 11). Read the protection rule first:
 `snippets.md`, section 3b.
 
-This repo's CI has no `all-jobs-passed` job yet. On 2026-10-30, main's protection listed 13 separate
-checks, not one. `scope` is one of them.
+This repo's checks.yml does not yet follow this; the per-repo audit fixes it.
 
 The required check names live in the branch protection. `merge.requiredChecks` in
 `.github/stamp.json` says `"protection"`, so `merge` reads them from there. A repo that pins a list
@@ -194,7 +187,8 @@ The seven opt-in templates of that decision:
   The caller sets `needs: [...]`, `if: always()`, and `with: needs: ${{ toJSON(needs) }}`.
 - `ci-done-comment`: posts one PR comment when a run ends with a failed or cancelled job. The caller
   is the last job. It sets `needs:` on every other job, and
-  `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`.
+  `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`,
+  and `permissions: {pull-requests: write}`.
 - `ci-alarm`: opens or comments on one issue when the latest completed run of any workflow on a
   branch (default `main`) is red. The caller is a scheduled workflow with
   `permissions: {actions: read, issues: write}`. It needs no checkout. Not enabled in this repo.
@@ -245,12 +239,13 @@ is a finding. A read that cannot run is unknown, never yes or no (rule
     `grep -n "pull_request_target" .github/workflows/*.yml`. For each hit, read its `ref:`.
 12. Does every job-level `if:` hold only the draft guard, or the guard of `ci-done`? Run
     `grep -n "^    if:" .github/workflows/*.yml`. A scope flag or a trigger guard at job level is a
-    finding. It skips a needed job.
+    finding. It skips a needed job. A job that no rollup needs is judged by item 1 instead, so do
+    not flag it here.
 13. Is the last job `ci-done`, with `needs:` every other job and a call to `ci-done-comment`? Read the
     last job block.
 14. Does no `run:` pipe a check into `tail` or `head` without `set -o pipefail`? Run
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
-15. Does an audit step run in CI and locally, with a pinned version? Run
+15. Does an audit step run in CI, with a pinned version? Run
     `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. No
     version is a no.

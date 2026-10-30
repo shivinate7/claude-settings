@@ -24,13 +24,17 @@ personal token. Set the budget alarm in the billing settings (Budgets and alerts
 
 ```yaml
 on:
-  push:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule: [{cron: "0 3 * * *"}]   # nightly full run
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   detect:
+    if: ${{ !github.event.pull_request.draft }}   # step 11: a draft skips every job
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       slow: ${{ steps.d.outputs.slow }}
     steps:
@@ -39,11 +43,11 @@ jobs:
       - id: d
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           slow=true                                   # fail safe: run
-          if [ "$EVENT" = push ] || [ "$EVENT" = pull_request ]; then
-            if files=$(git diff --name-only "$BASE" HEAD 2>/dev/null) && [ -n "$files" ]; then
+          if [ "$EVENT" = pull_request ]; then
+            if files=$(git diff --name-only "$BASE" HEAD) && [ -n "$files" ]; then
               grep -Eq '^(src/|slow-check/)' <<< "$files" || slow=false
             fi
           fi
@@ -222,7 +226,7 @@ Decide a commit on the check's own exit code. A pipe takes the exit code of its 
 # Wrong: tail's exit code is the pipe's. A red check still commits.
 <check> | tail -1 && git commit -m "<subject>"
 # Right: the check's exit code decides. Its output goes to a log.
-if <check> > check.log 2>&1; then git commit -m "<subject>"; else tail -n 20 check.log; fi
+if <check> > check.log 2>&1; then git commit -m "<subject>"; else tail -n 20 check.log; exit 1; fi
 ```
 
 In bash, `set -o pipefail` makes a pipe fail when any stage fails.
@@ -290,7 +294,7 @@ Each job that needs `scope` starts. Its CI step carries the scope flag. The job 
   shell-macos:
     needs: scope
     runs-on: macos-latest
-    timeout-minutes: 20   # provisional, step 5
+    timeout-minutes: 60   # provisional, step 5
     steps:
       - uses: actions/checkout@<full-sha>  # v5.0.0
         with: {persist-credentials: false}
