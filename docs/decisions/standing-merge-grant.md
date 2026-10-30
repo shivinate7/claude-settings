@@ -11,6 +11,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 
 - The coordinator merges by pull request with the merge tool of each repo, on green checks and a done review where one is required. It never asks the owner to merge.
 - The batch runner still builds the batches. It may run the merge tool under the coordinator's grant. It holds no grant of its own.
+- While another owner repo's own sessions are not working, the claude-settings coordinator may run that repo's work end to end. It uses the agents it starts in its own session to build, review and batch. It merges under the same grant and the same checks. It never widens what that repo's tools accept. Process-only (owner, 2026-10-29 20:33 CDT): "all my other repos arent working so if you want to complete anything end to end you are able to". <!-- ste-disable-line STE011: the owner's words, quoted exactly -->
 - The grant covers the merge act only. It lifts no check. These limits still apply:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).
   - Nothing merges while a batch's integration PR has a CI run in progress (`git-no-merge-during-batch-ci`: no merge during a batch CI run).
