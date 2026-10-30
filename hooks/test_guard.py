@@ -57,6 +57,7 @@ REPO = os.path.dirname(HERE)
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
+from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
@@ -101,7 +102,7 @@ FAMILIES = {
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
-    "owner-judge": "the waiting-page writer: a decision carries a Your stake line (goal, money, risk, rule or cannot undo), or is a stood pick, a port or a closed decision",
+    "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
     "option-letter-keys": "the waiting-page writer: a decision's option keys are the lowercase letter of their position, unique, never none, and item text names no option by a letter-and-digit key; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose context says being reworked is not written unless its status is closed",
     "rule9": "rule 9, the agent model floor",
@@ -11387,15 +11388,24 @@ with open(os.path.join(PQ_REPO, ".claude", "layout-extras.json"), "w", encoding=
     json.dump({"kinds": {}, "waiting-page": PQ_URL}, _f)
 
 
-# The line a waiting-page decision carries (rule owner-judge, its cases in the owner-judge section). Each
-# decision fixture below ends its context with it, so a case stays on its own rule, as TN_WHY does for a task.
-OJ_STAKE = "Your stake: risk — a wrong pick here changes what the guard lets through"
+# The lines a waiting-page decision carries (rule question-form, its cases in the owner-judge section: the
+# one form of hooks/question_form.py). Each decision fixture below starts its context with them and gives
+# each option a gain and a lose, so a case stays on its own rule, as TN_WHY does for a task. The lines hold
+# no port word and no press word.
+OJ_GOAL = "Goal: keep the CI checks fast, and keep every check"
+OJ_STAKE = "Problem (risk): a wrong pick here changes what the guard lets through, so it needs your word"
+OJ_BASED = "Based on (read): the stamp check runs in the lint job today"
+OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
 
 
 def with_stake(item):
-    """The item with OJ_STAKE on a line after its context. An item with no context stays as it is."""
+    """The item with OJ_FORM on the lines before its context, and a gain and a lose on each option that
+    lacks one. An item with no context, or no options, stays as it is."""
     if isinstance(item.get("context"), str):
-        item["context"] += "\n" + OJ_STAKE
+        item["context"] = OJ_FORM + "\n" + item["context"]
+    if isinstance(item.get("options"), list):
+        item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
+                           for o in item["options"]]
     return item
 
 
@@ -11841,7 +11851,7 @@ ci("a terminal step with the command on the item is allowed", "allow",
    ci_task(["Open Terminal", "Paste the command below and run it"], command="git push origin --delete old-a"))
 ci("a decision that opens a file and runs its command is not judged", "allow",
    {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
-    "context": "The plan file lists them.\n" + OJ_STAKE,
+    "context": OJ_FORM + "\nThe plan file lists them.",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
@@ -11893,8 +11903,8 @@ tn("an update that carries kind task, context and a Why yours line is allowed", 
    {"kind": "task", "context": TN_CTX + "\n" + TN_WHY}, action="update")
 tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
-# The Your stake line keeps this case on the task rule; owner-judge reads it (OJ_STAKE).
-tn("a decision is not judged", "allow", tn_task(kind="decision", context=TN_CTX + "\n" + OJ_STAKE))
+# The form lines keep this case on the task rule; the question form reads them (OJ_FORM).
+tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + TN_CTX))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
 add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -11923,23 +11933,28 @@ tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "al
            TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
 
 
-# --------------------------------------------------------------------------- a decision names what it costs the owner
+# --------------------------------------------------------------------------- a decision states the question form
 FAMILY = "owner-judge"
 #
-# Rule owner-judge (roadmap step c198), built against a named incident: waiting item 34, Oct 28 13:40
-# CDT. A decision about CI internals, which CI job runs a check, reached the owner with options, a
-# pick and a why. He saved b with "i really can't figure out how to decide". A decision carries a line
-# in `context`, at a line start, in any case: "Your stake: <kind> <text>". <kind> is one of goal,
-# money, risk, rule, cannot undo, and text follows it. Only that line counts: the same words in the
-# title, an option, why or elsewhere in context never do. `stands: true` (a stood pick) and
-# `port: true` (its Departs from line is the stake) pass, as do a task, a status-only or rank-only
-# update, another artifact's page, and a decision with status closed (the chat-answer flow writes one
-# already answered). The rule is read last, so each older rule keeps naming its own refusals.
+# Rules question-form and owner-judge: one form for a waiting-page decision, judged by hooks/question_form.py.
+# These cases run the real guard; the module's own cases, with item 92's shape, are in
+# hooks/test_question_form.py. Built against a named incident: waiting item 34, Oct 28 13:40 CDT. A decision
+# about CI internals, which CI job runs a check, reached the owner with options, a pick and a why. He saved b
+# with "i really can't figure out how to decide". A decision carries these lines in `context`, each at a line
+# start, in any case: `Goal: <goal>`, `Problem (<stake>): <text>`, and one to three
+# `Based on (<kind>): <premise>`. <stake> is one of goal, money, risk, rule, cannot undo; <kind> is one of
+# PREMISE_KINDS. Each option has a non-empty gain and lose. Only those lines count: the same words in the
+# title, an option, why or elsewhere in context never do. A stood pick (`stands: true`) may write
+# `Problem: <text>` with no stake. A task, a status-only or rank-only update, another artifact's page and a
+# decision with status closed (the chat-answer flow writes one already answered) pass.
+# A missing line is refused by `question-form`. The contract does not say whether `question-form` or
+# `owner-judge` names a bare Problem line or a stake outside the set, so those cases accept either id.
 
 OJ_KINDS = ("goal", "money", "risk", "rule", "cannot undo")
 OJ_DOC = "ci-check-job"
 OJ_CTX = "The stamp check runs in the lint job today. The test job could run it too."
-OJ_GOOD = OJ_CTX + "\n" + OJ_STAKE
+OJ_RULE = "question-form"
+OJ_PROBLEM_RULES = ("question-form", "owner-judge")
 OJ_OPTIONS = [
     {"key": "a", "label": "Keep the check in the lint job", "how": "Leave the workflow as it is.",
      "gain": "No change to review.", "lose": "The lint job stays the slow one."},
@@ -11947,8 +11962,16 @@ OJ_OPTIONS = [
      "gain": "The lint job gets faster.", "lose": "The test job runs longer."}]
 
 
+def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX):
+    """The context of a decision: the form lines, then the prose. A line passed as None or empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, tail) if line)
+
+
+OJ_GOOD = oj_ctx()
+
+
 def oj_item(**over):
-    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no Your stake line."""
+    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
     item = {"id": OJ_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
             "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
@@ -11956,13 +11979,19 @@ def oj_item(**over):
     return {k: v for k, v in item.items() if v is not None}
 
 
-def oj(name, expected, item, **extra):
-    wp_write("owner judge: " + name, expected, "owner-judge", item, doc_id=OJ_DOC, **extra)
+def oj(name, expected, item, rule=OJ_RULE, **extra):
+    """One write of the item. `rule` names the refusal on a deny. A tuple of ids is any-of, and the
+    refusal must name the Problem line either way."""
+    if isinstance(rule, tuple):
+        extra["carries"] = (*extra.get("carries", ()), "Problem", rule)
+        rule = None
+    wp_write("owner judge: " + name, expected, rule, item, doc_id=OJ_DOC, **extra)
 
 
-def oj_replace(name, expected, field, old, new):
-    """One str_replace on a field of the decision. The rule judges a context edit that takes the line out."""
-    oj("a str_replace " + name, expected, None, action="str_replace", field=field, old_str=old, new_str=new)
+def oj_replace(name, expected, field, old, new, rule=OJ_RULE):
+    """One str_replace on a field of the decision. The rule judges a context edit that takes a form line out."""
+    oj("a str_replace " + name, expected, None, rule=rule, action="str_replace", field=field, old_str=old,
+       new_str=new)
 
 
 def oj_write(data, op="set", collection="items"):
@@ -11970,59 +11999,92 @@ def oj_write(data, op="set", collection="items"):
 
 
 def oj_batch(name, expected, writes, **extra):
-    add("owner judge: a batch " + name, expected, "owner-judge" if expected == "deny" else None,
+    add("owner judge: a batch " + name, expected, OJ_RULE if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", writes=writes, **extra)
 
 
-oj("item 34's shape (a CI job choice with options, a pick, a why and no Your stake line) is denied", "deny",
+oj("item 34's shape (a CI job choice with options, a pick, a why and no form lines) is denied", "deny",
    oj_item())
-oj("the refusal names the line, the five kinds and stands: true", "deny", oj_item(),
-   carries=("Your stake", "stands: true", *OJ_KINDS))
-# Wrong-field class: the words are there, the line is not.
-oj("risk and rule words in the title, the options and why, with no Your stake line, are denied", "deny",
+oj("the refusal names the three lines, the five stakes and stands: true", "deny", oj_item(),
+   carries=("Goal", "Problem", "Based on", "stands: true", *OJ_KINDS))
+# Wrong-field class: the words are there, the lines are not.
+oj("risk and rule words in the title, the options and why, with no form lines, are denied", "deny",
    oj_item(title="Which CI job runs the stamp check? A risk, a rule",
            options=[dict(OJ_OPTIONS[0], label="Keep it in the lint job (a rule, no risk)",
                          how="Goal: leave the workflow. Money: none. Cannot undo: nothing."), OJ_OPTIONS[1]],
            why="Small stake: a risk and a rule, no goal, no money, nothing that cannot undo."))
-oj("risk and rule words in context, away from a Your stake line, are denied", "deny",
+oj("risk and rule words in context, away from the form lines, are denied", "deny",
    oj_item(context=OJ_CTX + "\nThis is a rule change and a risk to the goal."))
-oj("a Your stake line in the title is denied", "deny",
-   oj_item(title="Your stake: risk — which CI job runs the stamp check?"))
-oj("a Your stake line in why is denied", "deny",
-   oj_item(why="The lint job already holds the other format checks.\n" + OJ_STAKE))
-oj("a Your stake line in an option is denied", "deny",
-   oj_item(options=[dict(OJ_OPTIONS[0], how=OJ_STAKE), OJ_OPTIONS[1]]))
-oj("a kind outside the set (internals) is denied", "deny",
-   oj_item(context=OJ_CTX + "\nYour stake: internals — which job runs the check"))
-oj("a bare Your stake line with nothing after the colon is denied", "deny",
-   oj_item(context=OJ_CTX + "\nYour stake:   "))
-oj("a kind with no text after it is denied", "deny", oj_item(context=OJ_CTX + "\nYour stake: risk"))
-oj("a Your stake phrase mid-line does not count", "deny", oj_item(context="Reason. " + OJ_STAKE))
+oj("a Problem line in the title, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), title=OJ_STAKE))
+oj("a Problem line in why, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), why="The lint job already holds the other format checks.\n" + OJ_STAKE))
+oj("a Problem line in an option, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), options=[dict(OJ_OPTIONS[0], how=OJ_STAKE), OJ_OPTIONS[1]]))
+
+# Missing and malformed lines.
+oj("no Goal line is denied", "deny", oj_item(context=oj_ctx(goal=None)))
+oj("a Goal phrase mid-line does not count", "deny", oj_item(context=oj_ctx(goal="Aim. " + OJ_GOAL)))
+oj("no Problem line is denied", "deny", oj_item(context=oj_ctx(problem=None)))
+oj("a Problem phrase mid-line does not count", "deny", oj_item(context=oj_ctx(problem="Reason. " + OJ_STAKE)))
+oj("a stake outside the set (internals) is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (internals): which job runs the check")), rule=OJ_PROBLEM_RULES)
+oj("a bare Problem line with nothing after the colon is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (risk):   ")), rule=OJ_PROBLEM_RULES)
+oj("a stake with no colon and no text is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (risk)")), rule=OJ_PROBLEM_RULES)
+oj("a Problem line with no stake, on a decision that is not a stood pick, is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")),
+   rule=OJ_PROBLEM_RULES)
+oj("no Based on line is denied", "deny", oj_item(context=oj_ctx(based=())))
+oj("four Based on lines are denied", "deny",
+   oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (notes): three",
+                                 "Based on (notes): four"))))
+oj("a Based on kind outside the set is denied", "deny",
+   oj_item(context=oj_ctx(based=("Based on (guess): the lint job is slow.",))))
+oj("a Based on line with no kind is denied", "deny",
+   oj_item(context=oj_ctx(based=("Based on: the lint job is slow.",))))
+oj("an option with no lose is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], {k: v for k, v in OJ_OPTIONS[1].items() if k != "lose"}]))
+oj("an option with no gain is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[{k: v for k, v in OJ_OPTIONS[0].items() if k != "gain"}, OJ_OPTIONS[1]]))
+oj("an option with an empty lose is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], dict(OJ_OPTIONS[1], lose="")]))
 oj("a decision with no context is denied", "deny", oj_item(context=None))
 oj("an item with no kind is judged as a decision and denied", "deny", oj_item(kind=None))
-oj("stands false with no Your stake line is denied", "deny", oj_item(stands=False))
-oj("port false with no Your stake line is denied", "deny", oj_item(port=False))
+oj("stands false with no form lines is denied", "deny", oj_item(stands=False))
+oj("port false with no form lines is denied", "deny", oj_item(port=False))
 
-# False-alarm class: a stake line of any kind, in any case, anywhere at a line start, is a stake.
+# False-alarm class: a stake of any kind, a premise of any kind, in any case, at a line start, is the form.
 for _kind in OJ_KINDS:
-    oj("a Your stake line of kind %s is allowed" % _kind, "allow",
-       oj_item(context=OJ_CTX + "\nYour stake: %s — the pick changes what ships" % _kind))
-oj("a Your stake line with no dash is allowed", "allow",
-   oj_item(context=OJ_CTX + "\nYour stake: money about $40 a month of runner time"))
-oj("the Your stake label is read in lower case", "allow",
-   oj_item(context=OJ_CTX + "\nyour stake: risk — the pick changes what ships"))
-oj("the Your stake line is read in upper case", "allow",
-   oj_item(context=OJ_CTX + "\nYOUR STAKE: RISK — the pick changes what ships"))
-oj("a Your stake line that opens the context is allowed", "allow", oj_item(context=OJ_STAKE))
-oj("a Your stake line with more lines after it is allowed", "allow",
-   oj_item(context=OJ_CTX + "\n" + OJ_STAKE + "\nThe test job runs longer."))
-oj("a decision with a Your stake line is allowed", "allow", oj_item(context=OJ_GOOD))
+    oj("a Problem line of stake %s is allowed" % _kind, "allow",
+       oj_item(context=oj_ctx(problem="Problem (%s): the pick changes what ships" % _kind)))
+for _premise in PREMISE_KINDS:
+    oj("a Based on line of kind %s is allowed" % _premise, "allow",
+       oj_item(context=oj_ctx(based=("Based on (%s): the lint job is slow." % _premise,))))
+oj("three Based on lines are allowed", "allow",
+   oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (assumed): three"))))
+oj("a Problem line with no dash is allowed", "allow",
+   oj_item(context=oj_ctx(problem="Problem (money): about $40 a month of runner time")))
+oj("the Problem label is read in lower case", "allow",
+   oj_item(context=oj_ctx(problem="problem (risk): the pick changes what ships")))
+oj("the Problem line is read in upper case", "allow",
+   oj_item(context=oj_ctx(problem="PROBLEM (RISK): the pick changes what ships")))
+oj("comment openers and an apostrophe in the form lines are plain text", "allow",
+   oj_item(context=oj_ctx(goal="Goal: keep the stamp check's job, with //path, /* glob and # tags, working.",
+                          problem="Problem (risk): don't parse # or // here, so it needs your word")))
+oj("a context that holds only the form lines is allowed", "allow", oj_item(context=oj_ctx(tail=None)))
+oj("form lines with more lines after them are allowed", "allow",
+   oj_item(context=oj_ctx(tail=OJ_CTX + "\nThe test job runs longer.")))
+oj("a decision with the form is allowed", "allow", oj_item(context=OJ_GOOD))
 
-# Stood-pick class: the session's own pick stands, so the owner has no stake to weigh.
-oj("a stood pick with no Your stake line is allowed", "allow", oj_item(stands=True))
-oj("a port with a Departs from line and no Your stake line is allowed", "allow",
-   oj_item(port=True, context=OJ_CTX + "\n" + PQ_DEPARTS))
-oj("a task with a Why yours line and no Your stake line is not judged", "allow",
+# Stood-pick class: the session's own pick stands, so the stake needs no kind.
+oj("a stood pick with `Problem:` and no stake is allowed", "allow",
+   oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")))
+oj("a stood pick with a stake is allowed", "allow", oj_item(stands=True, context=OJ_GOOD))
+oj("a port with a Departs from line and the form is allowed", "allow",
+   oj_item(port=True, context=oj_ctx(tail=OJ_CTX + "\n" + PQ_DEPARTS)))
+oj("a task with a Why yours line and no form lines is not judged", "allow",
    tn_task(context=TN_CTX + "\n" + TN_WHY))
 oj("a record that is neither a decision nor a task is not judged", "allow", oj_item(kind="note"))
 oj("an items set to another artifact is allowed", "allow", oj_item(), url="https://claude.ai/artifact/other")
@@ -12030,65 +12092,75 @@ oj("a set to another collection is allowed", "allow", oj_item(), collection="ans
 add("owner judge: a repo with no waiting page allows item 34's shape", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=OJ_DOC, data=oj_item())
 
-# Updates: judged only when they carry kind decision and context.
-oj("an update that carries kind decision and context with no Your stake line is denied", "deny",
+# Updates: judged only for the fields they carry (context, options), and only with kind decision.
+oj("an update that carries kind decision and context with no form lines is denied", "deny",
    {"kind": "decision", "context": OJ_CTX}, action="update")
-oj("an update that carries kind decision, context and a Your stake line is allowed", "allow",
+oj("an update that carries kind decision and a context with the form is allowed", "allow",
    {"kind": "decision", "context": OJ_GOOD}, action="update")
-oj("an update that carries kind decision, context and stands true is allowed", "allow",
-   {"kind": "decision", "context": OJ_CTX, "stands": True}, action="update")
+oj("an update that carries kind decision, a stood pick and `Problem:` with no stake is allowed", "allow",
+   {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check"), "stands": True},
+   action="update")
 oj("an update that carries kind decision and no context is allowed", "allow",
    {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
+oj("an update that carries kind decision and options with an option that has no lose is denied", "deny",
+   {"kind": "decision", "options": [OJ_OPTIONS[0], {k: v for k, v in OJ_OPTIONS[1].items() if k != "lose"}]},
+   action="update")
+oj("an update that carries kind decision and options with a gain and a lose each is allowed", "allow",
+   {"kind": "decision", "options": OJ_OPTIONS}, action="update")
 oj("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 oj("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 
 # A closed decision asks the owner nothing. The writer's chat-answer flow (skills/waiting-page) writes a
-# decision already answered: status closed, the answer and its time in context, no Your stake line. An
-# open decision with the same context is still judged.
+# decision already answered: status closed, the answer and its time in context, no form lines. An open
+# decision with the same context is still judged.
 OJ_ANSWERED = OJ_CTX + "\nAnswer from chat, 10:42: keep the check in the lint job."
-oj("a closed decision with the chat answer in context and no Your stake line is allowed", "allow",
+oj("a closed decision with the chat answer in context and no form lines is allowed", "allow",
    oj_item(status="closed", context=OJ_ANSWERED))
-oj("a closed decision with no options and no Your stake line is allowed", "allow",
+oj("a closed decision with no options and no form lines is allowed", "allow",
    {"id": OJ_DOC, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
     "context": OJ_ANSWERED})
-oj("an update that carries kind decision, status closed and context, no Your stake line, is allowed", "allow",
+oj("an update that carries kind decision, status closed and context, no form lines, is allowed", "allow",
    {"kind": "decision", "status": "closed", "context": OJ_ANSWERED}, action="update")
-oj("an open decision with the chat answer in context and no Your stake line is denied", "deny",
+oj("an open decision with the chat answer in context and no form lines is denied", "deny",
    oj_item(status="open", context=OJ_ANSWERED))
-oj("an update that carries kind decision, status open and context, no Your stake line, is denied", "deny",
+oj("an update that carries kind decision, status open and context, no form lines, is denied", "deny",
    {"kind": "decision", "status": "open", "context": OJ_ANSWERED}, action="update")
 
-# A str_replace on context is judged when old_str holds the line and new_str does not.
-oj_replace("that drops the Your stake line from context is denied", "deny", "context", OJ_GOOD, OJ_CTX)
-oj_replace("that swaps the Your stake line for a kind outside the set is denied", "deny", "context",
-           OJ_STAKE, "Your stake: internals — which job runs the check")
-oj_replace("that keeps the Your stake line in context is allowed", "allow", "context", OJ_GOOD,
-           "The stamp check runs in the test job today.\n" + OJ_STAKE)
-oj_replace("that swaps the Your stake line for another kind is allowed", "allow", "context", OJ_STAKE,
-           "Your stake: money — the test job costs more runner time")
-oj_replace("whose old_str holds no Your stake line is allowed", "allow", "context", OJ_CTX,
+# A str_replace on context is judged when old_str holds a form line and new_str does not.
+oj_replace("that drops the Problem line from context is denied", "deny", "context", OJ_GOOD,
+           oj_ctx(problem=None))
+oj_replace("that drops the Goal line from context is denied", "deny", "context", OJ_GOOD, oj_ctx(goal=None))
+oj_replace("that drops the only Based on line from context is denied", "deny", "context", OJ_GOOD,
+           oj_ctx(based=()))
+oj_replace("that swaps the Problem line for a stake outside the set is denied", "deny", "context", OJ_STAKE,
+           "Problem (internals): which job runs the check", rule=OJ_PROBLEM_RULES)
+oj_replace("that keeps every form line in context is allowed", "allow", "context", OJ_GOOD,
+           oj_ctx(tail="The stamp check runs in the test job today."))
+oj_replace("that swaps the Problem line for another stake is allowed", "allow", "context", OJ_STAKE,
+           "Problem (money): the test job costs more runner time, so it needs your word")
+oj_replace("whose old_str holds no form line is allowed", "allow", "context", OJ_CTX,
            "The stamp check runs in the test job today.")
 oj_replace("on the title is allowed", "allow", "title", "Which CI job runs the stamp check?",
            "Which CI job runs the format check?")
 oj_replace("on why is not judged", "allow", "why", OJ_STAKE, "The lint job is shorter.")
 
 # A batch judges each write.
-oj_batch("with an item that has no Your stake line among the sets is denied", "deny",
+oj_batch("with an item that has no form lines among the sets is denied", "deny",
          [oj_write({"note": "x"}, collection="answers"), oj_write(oj_item())])
-oj_batch("whose second write has no Your stake line is denied", "deny",
+oj_batch("whose second write has no form lines is denied", "deny",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second"))])
-oj_batch("with an update that carries kind decision and context, no line, is denied", "deny",
+oj_batch("with an update that carries kind decision and context, no form lines, is denied", "deny",
          [oj_write({"kind": "decision", "context": OJ_CTX}, op="update")])
-oj_batch("with a str_replace that drops the Your stake line is denied", "deny",
+oj_batch("with a str_replace that drops the Problem line is denied", "deny",
          [{"op": "str_replace", "collection": "items", "doc_id": OJ_DOC, "field": "context",
-           "old_str": OJ_GOOD, "new_str": OJ_CTX}])
-oj_batch("of decisions that each carry the Your stake line is allowed", "allow",
+           "old_str": OJ_GOOD, "new_str": oj_ctx(problem=None)}])
+oj_batch("of decisions that each carry the form is allowed", "allow",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second", context=OJ_GOOD))])
-oj_batch("with a stood pick and no Your stake line is allowed", "allow",
-         [oj_write(oj_item(stands=True))])
-oj_batch("with a closed decision and no Your stake line is allowed", "allow",
+oj_batch("with a stood pick that writes `Problem:` with no stake is allowed", "allow",
+         [oj_write(oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check")))])
+oj_batch("with a closed decision and no form lines is allowed", "allow",
          [oj_write(oj_item(status="closed", context=OJ_ANSWERED))])
-oj_batch("with a closed decision, then an open one with no Your stake line, is denied", "deny",
+oj_batch("with a closed decision, then an open one with no form lines, is denied", "deny",
          [oj_write(oj_item(status="closed", context=OJ_ANSWERED)), oj_write(oj_item(id="second"))])
 
 # file_path data is read as `data` is.
@@ -12099,16 +12171,16 @@ with open(OJ_FILE_BAD, "w", encoding="utf-8") as _f:
     json.dump(oj_item(), _f)
 with open(OJ_FILE_GOOD, "w", encoding="utf-8") as _f:
     json.dump(oj_item(context=OJ_GOOD), _f)
-oj("file_path data with no Your stake line is denied", "deny", None, file_path=OJ_FILE_BAD)
-oj("file_path data with a Your stake line is allowed", "allow", None, file_path=OJ_FILE_GOOD)
+oj("file_path data with no form lines is denied", "deny", None, file_path=OJ_FILE_BAD)
+oj("file_path data with the form is allowed", "allow", None, file_path=OJ_FILE_GOOD)
 
-# An older rule keeps its own refusal on an item that also has no Your stake line (owner-judge is read last).
-wp_write("owner judge: a widening pick with no Your stake line is refused by uniform-pick", "deny",
-         "uniform-pick", oj_item(options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
-wp_write("owner judge: a port with no Departs from line and no Your stake line is refused by port-question",
-         "deny", "port-question", oj_item(context=PQ_CTX), doc_id=OJ_DOC)
-wp_write("owner judge: a press with no link and no Your stake line is refused by press-link", "deny",
-         "press-link", oj_item(options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
+# An older rule keeps its own id when the form is there (which rule names an item that breaks both is not fixed).
+wp_write("owner judge: a widening pick with the form lines is refused by uniform-pick", "deny",
+         "uniform-pick", oj_item(context=OJ_GOOD, options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
+wp_write("owner judge: a port with no Departs from line and the form lines is refused by port-question",
+         "deny", "port-question", oj_item(context=oj_ctx(tail=PQ_CTX)), doc_id=OJ_DOC)
+wp_write("owner judge: a press with no link and the form lines is refused by press-link", "deny",
+         "press-link", oj_item(context=OJ_GOOD, options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
 
 
 # --------------------------------------------------------------------------- the runner

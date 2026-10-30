@@ -4,7 +4,7 @@
 
 An open item on the waiting page is one the owner can answer now. An item whose options are being reworked is not that. A session never writes an open item that says it is being reworked. It closes the item with a home that names the rework, and adds a fresh item when the options are ready. A `none` answer whose new options are written in the same turn may stay open.
 
-- Guard rule `rework-off-page` (`hooks/guard.py`, function `rework_off_page_hit`) refuses an `ArtifactData` set or update to `items` whose `context` says "being reworked", in any case, unless the same write has `status: closed`.
+- Guard rule `rework-off-page` (`hooks/question_form.py`, function `rework_off_page_hit`) refuses an `ArtifactData` set or update to `items` whose `context` says "being reworked", in any case, unless the same write has `status: closed`.
   - It reads each write in a batch and data read from `file_path`. It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
   - It judges every kind, since an item that is being reworked is not answerable, whatever its kind.
   - It passes a write with status closed, a status-only update, an item that says "reworked" in the past tense, and a call to another artifact.

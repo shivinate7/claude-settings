@@ -4,7 +4,7 @@
 
 The waiting page shows an option by its position, as a letter: the first option is A, the second B (`skills/waiting-page/page.html`, symbol `letterOf`). The key of each option is that letter in lowercase. A session keys its options `a`, `b`, `c` in the order the page shows them, and names an option in item text by its letter, never by another key.
 
-- Guard rule `option-letter-keys` (`hooks/guard.py`, function `option_letter_hit`) refuses an `ArtifactData` set or update to `items`, of `kind: decision` or with no `kind`, when `options` has an option that:
+- Guard rule `option-letter-keys` (`hooks/question_form.py`, function `option_letter_hit`) refuses an `ArtifactData` set or update to `items`, of `kind: decision` or with no `kind`, when `options` has an option that:
   - has no string `key`;
   - repeats another option's key;
   - has the key `none` (the page's `NONE`, which it reads as "none of these"); or
@@ -12,7 +12,7 @@ The waiting page shows an option by its position, as a letter: the first option 
   - It also refuses an item whose text (title, context, why, an option's text or a step) names an option by a letter-and-digit key, such as "option e2". The words that start the match are option, pick and key, in any case. "Option A", "pick b" and "option 2" pass.
   - It reads each write in a batch and data read from `file_path`. It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
   - It passes a task, a note, an update that carries no `options` and no matching text, and a call to another artifact.
-  - It reads last, after `owner-judge`. Each older rule keeps naming its own refusals.
+  - It reads last, after the form rules (`question-form`, `owner-judge`). Each older rule keeps naming its own refusals.
   - The reason says: key the options a, b, c in the order shown, each once, never none, and name an option by its letter. It names no target.
   - It is built against a named incident, below. It landed 2026-10-30.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.
