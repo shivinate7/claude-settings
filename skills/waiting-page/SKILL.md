@@ -320,10 +320,10 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
 
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
-   `db` and `comments` (the full form, `{comments: {}}`). Change nothing else in the page. A page
+   `db` and `comments` (the full form, `{comments: {}}`). Before you publish, set the page's
+   `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
-   to turn this on. The one change is the page's `<title>`: it reads "<repo> Queue", set once in the
-   live page; a republish keeps it (`splice.carry`).
+   to turn this on.
 3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
    `python3 ~/.claude/lint/repo_colour.py identity <repo root>`. It reads the repo's own extras keys
    `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,

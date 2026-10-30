@@ -163,6 +163,18 @@ class Stale(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertEqual(self.verdict(r)[0], "current")
 
+    def test_an_edited_svg_title_reads_behind_and_an_edited_page_title_does_not(self):
+        # Only the document <title> is the live page's own. A <title> inside an svg is page code.
+        svg = "<svg><title>Icon label</title></svg>"
+        main = write_text(os.path.join(self.fetched, "main-with-svg.html"), PAGE.replace('<header class="hdr">', svg + '<header class="hdr">', 1))
+        self.assertIn(svg, open(main, encoding="utf-8").read())
+        edited_svg = write_text(os.path.join(self.fetched, "svg-edited.html"), open(main, encoding="utf-8").read().replace("Icon label", "Edited label"))
+        edited_title = write_text(os.path.join(self.fetched, "title-edited.html"), open(main, encoding="utf-8").read().replace("<title>Queue</title>", "<title>Compass Queue</title>", 1))
+        r = self.page_run(edited_svg, "--main", main)
+        self.assertEqual(self.verdict(r)[0], "behind", r.stdout + r.stderr)
+        r = self.page_run(edited_title, "--main", main)
+        self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
+
     def live_with_both_blocks(self):
         live = with_both_blocks(PAGE)
         self.assertTrue(re.search(re.escape(OPEN) + r"\s*" + re.escape(CLOSE), PAGE), "page.html has no empty roadmap block")

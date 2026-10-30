@@ -32,6 +32,8 @@ import sys
 OPEN, CLOSE = "roadmap:data", "/roadmap:data"
 DESIGN = "designData"
 TITLE = "title"
+SVG_OPEN, SVG_CLOSE = "svg-open", "svg-close"
+SVG_TAG = re.compile(r"<(/?)svg(?=[\s/>])", re.I)
 DESIGN_ID = re.compile(r"""\bid\s*=\s*["']?designData["']?(?=[\s/>"'])""", re.I)
 RAW = ("script", "style", "textarea", "title")
 TAG = re.compile(r"<(%s)(?=[\s/>])" % "|".join(RAW), re.I)
@@ -39,8 +41,8 @@ TAG = re.compile(r"<(%s)(?=[\s/>])" % "|".join(RAW), re.I)
 
 def scan(text):
     """[(name, start, end)] in the markup, outside raw-text elements: each roadmap marker comment, each
-    designData script element (start of its opening tag to the end of its closing tag), and each
-    title element's text (TITLE, the raw text between its tags)."""
+    designData script element (start of its opening tag to the end of its closing tag), each
+    title element's text (TITLE, the raw text between its tags), and each svg tag (SVG_OPEN, SVG_CLOSE)."""
     found, at = [], 0
     while True:
         at = text.find("<", at)
@@ -53,6 +55,11 @@ def scan(text):
             if body in (OPEN, CLOSE):
                 found.append((body, at, end))
             at = end
+            continue
+        svg = SVG_TAG.match(text, at)
+        if svg:
+            found.append((SVG_CLOSE if svg.group(1) else SVG_OPEN, at, at))
+            at += 1
             continue
         tag = TAG.match(text, at)
         if not tag:
@@ -112,9 +119,17 @@ def design_span(text, what):
 
 
 def title_span(text):
-    """(start, end) of the text of the first title element in the markup, or None when there is none."""
-    spans = [m for m in scan(text) if m[0] == TITLE]
-    return (spans[0][1], spans[0][2]) if spans else None
+    """(start, end) of the text of the page's own document title, or None when there is none: the last title
+    element in the markup that is not inside an svg. A host's skeleton title comes before the page's."""
+    depth, span = 0, None
+    for name, start, end in scan(text):
+        if name == SVG_OPEN:
+            depth += 1
+        elif name == SVG_CLOSE:
+            depth = max(depth - 1, 0)
+        elif name == TITLE and not depth:
+            span = (start, end)
+    return span
 
 
 def carry(template, live):
