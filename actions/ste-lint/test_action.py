@@ -647,10 +647,15 @@ def drifted_from_checkout(r):
             and "Move the pin to %s" % r["shas"]["D"] in r["out"])
 
 
+NAMES_CHECKOUT = re.compile(r"(?<![\w/\\.-])claude-settings(?![\w/\\-])")  # the word, never a part of a path
+
+
 def one_line_no_traceback(r):
-    """The command failed with one non-blank line that names claude-settings, and no traceback."""
+    """The command failed with one non-blank line that names the claude-settings checkout in words, and no traceback.
+    Every fixture path holds "claude-settings", so a caught exception that prints its own path does not count."""
     lines = [l for l in r["out"].splitlines() if l.strip()]
-    return r["rc"] != 0 and "Traceback" not in r["out"] and len(lines) == 1 and "claude-settings" in lines[0]
+    return (r["rc"] != 0 and "Traceback" not in r["out"] and "Errno" not in r["out"] and len(lines) == 1
+            and bool(NAMES_CHECKOUT.search(lines[0])))
 
 
 with scratch("sweep") as root:
