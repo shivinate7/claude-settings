@@ -26,13 +26,57 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
 .fr > b { font-size: 13px; color: var(--h-muted); }
 .fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
 .fw iframe { border: 0; display: block; transform-origin: 0 0; }
+
+/* Card pictures (states pic-1a, pic-1b, pic-5a, pic-5b): one figure each, the focus of its option card on the waiting page.
+   300 wide and under 480 high, so the card draws it whole with no scroll, at about 0.65 in a 198 column. Colours are page.html's tokens. */
+:root { --p-paper: #ffffff; --p-ink: #161b22; --p-muted: #565f6b; --p-line: #d9dee5; --p-chip: #eef1f4; --p-focus: #e0f2e7; --p-focus-edge: #1d7445; --p-new-edge: #6d28d9; }   /* New edge on #fff: 7.10:1 */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --p-paper: #191e26; --p-ink: #e8ecf1; --p-muted: #a3adba; --p-line: #2c3440; --p-chip: #222a35; --p-focus: #15301f; --p-focus-edge: #6fcf98; --p-new-edge: #8b5cf6; } }
+:root[data-theme="dark"] { --p-paper: #191e26; --p-ink: #e8ecf1; --p-muted: #a3adba; --p-line: #2c3440; --p-chip: #222a35; --p-focus: #15301f; --p-focus-edge: #6fcf98; --p-new-edge: #8b5cf6; }
+body.picmode { background: var(--p-paper); }
+body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: none; }
+#pics > a { display: block; padding: 8px 12px; font-size: 13px; color: var(--p-muted); }
+.pic { width: 300px; margin: 0; padding-bottom: 12px;background: var(--p-paper); color: var(--p-ink); font: 17px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.pic .pban { background: #5b21b6; color: #fff; font: 700 15px/30px system-ui, sans-serif; text-align: center; }
+.pic .phead { display: flex; gap: 10px; align-items: flex-start; padding: 12px 12px 4px; }
+.pic .pkey { flex: none; min-width: 44px; height: 32px; border-radius: 8px; background: var(--p-ink); color: var(--p-paper); font: 700 18px/32px ui-monospace, Menlo, monospace; text-align: center; }
+.pic .phead b { font-size: 21px; line-height: 1.2; }
+.pic .pbody { position: relative; margin: 18px 12px 12px; padding: 10px; border: 2px dashed #0f766e; border-radius: 8px; }
+.pic .pbody.new { border-color: var(--p-new-edge); }   /* Dark edge #8b5cf6 on #191e26: 3.95:1; Today's #0f766e there: 3.06:1 */
+.pic .ptag { position: absolute; left: 8px; top: -12px; padding: 1px 6px; border-radius: 4px; background: #0f766e; color: #fff; font: 600 13px/1.4 system-ui, sans-serif; }
+.pic .pbody.new .ptag { background: #6d28d9; }
+.pic .pnotes { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 17px; }
+.pic .pnotes b { font-weight: 700; }
+/* 1A and 1B: the mockup as a strip, the card's 480 box as a frame on it, and a bar for what the card scrolls. */
+.pic .pdia { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 12px; align-items: start; }
+.pic .strip { position: relative; display: grid; grid-template-rows: 46px 150px 46px; width: 120px; border: 1px solid var(--p-line); }
+.pic .strip > span { display: grid; place-items: center; font-size: 15px; font-weight: 600; color: var(--p-muted); background: var(--p-chip); }
+.pic .strip > .sf { place-items: end center; padding-bottom: 6px; background: var(--p-focus); color: var(--p-ink); border-block: 3px solid var(--p-focus-edge); }   /* label under the frame, so the frame never crosses it */
+.pic .strip > .off { background: repeating-linear-gradient(135deg, var(--p-chip) 0 6px, var(--p-paper) 6px 10px); text-decoration: line-through; }
+.pic .win { position: absolute; left: -4px; right: -4px; top: 44px; height: 88px; border: 4px solid var(--p-ink); border-radius: 4px; }
+.pic .rng { position: absolute; right: -12px; width: 6px; border-radius: 3px; background: var(--p-ink); }
+.pic .side { display: grid; gap: 10px; font-size: 16px; line-height: 1.25; }
+.pic .side span { display: block; }
+/* 5A and 5B: the card column (dashed) and the scroll box in it, drawn at 0.52 of card pixels, with a sample phone inside. */
+.pic .pcol { position: relative; margin: 0 auto; width: 150px; height: 250px; border: 2px solid var(--p-muted); border-radius: 6px; display: grid; justify-items: center; }
+.pic .pbox { position: relative; height: 250px; border: 1px solid var(--p-line); background: #ffffff; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 5px; }
+.pic .mini { --s: 0.16; overflow: hidden; color: #161b22; }
+.pic .mini .mb { height: calc(40px * var(--s)); background: #5b21b6; }
+.pic .mini .mh { height: calc(64px * var(--s)); border-bottom: 1px solid #d9dee5; display: flex; align-items: center; padding-left: calc(20px * var(--s)); }
+.pic .mini .mh i { display: block; width: 60%; height: calc(24px * var(--s)); border-radius: 2px; background: #161b22; }
+.pic .mini .mr { height: calc(56px * var(--s)); display: flex; align-items: center; justify-content: space-between; padding: 0 calc(20px * var(--s)); border-bottom: 1px solid #e6e9ee; }
+.pic .mini .mr i { display: block; height: calc(17px * var(--s)); border-radius: 2px; background: #565f6b; }
+.pic .mini .mr u { display: block; width: calc(44px * var(--s)); height: calc(26px * var(--s)); border-radius: 99px; background: #1d7445; }
+.pic .gut { background: #eef1f4; position: relative; }
+.pic .gut::after { content: ""; position: absolute; left: 1px; right: 1px; top: 2px; height: 60px; border-radius: 2px; background: #8b95a2; }
+.pic .pill { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); height: 13px; padding: 0 5px; border-radius: 7px; background: #161b22; color: #fff; box-shadow: 0 0 0 1px #fff; font: 600 8px/13px system-ui, sans-serif; white-space: nowrap; }
 </style>
 </head>
 <body>
 <div class="sample" id="sampleBanner">Sample. No item, number, name or time on this page is real.</div>
 <header class="tool">
   <h1>Waiting page c204: a tall option picture scrolls inside its 480px box</h1>
-  <div class="row" id="rowS"><span>State</span><button data-s="long" data-state="long">Tall, no focus</button><button data-s="long-end" data-state="long-end">Tall, at the end</button><button data-s="focus-in" data-state="focus-in">1A: tall focus scrolls the focus (pick)</button><button data-s="focus-whole" data-state="focus-whole">1B: tall focus scrolls the whole mockup</button><button data-s="fits" data-state="fits">Fits: as today</button><button data-s="keys" data-state="keys">Keyboard</button><button data-s="wide" data-state="wide">5B: scroll picture 221.8 wide</button><button class="hide" data-hide="focus-in" data-name="1A (focus only)">Hide 1A (focus only)</button><button class="hide" data-hide="focus-whole" data-name="1B (whole mockup)">Hide 1B (whole mockup)</button><button class="hide" data-hide="wide" data-name="5B (wider)">Hide 5B (wider)</button></div>
+  <div class="row" id="rowS"><span>State</span><button data-s="long" data-state="long">Tall, no focus</button><button data-s="long-end" data-state="long-end">Tall, at the end</button><button data-s="focus-in" data-state="focus-in">1A: tall focus scrolls the focus (pick)</button><button data-s="focus-whole" data-state="focus-whole">1B: tall focus scrolls the whole mockup</button><button data-s="fits" data-state="fits">Fits: as today</button><button data-s="keys" data-state="keys">Keyboard</button><button data-s="wide" data-state="wide">5B: scroll picture 221.8 wide</button><button class="hide" data-hide="focus-in,pic-1a" data-name="1A (focus only)">Hide 1A (focus only)</button><button class="hide" data-hide="focus-whole,pic-1b" data-name="1B (whole mockup)">Hide 1B (whole mockup)</button><button class="hide" data-hide="wide,pic-5b" data-name="5B (wider)">Hide 5B (wider)</button></div>
+  <div class="row" id="rowP"><span>Card</span><button data-s="pic-1a">1A picture</button><button data-s="pic-1b">1B picture</button><button data-s="pic-5a">5A picture</button><button data-s="pic-5b">5B picture</button><button class="hide" data-hide="pic-5a" data-name="5A picture">Hide 5A picture</button></div>
   <div class="row" id="rowW"><span>Size</span>
     <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button><button data-w="2200">Very wide 2200</button>
   </div>
@@ -40,9 +84,51 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button id="labBtn">Labels on</button><button id="rmBtn">Reduced motion off</button>
   </div>
-  <p>Deep links: <code>#s=long|long-end|focus-in|focus-whole|fits|keys|wide</code>, <code>&amp;w=all|390|1280|2200</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;rm=1</code>, <code>&amp;hide=focus-whole,wide</code>. The pictures in the frames are live: scroll them with a wheel, a drag or the scrollbar. A press on the picture opens View; a press on its scrollbar does not. 5A (today's scale, 120 wide) has no hide control: it is the scale in every state but <code>wide</code>. In <code>long</code>, picture C is marked as what sets its option apart (3px left border).</p>
+  <p>Deep links: <code>#s=long|long-end|focus-in|focus-whole|fits|keys|wide|pic-1a|pic-1b|pic-5a|pic-5b</code>, <code>&amp;w=all|390|1280|2200</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;rm=1</code>, <code>&amp;hide=focus-whole,wide</code>. The pictures in the frames are live: scroll them with a wheel, a drag or the scrollbar. A press on the picture opens View; a press on its scrollbar does not. 5A (today's scale, 120 wide) has no hide control: it is the scale in every state but <code>wide</code>. In <code>long</code>, picture C is marked as what sets its option apart (3px left border). A <code>pic-</code> state draws only one figure: the option card's picture on the waiting page (focus <code>#pic-1a</code>, <code>#pic-1b</code>, <code>#pic-5a</code> or <code>#pic-5b</code>).</p>
 </header>
 <main id="stage"></main>
+<!-- Card pictures: static markup, so the waiting page's check finds each data-state and focus id without running a script. -->
+<div id="pics" hidden>
+  <a href="#s=long">All states</a>
+  <figure class="pic" id="pic-1a" data-state="pic-1a" hidden>
+    <div class="pban">Sample. No figure is real.</div>
+    <div class="phead"><span class="pkey">1A</span><b>The card scrolls only the focus</b></div>
+    <div class="pbody"><span class="ptag">Today: scroll range</span>
+      <div class="pdia">
+        <div class="strip" aria-hidden="true"><span class="off">Above</span><span class="sf">Focus</span><span class="off">Below</span><i class="win"></i><i class="rng" style="top: 46px; height: 150px"></i></div>
+        <div class="side"><span><b>Frame:</b> the card when it opens</span><span><b>Bar:</b> what the card scrolls</span></div>
+      </div>
+      <ul class="pnotes"><li><b>Scrolls:</b> the focus only</li><li><b>Above, below:</b> in View only</li></ul>
+    </div>
+  </figure>
+  <figure class="pic" id="pic-1b" data-state="pic-1b" hidden>
+    <div class="pban">Sample. No figure is real.</div>
+    <div class="phead"><span class="pkey">1B</span><b>The card scrolls the whole mockup</b></div>
+    <div class="pbody new"><span class="ptag">New: scroll range</span>
+      <div class="pdia">
+        <div class="strip" aria-hidden="true"><span>Above</span><span class="sf">Focus</span><span>Below</span><i class="win"></i><i class="rng" style="top: 0; height: 242px"></i></div>
+        <div class="side"><span><b>Frame:</b> the card when it opens</span><span><b>Bar:</b> what the card scrolls</span></div>
+      </div>
+      <ul class="pnotes"><li><b>Scrolls:</b> all of the mockup</li><li><b>Above, below:</b> in the card</li></ul>
+    </div>
+  </figure>
+  <figure class="pic" id="pic-5a" data-state="pic-5a" hidden>
+    <div class="pban">Sample. No figure is real.</div>
+    <div class="phead"><span class="pkey">5A</span><b>A scroll picture at today's scale</b></div>
+    <div class="pbody"><span class="ptag">Today: picture width</span>
+      <div class="pcol" aria-hidden="true"><div class="pbox" style="width: 69px"><div class="mini" style="--s: 0.16"></div><div class="gut"></div><span class="pill">↓ More</span></div></div>
+      <ul class="pnotes"><li><b>Picture:</b> 120 wide</li><li><b>Text:</b> 0.31 of its size</li><li><b>Grey frame:</b> the card column</li></ul>
+    </div>
+  </figure>
+  <figure class="pic" id="pic-5b" data-state="pic-5b" hidden>
+    <div class="pban">Sample. No figure is real.</div>
+    <div class="phead"><span class="pkey">5B</span><b>A scroll picture at phone width</b></div>
+    <div class="pbody new"><span class="ptag">New: picture width</span>
+      <div class="pcol" aria-hidden="true"><div class="pbox" style="width: 122px"><div class="mini" style="--s: 0.296"></div><div class="gut"></div><span class="pill">↓ More</span></div></div>
+      <ul class="pnotes"><li><b>Picture:</b> 222 wide</li><li><b>Text:</b> 0.57 of its size</li><li><b>Grey frame:</b> the card column</li></ul>
+    </div>
+  </figure>
+</div>
 
 <script type="text/plain" id="pagecss">
 /* page.html's own CSS at origin/main 1cc47f01, unchanged. */
@@ -438,6 +524,10 @@ const STATES = [
   { id: "fits", label: "Fits: as today" },
   { id: "keys", label: "Keyboard" },
   { id: "wide", label: "5B: scroll picture 221.8 wide" },
+  { id: "pic-1a", label: "Card picture of 1A" },
+  { id: "pic-1b", label: "Card picture of 1B" },
+  { id: "pic-5a", label: "Card picture of 5A" },
+  { id: "pic-5b", label: "Card picture of 5B" },
 ];
 const CAP = 480, FLOOR = 120, DW = 390, PHONE_W = 480 * 390 / 844;
 const rowsOf = (n, f) => Array.from({ length: n }, (_, j) => f(j)).join("");
@@ -445,6 +535,8 @@ const SETS = ["Sound", "Vibrate", "Late alerts", "Quiet hours", "Map style", "Un
 const setRow = (j) => `<div class="pr"><span>${SETS[j % SETS.length]}</span><span class="tg${j % 3 === 1 ? " off" : ""}"></span></div>`;
 const ruleRow = (j) => `<div class="pr${j === 2 ? " late" : ""}"><span>Rule ${j + 1}: ${["late by 10 min", "no scan at stop", "door photo missing", "route changed", "fuel under 20%"][j % 5]}</span><small>${j === 2 ? "On" : ["Text", "Call", "Push"][j % 3]}</small></div>`;
 const block = (h, inner) => `<div style="height:${h}px">${inner}</div>`;
+// The sample phone in the 5A and 5B figures: a banner, a title and settings rows, scaled by each figure's --s.
+document.querySelectorAll(".pic .mini").forEach((m) => { m.innerHTML = '<div class="mb"></div><div class="mh"><i></i></div>' + rowsOf(24, (j) => `<div class="mr"><i style="width:${[52, 38, 60, 44, 30][j % 5]}%"></i><u></u></div>`); });
 // A sample mockup, 390 wide and H high. `focus` is the box the card shows, in mockup pixels, as fitScript reports it.
 const MOCKS = {
   page: { H: 2400, html: () => `<div class="pb">Sample</div><div class="ph">Settings, one page</div>` + rowsOf(5, (g) => `<div class="pg">Group ${g + 1}</div>` + rowsOf(7, (j) => setRow(g * 7 + j))) + `<div class="pr"><b>End of settings</b><small>2400px</small></div>` },
@@ -556,7 +648,8 @@ function readHash() {
 function writeHash() {
   const q = new URLSearchParams({ s: P.s, w: P.w });
   if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.rm === "1") q.set("rm", "1"); if (P.hide.length) q.set("hide", P.hide.join(","));
-  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+  // In the waiting page's sandboxed srcdoc frame, replaceState throws; the frame still draws its state.
+  const h = "#" + q; if (location.hash !== h) try { history.replaceState(null, "", h); } catch (e) {}
 }
 const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 function docFor(s) {
@@ -590,7 +683,12 @@ function render() {
   const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
   const rb = document.getElementById("rmBtn"); if (rb) { rb.textContent = P.rm === "1" ? "Reduced motion on" : "Reduced motion off"; rb.setAttribute("aria-pressed", String(P.rm === "1")); }
   document.getElementById("stage").replaceChildren();
-  (P.w === "all" ? WIDTHS : [Number(P.w) || 390]).forEach(frame);
+  // A pic- state draws its one figure and no harness, so the card's focus box holds only that figure.
+  const pic = P.s.startsWith("pic-");
+  document.body.classList.toggle("picmode", pic);
+  document.getElementById("pics").hidden = !pic;
+  document.querySelectorAll("#pics .pic").forEach((f) => { f.hidden = f.dataset.state !== P.s; });
+  if (!pic) (P.w === "all" ? WIDTHS : [Number(P.w) || 390]).forEach(frame);
 }
 document.querySelector(".tool").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
