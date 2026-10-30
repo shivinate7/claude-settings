@@ -152,24 +152,56 @@ def same(got, name):
     return got[:-1] == name[:-1] and got[-1] in (name[-1], name[-1] + "s", name[-1] + "es")
 
 
-def name_problems(where, text, table, plain=False):
+def prepared(table):
+    """(term words, [(name, name words)], index) of each row of `table`, built once per table, not per call.
+
+    The index maps a text word to the (row, name) pairs whose first word it can be, so a call tests only
+    the names that share a word with its text. A one-word name is indexed under its plural forms too."""
+    if _PREPARED and _PREPARED[0] is table and _PREPARED[1] == len(table):
+        return _PREPARED[2]
+    rows_, index = [], {}
+    for r, (term, _homes, names) in enumerate(table):
+        got = []
+        for name in names:
+            tagged = name.endswith(THIS_SENSE)
+            n = words(name[:-len(THIS_SENSE)] if tagged else name)
+            got.append((tagged, n))
+            if n:
+                for key in ([n[0], n[0] + "s", n[0] + "es"] if len(n) == 1 else [n[0]]):
+                    index.setdefault(key, []).append((r, len(got) - 1))
+        rows_.append((term, words(term), got))
+    _PREPARED[:] = [table, len(table), (rows_, index)]
+    return rows_, index
+
+
+_PREPARED = []
+tick = None  # a callable that lib users set to stop a long read: it is called inside the name loop and raises to stop
+
+
+def name_problems(where, text, table, plain=False, spans=()):
     """One problem per "not" name that the whole words of `text` hold.
 
     `plain` is a name of code that a person may spell for another sense (`block`, `entry`): a
-    "not" name tagged (this sense) is then left to the reviewer."""
+    "not" name tagged (this sense) is then left to the reviewer. `spans`: word lists of terms of the
+    checked repo's own glossary; a "not" word inside one of them is that term, like a term of the table."""
     out = []
+    if tick:
+        tick()
     # Read with and without case steps: HandOver may mean handover or hand over.
     forms = [words(text), words(text, camel=True)]
-    for term, _homes, names in table:
-        spelled = words(term)  # a "not" word inside its own term, such as `hole` in `safety hole`, is the term
-        for name in names:
-            if plain and name.endswith(THIS_SENSE):
-                continue
-            name = name[:-len(THIS_SENSE)] if name.endswith(THIS_SENSE) else name
-            n = words(name)
-            if n and any(same(w[i:i + len(n)], n) and not inside(w, i, len(n), spelled)
-                         for w in forms for i in range(len(w) - len(n) + 1)):
-                out.append("%s uses '%s'; the glossary name is '%s'" % (where, name, term))
+    rows_, index = prepared(table)
+    seen = {r_n for form in forms for w in form for r_n in index.get(w, ())}
+    for r, k in sorted(seen):
+        if tick:
+            tick()
+        term, spelled, names = rows_[r]
+        tagged, n = names[k]
+        if plain and tagged:
+            continue
+        if any(same(w[i:i + len(n)], n) and not any(inside(w, i, len(n), t) for t in (spelled, *spans))
+               for w in forms for i in range(len(w) - len(n) + 1)):
+            name = table[r][2][k]
+            out.append("%s uses '%s'; the glossary name is '%s'" % (where, name[:-len(THIS_SENSE)] if tagged else name, term))
     return out
 
 
@@ -179,8 +211,23 @@ def inside(w, i, count, term):
                for j in range(len(w) - len(term) + 1))
 
 
-def path_problems(path, table):
-    return [p for seg in path.replace("\\", "/").split("/") for p in name_problems(path, seg, table)]
+def child_spans(child_table, table):
+    """The word lists of the terms of a repo's own glossary that `name_problems` may honour as `spans`.
+
+    A term equal to a term of `table`, or to a "not" name (plural too), is left out: it is no spelling of its own."""
+    ours = [words(term) for term, _homes, _names in table]
+    retired = [words(name[:-len(THIS_SENSE)] if name.endswith(THIS_SENSE) else name)
+               for _term, _homes, names in table for name in names]
+    out = []
+    for term, _homes, _names in child_table:
+        w = words(term)
+        if w and not any(o and (same(w, o) or same(o, w)) for o in ours + retired):
+            out.append(w)
+    return out
+
+
+def path_problems(path, table, spans=()):
+    return [p for seg in path.replace("\\", "/").split("/") for p in name_problems(path, seg, table, spans=spans)]
 
 
 def scan_python(text):
@@ -398,17 +445,19 @@ def scan_yaml(text):
     return idents, strings
 
 
-def code_problems(rel, text, table, lines=None):
+def code_problems(rel, text, table, lines=None, spans=()):
     """Problems in the names of code, on the lines in `lines` only (None: every line).
 
+    `spans`: the terms of the checked repo's own glossary (`name_problems`).
     Raises SyntaxError when a Python file does not parse."""
     ext = os.path.splitext(rel)[1]
     rows = text.split("\n")
+    opted = [OPT_OUT in row for row in rows]  # once per line: a name asks it again for each of its hits
     out = []
 
     def hit(line, message, last=None):
         span = range(line, (last or line) + 1)
-        if (lines is None or any(n in lines for n in span)) and not any(OPT_OUT in rows[n - 1] for n in span):
+        if (lines is None or any(n in lines for n in span)) and not any(opted[n - 1] for n in span):
             out.extend("%s:%d: %s" % (rel, line, p) for p in message)
 
     if ext == ".py" or ext in SCRIPT:
@@ -427,18 +476,18 @@ def code_problems(rel, text, table, lines=None):
             return name in PLATFORM_NAMES or name.startswith(PLATFORM_PREFIXES)
         for line, name in idents:
             if not platform(name) and not (name in YAML_ONLY and ext in (".yml", ".yaml")):
-                hit(line, name_problems("name " + name, name, table, plain=True))
+                hit(line, name_problems("name " + name, name, table, plain=True, spans=spans))
         for line, last, s in ([] if fixture else strings):
             if NAME_LIKE.fullmatch(s):
                 if not platform(s):
-                    hit(line, name_problems("name " + s, s, table, plain=True), last)
+                    hit(line, name_problems("name " + s, s, table, plain=True, spans=spans), last)
             elif in_hooks and s.strip() and not REGEX_LIKE.search(s):
-                hit(line, name_problems("message '%s'" % s.strip()[:50], s, table, plain=True), last)
+                hit(line, name_problems("message '%s'" % s.strip()[:50], s, table, plain=True, spans=spans), last)
     for number, row in enumerate(rows, 1):
         for anchor in ANCHOR_REF.findall(row):
-            hit(number, name_problems("anchor " + anchor, anchor, table))
+            hit(number, name_problems("anchor " + anchor, anchor, table, spans=spans))
         for slug in TICKED_SLUG.findall(row) if ext == ".md" else ():
-            hit(number, name_problems("slug " + slug, slug, table))
+            hit(number, name_problems("slug " + slug, slug, table, spans=spans))
     return out
 
 

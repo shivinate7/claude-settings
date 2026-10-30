@@ -10,12 +10,16 @@ Each case builds a temp tree: a copy of the module, and the records it checks. I
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
 the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module path.
 """
+import contextlib
+import importlib.util
+import io
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
@@ -149,6 +153,23 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()  # no file arguments: the diff against origin/main
         self.assertEqual(rc, 1, out)
         self.assertEqual(flagged(out), ["debts/" + LONG])
+
+
+class ImportTests(unittest.TestCase):
+    """lint/compliance_probes.py imports the module and calls its functions on a child's root, so the command line
+    runs only behind `__main__`. The command line itself stays as RecordSlugsTests pins it."""
+
+    def test_importing_the_module_runs_no_check(self):
+        spec = importlib.util.spec_from_file_location("record_slugs_under_import", MODULE)
+        module = importlib.util.module_from_spec(spec)
+        out = io.StringIO()
+        # An option the command line refuses: run on import, it would print a FAIL line and exit.
+        with mock.patch.object(sys, "argv", ["check_record_slugs.py", "--bogus"]), contextlib.redirect_stdout(out):
+            try:
+                spec.loader.exec_module(module)
+            except SystemExit as err:
+                self.fail("importing the module ran the check and exited %r: %s" % (err.code, out.getvalue().strip()))
+        self.assertEqual(out.getvalue(), "")
 
 
 if __name__ == "__main__":

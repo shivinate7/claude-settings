@@ -9,14 +9,13 @@ hosts have no `python3`. A probe that cannot run is `unknown`. Every probe reads
 | Lint | Command | Reads |
 | --- | --- | --- |
 | `ste_lint.py` | `$PY $P/lint/ste_lint.py --fail-on error --quiet <child *.md>` | STE errors in child prose |
-| `check_record_slugs.py` | `$PY $P/lint/check_record_slugs.py docs/decisions/*.md docs/debts/*.md` | slugs over 32 characters |
+| `check_record_slugs.py` | `$PY $P/lint/compliance_probes.py slugs <child root>` | a record slug over 32 characters that the change adds |
 | `check_claude_md_size.py` | `$PY $P/lint/check_claude_md_size.py` | a CLAUDE.md over 200 lines (warns only) |
 | `check_agent_models.py` | `$PY $P/lint/check_agent_models.py .claude/agents/*.md` | a Haiku model in agent frontmatter |
 | `check_silent_undo.py` | `$PY $P/lint/check_silent_undo.py --repo . --history` | lost lines and reversals on main |
 
-`check_record_slugs.py` matches only paths that start with a record folder of `lint/layout.json`, as claude-settings itself holds it: `docs/decisions/` or `docs/debts/`.
-For a child that keeps records in `docs/`, run it from the child's root, as the row does, with
-file arguments. For a child that keeps them at its root, run it from a scratch folder that holds a `docs` link to the child's root. Its git diff reads this repo's tree, so it cannot target a child.
+The `slugs` group calls `check_record_slugs.py` on the child's root. It reads the child's own record folders and the files
+added against the child's `origin/main`. A long slug already on main is one note line, not a gap. No `origin/main` is `unknown`.
 
 These lints read the parent tree only, and cannot target a child: `rule_audit.py`,
 `check_landed_dirs.py`, `check_unknown_reads_contract.py`. `report_guard.py`
@@ -37,7 +36,7 @@ session transcripts, not a repo.
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
 | Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. `"protection"` is the right value (decision main-branch-protection, the protection holds the one list): no comparison. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it, else `merge` refuses. No `stamp.json`: no comparison |
-| Git | records folders, slugs lint | one file per record, one folder per kind, slugs of 32 or fewer |
+| Git | records folders, and `$PY $P/lint/compliance_probes.py slugs <child root>` | one file per record, one folder per kind, no added slug over 32 characters |
 | Git | `check_silent_undo.py --history` | no lost lines |
 | Verification | `ci-hygiene` skill on `.github/workflows/` | no top finding |
 | Verification | `$PY $P/lint/compliance_probes.py playwright .` reads workflows, actions, Makefiles, shell scripts, Dockerfiles, justfiles, Taskfiles, dev container files and package.json scripts | exit 0. No Playwright install runs apt (`--with-deps`, `install-deps`); a repo that does moves to `actions/playwright-setup` (decision one-browser-setup-no-apt, one shared Playwright setup) |
@@ -98,8 +97,8 @@ Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
 | kit package | a tracked `Package.swift` holds the app logic. None is `partial` |
 | swift 6 | each project file sets `SWIFT_VERSION` 6, no `swift-tools-version` below 6, no language mode 5 |
 | ci runner | each macOS image a workflow names, matrix values too, is the pinned image (`IOS_RUNNER`) or a larger runner of it, never `macos-latest` |
-| ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app |
-| slow tests | no workflow runs `xcodebuild test`, `make ui-test`, `make native-check` or `sim-test`; UI tests run once per batch on the Mac |
+| ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app. `xcodebuild -showsdks`, `-list`, `-showBuildSettings`, `-help` and `-version` compile nothing |
+| slow tests | no workflow runs `make ui-test`, `make native-check`, `sim-test` or an `xcodebuild test` that covers a UI-test bundle (`-only-testing:`, or the scheme's test targets). A run the probe cannot resolve is a gap. UI tests run once per batch on the Mac |
 | test diagnostics | each `xcodebuild test` or `test-without-building` run in a workflow, the Makefile or a tracked `*.sh` sets `-collect-test-diagnostics never`, so a failed test starts no `simctl diagnose` of up to 10 minutes. `sim-test` adds it; `build-for-testing` is no run. Named incident, landed 2026-10-29: Restyle and Duo each patched it alone |
 | account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `bin/ios-ship` in `tools/ios-ship.json` is an allowed override: `partial` |
 
@@ -115,6 +114,9 @@ The probe holds no word list. On each run it reads `GLOSSARY.md` and `lint/check
 parent clone. It calls the check's own readers: the path read, and the read of identifiers, rule
 anchors, record slugs and hook messages. A word the glossary brings back is gone from the next run. A
 `word (prose)` name is read in paths, anchors and slugs only, never in a code name. Prose is not read.
+A term of the child's own `GLOSSARY.md`, at its root, spans a retired word, as a claude-settings term does.
+Terms come only from a four-column `## Terms` table there. Another shape gives no terms.
+A child term that repeats a claude-settings term, or is the retired word, does not.
 
 The probe reads every tracked file, so it can take a minute on a large repo. The check reads hook
 messages in `hooks/` only. That fits the layout of claude-settings, and a child with another layout has
@@ -132,7 +134,7 @@ A tracked file that does not decode as text, such as a binary, is still read by 
 | --- | --- |
 | 0 | `words: in shape` |
 | 1 | `words: out`, one item line per hit |
-| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, a Python file does not parse, or no tracked file could be read |
+| 2 | `words: unknown`: `GLOSSARY.md` cannot be read, it has no rows, a Python file does not parse, no tracked file could be read, or the run passed `WORDS_DEADLINE` (`stopped at <file>, N of M read`) |
 
 A copy of the probe with no `GLOSSARY.md` beside it, such as an installed copy under `~/.claude/lint`,
 is `unknown`, never `in shape`.
