@@ -3527,3 +3527,298 @@ for (const width of [390, 1280]) test(`a press on the empty part of a ranked opt
   await page.mouse.click(x, y);
   assert.deepEqual(await ticked(page, r), ["a"], `${r.id}: a press on the empty part of the links row did not tick the option, at ${width} wide`);
 });
+
+// ---------------------------------------------------------------- lane page-shows-last-answer: the last answer, the reply and the lane
+// Spec: docs/design/last-answer-notes.md (picks 1A, 2A, 3A, and the copy in its section 4). Three item fields drive it:
+// `lastAnswer` ({choice?, done?, note?, at}), `reply` (a string) and `lane` (a lane branch slug). Each case sets them on an item
+// and reads the card, by visible text and by where the part sits. The panel is found by its aria-label (notes, section 4).
+const LA_AT = "2026-10-29T19:05:00Z"; // 14:05 CDT
+const LA_NAMES = ["Your last answer and the reply", "Your last answer", "The reply"];
+const LA_LONG = "A long reply that runs past three lines on a phone. ".repeat(8).trim(); // 415 characters
+const laPanel = (page, it) => card(page, it).locator(LA_NAMES.map((n) => `[aria-label="${n}"]`).join(", "));
+const flat = (s) => s.replace(/\s+/g, " ").trim();
+// The panel's text, flattened. Every case needs exactly one panel, so a page that draws none fails on this line at once.
+const laText = async (page, it) => {
+  assert.equal(await laPanel(page, it).count(), 1, `${it.id}: no single panel labelled "${LA_NAMES.join('", "')}"`);
+  return flat(await laPanel(page, it).innerText());
+};
+const laBox = (loc) => loc.evaluate((e) => { const r = e.getBoundingClientRect(); return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left + scrollX, right: r.right + scrollX, h: r.height }; });
+const laSaved = (it, choice = "a") => ({ [it.id]: { item: it.id, n: it.n, at: "2026-10-26T01:00:00Z", choice, note: "" } });
+const laReply = (page, it) => card(page, it).getByText(/^Reply: /);
+// How many lines of text the reply shows now: its box height over the height of one line in the same element.
+const laReplyLines = (page, it) => laReply(page, it).evaluate((e) => {
+  const probe = e.cloneNode(false); probe.removeAttribute("id"); probe.textContent = "x";
+  e.parentNode.insertBefore(probe, e); const one = probe.getBoundingClientRect().height; probe.remove();
+  return e.getBoundingClientRect().height / one;
+});
+
+test("a decision's last answer shows its letter and label, then its note, with the time in US Central 24-hour", async (t) => {
+  const it = mk("la-one", 1, { lastAnswer: { choice: "b", note: "Only if it is cheap.", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(p, /You chose B: Blue\./);
+  assert.match(p, /Note: Only if it is cheap\./);
+  assert.ok(p.indexOf("Your last answer") < p.indexOf("You chose B") && p.indexOf("You chose B") < p.indexOf("Note:"), "head, answer, note are not in that order: " + p);
+  assert.doesNotMatch(p, /\b[AP]M\b|UTC|19:05/, "the time is not US Central 24-hour: " + p);
+  assert.equal(await laPanel(page, it).getAttribute("aria-label"), "Your last answer");
+  assert.doesNotMatch(p, /Reply:/);
+});
+
+test("the last answer's time names the zone and keeps midnight as 00, in summer and in winter", async (t) => {
+  const cdt = mk("la-cdt", 1, { lastAnswer: { choice: "a", at: "2026-10-29T05:30:00Z" } });
+  const cst = mk("la-cst", 2, { lastAnswer: { choice: "a", at: "2026-12-05T06:30:00Z" } });
+  const page = await open(t, { items: [cdt, cst] }); if (!page) return;
+  assert.match(await laText(page, cdt), /Your last answer, Oct 29, 00:30 CDT/);
+  assert.match(await laText(page, cst), /Your last answer, Dec 5, 00:30 CST/);
+});
+
+test("a last answer whose time does not parse shows 'Your last answer' with no time and no stray comma", async (t) => {
+  const it = mk("la-badat", 1, { lastAnswer: { choice: "a", at: "not a time" } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /^Your last answer(?!,)/, "the head is not 'Your last answer' alone: " + p);
+  assert.doesNotMatch(p, /Invalid|NaN|undefined/);
+  assert.match(p, /You chose A: Red\./);
+});
+
+test("the note 'accepted pick' is not shown in the last answer, as the receipt hides it", async (t) => {
+  const it = mk("la-accepted", 1, { lastAnswer: { choice: "a", note: "accepted pick", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /You chose A: Red\./);
+  assert.doesNotMatch(p, /accepted pick|Note:/, "the pick's own note shows: " + p);
+});
+
+test("a last answer with no choice on a decision shows its head and note and no answer line", async (t) => {
+  const it = mk("la-noans", 1, { lastAnswer: { note: "Why not green?", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(p, /Note: Why not green\?/);
+  assert.doesNotMatch(p, /You chose|None of these|[Mm]arked done/, "an answer line shows with no choice: " + p);
+});
+
+test("a last answer of none reads 'None of these.' with its note", async (t) => {
+  const it = mk("la-none", 1, { lastAnswer: { choice: "none", note: "Neither. Keep the old rail.", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /None of these\./);
+  assert.match(p, /Note: Neither\. Keep the old rail\./);
+  assert.doesNotMatch(p, /You chose/);
+});
+
+test("a last answer that is a list shows each pick by letter and label, and a ranked list shows a numbered list in order", async (t) => {
+  const m = multi("la-multi", 1, { lastAnswer: { choice: ["a", "c"], at: LA_AT } });
+  const r = ranked("la-ranked", 2, { lastAnswer: { choice: ["c", "a"], at: LA_AT } });
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  const items = (it) => laPanel(page, it).locator("li").allTextContents().then((l) => l.map((s) => flat(s).replace(/ /g, "")));
+  assert.match(await laText(page, m), /You chose:/);
+  assert.deepEqual(await items(m), ["ARed", "CGreen"]);
+  assert.equal(await laPanel(page, m).locator("ol").count(), 0, "an unranked list is numbered");
+  assert.match(await laText(page, r), /You chose, in order:/);
+  assert.deepEqual(await items(r), ["CGreen", "ARed"]);
+  assert.equal(await laPanel(page, r).locator("ol").count(), 1, "a ranked list is not a numbered list");
+});
+
+test("a last answer that names a key no longer in options never shows the key, for one key and for a list", async (t) => {
+  const one = mk("la-gone", 1, { lastAnswer: { choice: "pinned", at: LA_AT } });
+  const list = multi("la-gone-list", 2, { lastAnswer: { choice: ["a", "pinned"], at: LA_AT } });
+  const page = await open(t, { items: [one, list] }); if (!page) return;
+  const p = await laText(page, one), q = await laText(page, list);
+  assert.match(p, /You chose an option that is no longer listed\./);
+  assert.doesNotMatch(p, /pinned|You chose [A-Z]:/, "the raw key or a letter shows: " + p);
+  assert.match(q, /You chose options that are no longer listed\./);
+  assert.doesNotMatch(q, /pinned|Red/, "the raw key shows, or the one valid pick is listed: " + q);
+  assert.equal(await laPanel(page, list).locator("li").count(), 0, "a list that holds a lost key is still drawn as picks");
+});
+
+test("a task's last answer reads 'Marked done.' when done is true and 'Not marked done.' otherwise", async (t) => {
+  const done = { ...TASK, id: "la-done", n: 3, lastAnswer: { done: true, at: LA_AT } };
+  const not = { ...TASK, id: "la-notdone", n: 4, lastAnswer: { note: "It asks for an Apple ID. Which one?", at: LA_AT } };
+  const page = await open(t, { items: [done, not] }); if (!page) return;
+  const d = await laText(page, done), n = await laText(page, not);
+  assert.match(d, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(d, /(^| )Marked done\./);
+  assert.doesNotMatch(d, /Not marked done|You chose/);
+  assert.match(n, /Not marked done\./);
+  assert.match(n, /Note: It asks for an Apple ID\. Which one\?/);
+  assert.doesNotMatch(n, /(^| )Marked done\./);
+});
+
+test("the reply shows as 'Reply: <text>', alone or after the last answer, and the panel is named for what it holds", async (t) => {
+  const both = mk("rp-both", 1, { lastAnswer: { choice: "a", at: LA_AT }, reply: "I added option C. Pick again." });
+  const last = mk("rp-last", 2, { lastAnswer: { choice: "a", at: LA_AT } });
+  const only = mk("rp-only", 3, { reply: "Your comment asked where the motion values live." });
+  const page = await open(t, { items: [both, last, only] }); if (!page) return;
+  const b = await laText(page, both);
+  assert.match(b, /Reply: I added option C\. Pick again\./);
+  assert.ok(b.indexOf("Your last answer") < b.indexOf("Reply:"), "the reply is not after the last answer: " + b);
+  assert.equal(await laPanel(page, both).getAttribute("aria-label"), "Your last answer and the reply");
+  assert.equal(await laPanel(page, last).getAttribute("aria-label"), "Your last answer");
+  assert.doesNotMatch(await laText(page, last), /Reply:/);
+  const o = await laText(page, only);
+  assert.equal(await laPanel(page, only).getAttribute("aria-label"), "The reply");
+  assert.match(o, /Reply: Your comment asked where the motion values live\./);
+  assert.doesNotMatch(o, /Your last answer/);
+});
+
+test("a reply over 220 characters folds to three lines with More of the reply, and Less folds it again", async (t) => {
+  const it = mk("rp-long", 1, { reply: LA_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const more = card(page, it).getByRole("button", { name: "More of the reply", exact: true });
+  await need(more, "no More of the reply button on a long reply");
+  const folded = await laReplyLines(page, it);
+  assert.ok(folded > 2.9 && folded < 3.1, `a folded reply shows ${folded} lines, not 3`);
+  assert.equal(await more.getAttribute("aria-expanded"), "false");
+  await more.click();
+  const less = card(page, it).getByRole("button", { name: "Less", exact: true });
+  await need(less, "More of the reply did not become Less");
+  assert.equal(await less.getAttribute("aria-expanded"), "true");
+  const unfolded = await laReplyLines(page, it);
+  assert.ok(unfolded > 3.5, `an opened reply shows ${unfolded} lines, not all of it`);
+  assert.ok(flat(await card(page, it).textContent()).includes(LA_LONG), "the opened reply is cut");
+  await less.click();
+  assert.ok((await laReplyLines(page, it)) < 3.1, "Less did not fold the reply");
+  await need(card(page, it).getByRole("button", { name: "More of the reply", exact: true }), "Less did not become More of the reply");
+});
+
+test("a reply of 220 characters has no More of the reply button, and one of 221 has it", async (t) => {
+  const word = "ab ".repeat(100);
+  const at220 = mk("rp-220", 1, { reply: word.slice(0, 220) }), at221 = mk("rp-221", 2, { reply: word.slice(0, 221) });
+  const page = await open(t, { items: [at220, at221] }); if (!page) return;
+  assert.equal(await laPanel(page, at220).count(), 1, "a reply of 220 characters draws no panel");
+  assert.equal(await card(page, at220).getByRole("button", { name: "More of the reply" }).count(), 0, "a reply of 220 characters is folded");
+  assert.equal(await card(page, at221).getByRole("button", { name: "More of the reply", exact: true }).count(), 1, "a reply of 221 characters is not folded");
+});
+
+test("an opened reply stays open while the owner picks an option, and does not open the context", async (t) => {
+  const it = mk("rp-keep", 1, { context: LONG, reply: LA_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(card(page, it).getByRole("button", { name: "More of the reply", exact: true }), "no More of the reply button");
+  await card(page, it).getByRole("button", { name: "More of the reply", exact: true }).click();
+  assert.match(await page.locator(`#ctx-${it.id}`).getAttribute("class"), /clamp/, "More of the reply opened the context");
+  await need(card(page, it).getByRole("button", { name: "More context", exact: true }), "More of the reply changed the context's button");
+  await choose(page, it, "b"); // a pick repaints the card
+  await need(card(page, it).getByRole("button", { name: "Less", exact: true }), "the reply folded when the card repainted");
+  assert.ok((await laReplyLines(page, it)) > 3.5, "the reply folded when the card repainted");
+  assert.match(await page.locator(`#ctx-${it.id}`).getAttribute("class"), /clamp/);
+});
+
+test("a lane shows 'waits on lane <slug>' as one text run in the top row, after the wait, and adds no row", async (t) => {
+  const on = mk("ln-on", 1, { lane: "ci-done-comment" }), off = mk("ln-off", 2);
+  const page = await open(t, { items: [on, off] }); if (!page) return;
+  const top = card(page, on).locator(".top");
+  await need(top.getByText("waits on lane ci-done-comment", { exact: true }), "the top row has no single text run 'waits on lane ci-done-comment'");
+  assert.match((await top.innerText()).replace(/\s+/g, " "), /waited .* waits on lane ci-done-comment$/, "the lane does not follow the wait in the top row");
+  assert.equal(await card(page, on).getByText(/waits on lane/i).count(), 1, "the lane shows more than once on the card");
+  assert.equal(await laPanel(page, on).count(), 0, "a lane alone draws a last-answer panel");
+  assert.equal(await card(page, off).getByText(/waits on lane/i).count(), 0);
+  assert.ok(Math.abs((await laBox(card(page, on))).h - (await laBox(card(page, off))).h) <= 1, "the lane added height to the card");
+});
+
+test("on an open card the panel sits after the stake lines, before the context, and stays put while an option is picked", async (t) => {
+  const it = mk("pl-1a", 1, { holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it);
+  await laText(page, it);
+  const title = await laBox(c.locator(".title")), holds = await laBox(c.locator(".stake.holds")), due = await laBox(c.locator(".stake.due"));
+  const th = await laBox(laPanel(page, it)), ctx = await laBox(c.getByText("Which colour?", { exact: true })), opts = await laBox(c.locator(".opts"));
+  assert.ok(title.bottom <= holds.top + 1 && holds.bottom <= due.top + 1, "the stake lines are not first under the title");
+  assert.ok(th.top >= due.bottom - 1, `the panel starts at ${th.top}, above the last stake line's end at ${due.bottom}`);
+  assert.ok(th.bottom <= ctx.top + 1, `the panel ends at ${th.bottom}, below the context's start at ${ctx.top}`);
+  assert.ok(ctx.bottom <= opts.top + 1, "the context is not above the options");
+  const before = await laText(page, it), rel = th.top - (await laBox(c)).top;
+  await choose(page, it, "b"); // an unsent pick: nothing in the panel changes
+  assert.equal(await laText(page, it), before, "picking an option changed the panel");
+  assert.ok(Math.abs((await laBox(laPanel(page, it))).top - (await laBox(c)).top - rel) <= 1, "picking an option moved the panel");
+});
+
+test("a card with a saved answer keeps its receipt where it lands today, draws the thread below it, and shows the lane in the top row", async (t) => {
+  const it = mk("rc-thread", 7, { lane: "ci-done-comment", lastAnswer: { choice: "b", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const plain = mk("rc-plain", 8);
+  const page = await open(t, { items: [it, plain], answers: { ...laSaved(it, "a"), ...laSaved(plain, "a") } }); if (!page) return;
+  const c = card(page, it), rc = c.locator(".receipt:has(.changebtn)");
+  await need(rc, "the saved answer's receipt (with its Change button) is gone");
+  assert.match(await c.getAttribute("class"), /answered/);
+  assert.match(flat(await rc.innerText()), /You chose A: Red\./);
+  assert.doesNotMatch(flat(await rc.innerText()), /Blue|Reply:|Your last answer/, "the thread is inside the receipt");
+  const p = await laText(page, it);
+  assert.match(p, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(p, /You chose B: Blue\./);
+  assert.match(p, /Reply: I added option C\. Pick again\./);
+  const r = await laBox(rc), th = await laBox(laPanel(page, it));
+  assert.ok(th.top >= r.bottom - 1, `the thread starts at ${th.top}, above the receipt's end at ${r.bottom}`);
+  const rp = await laBox(card(page, plain).locator(".receipt:has(.changebtn)")), at = (e, b) => b.top - e.top;
+  assert.ok(Math.abs(at(await laBox(c), r) - at(await laBox(card(page, plain)), rp)) <= 1, "the thread moved the receipt from where it lands today");
+  assert.match((await c.locator(".top").innerText()).replace(/\s+/g, " "), /Answered, filing pending .*waits on lane ci-done-comment$/, "the lane is not in the top row after the Answered pill");
+  assert.equal(await laPanel(page, plain).count(), 0, "a saved card with no thread fields drew a panel");
+});
+
+test("pressing Change on a saved card with a thread opens the card with one panel, between the title and the context", async (t) => {
+  const it = mk("rc-change", 7, { lastAnswer: { choice: "b", at: LA_AT }, reply: "I added option C. Pick again." });
+  const page = await open(t, { items: [it], answers: laSaved(it, "a") }); if (!page) return;
+  const c = card(page, it);
+  await laText(page, it);
+  await c.getByRole("button", { name: "Change", exact: true }).click();
+  await need(c.locator(".opts"), "Change did not open the card");
+  assert.doesNotMatch(await c.getAttribute("class"), /answered/);
+  await laText(page, it); // still exactly one panel
+  const title = await laBox(c.locator(".title")), th = await laBox(laPanel(page, it)), ctx = await laBox(c.getByText("Which colour?", { exact: true }));
+  assert.ok(th.top >= title.bottom - 1 && th.bottom <= ctx.top + 1, "the panel is not between the title and the context");
+});
+
+test("a card with none of lastAnswer, reply and lane draws as today, and so does one whose three fields are empty", async (t) => {
+  const plainD = mk("as-d", 1), plainT = { ...TASK, id: "as-t", n: 2 };
+  const emptyD = mk("em-d", 3, { reply: "", lane: "", lastAnswer: null }), emptyT = { ...TASK, id: "em-t", n: 4, reply: "", lane: "", lastAnswer: null };
+  const page = await open(t, { items: [plainD, plainT, emptyD, emptyT] }); if (!page) return;
+  const shape = (it) => card(page, it).evaluate((c) => ({ kids: [...c.children].map((e) => e.tagName + "." + e.className), top: c.querySelector(".top").innerText.replace(/No\. \d+/, "").replace(/\s+/g, " ").trim() }));
+  for (const [plain, empty] of [[plainD, emptyD], [plainT, emptyT]]) {
+    assert.equal(await laPanel(page, plain).count() + await laPanel(page, empty).count(), 0, `${plain.id}: a panel is drawn with nothing to show`);
+    assert.doesNotMatch(await card(page, plain).innerText() + await card(page, empty).innerText(), /Your last answer|Reply:|waits on lane/i);
+    assert.deepEqual(await shape(empty), await shape(plain), `${empty.id}: empty fields change the card`);
+  }
+});
+
+for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken reply stay inside their card at 390 wide, open and saved, ${scheme} scheme`, async (t) => {
+  const url = "https://example.test/" + "very-long-path-segment-".repeat(6);
+  const fields = { lane: "a-very-long-lane-branch-slug-".repeat(4), lastAnswer: { choice: "b", note: url, at: LA_AT }, reply: url };
+  const open1 = mk("ov-open", 1, fields), saved1 = mk("ov-saved", 2, fields);
+  const page = await open(t, { items: [open1, saved1], answers: laSaved(saved1), scheme, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await laText(page, open1); await laText(page, saved1);
+  const m = await page.evaluate(() => ({
+    sw: document.documentElement.scrollWidth, iw: innerWidth,
+    out: [...document.querySelectorAll("article.card")].flatMap((c) => [...c.querySelectorAll(".top *, [aria-label^='Your last answer'] *, [aria-label='The reply'] *, [aria-label^='Your last answer'], [aria-label='The reply']")].filter((e) => e.getBoundingClientRect().right > c.getBoundingClientRect().right + 0.5).map((e) => c.id + " " + e.tagName + "." + e.className)),
+  }));
+  assert.ok(m.sw <= m.iw, `the page scrolls sideways: ${m.sw} over ${m.iw}`);
+  assert.deepEqual(m.out, [], "an element runs past its card's right edge");
+});
+
+// The list of fields an item may carry is the page's own, in one JSON block, so a writer and a check can read it without running the page.
+const FIELDS_BLOCK = /<script type="application\/json" id="itemFields">([\s\S]*?)<\/script>/;
+
+test("page.html carries its known item fields as a JSON list that holds reply, lastAnswer and lane and every field a fixture item has", () => {
+  const m = html.match(FIELDS_BLOCK);
+  assert.ok(m, 'page.html has no <script type="application/json" id="itemFields">');
+  const list = JSON.parse(m[1]);
+  assert.ok(Array.isArray(list) && list.every((f) => typeof f === "string"), "itemFields is not a list of strings");
+  assert.equal(new Set(list).size, list.length, "itemFields repeats a field");
+  for (const f of ["reply", "lastAnswer", "lane"]) assert.ok(list.includes(f), `itemFields lacks ${f}`);
+  for (const f of [...Object.keys(DECISION), ...Object.keys(TASK)]) assert.ok(list.includes(f), `itemFields lacks ${f}, a field the page reads today`);
+});
+
+test("an item with a field the page does not list shows a visible warning that names each such field", async (t) => {
+  const odd = mk("odd-field", 1, { zzflavour: "mint", zzspin: 3 });
+  const page = await open(t, { items: [odd] }); if (!page) return;
+  const text = await page.locator("body").innerText();
+  assert.match(text, /zzflavour/, "the page does not name the unknown field zzflavour");
+  assert.match(text, /zzspin/, "the page does not name the unknown field zzspin");
+  await need(card(page, odd), "the item with an unknown field is not drawn");
+});
+
+test("items with only listed fields show no unknown-field warning, new fields included", async (t) => {
+  const fine = mk("fine-fields", 1, { reply: "Pick again.", lane: "some-lane", lastAnswer: { choice: "a", note: "n", at: LA_AT } });
+  const page = await open(t, { items: [fine, DECISION, TASK] }); if (!page) return;
+  assert.doesNotMatch(await page.locator("body").innerText(), /lastAnswer/, "a listed field was reported as unknown");
+  assert.equal(await page.locator(".status.broken, [role=alert]").count(), 0, "a sound item shows a warning");
+});
