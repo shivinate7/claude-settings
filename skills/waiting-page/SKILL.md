@@ -365,7 +365,7 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element, scaled to fit the card, so the part being decided is in frame.
-     Without `focus` the card shows the whole mockup. Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px. A picture more than 1px over that stays 480px high and scrolls in its box, and opens at the top of what the card shows. A picture 1px over draws 480px high, and up to 3px of its bottom edge is hidden. Set `focus` on each design to the element
+     Without `focus` the card shows the whole mockup. Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px. A picture more than 1px over that stays 480px high and scrolls in its box, drawn as wide as a 390 × 844 phone picture (221.8px) or the card less its scrollbar, if that is less, and opens at the top of what the card shows. A picture 1px over draws 480px high, and up to 3px of its bottom edge is hidden. Set `focus` on each design to the element
      being decided, such as the late-package row with its buttons.
    - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
      focused element, else the whole mockup). The card reserves that height before the mockup loads,

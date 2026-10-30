@@ -1616,6 +1616,7 @@ function withState(html, state) {
 const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
 // A mockup is drawn FIT_W wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const MIN_PIC = 120; // a capped picture is never narrower than this, however tall the mockup
+const PHONE_H = 844; // a picture that scrolls draws as wide as a FIT_W x PHONE_H phone picture gets in its box
 const FIT_W = 390;
 let FITS = [];
 // Sizes the mockups reported, by slug plus focus. They are kept in this browser, so the next load reserves the height before the mockup loads.
@@ -1642,11 +1643,13 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
     const c = FIT[key], ww = maxH ? (wrap.parentElement ? Math.max(wrap.parentElement.clientWidth - 2, 1) : Infinity) : wrap.clientWidth || DW; // a capped picture sizes to its card; before it is placed, to its own cap
     const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
     const ht = c ? c.h : (!focus && size ? size.h : 200);
-    const bw = box ? Math.max(box.w, 1) : DW, sc = Math.min(maxScale || 1, ww / bw, maxH ? Math.max(maxH / Math.max(box ? box.h : ht, 1), MIN_PIC / bw) : Infinity);
+    const bw = box ? Math.max(box.w, 1) : DW;
+    let sc = Math.min(maxScale || 1, ww / bw, maxH ? Math.max(maxH / Math.max(box ? box.h : ht, 1), MIN_PIC / bw) : Infinity);
     // A box more than 4 times as tall as it is wide would pass maxH. It keeps its scale and scrolls in a maxH box. A pass of 1px or less counts as fitting.
     const scroll = !!maxH && Math.ceil(Math.max(box ? box.h : ht, 1) * sc) > maxH + 1;
     if (maxH) wrap.classList.toggle("scroll", scroll);
     const g = scroll && wrap.isConnected ? Math.max(wrap.offsetWidth - wrap.clientWidth - 2, 0) : 0; // the scrollbar's gutter, plus any border past 1px; the box grows by it so the scrollbar takes none of the picture's width
+    if (scroll) sc = Math.min(maxScale || 1, (ww - g) / bw, maxH * FIT_W / PHONE_H / bw); // at the floor scale a tall picture is too narrow to read, so it widens to a phone picture's width, within the column less the gutter
     if (maxH) {
       wrap.style.width = Math.ceil(bw * sc) + 2 + g + "px";
       sizer.style.width = Math.ceil(bw * sc) + "px"; sizer.style.height = Math.ceil((box ? box.h : ht) * sc) + "px";
