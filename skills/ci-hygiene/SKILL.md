@@ -125,22 +125,17 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
-    Two decisions conflict on where a scope skip sits. The owner's ruling is open.
-    Decision `test-strategy-reset` runs a job only when its suites' files change, to save macOS
-    minutes. Decision `same-check-kinds` (every repo runs the same check kinds) fails the rollup on
-    a skipped job.
-    The rollup needs the skip on the CI step that runs the suite or lint, not on the job. A job whose
-    CI steps all skip still starts a runner and bills its setup minutes (step 13), macOS most.
-    Unmeasured: the size of that cost in this repo.
-    For a CI-step skip, a job-level `if:` holds only the draft guard. A job that runs only off pull
+    A scope skip sits on the CI step that runs the suite or lint, never on the job. Decision
+    `same-check-kinds` (every repo runs the same check kinds) and decision `main-branch-protection`
+    (the required checks on main) hold the rule: the rollup fails a skipped job. A job whose CI steps
+    all skip still starts a runner and bills its setup minutes (step 13), macOS most.
+    A job-level `if:` holds only the draft guard. A job that runs only off pull
     requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
     skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
     its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
     start it. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
     unreadable diff or an unmapped path runs everything.
-    This repo's checks.yml skips at job level, and `lint/test_windows_split.py` pins a job-level
-    scope `if:`. A repo that moves to CI-step skips re-points that test.
 
 ## Public repos
 
@@ -163,12 +158,9 @@ Branch protection decides what counts as passing. Decision `same-check-kinds` (e
 same check kinds) sets the rule. Branch protection requires one check: the `all-jobs-passed` rollup.
 That job lists every other job in `needs:`, and its `if:` holds `always()`. The rollup fails a
 needed job that failed, was cancelled or was skipped. Without the rollup, a skipped job reads as
-passing. So a scoped-out suite skips at its CI step, and its job still runs and passes, pending
-the owner's ruling in step 19. The rollup
-skips on a draft, and a draft cannot merge (step 11). Read the protection rule first:
+passing. So a scoped-out suite skips at its CI step, and its job still runs and passes (step 19).
+The rollup skips on a draft, and a draft cannot merge (step 11). Read the protection rule first:
 `snippets.md`, section 3b.
-
-This repo's checks.yml does not yet follow this; the per-repo audit fixes it.
 
 The required check names live in the branch protection. `merge.requiredChecks` in
 `.github/stamp.json` says `"protection"`, so `merge` reads them from there. A repo that pins a list
