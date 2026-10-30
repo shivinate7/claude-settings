@@ -109,8 +109,8 @@ Other tools, in `judge` order:
                        override lifts it. It adds no git spawn beyond what the call already spends.
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
-                       pin and no default model is set. Explore, a reviewer on a Round 2 or 3 brief
-                       and every Opus spawn pass it (Opus stays the ask below). An unread record
+                       pin and no default model is set. Explore, a reviewer on a later-round brief
+                       and every Opus spawn pass it. An unread record
                        passes and is noted as `agent-role-model-unread`. No override lifts it.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
@@ -1900,7 +1900,7 @@ def step_up_reason(prompt: str, role, model) -> str:
 # model in its second; a first cell that holds anything but role words (a qualifier such as `reviewer, rounds 2 and 3`, a
 # skill, a hook) names no role, and the first row for a role wins. Cost per Agent or Task spawn: one read of the record and,
 # for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
-# `agent-role-model-unread` log line when a read fails. Kind of risk: incident (landed 2026-10-30).
+# `agent-role-model-unread` log line when a read fails.
 ROLE_MODEL_RANK = ("haiku", "sonnet", "opus")
 ROLE_TABLE_PATH = os.path.join("docs", "decisions", "agent-model-cap.md")
 ROLE_TABLE_MAX = 256 * 1024
@@ -1908,6 +1908,10 @@ ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
+# Two points the owner has not ruled yet, each one line to flip. A role in ROLE_ABOVE_ROW_ROLES may name a model above its row.
+# A reviewer brief with a `Round N of 3` marker, N in ROLE_REVIEWER_FREE_ROUNDS, may too; add "1" there to let a reviewer on its first marker run above its row.
+ROLE_ABOVE_ROW_ROLES = ("Explore",)
+ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
@@ -1975,12 +1979,14 @@ def role_has_model_pin(pointer_root, role):
 
 def role_model_check(tool: str, tool_input):
     """(reason, matched, unread) for an Agent or Task spawn against its role's row. `reason` is the deny, or "".
-    `unread` is true when the table or the agent files could not be read: the spawn then passes. Opus is never this
-    rule's deny: a spawn on Opus above the row stays the ask in opus_spawn_hit. Explore and a reviewer on a
-    Round 2 or Round 3 brief run above the row by the table's own rows. Pure, so never_lifted may call it too."""
+    `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
+    opus_spawn_hit. Explore and a reviewer on a
+    later-round brief run above the row by the table's own rows. Pure, so never_lifted may call it too."""
     if tool not in SPAWN_TOOLS:
         return "", "", False
     pointer = pointer_checkout()
+    if not pointer:
+        return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
     table = role_model_table(pointer)
     if table is None:
         return "", pointer, True
@@ -1989,9 +1995,9 @@ def role_model_check(tool: str, tool_input):
     if model:
         named = next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in model.lower()), None)
         row = table.get(role)
-        if named is None or named == len(ROLE_MODEL_RANK) - 1 or row is None or role == "Explore":
+        if named is None or named == len(ROLE_MODEL_RANK) - 1 or row is None or role in ROLE_ABOVE_ROW_ROLES:
             return "", "", False
-        if role == "reviewer" and any(kind.lower() == "round" and n in ("2", "3")
+        if role == "reviewer" and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                       for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
@@ -3468,10 +3474,10 @@ def judge(payload) -> None:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
     # 9b2. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
-    # An unread table or agent folder passes and logs one line. Opus stays the ask at 9d.
+    # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
     role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
     if role_unread:
-        record(tool, "noted", "agent-role-model-unread", role_matched or "no pointer checkout")
+        record(tool, "noted", "agent-role-model-unread", role_matched)
     if role_reason:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
