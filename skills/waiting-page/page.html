@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<title>Waiting on you</title>
+<title>Questions</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -51,12 +51,10 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
 .who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.who .sub { font-size: 13.5px; opacity: .88; white-space: nowrap; }
-@media (max-width: 420px) { .who .sub { display: none; } }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
 .tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
-.tabs a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
 .tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
 
 /* State shapes: a tier shows by shape and word, never by colour alone. */
@@ -326,18 +324,268 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
 .dcap.on { display: block; }
 body.sheet-open { overflow: hidden; }
+
+/* Status tab: the roadmap's layout in this page's tokens, under .sv. The names page.html also uses
+   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) are renamed here, so no rule above reaches status. */
+.tabs .tl { display: flex; gap: 4px; }
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } }
+.tabs #qCount:empty { display: inline-block; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+:where(.sv) button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+:where(.sv) button:disabled { cursor: default; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.readat { font-size: 14px; color: var(--muted); min-width: 0; }
+.readat summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.readat li { overflow-wrap: anywhere; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+
+.live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.live summary .lh { font-weight: 700; }
+.live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); padding: 0; }
+.live h4 { padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.live ul { list-style: none; margin: 0; padding: 0; }
+.live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.live li .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.livenone { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 8px 14px; display: grid; gap: 2px; font-size: 14.5px; }
+.livenone .lh { font-weight: 700; }
+.livenone details { font-size: 14px; color: var(--muted); }
+.livenone summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.livenone pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.live a { color: var(--acc); text-decoration: none; }
+.live a:hover { text-decoration: underline; }
+@container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-working { color: var(--acc); }
+.tag.st-blocked, .tag.blk { color: var(--holds); }
+.tag.st-review_ready, .tag.landed { color: var(--good); }
+.tag.st-failed, .tag.st-stopped { color: var(--due); }
+.tag.st-done { color: var(--muted); }
+.tag.next { color: var(--muted); border-style: dashed; }
+
+.now { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.now > div { background: var(--surface); padding: 12px 14px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.now .ph { font: 700 19px/1.2 var(--body); }
+.now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+.now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
+.now li .id { flex: none; font-size: 13px; color: var(--muted); }
+.now li .tx { min-width: 0; min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.now li .tx:hover, .lnk:hover { text-decoration: underline; }
+.now li.none { color: var(--muted); }
+.now .ix { flex: none; width: 12px; font: 13px var(--mono); color: var(--muted); }
+.now .offt .ic { flex: none; font-size: 12px; font-weight: 700; color: var(--holds); border: 1.5px solid currentColor; border-radius: 4px; padding: 0 5px; }
+@container (min-width: 640px) { .now { grid-template-columns: 1fr 1fr; } }
+@container (min-width: 1000px) { .now { grid-template-columns: 1.1fr 1.4fr 1.6fr 1.6fr; } }
+
+.segbar { height: 6px; display: flex; gap: 2px; border-radius: 3px; overflow: hidden; }
+.segbar i { flex: 1; background: var(--line); }
+.segbar i.done { background: var(--acc); }
+.segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
+.segbar i.blk { background: var(--holds); }
+
+/* The view switch sits right above the view it changes. What every view shares sits above the switch. */
+.views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
+/* Below 340px four equal columns cut "Reference": each column takes its label's width, and the rest is shared. */
+@container (max-width: 339px) {
+  .views { grid-template-columns: repeat(4, auto); }
+  .views button { padding-inline: 4px; font-size: 14px; }
+}
+.views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.sview { display: grid; gap: 14px; min-width: 0; }
+
+.prail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.prail button { display: grid; gap: 6px; min-width: 0; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
+.prail button[aria-pressed="true"] { border-color: var(--acc); box-shadow: inset 0 3px 0 var(--acc); }
+.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); white-space: nowrap; }
+.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); }
+.prail .here { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
+@container (max-width: 639px) {
+  .prail { gap: 4px; }
+  .prail button { padding: 6px 5px; }
+  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
+  .prail .nm > span:first-child { overflow-wrap: anywhere; }
+}
+/* Below 340px five chips are too narrow for a name and the current-phase dot: the rail wraps to three columns. */
+@container (max-width: 339px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
+.side { display: grid; gap: 12px; min-width: 0; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.box > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box > header h3 { font: 700 15px/1.3 var(--body); }
+.sv .lbl { font-size: 13px; color: var(--muted); }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px; }
+.ph-head h3 { font: 700 18px/1.25 var(--body); }
+.ph-head .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.ph-head .prog .segbar { width: 110px; }
+@container (max-width: 639px) { .ph-head .prog { margin-left: 0; width: 100%; } .ph-head .prog .segbar { flex: 1; } }
+.asof { font-size: 13px; color: var(--muted); padding: 0 14px 8px; }
+.howto { display: inline-flex; align-items: center; min-height: 32px; margin-left: 4px; font-size: 13px; font-weight: 600; color: var(--acc); }
+.howbody { font-size: 13.5px; color: var(--muted); padding: 0 14px 10px; }
+.foot { font-size: 13px; color: var(--muted); padding: 6px 14px; border-bottom: 1px solid var(--line); }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+.tile { background: var(--surface); padding: 10px 14px; display: grid; gap: 4px; min-width: 0; align-content: start; text-align: left; }
+button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surface)); }
+.tile .tl { font-size: 13.5px; color: var(--muted); }
+.tile .row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tile .v { font: 600 20px/1.1 var(--mono); overflow-wrap: anywhere; }
+.tile .v small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.tile .goal { font-size: 13px; color: var(--muted); }
+.tile svg { display: block; width: 100%; height: 30px; overflow: visible; }
+.tile .ft { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
+.tile .rule { display: none; font-size: 13.5px; color: var(--ink); border-top: 1px dashed var(--line); padding-top: 5px; margin-top: 2px; }
+.tile[aria-expanded="true"] .rule { display: block; }
+.tiles .none { grid-column: 1 / -1; background: var(--surface); padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.dl { font: 500 12px var(--mono); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.dl.good { color: var(--good); background: var(--good-soft); }
+.dl.bad { color: var(--holds); background: color-mix(in srgb, var(--holds) 14%, var(--surface)); }
+.dl.flat { color: var(--muted); background: var(--chip); }
+.meter { display: flex; gap: 2px; height: 8px; }
+.meter i { flex: 1; background: var(--line); border-radius: 2px; }
+.meter i.on { background: var(--acc); }
+.one { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.one::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.rsteps { list-style: none; margin: 0; padding: 0; }
+.rsteps > li + li { border-top: 1px solid var(--line); }
+.rrow { display: grid; grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rrow .ttl { min-width: 0; overflow-wrap: anywhere; }
+.rrow .id { font-size: 13px; color: var(--muted); }
+.rrow .meta { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.rrow .chev { font-size: 11px; color: var(--muted); }
+.rsteps li.open .chev, .donefold.open > .fold .chev { transform: rotate(90deg); }
+.rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
+.rsteps .active .ttl { font-weight: 700; }
+.rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
+.rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
+.rsteps li.open .rbody { display: block; }
+.rbody dl { margin: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px 10px; }
+.rbody dt { font-size: 13px; padding-top: 2px; }
+.rbody dd { margin: 0; overflow-wrap: anywhere; min-width: 0; color: var(--ink); }
+.ask { display: flex; gap: 8px; align-items: flex-start; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 13px var(--mono); color: var(--ink); }
+.ask span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; max-height: 12em; overflow: auto; }
+.copy { flex: none; min-height: 44px; padding: 0 12px; border-radius: var(--r); background: var(--acc); color: var(--on-acc); font: 600 14px var(--body); }
+.sv .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.more { min-height: 32px; font-size: 13.5px; font-weight: 600; color: var(--acc); }
+.noneyet { padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
+.fold { display: flex; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; text-align: left; }
+.donefold .fb { display: none; border-top: 1px solid var(--line); }
+.donefold.open .fb { display: block; }
+@container (max-width: 639px) {
+  .rrow { grid-template-columns: 16px 40px minmax(0, 1fr) 12px; gap: 4px 8px; padding-inline: 10px; }
+  .rrow .meta { grid-column: 3; grid-row: 2; justify-content: flex-start; }
+  .rrow .chev { grid-column: 4; grid-row: 1; }
+  .rbody { padding: 2px 10px 12px; }
+}
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-top: 1px solid var(--line); background: var(--ground); }
+.pager .pc { font-size: 13.5px; color: var(--muted); text-align: center; }
+.pager button { min-height: 44px; padding: 4px 12px; font-size: 13.5px; font-weight: 600; color: var(--acc); border: 1px solid var(--line); background: var(--surface); border-radius: 8px; white-space: nowrap; }
+.pager button:disabled { color: var(--muted); opacity: .5; }
+.box > .pager:last-child { border-radius: 0 0 12px 12px; }
+
+.feed { list-style: none; margin: 0; padding: 4px 0; }
+.feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
+.feed .when, .ev .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
+.lnk { display: inline; min-height: 32px; color: var(--ink); text-align: left; }
+.lnk .id { color: var(--muted); }
+.morelink { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--acc); }
+.trend { padding: 8px 14px 10px; display: grid; gap: 8px; }
+.trow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.trow .k { font-size: 13px; color: var(--muted); line-height: 1.2; }
+.trow svg { width: 100%; height: 30px; display: block; overflow: visible; }
+.trow .r { text-align: right; line-height: 1.15; }
+.trow .r .num { font-size: 13px; font-weight: 600; display: block; }
+.legend { display: flex; gap: 12px; font-size: 13px; color: var(--muted); padding: 0 14px 10px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; border-top: 1px dashed var(--muted); vertical-align: middle; margin-right: 4px; }
+.burn { padding: 10px 14px 12px; display: grid; gap: 6px; }
+.burn svg { width: 100%; height: 110px; display: block; overflow: visible; }
+.dot { width: 8px; height: 8px; display: inline-block; flex: none; border-radius: 2px; background: var(--acc); }
+
+.day h3 { padding: 10px 14px; font: 700 15px/1.3 var(--body); display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); background: var(--chip); }
+.day:not(:first-child) h3 { border-top: 1px solid var(--line); }
+.day h3 .lbl { font-weight: 400; }
+.ev { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.day h3 + .ev { border-top: 0; }
+.ev .rg { margin-top: 3px; }
+.ev .gist { color: var(--muted); font-size: 13.5px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ev.done .t { text-decoration: line-through; text-decoration-color: var(--line); }
+.lead { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+.gcard { margin-bottom: 16px; }
+.gcard ol { margin: 0; padding: 0 0 0 18px; font-size: 14px; }
+.gcard ol li { padding: 2px 0; }
+.tp > button { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; gap: 8px; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); align-items: baseline; }
+.tp:first-of-type > button { border-top: 0; }
+.tp > button:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.tp .id { font-size: 13px; color: var(--muted); }
+.tp .sm { display: block; font-size: 13px; color: var(--muted); }
+.tp .tb { display: none; padding: 0 14px 12px 52px; min-width: 0; }
+.tp.open .tb { display: block; }
+.tp.open .chev { transform: rotate(90deg); }
+.tp .chev { font-size: 11px; color: var(--muted); }
+.tp ul { margin: 0; padding-left: 16px; font-size: 14px; color: var(--ink); }
+.tp ul li { margin: 3px 0; }
+.tp .ask { margin-top: 6px; }
+.tp .ask span { max-height: 16em; }
+.tp .blbl { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.src { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13.5px; margin-top: 8px; }
+.hl, .rc { list-style: none; margin: 0; padding: 0; }
+.hl li, .rc li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.hl li:first-child, .rc li:first-child { border-top: 0; }
+.hl .k { color: var(--muted); font-weight: 600; }
+.rc li { grid-template-columns: 72px minmax(0, 1fr); }
+.rc .when { font: 13px var(--mono); color: var(--muted); padding-top: 2px; }
+.rc a, .hl a { color: var(--acc); text-decoration: none; }
+.rc a:hover, .hl a:hover { text-decoration: underline; }
+.rc .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.count { font: 600 22px var(--mono); padding: 10px 14px 2px; }
+@container (max-width: 559px) { .hl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* No roadmap: unknown, why, and one control that leads on. */
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
+.nob p { max-width: 62ch; }
+.nob details { font-size: 14px; color: var(--muted); }
+.nob summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.nob pre, .nob textarea { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nob textarea { width: 100%; background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.sv-tip { position: fixed; z-index: 12; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 4px 7px; border-radius: 4px; max-width: 240px; opacity: 0; transition: opacity .08s; left: 0; top: 0; }
+.sv-tip.on { opacity: 1; }
+.sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
+@media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
 </style>
 
 <header class="hdr"><div class="in">
   <div class="mark" id="mark" aria-hidden="true"></div>
-  <div class="who"><h1 class="repo" id="repoName">Waiting on you</h1><span class="sub" id="repoSub" hidden>waiting on you</span></div>
+  <div class="who"><h1 class="repo" id="repoName">Questions</h1></div>
 </div></header>
 
-<nav class="in tabs" id="tabs" aria-label="Page" hidden><a href="#" id="tabQ" aria-current="page">Questions</a><a href="#" id="tabD" role="button">Designs <span class="cnt" id="dCount"></span></a></nav>
-<div class="in main" id="qView">
+<nav class="in tabs" id="tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" id="tabQ" role="tab" aria-selected="true" aria-controls="qView">Questions <span class="cnt" id="qCount"></span></a><a href="#" id="tabStatus" role="tab" aria-selected="false" aria-controls="sPanel" tabindex="-1">Status</a></div><a href="#" id="tabD" role="button" hidden>Designs <span class="cnt" id="dCount"></span></a></nav>
+<div class="in main" id="qView" role="tabpanel" aria-labelledby="tabQ">
   <nav class="rail" id="rail" aria-label="Overview"></nav>
   <div class="list" id="list"><div class="empty">Loading the items waiting on you…</div></div>
 </div>
+
+<div class="in svwrap" id="sPanel" role="tabpanel" aria-labelledby="tabStatus" hidden><section class="sv" id="sView" aria-label="Status"></section></div>
 
 <div class="bar" id="bar">
   <div class="sent" id="sent" hidden><div class="in" id="sentIn"></div></div>
@@ -360,11 +608,19 @@ body.sheet-open { overflow: hidden; }
   <div class="dsh-body" id="dStage"><p class="dcap" id="dCap"></p></div>
 </div>
 
+<div class="sv-tip" id="svTip" role="tooltip"></div>
+<div class="sv-toast" id="svToast" role="status" aria-live="polite" hidden></div>
+
 <!-- A session that adds designs republishes this page with {slug: whole mockup HTML}, "<" written as <. -->
 <script type="application/json" id="designData">{}</script>
 
+<!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The waiting-page writer replaces it on each publish
+     (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
+<!-- roadmap:data -->
+<!-- /roadmap:data -->
+
 <script>
-const state = { items: [], answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -489,9 +745,16 @@ function applyIdentity() {
     $("mark").classList.remove("icon"); $("mark").style.removeProperty("--tile");
     applyIcon(id.icon);
   }
-  $("repoName").textContent = name || "Waiting on you";
-  $("repoSub").hidden = !name;
-  document.title = name ? name + ": waiting on you" : "Waiting on you";
+  setTitle();
+}
+// Each part has one name, the name of its tab, and the title names the open one.
+function setTitle() {
+  const name = state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "";
+  const part = state.tab === "s" ? "Status" : "Questions";
+  document.title = (name ? name + ": " : "") + part;
+  // With no name the tab row already shows the part's name, so the header shows the mark only; the h1 stays for a screen reader.
+  $("repoName").textContent = name || part;
+  $("repoName").classList.toggle("sr", !name);
 }
 
 /* ---------- Time: always US Central, 24-hour, with the zone named ---------- */
@@ -937,7 +1200,7 @@ function bundleEl(slug) {
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
   if (!state.items.length) {
-    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing is waiting on you right now. Sessions add items here when they park something for your word."));
+    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
   }
   const live = new Set();
   TIERS.forEach((T) => {
@@ -1308,7 +1571,22 @@ function closeDesign(toItem) {
 $("dPrev").onclick = () => showDesign(dAt - 1); $("dNext").onclick = () => showDesign(dAt + 1);
 $("dClose").onclick = () => closeDesign(); $("dBack").onclick = () => closeDesign(dList[dAt].it);
 $("tabD").onclick = (e) => { e.preventDefault(); openDesign(""); };
-$("tabQ").onclick = (e) => e.preventDefault();
+// Status hides #qView and never removes it, so a note typed on a card survives a switch. A load always opens Questions.
+function showTab(which) {
+  state.tab = which;
+  const q = which === "q";
+  $("qView").hidden = !q; $("sPanel").hidden = q;
+  [["tabQ", q], ["tabStatus", !q]].forEach(([id, on]) => { $(id).setAttribute("aria-selected", String(on)); $(id).tabIndex = on ? 0 : -1; });
+  setTitle();
+  if (!q) document.dispatchEvent(new Event("statusshown"));
+}
+$("tabQ").onclick = (e) => { e.preventDefault(); showTab("q"); };
+$("tabStatus").onclick = (e) => { e.preventDefault(); showTab("s"); };
+$("tabs").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  if (!e.target.closest || !e.target.closest('[role="tab"]')) return;
+  e.preventDefault(); const to = state.tab === "q" ? "s" : "q"; showTab(to); $(to === "q" ? "tabQ" : "tabStatus").focus();
+});
 
 /* ---------- Keys: A to C pick on the focused card, Ctrl or Cmd+Enter sends. Nothing on screen teaches them. ---------- */
 let hoverItem = null;
@@ -1329,7 +1607,9 @@ function render() {
   renderList(); renderRail(); renderBar(); renderSent();
   FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
   const nd = allDesigns().length;
-  $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => designsOf(i).length);
+  $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
+  // The count box has a fixed width, so a count that grows moves no tab. It stays empty until the items load.
+  $("qCount").textContent = state.loaded ? String(state.items.filter((i) => !isSaved(i)).length) : "";
 }
 
 render();
@@ -1345,5 +1625,507 @@ render();
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; applyIdentity(); render(); }, () => {});
+})();
+</script>
+
+<script>
+/* Status tab (read only). It reads window.ROADMAP_DATA and window.ROADMAP_BUILD, the block the roadmap build bakes in
+   (roadmap:data above), and never the artifact database: with no record branch the block holds ROADMAP_DATA = null,
+   and the tab says the plan is unknown. The page draws it the first time the tab opens, so row heights can be measured. */
+(() => {
+const D = window.ROADMAP_DATA, B = window.ROADMAP_BUILD;
+const hasData = !!D && typeof D === "object";
+const root = $("sView");
+
+/* The five phases, in the order the work happens. Steps carry one of these ids in their `phase` field. */
+const PH = [{ k: "cleanup", n: "Clean up" }, { k: "organize", n: "Organize" }, { k: "design", n: "Design" }, { k: "rollout", n: "Roll out" }, { k: "later", n: "Later" }];
+const ORDER = ["todo", "active", "done", "blocked"];
+const LBL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked" };
+const CULL_KEYS = [{ k: "debts", n: "Debt files" }, { k: "decisions", n: "Decision files" }, { k: "hooks", n: "Hook lines" }, { k: "words", n: "CLAUDE.md words" }];
+/* Which step each clean-up warning points to. A link is left out when that step no longer exists. */
+const OFF_TRACK_LINKS = { hooks: "c18", debts: "c10", stop: "c2" };
+const THREAD_NAME = { blocked: "asking in its chat", working: "working", review_ready: "ready for review", failed: "failed", stopped: "stopped", done: "done" };
+
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (n) => (typeof n === "number" ? n.toLocaleString("en-US") : n == null || n === "" ? "—" : String(n));
+const isNum = (v) => typeof v === "number" && isFinite(v);
+const when = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d : null; };
+// Days and times are US Central, as the rest of the page (fmt).
+const CT = "America/Chicago";
+const dayKey = (d) => d.toLocaleDateString("en-CA", { timeZone: CT });
+const dayLabel = (d) => d.toLocaleDateString("en-US", { timeZone: CT, weekday: "short", month: "short", day: "numeric" });
+const timeLabel = (d) => fmt(d.toISOString(), false);
+const ago = (iso) => { const d = when(iso); if (!d) return ""; const hrs = (Date.now() - d) / 36e5; if (hrs < 1) return "just now"; if (hrs < 24) return Math.round(hrs) + "h ago"; return Math.round(hrs / 24) + "d ago"; };
+const fresh = (iso) => { const d = when(iso); return !!d && dayKey(d) === dayKey(new Date()); };
+const firstSentence = (t) => { if (!t) return ""; const m = String(t).match(/^.*?[.!?](\s|$)/); return (m ? m[0] : String(t)).trim(); };
+const pct = (a, b) => (a - b) / b * 100;
+const pctS = (v) => (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+const phaseName = (k) => (PH.find((p) => p.k === k) || {}).n || k;
+const unknownRead = (r) => String(r).startsWith("unknown");
+// "unknown (why)" shows as its why, so the word "unknown" appears once on the screen, at the plan.
+const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
+const segs = (d, a, b, n) => '<i class="done"></i>'.repeat(d) + '<i class="act"></i>'.repeat(a) + '<i class="blk"></i>'.repeat(b) + "<i></i>".repeat(Math.max(0, n - d - a - b)) + (n ? "" : "<i></i>");
+
+/* Status marks: shape and colour together, never colour alone. */
+const GLY = {
+  done: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" stroke="var(--surface)" stroke-width="1.7" fill="none"/></svg>',
+  active: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--acc)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--acc)"/></svg>',
+  todo: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+  blocked: '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--holds)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>',
+};
+const rg = (s) => `<span class="rg">${GLY[s] || GLY.todo}</span>`;
+// Where the mark alone carries the state, it names the state for a screen reader, so the word shows once.
+const rgl = (s) => `<span class="rg" role="img" aria-label="${LBL[s] || LBL.todo}">${GLY[s] || GLY.todo}</span>`;
+
+/* ---------- data: baked, never read from the database ---------- */
+const byOrder = (a, b) => (isNum(a.order) ? a.order : 1e9) - (isNum(b.order) ? b.order : 1e9) || String(a.id).localeCompare(String(b.id));
+const bag = (k) => (hasData && D[k] && typeof D[k] === "object" ? D[k] : {});
+const listOf = (k) => Object.entries(bag(k)).map(([id, v]) => ({ id, ...v })).sort(byOrder);
+const steps = listOf("steps").map((s) => ({ ...s, status: ORDER.includes(s.status) ? s.status : "todo" }));
+const topics = hasData ? listOf("topics") : null;
+const meta = bag("meta");
+const phases = meta.phases && typeof meta.phases === "object" ? meta.phases : null;
+const cull = meta.cull && typeof meta.cull === "object" ? meta.cull : null;
+const advisor = meta.advisor && typeof meta.advisor === "object" ? meta.advisor : null;
+
+const ui = { view: "plan", phase: null, page: {}, donePage: {}, logPage: 0, open: new Set(), tiles: new Set(), folds: new Set(), notes: new Set(), tps: new Set(), how: false };
+try { const r = JSON.parse(localStorage.getItem("rm-view") || "null"); if (r && typeof r === "object") { if (["plan", "log", "ref", "rec"].includes(r.v)) ui.view = r.v; if (PH.some((p) => p.k === r.p)) ui.phase = r.p; } } catch (e) { /* nothing remembered */ }
+const saveView = () => { try { localStorage.setItem("rm-view", JSON.stringify({ v: ui.view, p: ui.phase })); } catch (e) { /* not kept */ } };
+
+/* Rows per page follow the window: as many collapsed rows as fit in one screen, less room for the header and pager.
+   rowH is measured from the rendered rows, so a phone's two-line rows count right. */
+let rowH = 52;
+const pageSize = () => Math.max(5, Math.min(20, Math.floor((window.innerHeight - 150) / rowH)));
+function measureRows() {
+  const rs = [...document.querySelectorAll("#svPhases > section > .rsteps > li:not(.open)")];
+  if (!rs.length) return false;
+  const hgt = rs.reduce((t, r) => t + r.offsetHeight, 0) / rs.length;
+  if (!hgt || Math.abs(hgt - rowH) < 2) return false;
+  rowH = hgt; return true;
+}
+
+const byPhase = (k) => steps.filter((s) => s.phase === k);
+/* Work order: active steps first, then everything else by its `order` field. */
+const workOrder = (list) => [...list.filter((s) => s.status === "active").sort(byOrder), ...list.filter((s) => s.status !== "active").sort(byOrder)];
+const openList = (k) => workOrder(byPhase(k).filter((s) => s.status !== "done"));
+const doneList = (k) => byPhase(k).filter((s) => s.status === "done").sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) || byOrder(a, b));
+function curPhase() { for (const p of PH) if (byPhase(p.k).some((s) => s.status !== "done")) return p; return PH[PH.length - 1]; }
+const nextUp = () => workOrder(byPhase(curPhase().k)).filter((s) => s.status === "todo").slice(0, 3);
+const shownPhase = () => (ui.phase && PH.some((p) => p.k === ui.phase) ? ui.phase : curPhase().k);
+
+function cullInfo() {
+  if (!cull) return null;
+  const base = cull.baseline || {}, batches = Array.isArray(cull.batches) ? cull.batches.filter((b) => b && typeof b === "object") : [];
+  const pts = [{ label: "Start" + (base.at ? " (" + base.at + ")" : ""), v: base }, ...batches.map((b, i) => ({ label: b.label || b.at || "Reading " + (i + 2), v: b }))];
+  // The cull's own batches are labelled "Cull ..."; later re-measures on main are not. The last "Cull" batch is where it ended.
+  let closeIx = -1; pts.forEach((p, i) => { if (i > 0 && /^cull\b/i.test(p.label)) closeIx = i; });
+  return { base, batches, pts, closeIx, last: pts[pts.length - 1] };
+}
+const series = (ci, k) => { const out = []; ci.pts.forEach((p, i) => { if (isNum(p.v[k])) out.push({ v: p.v[k], label: p.label, i }); }); return out; };
+
+function offTrack() {
+  const items = [], ci = cullInfo();
+  const link = (key) => { const id = OFF_TRACK_LINKS[key]; return steps.some((s) => s.id === id) ? id : null; };
+  if (ci && ci.batches.length) {
+    const b = ci.base, l = ci.last.v;
+    if (isNum(b.hooks) && isNum(l.hooks) && l.hooks > b.hooks) items.push({ t: `Hook lines ${num(l.hooks)}, ${pctS(pct(l.hooks, b.hooks))} vs start. The rule says they only go down.`, k: "Growing", id: link("hooks") });
+    const c = ci.closeIx > 0 && ci.closeIx < ci.pts.length - 1 ? ci.pts[ci.closeIx].v : null;
+    if (c && isNum(c.debts) && isNum(l.debts) && l.debts > c.debts) items.push({ t: `Debt files back up ${num(c.debts)} → ${num(l.debts)} since the cull ended.`, k: "Back up", id: link("debts") });
+  }
+  if (cull && /time box/i.test(String(cull.closed || ""))) items.push({ t: `The cull's stop rule was not met; it ended on the time box${cull.timebox ? " (" + cull.timebox + ")" : ""}.`, k: "Missed", id: link("stop") });
+  workOrder(steps.filter((s) => s.status === "blocked")).forEach((s) => items.push({ blocked: true, id: s.id }));
+  return items;
+}
+
+/* ---------- small chart helpers ---------- */
+function spark(vals, { w = 200, h = 30, labels = [], markIx = null, fmtv = num } = {}) {
+  const min = Math.min(...vals), max = Math.max(...vals), r = (max - min) || 1;
+  const x = (i) => (vals.length === 1 ? w / 2 : i * (w / (vals.length - 1)));
+  const y = (v) => h - 2 - ((v - min) / r) * (h - 6);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  let s = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Trend: ${esc(vals.map(fmtv).join(", "))}">`;
+  s += `<line x1="0" x2="${w}" y1="${h - 1}" y2="${h - 1}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+  if (markIx != null && markIx >= 0 && markIx < vals.length - 1) { const mx = (x(markIx) + x(markIx + 1)) / 2; s += `<line x1="${mx}" x2="${mx}" y1="0" y2="${h}" stroke="var(--muted)" stroke-dasharray="2 2" stroke-width="1" vector-effect="non-scaling-stroke"/>`; }
+  s += `<polyline points="${pts}" fill="none" stroke="var(--acc)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+  s += `<circle cx="${x(vals.length - 1)}" cy="${y(vals[vals.length - 1])}" r="3" fill="var(--acc)" stroke="var(--surface)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+  const bw = w / Math.max(vals.length, 1);
+  vals.forEach((v, i) => { s += `<rect x="${Math.max(0, x(i) - bw / 2)}" y="0" width="${bw}" height="${h}" fill="transparent" data-tip="${esc((labels[i] || "") + ": " + fmtv(v))}"/>`; });
+  return s + "</svg>";
+}
+function delta(cur, ref, { downGood = true, pctMode = false, neutral = false } = {}) {
+  if (!isNum(cur) || !isNum(ref)) return "";
+  const d = cur - ref; if (d === 0) return '<span class="dl flat">±0</span>';
+  const cls = neutral ? "flat" : ((downGood ? d < 0 : d > 0) ? "good" : "bad");
+  return `<span class="dl ${cls}">${pctMode ? pctS(pct(cur, ref)) : (d > 0 ? "▲" : "▼") + num(Math.abs(d))}</span>`;
+}
+
+/* ---------- read-at stamps and live work ---------- */
+function readAt() {
+  const panels = B && Array.isArray(B.panels) ? B.panels : null;
+  if (!panels) return '<details class="readat"><summary>Read at: not known <span class="rg unk" role="img" aria-label="not read"></span></summary><ul><li class="unk">This page holds no roadmap build yet.</li></ul></details>';
+  const at = when(B.builtAt), bad = panels.some((p) => unknownRead(p.read));
+  const rows = panels.map((p) => unknownRead(p.read)
+    ? `<li class="unk"><span class="rg unk" aria-hidden="true"></span> ${esc(p.name)}: ${esc(reason(p.read))}</li>`
+    : `<li>${esc(p.name)}: ${p.home ? esc(p.home) + ", " : ""}read at <span class="num">${esc(p.read)}</span></li>`);
+  return `<details class="readat"><summary>Read ${at ? esc(fmt(at.toISOString())) : "at a time not known"}${bad ? ' <span class="rg unk" role="img" aria-label="one part not read"></span>' : ""}</summary><ul>${rows.join("")}</ul></details>`;
+}
+function liveWork() {
+  const w = (B && B.live) || {};
+  if (!Array.isArray(w.threads)) {
+    // Nothing was read and there is no body, so this is a line, not a disclosure. The build's own words sit behind one.
+    const plain = !w.read ? "this page holds no roadmap build yet" : /--live/.test(w.read) ? "the build had no live file" : "the build could not read it";
+    return `<div class="livenone"><p><span class="lh">Live work</span> <span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${plain}</span></p>`
+      + (w.read ? `<details><summary>What the build said</summary><pre>${esc(reason(w.read))}</pre></details>` : "") + "</div>";
+  }
+  const day = (iso) => { const d = when(iso); return d ? fmt(d.toISOString()) : ""; };
+  const link = (url, text) => (/^https?:\/\//.test(url || "") ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text);
+  const open = w.threads.filter((t) => t.state !== "done"), done = w.threads.length - open.length;
+  const counts = Object.keys(THREAD_NAME).filter((k) => k !== "done").map((k) => [k, open.filter((t) => t.state === k).length]).filter(([, n]) => n);
+  const pulls = w.pulls || [], branches = w.branches || [];
+  return `<details class="live"><summary><span class="lh">Live work</span>${counts.map(([k, n]) => `<span class="tag st-${k}">${n} ${esc(THREAD_NAME[k])}</span>`).join("")}`
+    + `<span>${pulls.length} open pull request${pulls.length === 1 ? "" : "s"}</span><span class="asof">read <span class="num">${esc(unknownRead(w.read) ? reason(w.read) : day(w.read))}</span></span></summary>`
+    + `<h4>Threads</h4><ul>${open.length ? open.map((t) => `<li><span><span class="tag st-${esc(t.state)}">${esc(THREAD_NAME[t.state] || t.state)}</span></span><span>${esc(t.title)}<span class="nm">${[t.step ? "step " + t.step : "", t.pr || "", t.lastActivity ? "active " + day(t.lastActivity) : ""].filter(Boolean).map(esc).join(", ")}</span></span></li>`).join("") : "<li><span></span><span>No thread is open.</span></li>"}</ul>`
+    + (done ? `<p class="asof" style="padding:4px 14px">${done} done thread${done === 1 ? "" : "s"} not shown.</p>` : "")
+    + `<h4>Open pull requests</h4><ul>${pulls.length ? pulls.map((p) => `<li><span class="num">#${esc(p.number)}${p.draft ? " draft" : ""}</span><span>${link(p.url, esc(p.title))}<span class="nm">${[p.branch || "", p.checks ? "checks " + p.checks : ""].filter(Boolean).map(esc).join(", ")}</span></span></li>`).join("") : "<li><span></span><span>No pull request is open.</span></li>"}</ul>`
+    + (branches.length ? `<h4>Branches with no open pull request</h4><ul>${branches.map((r) => `<li><span class="num">${esc(day(r.updatedAt))}</span><span class="nm">${esc(r.name)}</span></li>`).join("")}</ul>` : "")
+    + (w.skipped && w.skipped.length ? `<p class="asof unk" style="padding:4px 14px">Skipped, wrong shape in the live file: ${esc(w.skipped.join(", "))}</p>` : "") + "</details>";
+}
+
+/* ---------- where you are ---------- */
+function renderNow() {
+  const cur = curPhase(), ss = byPhase(cur.k), done = ss.filter((s) => s.status === "done").length, act = ss.filter((s) => s.status === "active").length;
+  const tot = steps.length, tdone = steps.filter((s) => s.status === "done").length;
+  const active = workOrder(steps.filter((s) => s.status === "active")), nu = nextUp(), off = offTrack();
+  $("svNow").innerHTML = `
+  <div><h3>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h3><div class="ph">${esc(cur.n)}</div>
+    <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}</div>
+    <div class="segbar" aria-hidden="true">${segs(done, act, 0, ss.length)}</div>
+    <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
+  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
+  <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing left to start in this phase.</li>'}</ol></div>
+  <div class="offt"><h3>Off track <span class="num" style="color:${off.length ? "var(--holds)" : "var(--muted)"}">${off.length}</span></h3><ul>${off.map((o) => {
+    const s = steps.find((x) => x.id === o.id);
+    if (o.blocked) return `<li>${rgl("blocked")}<button class="tx" type="button" data-go="${esc(s.id)}">In ${esc(phaseName(s.phase))}: <span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></li>`;
+    return `<li><span class="ic">${esc(o.k)}</span><span>${esc(o.t)}${s ? ` <button class="tx" type="button" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button>` : ""}</span></li>`;
+  }).join("") || '<li class="none">Nothing off track.</li>'}</ul></div>`;
+}
+
+function renderRail() {
+  const cur = curPhase(), shown = shownPhase();
+  $("svRail").innerHTML = PH.map((p) => {
+    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+    return `<button type="button" data-phase="${p.k}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur ? ", current phase" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="num" aria-hidden="true">${d}/${ss.length}</span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
+  }).join("");
+}
+
+/* ---------- number tiles ---------- */
+const ofCount = (n, t) => `${n}<small aria-hidden="true">/${t}</small><span class="sr"> of ${t}</span>`;
+function cullTiles(ci) {
+  if (!ci) return '<div class="none">No clean-up numbers saved yet.</div>';
+  const stop = cull.stopRule ? "Stop rule: " + cull.stopRule : "";
+  const rules = { debts: stop, decisions: stop, hooks: "Rule: hook lines only go down.", words: "Watched for regrowth." };
+  return CULL_KEYS.map((m, ki) => {
+    const sr = series(ci, m.k); if (!sr.length) return `<div class="tile"><span class="tl">${m.n}</span><span class="v">—</span></div>`;
+    const v = sr.map((x) => x.v), cur = v[v.length - 1], start = ci.base[m.k];
+    const markIx = ci.closeIx > 0 ? sr.findIndex((x) => x.i === ci.closeIx) : -1, key = "cleanup:" + ki;
+    return `<button type="button" class="tile" data-tile="${key}" aria-expanded="${ui.tiles.has(key)}">
+      <span class="tl">${m.n}</span>
+      <span class="row"><span class="v">${num(cur)}</span>${v.length > 1 ? delta(cur, start, { pctMode: true }) + delta(cur, v[v.length - 2]) : ""}</span>
+      ${v.length > 1 ? spark(v, { labels: sr.map((x) => x.label), markIx }) : '<span class="one">1 reading so far. The trend starts at the next measure.</span>'}
+      <span class="ft"><span>start <span class="num">${num(start)}</span></span><span>${v.length} reading${v.length === 1 ? "" : "s"}</span></span>
+      <span class="rule">${esc(rules[m.k] || "")} The % is against the start; ▲▼ is against the reading before.${markIx >= 0 && markIx < v.length - 1 ? " The dashed line is where the cull ended." : ""}</span></button>`;
+  }).join("");
+}
+function metaTiles(k) {
+  const data = phases && phases[k], list = data && Array.isArray(data.metrics) ? data.metrics.filter((m) => m && typeof m === "object") : [];
+  if (!list.length) return '<div class="none">No numbers saved for this phase yet.</div>';
+  return list.map((m, i) => {
+    const of = typeof m.value === "string" && m.value.match(/^\s*(\d+)\s+of\s+(\d+)\s*$/);
+    const sr = Array.isArray(m.series) ? m.series.filter(isNum) : [];
+    const tNum = m.target != null && /^\s*\d+(\.\d+)?\s*$/.test(String(m.target)) ? +m.target : null;
+    let viz;
+    if (sr.length > 1) {
+      const cur = isNum(m.value) ? m.value : sr[sr.length - 1], downGood = tNum != null ? cur > tNum : true;
+      viz = spark(sr, { labels: sr.map((_, j) => "Reading " + (j + 1)) }) + `<span class="ft"><span>was <span class="num">${num(sr[0])}</span></span>${delta(sr[sr.length - 1], sr[sr.length - 2], { downGood, neutral: tNum == null })}</span>`;
+    } else if (of) {
+      const n = +of[1], t = +of[2];
+      viz = t > 0 && t <= 30 ? `<span class="meter" aria-hidden="true">${Array.from({ length: t }, (_, j) => `<i class="${j < n ? "on" : ""}"></i>`).join("")}</span><span class="ft"><span>${Math.max(t - n, 0)} to go</span><span>1 reading</span></span>` : `<span class="one">${Math.max(t - n, 0)} to go.</span>`;
+    } else if (isNum(m.value)) viz = '<span class="one">1 reading so far. The trend starts at the next measure.</span>';
+    else viz = '<span class="one">No number yet.</span>';
+    const val = of ? ofCount(of[1], of[2]) : esc(num(m.value)), key = k + ":" + i;
+    const body = `<span class="tl">${esc(m.label || "Number")}</span><span class="row"><span class="v">${val}</span>${m.target != null && m.target !== "" ? `<span class="goal">goal ${esc(m.target)}</span>` : ""}</span>${viz}${m.rule ? `<span class="rule">${esc(m.rule)}</span>` : ""}`;
+    // A tile with no rule has nothing to open, so it is not a control.
+    return m.rule ? `<button type="button" class="tile" data-tile="${esc(key)}" aria-expanded="${ui.tiles.has(key)}">${body}</button>` : `<div class="tile">${body}</div>`;
+  }).join("");
+}
+
+/* ---------- steps ---------- */
+const landed = (id) => { const w = B && B.landed && B.landed[id]; return Array.isArray(w) && w.length ? w : null; };
+function stepRow(s, nextIds) {
+  const ni = nextIds.indexOf(s.id), lw = landed(s.id);
+  const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : ""];
+  const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = LBL[s.status] || LBL.todo;
+  return `<li class="${s.status}${open ? " open" : ""}" id="s-${esc(s.id)}">
+    <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
+      <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
+    <div class="rbody"><dl>
+      <dt>Status</dt><dd>${lbl}</dd>
+      ${s.why ? `<dt>Why</dt><dd>${esc(s.why)}</dd>` : ""}
+      ${s.note ? `<dt>Note</dt><dd><div class="${noteOpen ? "" : "clamp"}">${esc(s.note)}</div>${String(s.note).length > 260 ? `<button type="button" class="more" data-more="${esc(s.id)}">${noteOpen ? "Show less" : "Show all"}</button>` : ""}</dd>` : ""}
+      ${s.ask ? `<dt>Ask</dt><dd><div class="ask"><span>${esc(s.ask)}</span><button type="button" class="copy" data-copy="${esc(s.ask)}">Copy</button></div></dd>` : ""}
+      ${d ? `<dt>When</dt><dd><span class="num" style="font-size:13px">${esc(fmt(d.toISOString()))}</span></dd>` : ""}
+    </dl></div></li>`;
+}
+function pager(scope, page, pages, total, noun) {
+  if (pages <= 1) return "";
+  return `<div class="pager"><button type="button" data-pg="prev" data-scope="${scope}" ${page <= 0 ? "disabled" : ""}>← Previous</button>
+    <span class="pc">Page <span class="num">${page + 1}</span> of <span class="num">${pages}</span><span> · ${total} ${noun}</span></span>
+    <button type="button" data-pg="next" data-scope="${scope}" ${page >= pages - 1 ? "disabled" : ""}>Next →</button></div>`;
+}
+const clampPage = (p, pages) => Math.max(0, Math.min(p, pages - 1));
+const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "done"); return ix < 0 ? 0 : Math.floor(ix / pageSize()); };
+
+function renderPhase() {
+  const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
+  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+  const nextIds = nextUp().map((s) => s.id), size = pageSize();
+  const pages = Math.max(1, Math.ceil(open.length / size));
+  if (ui.page[k] == null) ui.page[k] = defaultPage(open);
+  const pg = ui.page[k] = clampPage(ui.page[k], pages);
+  const dPages = Math.max(1, Math.ceil(d / size)), dpg = ui.donePage[k] = clampPage(ui.donePage[k] || 0, dPages);
+  let asof = "", foot = "", tiles = "";
+  if (k === "cleanup") {
+    const ci = cullInfo(); tiles = cullTiles(ci);
+    if (ci) asof = ["Clean-up numbers", cull.closed ? "cull ended " + cull.closed : "", ci.batches.length ? "latest reading: " + ci.last.label : "no batch reported yet"].filter(Boolean).map(esc).join(" · ")
+      + (cull.note ? ` <button type="button" class="howto" data-how aria-expanded="${ui.how}">${ui.how ? "Hide how these are counted" : "How these are counted"}</button>` : "");
+  } else {
+    const pd = phases && phases[k]; tiles = metaTiles(k); asof = pd && pd.asOf ? esc(pd.asOf) : ""; foot = pd && pd.foot ? esc(pd.foot) : "";
+  }
+  const n = PH.indexOf(p) + 1;
+  $("svPhases").innerHTML = `<section class="box phase" id="p-${k}" aria-label="Phase ${n}, ${esc(p.n)}">
+    <div class="ph-head"><h3>Phase ${n}<span class="sr">, ${esc(p.n)}</span></h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done</span><div class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</div></div></div>
+    ${asof ? `<div class="asof">${asof}</div>` : ""}
+    ${k === "cleanup" && ui.how && cull && cull.note ? `<div class="howbody">${esc(cull.note)}</div>` : ""}
+    <div class="tiles">${tiles}</div>
+    ${foot ? `<div class="foot">${foot}</div>` : ""}
+    <div class="hint"><span>${open.length} open step${open.length === 1 ? "" : "s"}, in work order</span><span>Read only</span></div>
+    <ul class="rsteps">${open.slice(pg * size, (pg + 1) * size).map((s) => stepRow(s, nextIds)).join("") || `<li class="noneyet">${ss.length ? "Every step in this phase is done." : "No steps in this phase yet."}</li>`}</ul>
+    ${pager("open", pg, pages, open.length, "open steps")}
+    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${k}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
+      <div class="fb"><ul class="rsteps">${done.slice(dpg * size, (dpg + 1) * size).map((s) => stepRow(s, nextIds)).join("")}</ul>${pager("done", dpg, dPages, d, "done")}</div></div>` : ""}
+  </section>`;
+}
+
+/* ---------- side cards ---------- */
+function trendCard() {
+  const ci = cullInfo(); if (!ci || ci.pts.length < 2) return "";
+  return `<section class="box"><header><h3>Clean-up numbers over time</h3><span class="lbl">${ci.pts.length} readings</span></header>
+    <div class="trend">${CULL_KEYS.map((m) => { const sr = series(ci, m.k); if (sr.length < 2) return ""; const v = sr.map((x) => x.v), cur = v[v.length - 1];
+      const markIx = ci.closeIx > 0 ? sr.findIndex((x) => x.i === ci.closeIx) : -1;
+      return `<div class="trow"><span class="k">${m.n}</span>${spark(v, { w: 160, labels: sr.map((x) => x.label), markIx })}<span class="r"><span class="num">${num(cur)}</span>${delta(cur, ci.base[m.k], { pctMode: true })}</span></div>`; }).join("")}</div>
+    <div class="legend">${ci.closeIx > 0 && ci.closeIx < ci.pts.length - 1 ? "<span><i></i>cull ended</span>" : ""}<span>% against the start · down is good</span></div></section>`;
+}
+function burnCard() {
+  if (!steps.length) return "";
+  const today = new Date(), days = [];
+  for (let i = 4; i >= 0; i--) { const d = new Date(today); d.setDate(d.getDate() - i); days.push(d); }
+  const keys = days.map(dayKey);
+  const doneK = steps.filter((s) => s.status === "done").map((s) => { const d = when(s.updatedAt); return d ? dayKey(d) : ""; });
+  const touched = keys.map((k) => steps.filter((s) => { const d = when(s.updatedAt); return d && dayKey(d) === k; }).length);
+  const cum = keys.map((k) => doneK.filter((x) => x <= k).length);
+  const W = 300, H = 110, max = Math.max(steps.length, 1), bw = W / days.length, tmax = Math.max(...touched, 1);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Steps done by day">`;
+  [0, .5, 1].forEach((f) => { const y = H - 16 - (H - 26) * f; s += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)"/>`; });
+  days.forEach((d, i) => {
+    const x = i * bw + bw / 2, hC = (H - 26) * cum[i] / max, hT = (H - 26) * 0.45 * touched[i] / tmax;
+    s += `<rect x="${x - 14}" y="${H - 16 - hC}" width="12" height="${Math.max(hC, 1)}" rx="2" fill="var(--acc)"/>`;
+    s += `<rect x="${x + 2}" y="${H - 16 - hT}" width="12" height="${Math.max(hT, 1)}" rx="2" fill="var(--faint)"/>`;
+    s += `<text x="${x - 8}" y="${H - 19 - hC}" font-size="10" text-anchor="middle" fill="var(--muted)" font-family="var(--mono)">${cum[i]}</text>`;
+    s += `<text x="${x}" y="${H - 3}" font-size="10" text-anchor="middle" fill="var(--muted)" font-family="var(--mono)">${d.toLocaleDateString("en-US", { timeZone: CT, weekday: "short" })}</text>`;
+    s += `<rect x="${i * bw}" y="0" width="${bw}" height="${H}" fill="transparent" data-tip="${esc(dayLabel(d))}: ${cum[i]} done in total · ${touched[i]} steps changed that day"/>`;
+  });
+  s += "</svg>";
+  return `<section class="box"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num" aria-hidden="true">${cum[cum.length - 1]}/${steps.length}</span><span class="sr">${cum[cum.length - 1]} of ${steps.length} steps</span></span></header>
+    <div class="burn">${s}</div><div class="legend"><span><span class="dot"></span> done so far</span><span><span class="dot" style="background:var(--faint)"></span> steps changed that day</span></div></section>`;
+}
+function feedCard(n = 8) {
+  const recent = steps.filter((s) => when(s.updatedAt)).sort((a, b) => when(b.updatedAt) - when(a.updatedAt)).slice(0, n);
+  if (!recent.length) return "";
+  return `<section class="box"><header><h3>Latest changes</h3><span class="lbl">${esc(dayLabel(new Date()))}</span></header>
+    <ul class="feed">${recent.map((s) => `<li><span class="when">${esc(fresh(s.updatedAt) ? timeLabel(when(s.updatedAt)) : ago(s.updatedAt))}</span>${rgl(s.status)}<span><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join("")}</ul>
+    <button type="button" class="morelink" data-view-go="log">All changes by day →</button></section>`;
+}
+function renderSide() {
+  $("svSide").innerHTML = (shownPhase() === "cleanup" ? trendCard() : "") + feedCard() + burnCard();
+  $("svSide2").innerHTML = trendCard() + burnCard();
+}
+
+/* ---------- changes view ---------- */
+function renderLog() {
+  const ev = steps.filter((s) => when(s.updatedAt)).map((s) => ({ d: when(s.updatedAt), s })).sort((a, b) => b.d - a.d);
+  if (!ev.length) { $("svDays").innerHTML = '<section class="box"><p class="lead">No changes recorded yet.</p></section>'; return; }
+  const perDay = {}; ev.forEach((e) => { const k = dayKey(e.d); perDay[k] = (perDay[k] || 0) + 1; });
+  const size = pageSize(), pages = Math.max(1, Math.ceil(ev.length / size)), pg = ui.logPage = clampPage(ui.logPage, pages);
+  const slice = ev.slice(pg * size, (pg + 1) * size), before = pg > 0 ? dayKey(ev[pg * size - 1].d) : null;
+  const groups = []; slice.forEach((e) => { const k = dayKey(e.d); let g = groups[groups.length - 1]; if (!g || g.k !== k) { g = { k, d: e.d, list: [] }; groups.push(g); } g.list.push(e); });
+  $("svDays").innerHTML = `<section class="box">${groups.map((g, gi) => {
+    const all = ev.filter((e) => dayKey(e.d) === g.k), nd = all.filter((e) => e.s.status === "done").length, cont = gi === 0 && before === g.k;
+    return `<div class="day"><h3><span>${esc(dayLabel(g.d))}${cont ? ' <span class="lbl">continued</span>' : ""}</span><span class="lbl">${perDay[g.k]} change${perDay[g.k] === 1 ? "" : "s"}${nd ? ` · <span style="color:var(--good)">${nd} done</span>` : ""}</span></h3>
+    ${g.list.map((e) => { const s = e.s;
+      return `<div class="ev ${s.status}"><span class="when">${esc(timeLabel(e.d))}</span>${rgl(s.status)}<div><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
+        <div class="gist">${esc(firstSentence(s.note) || firstSentence(s.why))}</div></div></div>`; }).join("")}</div>`;
+  }).join("")}${pager("log", pg, pages, ev.length, "changes")}</section>
+  <p class="lead">Each step shows once, on the day it last changed.</p>`;
+}
+
+/* ---------- reference view ---------- */
+function renderRef() {
+  const copyBlock = (text) => `<div class="ask"><span>${esc(text)}</span><button type="button" class="copy" data-copy="${esc(text)}">Copy</button></div>`;
+  const tp = (key, id, title, sub, body) => `<div class="tp${ui.tps.has(key) ? " open" : ""}"><button type="button" data-tp="${esc(key)}" aria-expanded="${ui.tps.has(key)}"><span class="id">${esc(id)}</span><span>${esc(title)}<span class="sm">${esc(sub)}</span></span><span class="chev" aria-hidden="true">▶</span></button><div class="tb">${body}</div></div>`;
+  const a = advisor;
+  let guide;
+  if (!a) guide = '<p class="lead">No hand-off guide saved yet.</p>';
+  else {
+    const setup = Array.isArray(a.setup) ? a.setup : [], each = Array.isArray(a.each) ? a.each : [];
+    guide = (setup.length ? tp("g1", "1", "Set up once", `${setup.length} steps`, `<ol>${setup.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>`) : "")
+      + (each.length ? tp("g2", "2", "Every time", `${each.length} habits`, `<ol>${each.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>`) : "")
+      + (a.prompt ? tp("g3", "3", "Project instructions", "The advisor guide, ready to paste", copyBlock(a.prompt)) : "");
+  }
+  const list = Array.isArray(topics) ? topics : [];
+  const tbody = (t) => `<ul>${(Array.isArray(t.points) ? t.points : []).map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`
+    + (Array.isArray(t.blocks) ? t.blocks : []).filter((b) => b && b.text).map((b) => `${b.label ? `<div class="blbl">${esc(b.label)}</div>` : ""}${copyBlock(b.text)}`).join("")
+    + (() => { const l = (Array.isArray(t.sources) ? t.sources : []).filter((x) => x && /^https:\/\//.test(x.url || "")); return l.length ? `<div class="src"><span class="lbl">Sources:</span>${l.map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.label || x.url)}</a>`).join("")}</div>` : ""; })();
+  $("svRef").innerHTML = `<section class="box gcard"><header><h3>Hand-off guide</h3><span class="lbl">for a new advisor chat</span></header>${guide}</section>
+    <section class="box gcard"><header><h3>Reasoning topics</h3><span class="lbl"><span class="num">${list.length}</span> topics</span></header>
+    ${list.length ? list.map((t) => tp("t:" + t.id, t.id, t.title || "Topic", t.summary || "", tbody(t))).join("") : '<p class="lead">No topics saved yet.</p>'}</section>`;
+}
+
+/* ---------- records view: health, then the count and newest entries of each listed record kind ---------- */
+function renderRec() {
+  const link = (url, text) => (url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text);
+  const day = (iso) => { const d = when(iso); return d ? d.toLocaleDateString("en-US", { timeZone: CT, month: "short", day: "numeric" }) : ""; };
+  const health = B && Array.isArray(B.health) ? B.health : [], recs = B && Array.isArray(B.records) ? B.records : [];
+  $("svRec").innerHTML = `<section class="box gcard"><header><h3>Health</h3><span class="lbl">read when built</span></header>
+    ${health.length ? `<ul class="hl">${health.map((x) => `<li><span class="k">${esc(x.name)}</span><span${unknownRead(x.read) ? ' class="unk"' : ""}>${x.home ? link(x.url, `<span class="id">${esc(x.home)}</span>`) + ", changed at " : ""}<span class="num">${esc(unknownRead(x.read) ? reason(x.read) : x.read)}</span></span></li>`).join("")}</ul>`
+      : '<p class="lead unk">Health: not read. This page holds no roadmap build yet.</p>'}</section>`
+    + (recs.length ? recs.map((r) => `<section class="box gcard"><header><h3>${esc(r.name)}</h3><span class="lbl">${r.home ? `<span class="id">${esc(r.home)}</span>` : ""}</span></header>
+      ${r.count == null ? `<p class="lead unk">${esc(reason(r.why || "not read"))}</p>`
+        : `<div class="count">${r.count}</div>${r.newest.length ? `<div class="asof">Newest ${r.newest.length}</div><ul class="rc">${r.newest.map((n) => `<li><span class="when">${esc(day(n.added))}</span><span>${link(n.url, esc(n.title))}<span class="nm">${esc(n.name)}</span></span></li>`).join("")}</ul>${r.newestWhy ? `<p class="asof">${esc(r.newestWhy)}</p>` : ""}` : (r.newestWhy ? `<p class="lead unk">Newest: ${esc(reason(r.newestWhy))}</p>` : '<p class="lead">No entry has a commit yet.</p>')}`}
+      </section>`).join("")
+      : '<section class="box gcard"><p class="lead unk">Records: not read. This page holds no roadmap build yet.</p></section>');
+}
+
+/* ---------- no roadmap ---------- */
+// The repo's name is the page's identity name (meta/page); with none, "this repo".
+const askText = () => {
+  const id = (state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
+  return "Start a roadmap for " + (name || "this repo") + ", as the roadmap skill says. Then have the waiting-page writer put its roadmap block on this repo's waiting page.";
+};
+function noRoadmap() {
+  const steps0 = B && Array.isArray(B.panels) ? B.panels.find((p) => p.name === "Steps") : null;
+  const said = steps0 ? reason(steps0.read) : "This page holds no roadmap build yet.";
+  const why = B && D === null ? "This repo has no roadmap yet, so the build had no steps to read. Your questions are not affected."
+    : "No roadmap has been built into this page yet, so there are no steps to show. Your questions are not affected.";
+  return `<section class="box nob"><h3><span class="rg unk" aria-hidden="true"></span>Plan: unknown</h3>
+    <p>${why}</p>
+    <details><summary>What the build said</summary><pre>${esc(said)}</pre></details>
+    <button type="button" class="btn alt" data-ask>Copy the ask to start a roadmap</button>
+    <textarea id="svAsk" rows="4" readonly hidden aria-label="The ask to start a roadmap"></textarea></section>`;
+}
+
+/* ---------- views ---------- */
+const VIEWS = [["plan", "Plan"], ["log", "Changes"], ["ref", "Reference"], ["rec", "Records"]];
+const NOPLAN = (what) => `<section class="box"><p class="lead">${what} appear here once the plan can be read.</p></section>`;
+function renderPlan() { if (!hasData) return; renderNow(); renderRail(); renderPhase(); renderSide(); renderLog(); }
+function setView(v) {
+  ui.view = v;
+  root.querySelectorAll("[data-view]").forEach((b) => { b.setAttribute("aria-selected", String(b.dataset.view === v)); b.tabIndex = b.dataset.view === v ? 0 : -1; });
+  VIEWS.forEach(([k]) => { $("v-" + k).hidden = k !== v; });
+  saveView();
+}
+function build() {
+  root.innerHTML = `<div class="sv-head">${readAt()}</div>${liveWork()}${hasData ? '<section class="now" id="svNow" aria-label="Where the plan stands"></section>' : ""}
+    <div class="views" role="tablist" aria-label="Status views">${VIEWS.map(([k, n]) => `<button type="button" role="tab" id="vt-${k}" data-view="${k}" aria-controls="v-${k}" aria-selected="false">${n}</button>`).join("")}</div>
+    <div class="sview" id="v-plan" role="tabpanel" aria-labelledby="vt-plan">${hasData ? '<nav class="prail" id="svRail" aria-label="Phases"></nav><div class="cols"><div id="svPhases"></div><aside class="side" id="svSide"></aside></div>' : noRoadmap()}</div>
+    <div class="sview" id="v-log" role="tabpanel" aria-labelledby="vt-log" hidden>${hasData ? '<div class="cols"><div id="svDays"></div><aside class="side" id="svSide2"></aside></div>' : NOPLAN("Changes")}</div>
+    <div class="sview" id="v-ref" role="tabpanel" aria-labelledby="vt-ref" hidden>${hasData ? '<div class="cols"><div id="svRef"></div><aside class="side"><section class="box"><header><h3>About this area</h3></header><p class="lead">Reference is not a phase. It holds the hand-off guide for a new advisor thread and the reasoning behind the plan. Steps point here; nothing here is a to-do.</p></section></aside></div>' : NOPLAN("The hand-off guide and topics")}</div>
+    <div class="sview" id="v-rec" role="tabpanel" aria-labelledby="vt-rec" hidden><div class="cols"><div id="svRec"></div><aside class="side"><section class="box"><header><h3>About this area</h3></header><p class="lead">Health and records are read from the repo when the page is built. Each card says the commit it read. A card that could not be read says why.</p></section></aside></div></div>`;
+  if (hasData) { renderPlan(); renderRef(); }
+  renderRec();
+  setView(ui.view);
+}
+
+/* ---------- actions ---------- */
+function toast(msg) { const t = $("svToast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 2800); }
+function copyText(txt, btn, fallback) {
+  const label = btn.textContent;
+  const ok = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = label; }, 1400); };
+  try { navigator.clipboard.writeText(txt).then(ok, fallback); } catch (e) { fallback(); }
+}
+function goStep(id) {
+  const s = steps.find((x) => x.id === id); if (!s) return;
+  if (PH.some((p) => p.k === s.phase)) ui.phase = s.phase;
+  const size = pageSize();
+  if (s.status === "done") { ui.folds.add(s.phase); ui.donePage[s.phase] = Math.floor(doneList(s.phase).findIndex((x) => x.id === id) / size); }
+  else ui.page[s.phase] = Math.floor(openList(s.phase).findIndex((x) => x.id === id) / size);
+  ui.open.add(id);
+  setView("plan"); renderPlan();
+  const li = document.getElementById("s-" + id);
+  if (li) { li.scrollIntoView({ behavior: "smooth", block: "center" }); const b = li.querySelector(".rrow"); if (b) b.focus({ preventScroll: true }); }
+}
+root.addEventListener("click", (e) => {
+  const hit = (sel) => e.target.closest(sel);
+  let n;
+  if ((n = hit("[data-ask]"))) { const ask = askText(); copyText(ask, n, () => { const box = $("svAsk"); box.value = ask; box.hidden = false; box.select(); toast("Select the text in the box and copy it."); }); return; }
+  if ((n = hit("[data-copy]"))) { copyText(n.dataset.copy, n, () => { const sp = n.previousElementSibling; if (sp) { const r = document.createRange(); r.selectNodeContents(sp); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast("Selected. Copy it with your keyboard."); }); return; }
+  if ((n = hit("[data-more]"))) { const id = n.dataset.more, c = n.previousElementSibling, shut = c.classList.toggle("clamp"); shut ? ui.notes.delete(id) : ui.notes.add(id); n.textContent = shut ? "Show all" : "Show less"; return; }
+  if ((n = hit("[data-go]"))) { goStep(n.dataset.go); return; }
+  if ((n = hit("[data-view-go]"))) { setView(n.dataset.viewGo); window.scrollTo({ top: 0 }); return; }
+  if ((n = hit("[data-view]"))) { setView(n.dataset.view); return; }
+  if ((n = hit("[data-phase]"))) { ui.phase = n.dataset.phase; setView("plan"); renderPlan(); const f = root.querySelector(`[data-phase="${ui.phase}"]`); if (f) f.focus(); return; }
+  if ((n = hit("[data-pg]"))) {
+    const sc = n.dataset.scope, dir = n.dataset.pg === "next" ? 1 : -1, k = shownPhase();
+    if (sc === "log") ui.logPage += dir; else if (sc === "done") ui.donePage[k] = (ui.donePage[k] || 0) + dir; else ui.page[k] = (ui.page[k] || 0) + dir;
+    if (sc === "log") renderLog(); else renderPhase();
+    const btn = root.querySelector(`[data-scope="${sc}"][data-pg="${n.dataset.pg}"]:not(:disabled)`) || root.querySelector(`[data-scope="${sc}"][data-pg]:not(:disabled)`);
+    if (btn) btn.focus({ preventScroll: true });
+    const top = sc === "log" ? $("svDays") : root.querySelector("#svPhases .rsteps");
+    if (top && top.getBoundingClientRect().top < 60) top.scrollIntoView({ block: "start" });
+    return;
+  }
+  if ((n = hit("[data-how]"))) { ui.how = !ui.how; renderPhase(); const x = root.querySelector("[data-how]"); if (x) x.focus(); return; }
+  if ((n = hit("[data-tile]"))) { const k = n.dataset.tile, o = n.getAttribute("aria-expanded") !== "true"; n.setAttribute("aria-expanded", String(o)); o ? ui.tiles.add(k) : ui.tiles.delete(k); return; }
+  const toggle = (btn, set, key) => { const p = btn.closest("li, .tp, .donefold"); const o = !p.classList.contains("open"); p.classList.toggle("open", o); btn.setAttribute("aria-expanded", String(o)); o ? set.add(key) : set.delete(key); };
+  if ((n = hit("[data-row]"))) { toggle(n, ui.open, n.dataset.row); return; }
+  if ((n = hit("[data-tp]"))) { toggle(n, ui.tps, n.dataset.tp); return; }
+  if ((n = hit("[data-fold]"))) { toggle(n, ui.folds, n.dataset.fold); return; }
+});
+// The view switch takes the arrow keys, as a tab row does.
+root.addEventListener("keydown", (e) => {
+  const t = e.target.closest && e.target.closest("[data-view]"); if (!t || (e.key !== "ArrowRight" && e.key !== "ArrowLeft")) return;
+  e.preventDefault();
+  const at = VIEWS.findIndex(([k]) => k === t.dataset.view), nx = VIEWS[(at + (e.key === "ArrowRight" ? 1 : VIEWS.length - 1)) % VIEWS.length][0];
+  setView(nx); $("vt-" + nx).focus();
+});
+const tip = $("svTip");
+root.addEventListener("pointerover", (e) => { const el = e.target.closest && e.target.closest("[data-tip]"); if (!el) { tip.classList.remove("on"); return; } tip.textContent = el.dataset.tip; tip.classList.add("on"); });
+root.addEventListener("pointerleave", () => tip.classList.remove("on"));
+root.addEventListener("pointermove", (e) => { if (!tip.classList.contains("on")) return; const x = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8); tip.style.left = Math.max(8, x) + "px"; tip.style.top = (e.clientY + 14) + "px"; });
+
+// Rows are measured once they show, so the first draw may change the page size: draw again then.
+let built = false;
+function shown() {
+  if (!built) { built = true; build(); if (hasData && measureRows()) { ui.page = {}; renderPlan(); } return; }
+  if (hasData && measureRows()) { ui.page = {}; renderPlan(); }
+}
+document.addEventListener("statusshown", shown);
+let lastSize = pageSize(), sizeT = null;
+window.addEventListener("resize", () => {
+  clearTimeout(sizeT);
+  sizeT = setTimeout(() => {
+    if (!built || $("sPanel").hidden || !hasData) return;
+    measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = {}; renderPlan();
+  }, 150);
+});
 })();
 </script>
