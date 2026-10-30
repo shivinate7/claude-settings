@@ -484,6 +484,7 @@ const STEPS_BAD = [
   ["a step with neither click nor wait", [{}]],
   ["a step with both click and wait", [{ click: "#a", wait: "#b" }]],
   ["a step with only a state", [{ state: "hidden" }]],
+  ["a click step with a state", [{ click: "#a", state: "visible" }]],
   ["a step with another key", [{ tap: "#a" }]],
   ["a step that is a string", ["#a"]],
   ["a step that is null", [null]],
