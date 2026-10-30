@@ -141,7 +141,7 @@ gives no page URL: no item exists yet.
 ## Keep the page on main's code
 
 The writer runs this at each wake and before each republish. A lane never runs it. Every republish
-is main's `page.html` with the live `designData` kept, never the live page's own code (owner,
+is main's `page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (owner,
 2026-10-29 14:47 CDT; decision `questions-go-to-owner`).
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
@@ -151,7 +151,9 @@ is main's `page.html` with the live `designData` kept, never the live page's own
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`.
 3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
-   `<out>` is main's page with the live `designData` kept. When you also add a design, do it in
+   `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
+   (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
+   When you also add a design, do it in
    `<out>` first and republish once ("Add a design").
 4. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
    could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
@@ -305,8 +307,8 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
    Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-3. Build the new page as "Keep the page on main's code" steps 1 to 3 say, from the saved live page,
-   so the roadmap block stays. In the built page, add `"slug": "<html string>"` to the JSON in
+3. Build the new page as "Keep the page on main's code" steps 1 and 2 say, from the saved live page:
+   `<out>` keeps the live roadmap block with the live designs. In `<out>`, add `"slug": "<html string>"` to the JSON in
    `<script type="application/json" id="designData">`, and change nothing else. Never edit the live
    page's own code.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
@@ -373,14 +375,13 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
 3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
-   from plain `page.html`, as "Keep the page on main's code" step 3 says:
-   `stale_pages.py --page <fetched page> --write <main page>`, then
-   `python3 ~/.claude/skills/waiting-page/splice.py --page <main page> --carry <fetched page> --out <new page>`.
-   The carry puts the live `designData` block and roadmap block into main's page, byte for byte. A live
-   page with no roadmap block is carried like any other: it gives its `designData` block, and the template
-   keeps its empty roadmap block. The carry refuses, with nothing written, when the template lacks
-   either block, when the live page has no `designData` block, and when either file has a broken or
-   doubled block. Republish `<new page>` to the same URL
+   from plain `page.html`, as "Keep the page on main's code" step 2 says:
+   `stale_pages.py --page <fetched page> --write <new page>`.
+   `--write` carries the live `designData` block and roadmap block into main's page, byte for byte. A live
+   page with no roadmap block gives its `designData` block, and the template keeps its empty roadmap
+   block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
+   lacks either block, when the live page has no `designData` block, or when either file has a
+   broken or doubled block. Republish `<new page>` to the same URL
    with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
    republish of plain `page.html` drops the open items' designs and the Status tab.
    `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
