@@ -126,8 +126,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
     Two decisions conflict on where a scope skip sits. The owner's ruling is open.
-    - Decision `test-strategy-reset` runs a job only when its suites' files change, to save macOS minutes.
-    - Decision `same-check-kinds` (every repo runs the same check kinds) makes a skipped needed job fail the rollup.
+    Decision `test-strategy-reset` runs a job only when its suites' files change, to save macOS
+    minutes. Decision `same-check-kinds` (every repo runs the same check kinds) fails the rollup on
+    a skipped job.
     The rollup needs the skip on the CI step that runs the suite or lint, not on the job. A job whose
     CI steps all skip still starts a runner and bills its setup minutes (step 13), macOS most.
     Unmeasured: the size of that cost in this repo.
