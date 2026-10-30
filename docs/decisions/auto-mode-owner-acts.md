@@ -6,7 +6,7 @@ Owner, 2026-10-30 16:24 CDT, relayed by the coordinator session: the auto-mode c
 
 ### The test for a new entry
 
-An act gets an allow entry only when all three hold:
+An act gets an allow entry only if all three hold:
 
 - The owner always approves it. A named refusal shows it (`building-guard-needs-incident`).
 - It can be undone, or it loses nothing.
@@ -25,7 +25,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 
 The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
 
-"Owner PR Housekeeping" never covers a merge, an approval, a review, a title or body edit, a branch or ref delete, a force push, a PR nobody named, or a repo outside `shivinate7`. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge.
+"Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a branch or ref delete, a force push, a PR nobody named, or a repo outside `shivinate7`. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge.
 
 ### Incidents for the two new entries
 
