@@ -1,9 +1,9 @@
 {
   "title": "The waiting page is named \"<repo> Queue\"",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33741,
   "why": "shiv, Oct 30 14:33 CDT (chat): the artifact's name should just be the repo name plus Queue. Read on main (skills/waiting-page/page.html): the static <title> is 'Questions', and setTitle writes '<name>: Questions' or '<name>: Status' from meta/page identity.name.",
-  "note": "Fix: the static <title> and setTitle both give '<name> Queue' (the open tab may follow after a dot, never instead), falling back to 'Queue' with no name; the page keeps the name 'waiting page' everywhere else (rule speak-one-name-per-thing). The roadmap page is already retired on main (skill roadmap); this branch's CLAUDE.md and README now point at the waiting page (Triage 12, Oct 30). Triage 12 runs the <title> line as a shortcut in the live page until this lands. Done check: the published artifact and the browser tab read 'claude-settings Queue'. Needs no answer. Port: yes, every repo with a waiting page. Placed ahead of note-always-open (Triage 12, Oct 30): shiv asked for both in chat; this one is two lines.",
-  "updatedAt": "2026-10-30T19:40:00Z"
+  "note": "Fix: the static <title> and setTitle both give '<name> Queue' (the open tab may follow after a dot, never instead), falling back to 'Queue' with no name; the page keeps the name 'waiting page' everywhere else (rule speak-one-name-per-thing). The roadmap page is already retired on main (skill roadmap); this branch's CLAUDE.md and README now point at the waiting page (Triage 12, Oct 30). Triage 12 runs the <title> line as a shortcut in the live page until this lands. Done check: the published artifact and the browser tab read 'claude-settings Queue'. Needs no answer. Port: yes, every repo with a waiting page. Placed ahead of note-always-open (Triage 12, Oct 30): shiv asked for both in chat; this one is two lines. Lane page-name-queue: draft PR #874, batch 37.",
+  "updatedAt": "2026-10-30T21:20:00Z"
 }
