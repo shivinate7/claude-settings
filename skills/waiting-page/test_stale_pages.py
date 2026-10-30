@@ -15,16 +15,40 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CMD = os.environ.get("STALE_PAGES_UNDER_TEST") or os.path.join(HERE, "stale_pages.py")
+SPLICE = os.environ.get("SPLICE_UNDER_TEST") or os.path.join(HERE, "splice.py")  # the same seam as test_splice.py
+DESIGN_BLOCK = re.compile(r'<script type="application/json" id="designData">.*?</script>', re.S)
 LINT = os.path.realpath(os.path.join(HERE, "..", "..", "lint"))
 HOOKS = os.path.realpath(os.path.join(HERE, "..", "..", "hooks"))
 sys.path.insert(0, LINT)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
-RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run)
 TEMPLATE = os.path.join(HERE, "page.html")
 with open(TEMPLATE, encoding="utf-8") as f:
     PAGE = f.read()
 URL = "https://claude.ai/artifact/%s"
+RUN_FOLDER = None  # made in setUpModule
+
+OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
+DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>"}'
+# A roadmap block as build.py --block writes it: markup escaped, a lone quote, the escaped form of the closing marker.
+ROADMAP_BODY = ('\n<script>window.ROADMAP_DATA = {"steps": {"c1": {"note": "a \\u003c!-- b <\\/script> Don\'t '
+                '\\u003c!-- /roadmap:data -->"}}}; window.ROADMAP_BUILD = {"repo": "r"};</script>\n')
+ROADMAP_RE = re.compile(re.escape(OPEN) + r".*?" + re.escape(CLOSE), re.S)
+
+
+def with_both_blocks(page):
+    """`page` with its designData and its roadmap block filled, as a live page holds them."""
+    page = page.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1)
+    return ROADMAP_RE.sub(lambda m: OPEN + ROADMAP_BODY + CLOSE, page, count=1)
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 # Fixtures, all derived from page.html at run time. A live page holds backslash-u escapes in its mockups.
 BLOCK = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
@@ -122,6 +146,72 @@ class Stale(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("current: mocked", out)
 
+    def live_with_both_blocks(self):
+        live = with_both_blocks(PAGE)
+        self.assertTrue(re.search(re.escape(OPEN) + r"\s*" + re.escape(CLOSE), PAGE), "page.html has no empty roadmap block")
+        self.assertIn(ROADMAP_BODY, live, "the roadmap block was not filled")
+        return live
+
+    def test_page_differing_only_inside_the_two_blocks_is_current(self):
+        root = self.repo("blocks", "GGG")
+        self.fetch("GGG", self.live_with_both_blocks())
+        code, out = self.run_cmd(root)
+        self.assertEqual(code, 0, out)
+        self.assertIn("current: blocks", out)
+
+    def test_change_outside_the_blocks_is_behind_even_with_both_blocks_filled(self):
+        live = self.live_with_both_blocks()
+        changes = {
+            "far from them": live.replace("<style>", "<style>/* old */", 1),
+            "right after the roadmap block": live.replace(CLOSE, CLOSE + "<p>old template</p>", 1),
+        }
+        root = self.repo("changed", "HHH")
+        for name, text in changes.items():
+            self.assertNotEqual(text, live, name)
+            with self.subTest(name):
+                self.fetch("HHH", text)
+                code, out = self.run_cmd(root)
+                self.assertEqual(code, 1, out)
+                self.assertIn("behind: changed", out)
+
+    def carry_into_template(self, live):
+        """page.html with the live page's blocks carried in (splice.py --carry), as the writer republishes it."""
+        live_path = os.path.join(self.tmp.name, "live.html")
+        carried_path = os.path.join(self.tmp.name, "carried.html")
+        with open(live_path, "w", encoding="utf-8", newline="") as f:
+            f.write(live)
+        r = subprocess.run([sys.executable, SPLICE, "--page", os.path.join(HERE, "page.html"), "--carry", live_path,
+                            "--out", carried_path], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(carried_path, encoding="utf-8", newline="") as f:
+            return f.read()
+
+    def test_a_carry_of_a_page_from_before_the_roadmap_block_keeps_its_designs_and_reads_current(self):
+        # The first batch: every live page predates the roadmap block, and its designs must survive the republish.
+        self.live_with_both_blocks()  # the template has the block to keep
+        old = ROADMAP_RE.sub("", PAGE.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1), count=1)
+        self.assertNotEqual(DESIGN_BLOCK.findall(old), DESIGN_BLOCK.findall(PAGE))
+        carried = self.carry_into_template(old)
+        self.assertEqual(DESIGN_BLOCK.findall(carried), DESIGN_BLOCK.findall(old), "the carry lost the live designData")
+        self.assertTrue(re.search(re.escape(OPEN) + r"\s*" + re.escape(CLOSE), carried), "the template's empty roadmap block is gone")
+        self.fetch("JJJ", carried)
+        code, out = self.run_cmd(self.repo("before", "JJJ"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("current: before", out)
+
+    def test_a_carry_reads_current_and_keeps_the_live_designs(self):
+        # stale_pages empties designData on both sides, so "current" cannot show a loss of the live mockups.
+        # A republish of plain page.html reads current with designData empty; only the carry keeps them.
+        live = self.live_with_both_blocks()
+        self.assertNotEqual(DESIGN_BLOCK.findall(live), DESIGN_BLOCK.findall(PAGE), "the template holds the live designs")
+        carried = self.carry_into_template(live)
+        self.assertEqual(DESIGN_BLOCK.findall(carried), DESIGN_BLOCK.findall(live), "the carry lost the live designData")
+        self.assertIn(ROADMAP_BODY, carried, "the carry lost the live roadmap block")
+        self.fetch("III", carried)
+        code, out = self.run_cmd(self.repo("carried", "III"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("current: carried", out)
+
     def test_page_with_no_fetched_file_is_unknown_never_current(self):
         code, out = self.run_cmd(self.repo("unfetched", "EEE"))
         self.assertEqual(code, 1, out)
@@ -214,6 +304,37 @@ class Stale(unittest.TestCase):
         with open(out, encoding="utf-8", newline="") as f:
             self.assertEqual(f.read(), set_body(PAGE, STALE_BODY))
 
+    def write_out(self, live_text):
+        """Run --page <live> --write OUT against page.html; (OUT text, the run). OUT is read without newline changes."""
+        live = write_text(os.path.join(self.fetched, "live.html"), live_text)
+        out = os.path.join(self.tmp.name, "republish.html")
+        r = self.page_run(live, "--main", TEMPLATE, "--write", out)
+        self.assertTrue(os.path.isfile(out), r.stdout + r.stderr)
+        with open(out, encoding="utf-8", newline="") as f:
+            return f.read(), r
+
+    def test_write_carries_the_live_designdata_and_roadmap_blocks_byte_for_byte(self):
+        # The writer republishes OUT: a roadmap block left empty here gives a blank Status tab, and stale_pages
+        # still reads the page current because its compare empties that block.
+        def crlf(text):  # CRLF inside the block: a carry that re-serializes it would change these bytes
+            return text.replace(ROADMAP_BODY, ROADMAP_BODY.replace("\n", "\r\n"), 1)
+        live_text = crlf(with_both_blocks(ALTERED))  # behind: differs from page.html outside the blocks
+        self.assertIn(ROADMAP_BODY.replace("\n", "\r\n"), live_text)
+        out, r = self.write_out(live_text)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(ROADMAP_RE.findall(out), ROADMAP_RE.findall(live_text), "OUT lost the live roadmap block")
+        self.assertEqual(DESIGN_BLOCK.findall(out), DESIGN_BLOCK.findall(live_text), "OUT lost the live designData block")
+        self.assertEqual(out, crlf(with_both_blocks(PAGE)), "OUT is not page.html with the two live blocks")
+
+    def test_write_of_a_page_with_no_roadmap_block_keeps_the_live_designs_and_the_templates_empty_block(self):
+        live_text = ROADMAP_RE.sub("", set_body(ALTERED, DESIGN_BODY), count=1)  # a page from before the roadmap block
+        self.assertNotIn(OPEN, live_text)
+        out, r = self.write_out(live_text)
+        self.assertNotEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(DESIGN_BLOCK.findall(out), DESIGN_BLOCK.findall(live_text), "OUT lost the live designData block")
+        self.assertEqual(ROADMAP_RE.findall(out), ROADMAP_RE.findall(PAGE), "OUT lost the template's empty roadmap block")
+        self.assertEqual(out, set_body(PAGE, DESIGN_BODY), "OUT is not page.html with the live designData")
+
     def test_current_page_with_mockups_is_current_and_check_mode_writes_nothing(self):
         mocked = write_text(os.path.join(self.fetched, "mocked.html"), set_body(PAGE, MOCK_BODY))
         before = self.snapshot()
@@ -254,6 +375,7 @@ class Stale(unittest.TestCase):
                                capture_output=True, text=True, timeout=30)
         self.assertNotEqual(probe.returncode, 0, "the temp folder is inside a git checkout, so the script finds that")
         shutil.copy2(CMD, os.path.join(installed, "stale_pages.py"))
+        shutil.copy2(SPLICE, os.path.join(os.path.dirname(os.path.join(installed, "stale_pages.py")), "splice.py"))
         write_text(os.path.join(installed, "page.html"), ALTERED)
         link_repo_dirs(claude)
         pointer = write_text(os.path.join(claude, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone)
@@ -277,8 +399,11 @@ class Stale(unittest.TestCase):
     def test_script_run_from_inside_a_checkout_reads_that_checkouts_origin_main(self):
         with open(CMD, encoding="utf-8") as f:
             script_text = f.read()
+        with open(SPLICE, encoding="utf-8") as f:
+            splice_text = f.read()
         clone = self.make_clone("own", {"skills/waiting-page/page.html": PAGE,
-                                        "skills/waiting-page/stale_pages.py": script_text})
+                                        "skills/waiting-page/stale_pages.py": script_text,
+                                        "skills/waiting-page/splice.py": splice_text})
         home = os.path.join(self.tmp.name, "home")
         os.makedirs(os.path.join(home, ".claude", "skills", "waiting-page"))
         link_repo_dirs(os.path.join(home, ".claude"))
@@ -349,6 +474,7 @@ class Stale(unittest.TestCase):
         os.makedirs(installed)
         script = os.path.join(installed, "stale_pages.py")
         shutil.copy2(CMD, script)
+        shutil.copy2(SPLICE, os.path.join(os.path.dirname(script), "splice.py"))
         write_text(os.path.join(installed, "page.html"), ALTERED)
         link_repo_dirs(claude, hooks=False)
         same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
@@ -362,6 +488,7 @@ class Stale(unittest.TestCase):
         os.makedirs(installed)
         script = os.path.join(installed, "stale_pages.py")
         shutil.copy2(CMD, script)
+        shutil.copy2(SPLICE, os.path.join(os.path.dirname(script), "splice.py"))
         write_text(os.path.join(installed, "page.html"), ALTERED)
         link_repo_dirs(claude)
         # Bytes that are not UTF-8, then a valid pointer line to the clone.
@@ -393,7 +520,4 @@ class Stale(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    try:
-        unittest.main()
-    finally:
-        shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+    unittest.main()

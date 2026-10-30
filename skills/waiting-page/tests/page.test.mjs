@@ -8,6 +8,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { needEnv } from "../../../testing/skip-locally-fail-in-ci.mjs";
@@ -36,8 +37,13 @@ const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, 
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
-  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
+// dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
+// meta docs, which the status part must never read. window.__reads lists every read as
+// [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra = {} }) {
+  const { meta: metaExtra, ...otherExtra } = dbExtra;
+  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
+  window.__reads = []; window.__uses = [];
   const subs = {}, docSubs = {};
   window.__log = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
@@ -47,14 +53,17 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
     (docSubs[name + "/" + id] || []).forEach((cb) => cb(dsnap(name, id)));
   };
   window.__answers = () => data.answers;
+  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
+    doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
     collection: (name) => ({
-      onSnapshot: (cb) => { (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; },
+      onSnapshot: (cb) => listen(name, cb),
+      orderBy: () => ({ onSnapshot: (cb) => listen(name, cb) }),
       doc: (id) => ({
-        get: async () => dsnap(name, id),
+        get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
         set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
-        onSnapshot: (cb) => { (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
+        onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
     }),
   };
@@ -72,26 +81,26 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
-  window.claude = { use: async (cap) => (cap === "db" ? db : cap === "comments" ? (cm || null) : null) };
+  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? db : cap === "comments" ? (cm || null) : null; } };
 }
 
 let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
   t.after(() => page.close());
   await page.emulateMedia({ colorScheme: scheme });
-  const body = designData ? html.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : html;
+  const body = designData ? pageHtml.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : pageHtml;
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
@@ -103,6 +112,20 @@ const answers = (page) => page.evaluate(() => window.__answers());
 // A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
 const takePick = (page, it) => card(page, it).getByRole("button", { name: /Take my pick/ }).click();
+// The keyboard way to take a pick: focus the button and press Enter. Resolves to what holds focus one frame later, so a fix that focuses in a frame still counts.
+// `place` is an optional step that scrolls the page between the focus and the key press.
+const enterTakePick = async (page, it, place) => {
+  await page.locator(`#b-take-${it.id}`).focus();
+  if (place) await place();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  return page.evaluate(() => ({ tag: document.activeElement.tagName, id: document.activeElement.id }));
+};
+// After Take my pick hides, focus belongs on the input of the pick's first key, as the A to C key handler leaves it.
+const assertFocusOnFirstPick = (at, it, key) => {
+  assert.notEqual(at.tag, "BODY", `${it.id}: focus fell to BODY after Enter on Take my pick`);
+  assert.equal(at.id, `o-${it.id}-${key}`, `${it.id}: focus is not on the first key of the pick`);
+};
 const addNote = async (page, it, text) => { await card(page, it).getByRole("button", { name: "Add a note" }).click(); await page.fill(`#n-${it.id}`, text); };
 const send = (page) => page.click("#send");
 const written = (page) => page.waitForFunction(() => window.__log.some((l) => l[0] === "set"));
@@ -375,6 +398,15 @@ test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   assert.equal((await answers(page))[DECISION.id].choice, "b");
 });
 
+// The pick is B, not the first option, so a fix that focuses the first radio of the card fails.
+test("Enter on Take my pick puts focus on the pick's input, on a pick-one card", async (t) => {
+  const it = mk("take-focus", 40, { pick: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const at = await enterTakePick(page, it);
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
+});
+
 // ---------------------------------------------------------------- repo colour
 
 const BRANDS = ["#b45f06", "#3d5af1", "#0a84ff", "#f47820", "#6f5ca6", "#27553f", "#0b5fff", "#ffffff", "#000000", "#ffff00", "#ff0000", "#00ff00", "#808080", "#4b5a6b", "#e6e6e6", "#1a1a1a", "#ff00ff", "#00ffff", "#7f7f00"];
@@ -427,7 +459,7 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    assert.equal(await page.title(), "Agent Q: waiting on you");
+    assert.equal(await page.title(), "Agent Q: Questions"); // one-page notes, choice 6: the title names the open tab
   });
 }
 
@@ -565,7 +597,26 @@ test("a look question with three options, a GitHub folder link and no designs sh
 });
 
 const PICS = { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" };
-const picItem = (id, n) => mk(id, n, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })) });
+// Option A may take a focus, a declared size or a differing picture. The other options stay plain.
+const picItem = (id, n, { focus, size, differs } = {}) => mk(id, n, {
+  options: LOOK_OPTS.map((o) => (o.key === "a" && differs ? { ...o, differs } : o)), pick: "a",
+  designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, ...(o.key === "a" && focus ? { focus, ...(size ? { size } : {}) } : {}) })),
+});
+// A mockup h px tall, 390 wide: a gradient over a 50px band at the end.
+const TALL_PIC = (h) => `<body style="margin:0"><div style="height:${h - 50}px;background:linear-gradient(#2a6,#26a)"></div><div style="height:50px;background:#a62"></div></body>`;
+const FOCUS_TALL = '<body style="margin:0"><div style="height:300px;background:#ccc"></div><div id="panel" style="width:390px;height:1700px;background:linear-gradient(#a62,#26a)"></div><div style="height:600px;background:#999"></div></body>';
+// Waits until the frame has posted a mockup h px tall.
+const frameSettled = (page, h) => page.waitForFunction((H) => Object.values(FIT).some((c) => c.h === H), h);
+const boxSel = (id, key = "a") => `#item-${id} label.opt[for="o-${id}-${key}"] .dfitwrap`;
+// The box, its scroll, and the frame's place. g is the scrollbar gutter plus any border past 1px.
+const measure = (page, id, key = "a") => page.locator(boxSel(id, key)).evaluate((w) => {
+  const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect();
+  return { w: r.width, h: r.height, top: r.top, cw: w.clientWidth, ch: w.clientHeight, sh: w.scrollHeight, st: w.scrollTop, cls: w.className, fw: f.width, fTop: f.top, fBot: r.bottom - f.bottom, g: w.offsetWidth - w.clientWidth - 2, sizer: (w.querySelector(".dsizer") || w).getBoundingClientRect().height };
+});
+const cueState = (page, id, key = "a") => page.locator(boxSel(id, key)).evaluate((w) => {
+  const c = w.querySelector(".dcue"), t = w.querySelector(".dtop");
+  return { disp: getComputedStyle(c).display, op: +getComputedStyle(c).opacity, text: c.textContent, top: +getComputedStyle(t).opacity, cls: w.className };
+});
 
 test("each option's picture is inside its own option card; a tap on it opens the viewer and a tap on the card picks", async (t) => {
   const it = picItem("with-pictures", 31);
@@ -661,18 +712,22 @@ test("an item with some designs but not every option's design warns in the optio
   assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dwarn`).count(), 0);
 });
 
+// The owner's note on waiting-page item 55 (Oct 28, 17:50 CDT): a picture taller than its box scrolls inside it.
 for (const width of [390, 1440]) {
-  test(`a tall mockup is never cropped, at ${width} wide`, async (t) => {
+  test(`a tall mockup scrolls inside a 480px box, is never drawn taller, and its last row is reachable, at ${width} wide`, async (t) => {
     const it = picItem("tall", 35);
-    const tall = '<body style="margin:0"><div style="height:1200px;background:#2a6">tall</div></body>';
+    const tall = TALL_PIC(2400);
     const page = await open(t, { items: [it], designData: { ...PICS, "price-a": tall }, viewport: { width, height: 900 } }); if (!page) return;
     const wrap = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dfitwrap`);
     await page.waitForFunction((sel) => document.querySelector(sel).getBoundingClientRect().height > 300, `#item-${it.id} label.opt .dfitwrap`);
     const m = await wrap.evaluate((w) => { const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect(); return { wrapW: r.width, wrapH: r.height, frameW: f.width, frameH: f.height }; });
     const scale = m.frameW / 390;
-    assert.ok(Math.abs(m.frameH - 1200 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${1200 * scale}`);
-    assert.ok(m.wrapH >= m.frameH - 1, "the wrapper cuts the bottom of the mockup");
+    assert.ok(Math.abs(m.frameH - 2400 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${2400 * scale}`);
+    assert.ok(m.wrapH <= 480, `the box is ${m.wrapH} high, over 480`);
     assert.ok(m.frameW <= m.wrapW + 1, "the mockup is wider than the card");
+    await wrap.evaluate((w) => { w.scrollTop = w.scrollHeight; });
+    const fBot = await wrap.evaluate((w) => w.getBoundingClientRect().bottom - w.querySelector("iframe").getBoundingClientRect().bottom);
+    assert.ok(Math.abs(fBot - 1) <= 2, `the last row is ${fBot}px from the box bottom after the scroll`);
   });
 
   test(`a long option key stays on one line and never overlaps the title, at ${width} wide`, async (t) => {
@@ -688,6 +743,265 @@ for (const width of [390, 1440]) {
       assert.equal(m.ws, "nowrap", "the chip wraps");
       assert.ok(m.k.right <= m.b.left + 1 || m.k.bottom <= m.b.top + 1, `the chip overlaps the title for ${o.key}`);
     }
+  });
+}
+
+// ---------------------------------------------------------------- a picture taller than its box scrolls inside it
+for (const width of [390, 1440]) {
+  test(`a tall picture's scroll range is over 100px, and the picture fills the card's width, at ${width} wide`, async (t) => {
+    const it = picItem("scroll-range", 52);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width, height: 900 } }); if (!page) return;
+    await frameSettled(page, 2400);
+    const m = await measure(page, it.id);
+    assert.ok(m.sh - m.ch > 100, `the scroll range is ${m.sh - m.ch}px`);
+    assert.ok(Math.abs(m.fw - m.cw) <= 1, `the picture is ${m.fw} wide in a ${m.cw} wide box: the scrollbar took some of it`);
+  });
+}
+
+test("a focus box taller than the card scrolls inside the focus box and opens at its top, at 390 wide", async (t) => {
+  const it = picItem("focus-tall", 51, { focus: "#panel" });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": FOCUS_TALL }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2600);
+  await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+  const m = await measure(page, it.id);
+  const sc = m.fw / 390;
+  assert.ok(m.h <= 480, `the focus box is ${m.h} high, over 480`);
+  assert.ok(m.sh > m.ch, "the focus box does not scroll");
+  assert.ok(Math.abs(m.sh - Math.ceil(1700 * sc)) <= 2, `the scroll range is ${m.sh} high, not the focus box's ${Math.ceil(1700 * sc)}`);
+  assert.equal(m.st, 0, "the box did not open at its top");
+  assert.ok(Math.abs(m.fTop + 300 * sc - m.top) <= 2, "the focus does not start at the top of the box");
+});
+
+test("a resize or a repaint keeps the owner's scroll, the same box, and the scroll hint in the picture's name", async (t) => {
+  const it = picItem("once", 36);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await page.locator(boxSel(it.id)).evaluate((w) => { window.__w = w; w.scrollTop = 150; });
+  assert.equal((await measure(page, it.id)).st, 150, "the owner's scroll did not take");
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.waitForTimeout(300);
+  assert.equal((await measure(page, it.id)).st, 150, "a resize moved the scroll");
+  await choose(page, it, "b");
+  await page.waitForTimeout(300);
+  const after = await page.locator(boxSel(it.id)).evaluate((w) => ({ same: w === window.__w, st: w.scrollTop }));
+  assert.deepEqual(after, { same: true, st: 150 }, "a repaint replaced the box or moved its scroll");
+  const label = await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).getAttribute("aria-label");
+  assert.match(label, /Arrow keys scroll its picture$/, "a repaint dropped the scroll hint from the name");
+});
+
+test("the cue shows before the picture's end, goes at the end, and the shades add no height, at 390 wide", async (t) => {
+  const it = picItem("cue", 37);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const a = await cueState(page, it.id);
+  assert.equal(a.disp, "flex", "the cue is not drawn");
+  assert.equal(a.op, 1, "the cue is not fully shown before the end");
+  assert.equal(a.text, "↓ More");
+  assert.ok(!/at-end/.test(a.cls), "the picture is at its end before any scroll");
+  assert.equal(a.top, 0, "the top shade is shown before any scroll");
+  const m = await measure(page, it.id);
+  assert.ok(Math.abs(m.sh - m.sizer) <= 1, `the scroll height ${m.sh} is not the picture's ${m.sizer}`);
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = 200; });
+  await page.waitForFunction((sel) => +getComputedStyle(document.querySelector(sel + " .dtop")).opacity === 1, boxSel(it.id));
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = w.scrollHeight; });
+  await page.waitForFunction((sel) => +getComputedStyle(document.querySelector(sel + " .dcue")).opacity === 0, boxSel(it.id));
+});
+
+test("a touch drag scrolls the picture and opens nothing, and a tap opens View, at 390 wide", async (t) => {
+  const it = picItem("touch", 42);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const touch = (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+  await page.locator(boxSel(it.id)).scrollIntoViewIfNeeded();
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  const x = r.x + 40, y = r.y + 380;
+  await touch("touchStart", [{ x, y }]);
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await page.waitForTimeout(16); }
+  await touch("touchEnd", []);
+  await page.waitForTimeout(500);
+  assert.ok((await measure(page, it.id)).st > 0, "the touch drag did not scroll the picture");
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "the touch drag opened View");
+  await page.waitForTimeout(300);
+  const r2 = await page.locator(boxSel(it.id)).boundingBox();
+  await touch("touchStart", [{ x: r2.x + 40, y: r2.y + 200 }]);
+  await touch("touchEnd", []);
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "the tap did not open View");
+});
+
+test("a press on the scrollbar gutter opens nothing and picks nothing, and a press on the picture opens View, at 1280 wide", async (t) => {
+  const it = picItem("press", 41);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  assert.ok((await measure(page, it.id)).g > 0, "this browser draws no scrollbar gutter");
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100);
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the scrollbar opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the scrollbar picked the option");
+  // A drag that starts on the scroll thumb and ends on the picture scrolls it; it is not a press on the picture.
+  await page.mouse.move(r.x + r.width - 4, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 24, r.y + 250, { steps: 15 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a drag from the scrollbar onto the picture opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a drag from the scrollbar onto the picture picked the option");
+  await page.mouse.click(r.x + 20, r.y + 100);
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "a press on the picture did not open View");
+});
+
+test("a right-button press on the scrollbar, then Escape, leaves Enter working on Add a note, at 1280 wide", async (t) => {
+  const it = picItem("stale-right", 43);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "right" });
+  await page.keyboard.press("Escape");
+  await card(page, it).getByRole("button", { name: "Add a note" }).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, "the note did not open: a right press on the scrollbar left a stale state");
+});
+
+test("a middle press on the scrollbar leaves Space working on an option, at 1280 wide", async (t) => {
+  const it = picItem("stale-middle", 44);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "middle" });
+  await page.locator(`#o-${it.id}-b`).focus();
+  await page.keyboard.press("Space");
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Space did not pick option b: a middle press on the scrollbar left a stale state");
+});
+
+test("a press on the picture released on the scrollbar gutter opens nothing and picks nothing, at 1280 wide", async (t) => {
+  const it = picItem("press-out", 45);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.move(r.x + 20, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 4, r.y + 160, { steps: 10 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the picture released on the gutter opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the picture released on the gutter picked the option");
+});
+
+test("the picture is one tab stop: its arrow, page and end keys scroll it, Home goes back, and Enter opens View, at 390 wide", async (t) => {
+  const it = picItem("keys", 40);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const opic = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`);
+  const a = await opic.evaluate((o) => ({ label: o.getAttribute("aria-label"), tab: o.querySelector(".dfitwrap").getAttribute("tabindex"), hidden: o.querySelector(".dfitwrap").getAttribute("aria-hidden"), inert: o.querySelector("iframe").inert }));
+  assert.ok(a.tab === "-1" && a.hidden === "true" && a.inert, "the wrap or its frame is a tab stop: " + JSON.stringify(a));
+  assert.match(a.label, /Arrow keys scroll its picture$/, "the name lacks the scroll hint");
+  await opic.focus();
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown");
+  assert.equal((await measure(page, it.id)).st, 80, "two ArrowDown presses did not scroll 80px");
+  await page.keyboard.press("PageDown");
+  const m = await measure(page, it.id);
+  assert.equal(m.st, Math.min(80 + m.ch - 40, m.sh - m.ch), "PageDown did not scroll a page less 40px");
+  await page.keyboard.press("End");
+  const end = await measure(page, it.id);
+  assert.ok(end.st + end.ch >= end.sh - 1, "End did not reach the end");
+  const taken = await opic.evaluate((o) => { const e = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }); o.dispatchEvent(e); return e.defaultPrevented; });
+  assert.equal(taken, false, "at the end, ArrowDown was taken from the page");
+  await page.keyboard.press("Home");
+  assert.equal((await measure(page, it.id)).st, 0, "Home did not go to the top");
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "Enter did not open View");
+});
+
+for (const scheme of ["light", "dark"]) {
+  test(`the cue's pill and its text reach 4.5:1, and the box holds 480px, in the ${scheme} scheme`, async (t) => {
+    const it = picItem("pill", 38);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 }, scheme }); if (!page) return;
+    await frameSettled(page, 2400);
+    const [onFrame, onPill, h] = await page.evaluate(`(() => {${CONTRAST}
+      const rgb = (c) => "#" + c.match(/\\d+/g).slice(0, 3).map((x) => (+x).toString(16).padStart(2, "0")).join("");
+      const w = document.querySelector(${JSON.stringify(boxSel(it.id))}), pill = getComputedStyle(w.querySelector(".dmore"));
+      return [R(rgb(pill.backgroundColor), rgb(getComputedStyle(w).backgroundColor)), R(rgb(pill.color), rgb(pill.backgroundColor)), w.getBoundingClientRect().height];
+    })()`);
+    assert.ok(onFrame >= 4.5, `the pill is ${onFrame.toFixed(2)}:1 on the frame`);
+    assert.ok(onPill >= 4.5, `the text is ${onPill.toFixed(2)}:1 on the pill`);
+    assert.ok(h <= 480, `the box is ${h} high, over 480`);
+  });
+}
+
+// Each row: name, mockup, focus, mockup height, box width and height, the focus's top in the mockup, and a declared size.
+const FIT_CASES = [
+  ["a focus that fits", '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>', "#panel", 1400, 300, 200, 700],
+  ["a 1200px mockup", '<body style="margin:0"><div style="height:1200px;background:#2a6"></div></body>', undefined, 1200, 390, 1200, 0],
+  ["a focus with a declared size", '<body style="margin:0;width:700px"><div style="height:700px"></div><div id="panel" style="width:600px;height:400px;background:#a62"></div></body>', "#panel", 1100, 600, 400, 700, { w: 600, h: 400 }],
+];
+for (const width of [390, 1280, 1440]) {
+  for (const [name, mock, focus, H, bw, bh, ty, size] of FIT_CASES) {
+    test(`${name} is drawn as today, with no scroll and no cue, at ${width} wide`, async (t) => {
+      const it = picItem("fit", 39, { focus, size });
+      const page = await open(t, { items: [it], designData: { ...PICS, "price-a": mock }, viewport: { width, height: 900 } }); if (!page) return;
+      await frameSettled(page, H);
+      if (focus) await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+      const m = await measure(page, it.id);
+      const col = await page.locator(boxSel(it.id)).evaluate((w) => w.parentElement.clientWidth);
+      const sc = Math.min(1, (col - 2) / bw, Math.max(480 / bh, 120 / bw));
+      assert.equal(m.w, Math.ceil(bw * sc) + 2, "the box width");
+      assert.equal(m.h, Math.ceil(bh * sc), "the box height");
+      assert.ok(!/scroll/.test(m.cls), "a picture that fits scrolls");
+      assert.equal(await page.locator(boxSel(it.id)).evaluate((w) => { const c = w.querySelector(".dcue"); return !c || getComputedStyle(c).display === "none"; }), true, "the cue is drawn on a picture that fits");
+      const tf = await page.locator(`${boxSel(it.id)} iframe`).evaluate((f) => f.style.transform);
+      assert.ok(Math.abs(+/scale\(([-\d.e]+)\)/.exec(tf)[1] - sc) < 1e-6, `the scale is not the formula's ${sc}: ${tf}`);
+      if (focus) assert.ok(Math.abs(+/translate\([^,]*,\s*([-\d.e]+)px\)/.exec(tf)[1] + ty * sc) < 0.01, `the focus is not moved to ${-ty * sc}: ${tf}`);
+    });
+  }
+}
+
+test("a 1564px mockup at 390 wide scrolls in its box, and the cue shows", async (t) => {
+  const it = picItem("scroll-edge", 56);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1564) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1564);
+  const m = await measure(page, it.id);
+  assert.ok(m.sh - m.ch > 0, `the picture does not scroll: its scroll range is ${m.sh - m.ch}px`);
+  assert.equal((await cueState(page, it.id)).disp, "flex", "the cue is not drawn on a picture that scrolls");
+});
+
+test("a mockup 1px over the fitted height gives a box of at most 480 and no cue, at 390 wide", async (t) => {
+  const it = picItem("edge", 53);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1561) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1561);
+  const m = await measure(page, it.id);
+  assert.ok(m.h <= 480, `the box is ${m.h} high, over 480`);
+  assert.notEqual((await cueState(page, it.id)).disp, "flex", "the cue shows on a picture 1px over the fit");
+});
+
+test("a picture that differs from its siblings keeps its 3px border inside a 134px box, and still scrolls, at 1280 wide", async (t) => {
+  const it = picItem("dif", 5, { differs: ["picture"] });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const m = await measure(page, it.id);
+  assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif")), "the picture is not marked as differing");
+  assert.ok(Math.abs(m.w - 134) <= 1, `the box is ${m.w} wide, not 134`);
+  assert.ok(m.sh - m.ch > 100 && Math.abs(m.fw - m.cw) <= 1, "the differing picture does not scroll at the content width");
+});
+
+test("a tall picture adds no sideways scroll to the page at 390 wide, even scrolled to its end", async (t) => {
+  const it = picItem("sideways", 54);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = w.scrollHeight; });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+});
+
+// A 60-character URL has no break point, so the step must wrap inside the card rather than widen it.
+const LONG_URL = "https://waiting.test/" + "a".repeat(60 - "https://waiting.test/".length);
+for (const width of [430, 390, 360]) {
+  test(`a task step with an unbroken 60-character URL stays inside the card and the page, at ${width} wide`, async (t) => {
+    const it = { ...TASK, id: "long-url-task", n: 60, steps: [LONG_URL] };
+    const page = await open(t, { items: [it], viewport: { width, height: 900 } }); if (!page) return;
+    // The card's own box can stay on screen while a step inside it runs past the edge, so take the furthest right of the card and all it holds.
+    const right = await card(page, it).evaluate((c) => Math.max(c.getBoundingClientRect().right, ...[...c.querySelectorAll("*")].map((e) => e.getBoundingClientRect().right)));
+    assert.ok(right <= width, `the card runs to ${right} px, past the ${width} px screen`);
+    const scrollW = await page.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(scrollW <= width, `the page is ${scrollW} px wide on a ${width} px screen`);
   });
 }
 
@@ -2181,6 +2495,223 @@ test("a decision card with no differs mark shows no stray null or undefined text
   assert.deepEqual(stray, [], "stray text in the decision card");
 });
 
+// ---------------------------------------------------------------- one page: the Status tab (lane c136)
+// The roadmap data block is built by skills/roadmap/build.py --block and spliced into PAGE by
+// skills/waiting-page/splice.py, as the writer republishes it (tests/merged_page.py does both).
+// The status panel reads only window.ROADMAP_DATA, never the artifact database.
+
+const MERGED = path.join(HERE, "merged_page.py");
+function mergedPage(...flags) {
+  const r = spawnSync(process.env.PYTHON || "python3", [MERGED, "--page", PAGE, ...flags], { encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(r.status, 0, "the roadmap build or the splice failed: " + (r.stderr || r.error));
+  return r.stdout;
+}
+// Database content the status panel must never show: the roadmap's own collections in the live database.
+const LEAKED_STEP = "Leaked database step", LEAKED_TILE = "Leaked database tile";
+const LEAK = {
+  steps: { leak1: { title: LEAKED_STEP, status: "active", phase: "cleanup", order: 0, note: "n", updatedAt: "2026-10-26T00:00:00Z" } },
+  meta: { phases: { cleanup: { metrics: [{ label: LEAKED_TILE, value: "9 of 9" }] } }, cull: { stopRule: "leak" }, advisor: { text: "leak" } },
+};
+// The waiting part reads items, answers, groups, receipts and meta/page. A read of anything else is the status part's.
+const statusRead = (r) => r[0] === "steps" || r[0] === "topics" || (r[0] === "meta" && r[1] !== "page");
+const statusTab = (page) => page.getByRole("tab", { name: "Status", exact: true });
+async function openStatus(page) {
+  const tab = statusTab(page);
+  assert.equal(await tab.count(), 1, "the page has no Status tab (role=tab, name Status)");
+  const id = await tab.getAttribute("aria-controls");
+  assert.ok(id, "the Status tab does not name its panel with aria-controls");
+  const panel = page.locator("#" + id);
+  assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
+  await tab.click();
+  await panel.waitFor({ state: "visible" });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read would land here
+  return panel;
+}
+// Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
+const shows = async (page, re) => re.test(await page.locator("body").textContent());
+const waitingShape = (page) => page.evaluate(() => ({
+  tiers: [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id)]),
+  bar: document.getElementById("barStatus").textContent,
+  send: document.getElementById("send").textContent,
+}));
+// Waits for the title, then returns the real one, so a red run names what the title was.
+const titleOf = async (page, want) => { await page.waitForFunction((w) => document.title === w, want).catch(() => {}); return page.title(); };
+
+test("saved answers survive a rebuild and republish", async (t) => {
+  const page = await open(t, { pageHtml: mergedPage(), items: [DECISION], answers: SAVED_A, dbExtra: LEAK }); if (!page) return;
+  assert.match(await card(page, DECISION).locator(".receipt").textContent(), /You chose A: Red/);
+  assert.match((await card(page, DECISION).locator(".ans").textContent()).trim(), /^Answered, filing pending /);
+  const usesBefore = await page.evaluate(() => window.__uses.length);
+  const panel = await openStatus(page);
+  assert.match(await panel.textContent(), /Baked roadmap step zebra/, "the status panel does not show the baked roadmap");
+  assert.equal(await shows(page, /Leaked database/), false, "the status panel shows database content");
+  assert.deepEqual((await page.evaluate(() => window.__reads)).filter(statusRead), [], "the status part reads the live database");
+  assert.equal(await page.evaluate(() => window.__uses.length), usesBefore, "opening Status calls window.claude.use");
+  assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[1] === "answers"), [], "a document in answers/ was written or deleted");
+  assert.deepEqual(await answers(page), SAVED_A);
+});
+
+test("with no roadmap data the Status tab says unknown with a reason, and the waiting part is unchanged", async (t) => {
+  const items = [DECISION, TASK];
+  const shipped = await open(t, { items, dbExtra: LEAK }); if (!shipped) return; // PAGE as shipped: its roadmap block is empty
+  const built = await open(t, { pageHtml: mergedPage("--no-roadmap"), items, dbExtra: LEAK }); // ROADMAP_DATA = null
+  const before = await waitingShape(shipped);
+  assert.ok(before.tiers.length > 0 && before.send, "the waiting part drew nothing: " + JSON.stringify(before));
+  assert.deepEqual(await waitingShape(built), before, "the roadmap block changed the waiting part");
+  assert.equal(await statusTab(built).count(), 1, "the page has no Status tab (role=tab, name Status)");
+  assert.equal(await statusTab(built).isVisible(), true, "the tab row hides Status when no item has a design");
+  for (const [name, page] of [["as shipped", shipped], ["no record branch", built]]) {
+    const text = await (await openStatus(page)).textContent();
+    assert.match(text, /unknown/i, name + ": the status panel does not say unknown");
+    // The build knows why (no record branch), so its page says so. The shipped page has no build info to quote.
+    if (page === built) assert.match(text, /\bno\b[^.]{0,40}\b(roadmap|record branch)\b/i, name + ": the status panel gives no reason");
+    assert.doesNotMatch(text, /signed in/i, name + ": the status panel tells the owner to sign in, which is false here");
+    assert.equal(await shows(page, /Leaked database/), false, name + ": the status panel shows database content");
+    assert.deepEqual((await page.evaluate(() => window.__reads)).filter(statusRead), [], name + ": the status part reads the live database");
+  }
+});
+
+test("a note typed on an item survives a press of Status and back, because Status hides #qView and never removes it", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "keep this draft");
+  await page.evaluate(() => { window.__qView = document.getElementById("qView"); });
+  const panel = await openStatus(page);
+  assert.equal(await page.locator("#qView").count(), 1, "Status removed #qView");
+  assert.equal(await page.locator("#qView").isHidden(), true, "Questions still shows under Status");
+  await page.click("#tabQ");
+  await page.locator("#qView").waitFor({ state: "visible" });
+  assert.equal(await panel.isHidden(), true, "Status still shows on Questions");
+  assert.equal(await page.evaluate(() => document.getElementById("qView") === window.__qView), true, "#qView was rebuilt");
+  assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
+});
+
+test("the document title names the open tab: <repo>: Questions, then <repo>: Status", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
+  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+  await openStatus(page);
+  assert.equal(await titleOf(page, "Compass: Status"), "Compass: Status");
+  await page.click("#tabQ");
+  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+});
+
+// ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)
+// The rail's current phase carries a dot, so its name has the least room. From 320 to 540px of page
+// width, in light and dark, with each of the five real phases (Clean up, Organize, Design, Roll out,
+// Later) current in turn: no phase name may break inside a word, and the dot may not sit alone on a line
+// below its name (design notes, item 16: 5 columns only while each name with the dot sits on one line).
+// The sweep must cross the rail's change from 3 to 5 columns, or it pins nothing about where that change
+// sits. Each word is measured with a Range: more than one client rect is a word on two lines. The dot is
+// alone when its top is at or below the bottom of its name's last text line. The width is swept on one
+// page with setViewportSize, so the rail re-lays out as it does when a phone turns or a window is dragged.
+// The web fonts are blocked, so the rail is set in whatever fallback font the runner has, and a threshold
+// that holds for that font may fail in a wider one. So each case runs twice: in the runner's own font, and
+// with the page's --body forced to "DejaVu Sans", a wide font that the ubuntu CI images ship. The forced
+// run proves the font applied (installed, set on the rail, measured in the rail), and fails, never skips,
+// when it did not. The range reaches 540px so a threshold that rises for the wide font still shows 5 columns.
+
+const RAIL_WIDTHS = Array.from({ length: 540 - 320 + 1 }, (_, i) => 320 + i);
+const RAIL_FONTS = [{ label: "default", force: null }, { label: "DejaVu Sans", force: "DejaVu Sans" }];
+const RAIL_PHASES = [["cleanup", "Clean up"], ["organize", "Organize"], ["design", "Design"], ["rollout", "Roll out"], ["later", "Later"]];
+// Overrides --body on the page (the rail sets its text with var(--body)); the !important beats the :root rule.
+const forceRailFont = (page, family) => page.addStyleTag({ content: `:root { --body: "${family}", sans-serif !important; }` });
+// Measures "Organize" (a word of the rail) as the rail sets it, and again in a probe span with the same
+// weight and size but a named family. An installed family measures the same with a serif or a monospace
+// fallback; a missing one does not. The "no such font" pair shows the probe tells two fallbacks apart on
+// this runner.
+const railFontProbe = (page, family) => page.evaluate((family) => {
+  const nm = [...document.querySelectorAll(".prail .nm > span:first-child")].find((s) => s.textContent === "Organize");
+  const cs = getComputedStyle(nm);
+  const range = document.createRange();
+  range.selectNodeContents(document.createTreeWalker(nm, NodeFilter.SHOW_TEXT).nextNode());
+  const width = (fam) => {
+    const s = document.createElement("span");
+    s.textContent = "Organize";
+    s.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;letter-spacing:${cs.letterSpacing};font:${cs.fontWeight} ${cs.fontSize} ${fam}`;
+    document.body.append(s);
+    const w = s.getBoundingClientRect().width;
+    s.remove();
+    return w;
+  };
+  return {
+    family: cs.fontFamily, rail: range.getBoundingClientRect().width,
+    namedSerif: width(`"${family}", serif`), namedMono: width(`"${family}", monospace`),
+    noneSerif: width('"No Such Font 7f3a", serif'), noneMono: width('"No Such Font 7f3a", monospace'),
+  };
+}, family);
+const assertRailFont = async (page, family) => {
+  const f = await railFontProbe(page, family);
+  assert.ok(f.family.startsWith(`"${family}"`), `the rail's font-family is ${f.family}, not "${family}": the forced font did not reach the rail`);
+  assert.notEqual(f.noneSerif, f.noneMono, "the font probe cannot tell a serif fallback from a monospace one on this runner");
+  assert.ok(Math.abs(f.namedSerif - f.namedMono) < 0.01, `"${family}" is not installed on this runner (the probe fell back to another font), so this sweep would prove nothing about it`);
+  assert.ok(Math.abs(f.rail - f.namedSerif) < 0.05, `the rail sets "Organize" ${f.rail}px wide, but "${family}" sets it ${f.namedSerif}px: the rail is not rendered in the forced font`);
+};
+const railWords = (page) => page.evaluate(() => {
+  const words = [], split = [];
+  let dotAlone = false;
+  for (const nm of document.querySelectorAll(".prail .nm > span:first-child")) {
+    const walk = document.createTreeWalker(nm, NodeFilter.SHOW_TEXT);
+    let lastBottom = -Infinity;
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      for (const m of n.textContent.matchAll(/\S+/g)) {
+        const r = document.createRange();
+        r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        words.push(m[0]);
+        const rects = r.getClientRects();
+        if (rects.length > 1) split.push(m[0]);
+        for (const q of rects) lastBottom = Math.max(lastBottom, q.bottom);
+      }
+    }
+    const dot = nm.querySelector(".here");
+    if (dot && dot.getBoundingClientRect().top >= lastBottom) dotAlone = true;
+  }
+  const rail = document.querySelector(".prail");
+  return { words, split, dotAlone, cols: getComputedStyle(rail).gridTemplateColumns.split(" ").length, box: Math.round(rail.getBoundingClientRect().width) };
+});
+// "372-380px Organize current: dot alone on a line": the widths of each kind of hit as runs.
+const hitRuns = (hits) => {
+  const byKey = new Map();
+  for (const { w, key } of hits) byKey.set(key, [...(byKey.get(key) || []), w]);
+  return [...byKey].map(([key, ws]) => {
+    const runs = [];
+    for (const w of ws) { const last = runs[runs.length - 1]; if (last && last[1] === w - 1) last[1] = w; else runs.push([w, w]); }
+    return runs.map(([a, b]) => (a === b ? a : a + "-" + b) + "px").join(", ") + " " + key;
+  }).join("; ");
+};
+
+for (const scheme of ["light", "dark"]) {
+  for (const [phase, name] of RAIL_PHASES) {
+    for (const font of RAIL_FONTS) {
+      test(`no phase name breaks inside a word or leaves its dot alone at any page width from 320 to 540px, ${name} current, ${scheme} theme, ${font.label} font`, async (t) => {
+        const page = await open(t, { pageHtml: mergedPage("--current", phase), viewport: { width: RAIL_WIDTHS[0], height: 900 }, scheme }); if (!page) return;
+        if (font.force) await forceRailFont(page, font.force);
+        await openStatus(page);
+        assert.equal(await page.locator(".prail > button").count(), 5, "the rail does not hold the five phases");
+        assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+        assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), name, "the current phase is not " + name);
+        if (font.force) await assertRailFont(page, font.force);
+        const hits = [], cols = new Set();
+        for (const w of RAIL_WIDTHS) {
+          await page.setViewportSize({ width: w, height: 900 });
+          const m = await railWords(page); // the reads force a layout, so the container queries have resolved
+          assert.deepEqual(m.words, ["Clean", "up", "Organize", "Design", "Roll", "out", "Later"], `${w}px: the rail's words`);
+          cols.add(m.cols);
+          for (const word of m.split) hits.push({ w, key: `${name} current, ${font.label} font: "${word}" breaks inside the word`, box: m.box });
+          if (m.dotAlone) hits.push({ w, key: `${name} current, ${font.label} font: dot alone on a line`, box: m.box });
+        }
+        assert.deepEqual([...cols].sort(), [3, 5], "the sweep does not cross the rail's change from 3 to 5 columns, so it pins no threshold; columns seen: " + [...cols]);
+        assert.equal(hits.length, 0, `the rail breaks at ${hits[0] && hits[0].w}px page width (rail box ${hits[0] && hits[0].box}px), ${hits[0] && hits[0].key}; every hit: ${hitRuns(hits)}`);
+      });
+    }
+  }
+}
+
+test("merged_page.py refuses --current with --no-roadmap, since a repo with no roadmap has no current phase", () => {
+  const r = spawnSync(process.env.PYTHON || "python3", [MERGED, "--page", PAGE, "--no-roadmap", "--current", "organize"], { encoding: "utf8" });
+  assert.equal(r.status, 2, "exit status of the refusal: " + r.status);
+  assert.match(r.stderr, /--current needs a roadmap/);
+  assert.equal(r.stdout, "", "the refusal printed a page");
+});
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
@@ -2615,6 +3146,83 @@ test("Undo puts a list pick back as a draft, in its order", async (t) => {
   assert.match(await rankText(page, r, "c"), rank("1st", 2), "Undo lost the order");
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
 });
+
+// The first option is in no pick, so a fix that focuses the first box of the card fails. An unranked pick shows in option order, so ["c","b"] starts with B: a fix that reads it.pick[0] fails. The ranked pick starts with C, so a fix that reads option order fails.
+test("Enter on Take my pick puts focus on the first key of the pick, on a multi card", async (t) => {
+  const it = multi("take-focus-multi", 41, { pick: ["c", "b"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["b", "c"], "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
+});
+
+test("Enter on Take my pick puts focus on the first key of the pick, in rank order, on a ranked card", async (t) => {
+  const it = ranked("take-focus-ranked", 42);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["a", "c", "d"], "Enter did not take the pick");
+  assert.match(await rankText(page, it, "c"), rank("1st", 3), "the pick's first key is not ranked 1st");
+  assertFocusOnFirstPick(at, it, "c");
+});
+
+// At 390 wide a card is taller than the screen and Take my pick sits below its options, so the focused option can end under the sticky header (.hdr) or the fixed bar (.bar).
+// The pick starts with A in both cards: the option is far above the button, and the page must show it whole.
+const SPOTS = {
+  "just above the bar": (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.bottom - (document.querySelector(".bar").getBoundingClientRect().top - 8)); },
+  centred: (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.top + b.height / 2 - innerHeight / 2); },
+};
+const FILL = [mk("take-fill-1", 50), mk("take-fill-2", 51), mk("take-fill-3", 52)];
+const TAKE_CARDS = {
+  "pick-one": () => mk("take-clear", 43, { options: COLOURS, pick: "a" }),
+  "multi A and D": () => multi("take-clear-multi", 44, { options: COLOURS, pick: ["a", "d"] }),
+};
+for (const [kind, build] of Object.entries(TAKE_CARDS)) for (const [spot, scrollTo] of Object.entries(SPOTS)) {
+  test(`Enter on Take my pick keeps the focused option clear of the header and the bar, ${kind}, button ${spot}, at 390 wide`, async (t) => {
+    const it = build();
+    const page = await open(t, { items: [it, ...FILL], viewport: { width: 390, height: 800 } }); if (!page) return;
+    const at = await enterTakePick(page, it, () => page.evaluate(scrollTo, it.id));
+    assertFocusOnFirstPick(at, it, "a");
+    const m = await page.evaluate(() => {
+      const o = document.activeElement.closest(".opt"), r = o && o.getBoundingClientRect();
+      return { top: r && Math.round(r.top), bottom: r && Math.round(r.bottom), hdr: Math.round(document.querySelector(".hdr").getBoundingClientRect().bottom), bar: Math.round(document.querySelector(".bar").getBoundingClientRect().top) };
+    });
+    assert.ok(m.top !== null && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A is not between the header and the bar: ${JSON.stringify(m)}`);
+  });
+}
+
+// "Nothing on the page moves" (page.html, top comment): an option already between the header and the bar needs no scroll, so Enter on Take my pick leaves scrollY as it was.
+// `gap` is the px from the header's bottom to option A's top. A scroll that moves the page, even by 10px, fails.
+const stillAfterTake = async (t, it, width, gap, buttonInView) => {
+  const page = await open(t, { items: [it, ...FILL], viewport: { width, height: 800 } }); if (!page) return;
+  let m;
+  const at = await enterTakePick(page, it, async () => {
+    m = await page.evaluate(({ id, gap }) => {
+      const hdr = document.querySelector(".hdr").getBoundingClientRect().bottom, bar = document.querySelector(".bar").getBoundingClientRect().top;
+      const o = document.getElementById(`o-${id}-a`).closest(".opt");
+      scrollBy(0, o.getBoundingClientRect().top - (hdr + gap));
+      const r = o.getBoundingClientRect(), b = document.getElementById("b-take-" + id).getBoundingClientRect();
+      return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), btnTop: Math.round(b.top), btnBottom: Math.round(b.bottom), hdr: Math.round(hdr), bar: Math.round(bar) };
+    }, { id: it.id, gap });
+  });
+  assert.ok(m.y > 0 && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A was not placed in view with the page scrolled: ${JSON.stringify(m)}`);
+  if (buttonInView) assert.ok(m.btnTop >= m.hdr && m.btnBottom <= m.bar, `${it.id}: Take my pick was not placed in view: ${JSON.stringify(m)}`);
+  assertFocusOnFirstPick(at, it, "a");
+  assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: Enter on Take my pick scrolled the page`);
+};
+// Option A starts 56px under the 44px header, so 100px from the top of the screen: whole and clear of the 64px scroll margin. A scroll that centres it moves the page.
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(TAKE_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 56, false));
+}
+// Option A is fully visible 10px under the header, inside the 64px scroll margin, and Take my pick is in view too. These cards hold two options, so both fit at 390 wide.
+const NEAR_CARDS = {
+  "pick-one": () => mk("take-near", 45, { pick: "a" }),
+  "multi A and B": () => multi("take-near-multi", 46, { options: COLOURS.slice(0, 2), pick: ["a", "b"] }),
+};
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(NEAR_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option sits 10px under the header, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 10, true));
+}
 
 test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
   const it = { ...picItem("multi-pics", 33), multi: true, pick: ["a", "c"] };

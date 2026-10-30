@@ -2622,6 +2622,40 @@ def widens_pick_hit(data) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ a task names why only the owner can do it
+#
+# docs/decisions/task-names-its-check.md, rule `task-names-check`, built against a named incident
+# (incident in the record): a waiting-page task handed the owner a job a session on his computer then
+# did. A task carries a "Why yours:" line naming the check that showed no session could do it.
+WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
+TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
+               "act, ask a session on the owner's computer first (list_computer_folders, then "
+               "request_computer_folder). Then add a line to context that starts \"Why yours: "
+               "<the check that showed no session could do it>\".")
+
+
+def task_check_hit(op: str, data) -> str:
+    """The matched text when this write of a waiting-page task has no Why yours line. An update that
+    carries no `context` cannot change the line and passes, as does one with no `kind`."""
+    if not isinstance(data, dict) or data.get("kind") != "task":
+        return ""
+    if (op == "set" or "context" in data) and not WHY_YOURS_LINE.search(str(data.get("context") or "")):
+        return "task with no Why yours line"
+    return ""
+
+
+def task_str_replace_hit(entry) -> str:
+    """The matched text when a str_replace on `context` removes the Why yours line. It carries no
+    `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it
+    judges a context edit that touches the line, whatever the item's kind."""
+    if entry.get("field") != "context":
+        return ""
+    old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
+    if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
+        return "context edit that removes the Why yours line"
+    return ""
+
+
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
@@ -2631,10 +2665,15 @@ def data_tool_hit(tool_input, cwd=""):
     else:
         entries = [(tool_input.get("action"), tool_input)]
     writes = [(op, e) for op, e in entries
-              if op in ("set", "update") and e.get("collection") == WAITING_ITEMS]
+              if op in ("set", "update", "str_replace") and e.get("collection") == WAITING_ITEMS]
     if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
         return "", ""
     for op, entry in writes:
+        if op == "str_replace":
+            hit = task_str_replace_hit(entry)
+            if hit:
+                return "task-names-check", hit
+            continue
         data = _write_data(entry)
         hit = port_item_hit(op, data)
         if hit:
@@ -2642,6 +2681,9 @@ def data_tool_hit(tool_input, cwd=""):
         hit = widens_pick_hit(data)
         if hit:
             return "uniform-pick", hit
+        hit = task_check_hit(op, data)
+        if hit:
+            return "task-names-check", hit
     return "", ""
 
 
@@ -3185,6 +3227,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "port-question", PORT_REASON, matched)
         if rule == "uniform-pick":
             refuse(tool, "deny", "uniform-pick", WIDENS_REASON, matched)
+        if rule == "task-names-check":
+            refuse(tool, "deny", "task-names-check", TASK_REASON, matched)
         return
 
     if tool in SHELL_TOOLS:
