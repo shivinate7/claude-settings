@@ -1833,8 +1833,8 @@ test("two designs of one slug with different focus keep their own size, and the 
 // FIT_W is the width a mockup is laid out at. A CSS rule or a comment that repeats the number goes stale when FIT_W moves.
 const FIT_W_DECL = /const FIT_W = (\d+)/;
 // Each line of `src` that holds `num` as a number of its own, except the FIT_W declaration itself. Strings, comments and
-// templates are read as plain text: a restatement counts wherever it stands. 3900, 1390, a390 and 0.390 are other values;
-// 390px and "390 wide" are the same one.
+// templates are read as plain text: a restatement counts wherever it stands. 3900, 1390, a390, 0.390 and #390 (a hex
+// colour) are other values; 390px and "390 wide" are the same one.
 function restatements(src, num) {
   const decl = FIT_W_DECL.exec(src), own = decl ? decl.index + decl[0].length - decl[1].length : -1;
   const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g");
@@ -1849,16 +1849,20 @@ test("the mockup draw width is written once in the page, in FIT_W", () => {
   assert.deepEqual(found, [], `page.html restates the draw width ${decl[1]} outside FIT_W. Read it from FIT_W or drop it:\n  ${found.join("\n  ")}`);
 });
 
-test("the restatement scan finds a number in a string, a template and after a lone quote, and skips other numbers", () => {
+test("the restatement scan finds a number behind a comment opener in a string, in a template and after a lone quote, and skips other numbers", () => {
   const src = [
     "const FIT_W = 390;",
     "const u = 'http://x/390px';",
+    'const c = "/* 390 */";',
+    'const h = "# 390";',
     "const t = `a",
     "b 390 c`;",
     "<p>Don't</p> 390 wide",
-    "const other = 3900 + 1390 + 0.390 + 390.5 + a390;",
+    "const other = 3900 + 1390 + 0.390 + 390.5 + a390 + #390;",
   ].join("\n");
-  assert.deepEqual(restatements(src, "390"), ["line 2: const u = 'http://x/390px';", "line 4: b 390 c`;", "line 5: <p>Don't</p> 390 wide"]);
+  assert.deepEqual(restatements(src, "390"), [
+    "line 2: const u = 'http://x/390px';", 'line 3: const c = "/* 390 */";', 'line 4: const h = "# 390";', "line 6: b 390 c`;", "line 7: <p>Don't</p> 390 wide",
+  ]);
 });
 
 test("a mockup frame is laid out at the width FIT_W holds", async (t) => {
