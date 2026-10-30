@@ -6,6 +6,8 @@
                           A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
+  merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
+                          runs only when that role is recorded for the session (read_merge_role).
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
@@ -2337,10 +2339,51 @@ def default_lock(root):
     POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
     return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
 
+MERGE_ROLES = {"coordinator", "batch-runner"}  # the tiers that may run `merge <pr> --confirm` in a cloud session
+
+def role_path():
+    return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
+
+def read_merge_role():
+    """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
+    Every failure is None, so the gate fails closed. An absent id never equals an absent record."""
+    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    if not sid:
+        return None
+    try:
+        data = json.loads(role_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
+        return None
+    if not isinstance(data, dict) or data.get("session") != sid:
+        return None
+    role = data.get("role")
+    return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
+
+def write_merge_role(tier):
+    """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
+    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
+        raise Stop("--role records a merge role in a cloud session only.")
+    if not sid:
+        raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set.")
+    if tier not in MERGE_ROLES:
+        raise Stop("this session's tier may not record a merge role. Hand the pull request number and its head to the batch runner.")  # names no valid tier: a lane must not learn which to claim
+    path = role_path()
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps({"session": sid, "role": tier}), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as e:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise Stop(f"cannot write the merge role to {path}: {e}.")
+
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", type=int)
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (coordinator or batch-runner)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
@@ -2348,9 +2391,18 @@ def main(argv, host=None, lock=None):
     p.add_argument("--config", default=".github/stamp.json")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
-        p.error("give a pull request number, or --unlock")
+    if a.role is not None:
+        if a.pr is not None or a.confirm or a.unlock is not None:
+            p.error("--role stands alone")
+    elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
+        p.error("give a pull request number, --unlock, or --role TIER")
     try:
+        if a.role is not None:
+            write_merge_role(a.role)
+            say(f"merge: merge role {a.role} recorded for this session.")
+            return 0
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
+            raise Stop("this session may not merge. Hand the pull request number and its head to the batch runner.")
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")

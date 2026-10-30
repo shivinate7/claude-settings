@@ -33,7 +33,9 @@ playwright: a Playwright install that also runs apt (`--with-deps`, `install-dep
   Comments do not count.
 ios: drift from the iOS standard of skills/ios-apps, one item per line: the make targets, the ship
   path, the project file, the Kit package, Swift 6, the CI runner, the CI checks, slow tests on each
-  pull request, and account IDs in the repo. A repo with no iOS app is n/a. Comments do not count.
+  pull request, test diagnostics (each `xcodebuild test` run in a workflow, the Makefile or a tracked
+  shell script sets `-collect-test-diagnostics never`), and account IDs in the repo. A repo with no
+  iOS app is n/a. Comments do not count.
 words: each retired word in a checked repo, one item per line: `  <word>: <file>:<line> <detail>`, with `-` for
   the line of a path hit. The word list is read live from lint/check_glossary.py and the GLOSSARY.md beside
   it: its path, identifier, rule anchor, record slug and hook message reads, run on the child's tracked
@@ -366,7 +368,10 @@ UI_BUNDLE = "bundle.ui-testing"
 # A word, or an operator that ends a command. Quotes are cut before the read: a quoted `run:` value and a `bash -c "..."`
 # argument hold commands, and an apostrophe in text (`it's`) has no partner to pair with and hide one.
 SHELL_TOKEN = re.compile(r"[^\s;&|]+|&&|\|\||[;|&]")
+XCODEBUILD_TEST = r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])"
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
+XCODEBUILD_TEST_RE = re.compile(XCODEBUILD_TEST)
+NO_DIAGNOSE = re.compile(r"(?<![\w-])-collect-test-diagnostics\s+never(?![-\w.])")
 DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*[\"']?[A-Z0-9]")
 
 
@@ -540,6 +545,13 @@ def probe_ios(root):
     slow = [f for f in flows if runs_ui_tests(text[f], projects)]
     item("slow tests", "gap" if slow else "pass",
          "%s runs UI tests; they run once per batch on the Mac, through sim-test" % ", ".join(slow) if slow else "no UI suite in CI")
+    # Each run of xcodebuild test, split at `&&`, `;` and `|`, needs the flag itself. sim-test adds its own.
+    diag = [f for f in files if f == "Makefile" or f.endswith(".sh") or WORKFLOW.search(f)
+            if any(XCODEBUILD_TEST_RE.search(run) and not NO_DIAGNOSE.search(run)
+                   for line in uncommented(read(root, f) or "") for run in re.split(r"[;&|]+", line))]
+    item("test diagnostics", "gap" if diag else "pass",
+         "%s runs xcodebuild test without -collect-test-diagnostics never" % ", ".join(diag) if diag
+         else "every xcodebuild test run sets -collect-test-diagnostics never")
     ids, overrides = [], []
     if "tools/ios-ship.json" in text:
         try:
