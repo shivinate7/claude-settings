@@ -1,0 +1,9 @@
+{
+  "title": "Cloud setup script installs claude-settings before start",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33747,
+  "why": "shiv, Oct 30 15:05 and 15:09 CDT (item 77 A): a builder spawned with no model must run Sonnet; the builder-model setting is written too late in a cloud session.",
+  "note": "Lane setup-script-install writes a setup script that fetches claude-settings and runs install.sh before Claude Code starts, then returns the paste block and a fresh-session test. Pasting it into the environment settings is shiv's act; it comes to him as a page task. Home: decision agent-model-cap. Done check: a fresh cloud session spawns a builder with no model and it runs Sonnet.",
+  "updatedAt": "2026-10-30T20:18:00Z"
+}
