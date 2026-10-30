@@ -1,9 +1,9 @@
 {
   "title": "The layout check refuses outside claude-settings and points to the layout probe",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.3375,
   "why": "Incident Oct 30 03:59 CDT (coordinator): run in a child repo, check_layout.py printed PASS, but it checks only claude-settings' own layout readers, so the pass proved nothing about q_max or mailaudit. The real check is the layout probe (compliance_probes.py layout).",
-  "note": "Fix: check_layout.py refuses when run outside claude-settings and names the layout probe. Done check: a red test that runs it in a child-repo fixture and expects the refusal and the pointer. Replaces step installed-layout-check, stopped with no code: no child-repo flow runs the installed check (coordinator, 04:06 CDT). Lane session_013NEJL2DkzMyg34ExX3Yukf. Needs no answer. Port: yes, the lint installs everywhere. Placed ahead of c95 (triage 12, Oct 30): a live lane.",
-  "updatedAt": "2026-10-30T09:07:00Z"
+  "note": "Fix: check_layout.py refuses when run outside claude-settings and names the layout probe. Done check: a red test that runs it in a child-repo fixture and expects the refusal and the pointer. Replaces step installed-layout-check, stopped with no code: no child-repo flow runs the installed check (coordinator, 04:06 CDT). Lane session_013NEJL2DkzMyg34ExX3Yukf. Needs no answer. Port: yes, the lint installs everywhere. Placed ahead of c95 (triage 12, Oct 30): a live lane. Done: batch 27 #849 merged Oct 30 04:41 CDT as main 7a9d5549 (#847).",
+  "updatedAt": "2026-10-30T10:25:00Z"
 }
