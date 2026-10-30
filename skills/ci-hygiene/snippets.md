@@ -111,13 +111,13 @@ jobs:
   static:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60   # provisional, step 5
     steps: []   # the cheap checks, in one job
   shards:
     needs: static   # a red static job stops the shards
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60   # provisional, step 5
     steps:
       - uses: actions/checkout@<full-sha>  # v4.x.x
         with: {persist-credentials: false}
@@ -163,8 +163,10 @@ gh run list --commit <merge-sha> --json name,conclusion
   with: {persist-credentials: false}
 ```
 
-Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30) or `uses: ./path`. This repo's
-`checks.yml` uses `$/actions/<name>`.
+Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30). This repo's `checks.yml` uses
+`$/actions/<name>`, and zizmor 1.30.1 passes it. zizmor 1.30.0 or later flags each local
+`uses: ./...` call, an action or a workflow. For a reusable workflow call, the replacement is
+unknown; read zizmor's docs for self-repository.
 
 Pins of claude-settings' `ste-lint` action follow the session's tools. Check drift with the tool
 that reads the pin. It exits 3 when the pin lags:
@@ -257,7 +259,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60   # provisional, step 5
     steps:
       - uses: actions/checkout@<full-sha>  # v4.x.x
         with: {persist-credentials: false}

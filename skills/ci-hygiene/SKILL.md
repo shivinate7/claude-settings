@@ -33,22 +33,23 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    as `snippets.md`, section 4 shows. A draft run skips every job (step 11), so it must never cancel
    a ready run. Runners with a low concurrency cap, such as hosted macOS, queue first.
 5. **Cap each job's time.** Set each cap at about 2x the slowest measured run. Decision `ci-job-caps`
-   (each job's cap) holds the rule, the table and how to measure again. Mark a new job's cap
-   `# provisional` until it has 5 green runs. The owner may set another provisional cap. The merge
+   (each job's cap) holds the rule, the table and how to measure again. A new job's provisional cap
+   is 60 min. Mark it `# provisional` until it has 5 green runs. The owner may set another
+   provisional cap. The merge
    tool's `warn` mode flags a job past 70% of its cap. A job that ends at its cap with no red CI
    step is re-capped or split. It is never left. A timeout stays red, labelled "re-cap or split".
    Give a network step, such as a browser install, its own short cap. When a job nears its cap,
    split its slowest suite by family into its own job. Give the measured CI time before and after.
-   Decision `test-strategy-reset` (each suite in one job) holds that split.
+   Decision `test-strategy-reset` (a test must not fail on runner speed) holds that split.
 6. **After a merge, read every run the push starts.** A deploy or nightly workflow is not a required
    check. So its failure shows on no PR. See `snippets.md`, section 6.
 7. **Pin and audit actions.** Pin each third-party action by full commit SHA. Put its version in a
    comment. Set `persist-credentials: false` on each checkout. Run an audit tool in CI, and run the
    same command locally. See `snippets.md`, section 7, for the zizmor command.
    Pin the audit tool's version too. Read its changelog before a bump (rule
-   `verification-newest-that-passes`, take the newest version that passes). zizmor 1.30.1 added the
-   `self-repository` audit, which fails a local workflow call written `uses: ./.github/workflows/x.yml`.
-   A floating version once turned a PR red.
+   `verification-newest-that-passes`, take the newest version that passes). zizmor 1.30.0 added the
+   `self-repository` audit. It flags each local `uses: ./...` call, an action such as `./actions/a`
+   too, not only a workflow. A floating version once turned a PR red.
    Pins of claude-settings' `ste-lint` action follow the session's tools (decision
    `action-pins-follow-sessions`). `bin/ste-changed` reads that pin. It prints drift and exits 3. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
@@ -61,7 +62,6 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run.
-   Never make an empty commit, or close and reopen a PR, to restart CI.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
@@ -125,17 +125,21 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.
-    A scope skip sits on the CI step that runs the suite or lint, never on the job. A job-level `if:`
-    holds only the draft guard. A job that runs only off pull requests, such as a push-only job, also
-    skips at its CI steps. A job-level trigger guard would skip a needed job on every PR, and the
-    rollup would fail on it. Each scoped CI step's `if:` names its scope flag and
-    `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs start it. See
-    `snippets.md`, section 19.
-    A job whose CI steps all skip still starts a runner. It bills its setup minutes (step 13).
+    Two decisions conflict on where a scope skip sits. The owner's ruling is open.
+    - Decision `test-strategy-reset` runs a job only when its suites' files change, to save macOS minutes.
+    - Decision `same-check-kinds` (every repo runs the same check kinds) makes a skipped needed job fail the rollup.
+    The rollup needs the skip on the CI step that runs the suite or lint, not on the job. A job whose
+    CI steps all skip still starts a runner and bills its setup minutes (step 13), macOS most.
     Unmeasured: the size of that cost in this repo.
+    For a CI-step skip, a job-level `if:` holds only the draft guard. A job that runs only off pull
+    requests, such as a push-only job, also skips at its CI steps. A job-level trigger guard would
+    skip a needed job on every PR, and the rollup would fail on it. Each scoped CI step's `if:` names
+    its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
+    start it. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips the code suites. Lint CI steps still run. An
     unreadable diff or an unmapped path runs everything.
-    This repo's checks.yml does not yet follow this; the per-repo audit fixes it.
+    This repo's checks.yml skips at job level, and `lint/test_windows_split.py` pins a job-level
+    scope `if:`. A repo that moves to CI-step skips re-points that test.
 
 ## Public repos
 
@@ -186,9 +190,9 @@ The seven opt-in templates of that decision:
 - `all-jobs-passed`: fan-in check. Fails when a needed job failed, was cancelled or was skipped.
   The caller sets `needs: [...]`, `if: always()`, and `with: needs: ${{ toJSON(needs) }}`.
 - `ci-done-comment`: posts one PR comment when a run ends with a failed or cancelled job. The caller
-  is the last job. It sets `needs:` on every other job, and
+  is the last job. It sets `needs:` on every other job,
   `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`,
-  and `permissions: {pull-requests: write}`.
+  `permissions: {pull-requests: write}`, and `with: needs: ${{ toJSON(needs) }}`.
 - `ci-alarm`: opens or comments on one issue when the latest completed run of any workflow on a
   branch (default `main`) is red. The caller is a scheduled workflow with
   `permissions: {actions: read, issues: write}`. It needs no checkout. Not enabled in this repo.
@@ -212,8 +216,8 @@ The other composite actions in `actions/`, in the same home:
 
 ## Audit a repo
 
-Run these checks against `.github/workflows/*.yml` and the branch protection. Answer yes or no. A no
-is a finding. A read that cannot run is unknown, never yes or no (rule
+Run these checks against `.github/workflows/*.yml` and the branch protection. Answer yes or no, or
+n/a where an item says so. A no is a finding. A read that cannot run is unknown, never yes or no (rule
 `verification-report-unknown-reads`, report a read that cannot run as unknown).
 
 1. Does a job named `all-jobs-passed` exist? Read `.github/workflows/*.yml`.
@@ -229,8 +233,9 @@ is a finding. A read that cannot run is unknown, never yes or no (rule
    run? Read the block. Compare it with `snippets.md`, section 4.
 7. Does every job set `timeout-minutes`? Run `grep -c "^    runs-on:"` and
    `grep -c "^    timeout-minutes:"` on each workflow file. The two counts must match.
-8. Is every `uses:` pinned by a full 40-character SHA, except same-repo `$/` and `./` actions? Run
-   `grep -n "uses:" .github/workflows/*.yml` and read each line.
+8. Is every `uses:` pinned by a full 40-character SHA, except same-repo `$/` actions? Run
+   `grep -n "uses:" .github/workflows/*.yml` and read each line. A local `./` call is a finding under
+   zizmor 1.30.0 or later (step 7).
 9. Does every `actions/checkout` set `persist-credentials: false`? Run
    `grep -n -A3 "actions/checkout" .github/workflows/*.yml`.
 10. Is the top-level `permissions:` read-only, with `contents: read` or narrower? Read the lines above
@@ -239,10 +244,10 @@ is a finding. A read that cannot run is unknown, never yes or no (rule
     `grep -n "pull_request_target" .github/workflows/*.yml`. For each hit, read its `ref:`.
 12. Does every job-level `if:` hold only the draft guard, or the guard of `ci-done`? Run
     `grep -n "^    if:" .github/workflows/*.yml`. A scope flag or a trigger guard at job level is a
-    finding. It skips a needed job. A job that no rollup needs is judged by item 1 instead, so do
-    not flag it here.
-13. Is the last job `ci-done`, with `needs:` every other job and a call to `ci-done-comment`? Read the
-    last job block.
+    finding. It skips a needed job. A job that no rollup needs is judged by items 1 and 2 instead, so
+    do not flag it here.
+13. If sessions wait on this repo's CI, is the last job `ci-done`, with `needs:` every other job and a
+    call to `ci-done-comment`? Read the last job block. A repo no session waits on answers n/a.
 14. Does no `run:` pipe a check into `tail` or `head` without `set -o pipefail`? Run
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
