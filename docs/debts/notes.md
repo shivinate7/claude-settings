@@ -704,3 +704,5 @@
 - check-handoff-id-letter-prefix: skills/project-ops/scripts/check_handoff.py passes `<URL> A12, B14` and `<URL> #A12`, since its ID pattern needs no word character before the digits. Decision: none.
 - check-handoff-count-false-alarm: skills/project-ops/scripts/check_handoff.py flags `<URL> (3 open)` as copied ids. Its message gives the fix. Decision: none.
 - check-handoff-bracket-after-url: skills/project-ops/scripts/check_handoff.py checks brackets only in the first URL, so `<URL> <placeholder>` passes where main refused it. A real home is still named. Decision: none.
+- wp-ruling-draft-note: skills/waiting-page/page.html setDraft merges, so an unsent note typed while an item was open joins its overturn once it is a ruling; the ruling card shows no note box. Found by reading, not run. Decision: session-tiers.
+- wp-rulings-never-leave: a closed arbiter ruling stays on the waiting page for good, so the "Arbiter rulings" section grows on long runs. Decision: session-tiers.
