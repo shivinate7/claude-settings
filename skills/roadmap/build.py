@@ -26,11 +26,20 @@ NOTE_WORDS words; in phases that hold an active step, open steps untouched for S
 open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line.
 
+The upkeep list also names each step marked doing or active that has no live lane session and no open
+pull request, so triage can set it back (step roadmap-matches-lanes). A step is live when a session in
+the live file's "sessions" list is not archived and carries the tag cs-step:<step id>, or when an open
+pull request's branch equals the step id. Both matches are exact. The row reads one unknown entry, never an
+empty list, when the live file is missing, unreadable, over STALE_LIVE_MINUTES old, has no sessions list, or
+has a session row of the wrong shape.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
 Cost per build: about six git processes, one read of each scanned file, one page written. No
-watcher, no timer, no log.
+watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
+adds to triage's publish, already running: one more list_sessions walk (every page) and three more
+fields (id, session_status, tags) per session in the live file it already writes.
 """
 import argparse
 import datetime
@@ -43,6 +52,10 @@ import urllib.parse
 
 NOTE_WORDS = 250
 STALE_DAYS = 5
+# A live file older than this counts a dead lane as live, so the stale-step row reads unknown.
+STALE_LIVE_MINUTES = 60
+STEP_TAG = "cs-step:"
+ARCHIVED = "SESSION_STATUS_ARCHIVED"
 TOP = 5
 DATA = "roadmap/data"
 # roadmap.html is left out: the builder rewrites it, so a conflict there is resolved by building.
@@ -420,9 +433,12 @@ def live_work(path, steps):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-    "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}]}.
+    "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
+    "sessions"?: [{"id", "session_status", "tags"}]} (triage copies the list_sessions rows, every page).
     A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
-    names that is not an open step is listed in `strays`.
+    names that is not an open step is listed in `strays`. The session rows feed only the stale-step upkeep row:
+    `sessionSteps` holds the step ids of non-archived sessions, and `staleWhy` says why that row reads unknown, or None.
+    A live file with no sessions list still renders Live work.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -467,8 +483,36 @@ def live_work(path, steps):
         if sid and (sid not in steps or steps[sid].get("status") == "done"):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
+    stale_why, session_steps = None, []
+    if read.startswith("unknown"):
+        stale_why = read
+    else:
+        minutes = live_age_minutes(read)
+        if minutes is None:
+            stale_why = "unknown (the live file's readAt has no time zone: %r)" % (read,)
+        elif minutes > STALE_LIVE_MINUTES:
+            stale_why = "unknown (the live file was read %d minutes ago; read it again)" % minutes
+    if isinstance(raw.get("sessions"), list):
+        before = len(skipped)
+        sessions = keep("session", raw["sessions"], lambda r: isinstance(r.get("id"), str)
+                        and isinstance(r.get("session_status"), str) and isinstance(r.get("tags"), list))
+        session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] != ARCHIVED
+                                for t in r["tags"] if isinstance(t, str) and t.startswith(STEP_TAG)})
+        if len(skipped) > before and not stale_why:
+            stale_why = "unknown (%d session rows skipped)" % (len(skipped) - before)
+    elif not stale_why:
+        stale_why = "unknown (the live file has no sessions list)"
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
-            "branches": branches, "skipped": skipped, "strays": strays}
+            "branches": branches, "skipped": skipped, "strays": strays,
+            "sessionSteps": session_steps, "staleWhy": stale_why}
+
+
+def live_age_minutes(read):
+    """Whole minutes since the ISO time `read`, or None when it has no time zone."""
+    at = datetime.datetime.fromisoformat(read.replace("Z", "+00:00"))
+    if at.tzinfo is None:
+        return None
+    return int((datetime.datetime.now(datetime.timezone.utc) - at).total_seconds() // 60)
 
 
 def build_info(repo, source, why):
@@ -616,6 +660,17 @@ def added_at(source):
     return seen
 
 
+def unlaned(open_, marks, work):
+    """Entries for each doing or active step with no live session and no open PR, or one unknown entry."""
+    work = work or {"read": "unknown (no --live file)"}
+    why = work["staleWhy"] if "staleWhy" in work else work["read"]
+    if why:
+        return [why]
+    live = set(work["sessionSteps"]) | {p["branch"] for p in work["pulls"] if isinstance(p.get("branch"), str)}
+    return ["%s (set to done: landed in %s)" % (k, ", ".join(marks[k])) if k in marks else "%s (set to todo)" % k
+            for k, d in open_ if d.get("status") in ("doing", "active") and k not in live]
+
+
 def upkeep(steps, added, marks, strays, work=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
@@ -644,6 +699,7 @@ def upkeep(steps, added, marks, strays, work=None):
         jumped = ["unknown (git log could not run)"]
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
+            ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
             ("landed, waiting for triage to close", ["%s (%s)" % (k, ", ".join(v)) for k, v in sorted(marks.items())]),
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),

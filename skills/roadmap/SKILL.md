@@ -73,11 +73,15 @@ GitHub, so the publisher reads them just before the build and passes one file:
     {"readAt": "<ISO time of the reads>",
      "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
      "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}],
-     "branches": [{"name", "updatedAt"?}]}
+     "branches": [{"name", "updatedAt"?}],
+     "sessions": [{"id", "session_status", "tags"}]}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
 - `pulls`: the repo's open pull requests. `branches`: lane branches with no open pull request.
+- `sessions`: `list_sessions`, every page, each row copied as it comes with only these three fields.
+  The upkeep list reads it for steps in progress. A live file with no `sessions` list still renders
+  Live work.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
 - With no `--live`, no `threads` or `pulls` list, or a `readAt` that is not an ISO time, the
@@ -106,13 +110,21 @@ After each build the builder prints the upkeep list for the triage thread. It na
 - untouched steps and empty notes in a live phase;
 - new top steps with no "Placed ahead of" line;
 - landed steps that wait for triage to close them;
+- steps marked `doing` or `active` with no live lane or open PR. A step is live when a session that is
+  not archived has the tag `cs-step:<step id>`, or an open pull request's branch equals the step id.
+  Both match the id exactly. Each entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)`
+  when a `Step:` trailer is on main. Triage sets each step back. The row reads one `unknown (<why>)` entry
+  when `--live` is missing or unreadable, has no `sessions` list, has a session row of the wrong shape, or
+  has a `readAt` over 60 minutes old (an old list counts a dead lane as live);
 - `Step:` trailers that name no step.
 
 ## Cost
 
 About six git processes and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the builder
-reads. No watcher, no timer, no log.
+reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
+fields per session in the file. The builder adds no git process, file, timer or log for it.
+No watcher, no timer, no log.
 
 ## Tests
 
