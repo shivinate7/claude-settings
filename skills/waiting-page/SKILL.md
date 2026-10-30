@@ -122,12 +122,11 @@ in <home>", never "waited". It stays on the page until the owning session closes
 Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
 project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
-into `meta/page`.
+into `meta/page`. The writer watches the page ("Read the answers").
 
 - Every other session sends its question to the writer, which writes the item. A lane's question
   reaches the writer through its report to its orchestrator ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
-  The writer watches the page (see "Read the answers").
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
@@ -235,10 +234,12 @@ writer adds the answer and its time to the item's `context`, and the owning sess
 closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 
 - A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
-  adds an item, takes the writer role, or inherits open items. A session that inherits items also
-  rewrites each item's `owner` to itself: `owner` is the session that reads the answer. Its
-  handoff names the watch as `Watch: <page URL>`. A session stops (`ArtifactComments` action
-  `watch` with `on: false` and the page URL) only when it holds none of these, and at rotation.
+  adds an item, takes the writer role, or inherits open items. A writer gets the URL from
+  `meta/page`, or from the `Watch:` line of the project-ops role handoff
+  (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
+  items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
+  It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
+  has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.

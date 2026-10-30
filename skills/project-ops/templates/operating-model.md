@@ -32,7 +32,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 When the owner names the wrong tier, or brings work that belongs to another tier, the session
 says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
 
-A coordinator may work in another repo, by hand-off or by its own lane PR there. Before it acts,
+A coordinator may work in another repo, by handoff or by its own lane PR there. Before it acts,
 it checks whether that repo has an active coordinator: a live session tagged both
 `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`. It reads every page of
 `list_sessions` and filters the tags itself. If one is active, it coordinates with it.
@@ -60,7 +60,7 @@ parent, or miss a message while busy.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
   3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
      `role-handoff.md`, with that time. The file names each wait it handed over, each open
-     waiting-page item, and the page to watch. It runs
+     waiting-page item, and each page to watch. It runs
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from
