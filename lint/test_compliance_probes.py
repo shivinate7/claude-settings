@@ -590,17 +590,21 @@ def hits(out):
     return [m.groups() for m in map(ITEM.match, out.splitlines()[1:]) if m]
 
 
-def planted(prose=False):
+def planted(prose=False, one_word=False, nth=0):
     """The first "not" name of the live glossary, read on each run, so no case writes one. `prose`
-    takes an everyday name, tagged (prose), in place of a retired one."""
+    takes an everyday name, tagged (prose), in place of a retired one. `one_word`: a name of one word, which a
+    child term wraps in a prefix. `nth`: the later names of that kind, for a case that needs two."""
     table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+    found = []
     for _, _, names in table:
         for name in names:
             tagged = name.endswith(check_glossary.THIS_SENSE)
             word = name[:-len(check_glossary.THIS_SENSE)] if tagged else name
-            if tagged == prose and word not in SPARE:
-                return word
-    raise AssertionError("the glossary holds no such name")
+            if tagged == prose and word not in SPARE and not (one_word and re.search(r"[\s-]", word)) and word not in found:
+                found.append(word)
+    if nth >= len(found):
+        raise AssertionError("the glossary holds no such name")
+    return found[nth]
 
 
 def dropping(word):
@@ -610,6 +614,15 @@ def dropping(word):
     def rows(text):
         return [(term, homes, [name for name in names if name != word]) for term, homes, names in real_rows(text)]
     return rows
+
+
+CHILD_MARK = "<!-- child glossary -->"  # a patched rows() tells the child's file from this repo's by it
+
+
+def child_glossary(repo, *terms, where="GLOSSARY.md"):
+    """`repo` with a glossary of its own domain terms: the same `## Terms` table as this repo's (GLOSSARY.md line 4)."""
+    rows = "".join("| %s | A term of this repo. | `README.md` | - |\n" % term for term in terms)
+    return repo.write(where, "# Glossary\n\n%s\n\n## Terms\n\n| Term | Meaning | Home | Not |\n|---|---|---|---|\n%s" % (CHILD_MARK, rows))
 
 
 class Words(unittest.TestCase):
@@ -706,10 +719,177 @@ class Words(unittest.TestCase):
                 code, out = Repo(self).write(rel, text).run("words")
                 self.assertEqual(hits(out), [(word, rel, line)], out)
 
+    # A repo's own domain words (`block` in an ad blocker, `worker` for a Cloudflare Worker) are spelled in its own
+    # GLOSSARY.md. A child term is a spelling that spans a retired word, like a term of this repo's glossary.
+
+    def test_a_child_term_spans_a_retired_word_wherever_a_name_is_read(self):
+        for prose in (False, True):  # a retired word, and an everyday word tagged (this sense)
+            word = planted(prose, one_word=True)
+            kebab = "ad-" + word
+            repo = child_glossary(Repo(self), "ad " + word)
+            repo.write("src/ad_%s.py" % word).write("src/ad%sList.js" % word.capitalize())  # snake and camel path
+            repo.write("docs/guide.md", "See `%s-list-rule` and rule:%s-list.\n" % (kebab, kebab))  # a slug, an anchor
+            if not prose:
+                repo.write("src/rules.py", "ad_%s = 1\n" % word)  # an identifier: read for a retired word only
+            with self.subTest(word=word):
+                code, out = repo.run("words")
+                self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_the_bare_word_still_hits_beside_a_child_term(self):
+        word, other = planted(one_word=True), planted(one_word=True, nth=1)
+        repo = child_glossary(Repo(self), "ad " + word)
+        repo.write("src/ad_%s.py" % word)  # spanned by the term
+        repo.write("src/%s_list.py" % word).write("src/%s_ad_%s.py" % (word, word))  # bare, alone and beside the term
+        repo.write("src/ad_%s_%s.py" % (word, other))  # a second retired word is no part of the term
+        repo.write("src/rules.py", "ad_%s = 1\n%s_total = 2\n" % (word, word))
+        code, out = repo.run("words")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(sorted(hits(out)), sorted([
+            (word, "src/%s_list.py" % word, "-"), (word, "src/%s_ad_%s.py" % (word, word), "-"),
+            (other, "src/ad_%s_%s.py" % (word, other), "-"), (word, "src/rules.py", "2")]), out)
+
+    def test_a_child_term_that_is_the_retired_word_is_not_honoured(self):
+        for prose in (False, True):
+            word = planted(prose, one_word=True)
+            for term in (word, word + "s"):  # the bare word, and its plural, which the check reads as the word
+                with self.subTest(word=word, term=term):
+                    repo = child_glossary(Repo(self), term).write("src/%s_list.py" % term)
+                    code, out = repo.run("words")
+                    self.assertEqual((code, hits(out)), (1, [(word, "src/%s_list.py" % term, "-")]), out)
+
+    def test_a_child_term_that_repeats_a_claude_settings_term_is_not_honoured(self):
+        # This repo's glossary never lets a repo define a term again that it defines. Here it defines `ad <word>` too.
+        word = planted(one_word=True)
+        term, path = "ad " + word, "src/ad_%s.py" % word
+        repo = child_glossary(Repo(self), term).write(path)
+        real_rows = check_glossary.rows
+
+        def repeated(text):
+            found = real_rows(text)
+            return found if CHILD_MARK in text else found + [(term, ["README.md"], [])]
+        with mock.patch.object(check_glossary, "rows", repeated):
+            code, out = in_process(repo.root)
+        self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+        code, out = in_process(repo.root)  # the same child file, with the term this repo's own: honoured
+        self.assertEqual((code, hits(out)), (0, []), out)
+
+    def test_no_child_glossary_at_the_root_changes_nothing(self):
+        word = planted(one_word=True)
+        path = "src/ad_%s.py" % word
+        for repo in (Repo(self).write(path), child_glossary(Repo(self).write(path), "ad " + word, where="docs/GLOSSARY.md")):
+            code, out = repo.run("words")  # a glossary anywhere but the root is no child glossary
+            self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+
     def test_registered_in_groups(self):
         probes = load_probes()
         self.assertIn("words", probes.GROUPS)
         self.assertIs(probes.GROUPS["words"], probes.probe_words)
+
+
+class Slugs(unittest.TestCase):
+    """The slugs group: the rule fails a slug over 32 characters that a change ADDS against origin/main, in the child's
+    own record folders. Old long slugs are a note, never a scored row. The Git row once scored every old one as out,
+    since probes.md gave check_record_slugs.py the record files, and a file list skips git."""
+
+    OLD = ["b" * 33, "c" * 33, "d" * 33, "e" * 33]  # over 32 characters, in git's sort order
+
+    def child(self, rolled=False):
+        """(repo, record folders) of a child clone, its origin/main holding four old long slugs and a short one."""
+        repo = Repo(self, origin=True)
+        if rolled:
+            repo.write(EXTRAS, '{"kinds": {}, "rolled-out": true}')
+        folders = layout.folders(repo.root, "record")  # the child's own folders, never this repo's
+        for slug in self.OLD:
+            repo.write("%s/%s.md" % (folders[0], slug), "# Record\n")
+        repo.write("%s/short.md" % folders[0])
+        return repo.publish(), folders
+
+    @staticmethod
+    def items(out):
+        return [line for line in out.splitlines()[1:] if line[:1].isspace()]
+
+    @staticmethod
+    def notes(out):
+        return [line for line in out.splitlines()[1:] if line.strip() and not line[:1].isspace()]
+
+    def test_old_long_slugs_alone_are_a_note_and_not_a_gap(self):
+        repo, folders = self.child()
+        repo.branch("work").write("src/a.py").write("%s/%s.md" % (folders[0], self.OLD[0]), "# Record\nedited\n").commit()  # an edit is no add
+        code, out = repo.run("slugs")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(head(out).startswith("slugs: in shape"), out)
+        self.assertEqual(self.items(out), [], out)
+        notes = self.notes(out)
+        self.assertEqual(len(notes), 1, out)  # one line, as the words group's `unread:` line is one
+        self.assertRegex(notes[0], r"\b4\b")
+        self.assertTrue(all(slug in notes[0] for slug in self.OLD[:3]), notes)
+        self.assertNotIn(self.OLD[3], notes[0])  # the first three names only
+
+    def test_a_slug_added_against_origin_main_is_red_and_the_old_ones_are_no_item(self):
+        repo, folders = self.child()
+        new = "%s/%s.md" % (folders[0], "f" * 33)
+        repo.branch("work").write(new).commit()
+        code, out = repo.run("slugs")
+        self.assertEqual(code, 1, out)
+        self.assertTrue(head(out).startswith("slugs: out"), out)
+        items = self.items(out)
+        self.assertEqual(len(items), 1, out)
+        self.assertIn(new, items[0])
+        self.assertFalse(any(slug in line for slug in self.OLD for line in items), out)
+
+    def test_a_short_slug_added_and_a_long_name_outside_a_record_folder_pass(self):
+        repo, folders = self.child()
+        repo.branch("work").write("%s/%s.md" % (folders[0], "s" * 32))  # 32 characters pass
+        repo.write("%s/%s.txt" % (folders[0], "t" * 40)).write("src/%s.md" % ("u" * 40)).commit()  # not a record: a .txt, another folder
+        code, out = repo.run("slugs")
+        self.assertEqual((code, self.items(out)), (0, []), out)
+        self.assertTrue(head(out).startswith("slugs: in shape"), out)
+
+    def test_the_childs_own_record_folders_are_read(self):
+        # Not rolled out, a child keeps records at decisions/ and debts/; rolled out, under docs/. This repo's layout is rolled out.
+        seen = set()
+        for rolled in (False, True):
+            repo, folders = self.child(rolled)
+            seen.add(folders)
+            for folder in folders:
+                with self.subTest(rolled=rolled, folder=folder):
+                    new = "%s/%s.md" % (folder, "g" * 33)
+                    repo.branch("work-" + folder.replace("/", "-")).write(new).commit()
+                    code, out = repo.run("slugs")
+                    self.assertEqual(code, 1, out)
+                    self.assertIn(new, "\n".join(self.items(out)))
+        self.assertEqual(len(seen), 2, seen)  # the two children hold their records in different folders
+
+    def test_a_child_with_no_origin_main_is_unknown(self):
+        # With no base, an added slug cannot be told from an old one: unknown, never in shape.
+        repo = Repo(self)
+        folder = layout.folders(repo.root, "record")[0]
+        repo.write("%s/%s.md" % (folder, self.OLD[0])).commit("base")
+        code, out = repo.run("slugs")
+        self.assertEqual(code, 2, out)
+        self.assertTrue(head(out).startswith("slugs: unknown"), out)
+
+    def test_probe_output_is_a_scorecard_group_and_old_slugs_land_in_the_notes(self):
+        repo, folders = self.child()
+        new = "%s/%s.md" % (folders[0], "f" * 33)
+        out = repo.branch("work").write("src/a.py").commit().run("slugs")[1]
+        group = load_probes().GROUP_LINE.match(head(out))  # the scorecard's one reader of a group line
+        self.assertIsNotNone(group, out)
+        self.assertEqual(group.group(1, 2), ("slugs", "in shape"), out)
+        _, body = Scorecard.run_card(self, Repo(self), out)
+        rows, _, notes = body.partition("## Notes")
+        self.assertIn("| slugs | in shape |", rows)
+        self.assertNotIn("| slugs: ", rows)  # no scored row for an old slug
+        self.assertTrue(all(slug in notes and slug not in rows for slug in self.OLD[:3]), body)
+        out = repo.write(new).commit().run("slugs")[1]  # a new long slug: a scored row, the old ones still notes
+        _, body = Scorecard.run_card(self, Repo(self), out)
+        rows, _, notes = body.partition("## Notes")
+        self.assertIn("| slugs | out |", rows)
+        self.assertEqual(len([r for r in rows.splitlines() if r.startswith("| slugs: ") and new in r]), 1, body)
+        self.assertTrue(all(slug in notes and slug not in rows for slug in self.OLD[:3]), body)
+
+    def test_registered_in_groups(self):
+        self.assertIn("slugs", load_probes().GROUPS)
 
 
 class ProbesText(unittest.TestCase):
@@ -718,6 +898,14 @@ class ProbesText(unittest.TestCase):
     def text(self):
         with open(PROBES_MD, encoding="utf-8") as handle:
             return handle.read()
+
+    def test_the_slugs_row_runs_the_slugs_group_and_gives_the_lint_no_record_files(self):
+        text = self.text()
+        self.assertIn("compliance_probes.py slugs", text)
+        git_rows = [line for line in text.splitlines() if line.startswith("| Git |") and "slug" in line]
+        self.assertTrue(git_rows and all("compliance_probes.py slugs" in row for row in git_rows), git_rows)
+        # A file list makes check_record_slugs.py skip git, so it fails every old slug.
+        self.assertEqual(re.findall(r"check_record_slugs\.py[^\n|]*\*\.md", text), [])
 
     def test_probes_fall_back_to_python(self):
         text = self.text()
