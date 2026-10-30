@@ -218,6 +218,9 @@ jobs:
       - name: Fixture copy helper suite
         run: python3 lint/test_tracked_tree.py
 
+      - name: Debt notes union merge fixture suite
+        run: python3 lint/test_notes_union_merge.py
+
       - name: Job runner fixture suite (bin/ci-job)
         run: python3 lint/test_ci_job.py
 
