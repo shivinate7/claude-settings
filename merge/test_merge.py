@@ -9306,7 +9306,7 @@ class StandingGrantSwitch(CloudSession):
 
     def assert_grant_refused(self, rc, out, err, refs_before):
         """The grant refusal: rc 1, no merge, no claim pushed and no lock taken, and the owner-ask wording on stderr. The wording names
-        no key, no value, no config path and no flag (git-remedy-never-names-target). The key is known here, so the refusal is the
+        no key, no value, no config path, no settings and no flag (git-remedy-never-names-target). The key is known here, so the refusal is the
         grant's own, not a stop on an unknown field."""
         self.assertEqual(rc, 1, out + err)
         self.assertFalse(getattr(self.host, "merged", False), out + err)
@@ -9314,8 +9314,9 @@ class StandingGrantSwitch(CloudSession):
         self.assertNotIn("unknown field", out + err)
         self.assertRegex(err, r"(?i)standing merge grant")
         self.assertRegex(err, r"(?i)\boff\b")
-        self.assertRegex(err, r"(?i)merge settings")
         self.assertRegex(err, r"(?i)ask the owner")
+        self.assertNotRegex(err, r"(?i)merge settings")  # the remedy points at no settings page, which is the switch's home
+        self.assertNotRegex(err, r"(?i)settings")
         self.assertNotRegex(err, r"(?i)standinggrant")
         self.assertNotRegex(err, r"(?i)true")
         self.assertNotIn("stamp.json", err)
