@@ -3564,3 +3564,94 @@ test("a closed item with no arbiter flag stays hidden next to a closed arbiter i
   assert.equal(await page.locator('[id^="item-"]').count(), 2, "the page draws a card for a closed item that is no ruling");
   assert.equal(await overturn(page).count(), 1, "the page offers Overturn on more than the arbiter item");
 });
+
+// Round 2: an answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
+// may hold an option key ("a"). Only choice "overturn" is an overturn; any other record under a ruling's id is stale.
+const staleAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "a", note: "" } };
+const staleDraft = { "waiting.draft": JSON.stringify({ [ARBITER.id]: { choice: "a" } }) };
+const overturnAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "overturn", note: "" } };
+const pressed = (page) => overturn(card(page, ARBITER)).getAttribute("aria-pressed");
+
+test("a saved answer that is no overturn does not read as an overturn on the ruling card", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], answers: staleAnswer }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "a saved answer with choice a shows as an overturn");
+  assert.equal(await overturn(card(page, ARBITER)).count(), 1, "the ruling card no longer offers Overturn");
+  assert.equal(await pressed(page), "false", "the ruling card shows as overturned");
+});
+
+test("a stale pick draft under a ruling's id is not sent", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], storage: staleDraft }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on a stale pick draft alone");
+  await choose(page, DECISION, "a");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "Send counts the stale draft");
+  await send(page);
+  await holds(page, (id) => !!window.__answers()[id], DECISION.id);
+  assert.equal(ARBITER.id in await answers(page), false, "Send wrote an answer for the ruling from a stale draft");
+});
+
+test("the Copy line leaves out a stale pick draft under a ruling's id", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], storage: staleDraft, failSet: true }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  await choose(page, DECISION, "a"); // a ready answer, so the failed write opens the Copy line
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await stubClipboard(page, false);
+  await page.click("#copy");
+  const copied = await page.evaluate(() => window.__copied);
+  assert.doesNotMatch(copied, /901/, "the Copy line carries the stale pick draft of the ruling: " + copied);
+  assert.equal(copied, "27 a");
+});
+
+test("a ruling is no open question: the counts and the bar count only the open item, and All answered shows with the ruling unpressed", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  const count = async () => (await page.locator("#qCount").textContent()).trim();
+  assert.equal(await count(), "1", "the Questions count includes the ruling");
+  assert.match(await page.locator("#barStatus").innerText(), /\b1 stay open/, "the bar does not count the one open item as staying open");
+  assert.doesNotMatch(await page.locator("#barStatus").innerText(), /All answered/, "All answered shows with an open item");
+  await overturn(card(page, ARBITER)).click();
+  assert.equal(await count(), "1", "a pressed Overturn changes the Questions count");
+  assert.match(await page.locator("#barStatus").innerText(), /\b1 stay open/, "a pressed Overturn changes the stay-open count");
+  await overturn(card(page, ARBITER)).click(); // unpress: the ruling stands unpressed
+  await choose(page, DECISION, "a"); await send(page);
+  await page.locator("#barStatus", { hasText: "All answered." }).waitFor();
+  assert.equal(await count(), "0", "the Questions count still includes the ruling");
+  assert.doesNotMatch(await page.locator("#barStatus").innerText(), /stay open/, "the bar counts the unpressed ruling as staying open");
+  assert.equal(await pressed(page), "false", "answering the open item pressed the Overturn");
+});
+
+test("Undo of a sent overturn removes the answer and the ruling card is back, with no receipt", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(overturn(card(page, ARBITER)), "the arbiter card has no Overturn button");
+  await overturn(card(page, ARBITER)).click();
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], ARBITER.id), "Send wrote no answer for the arbiter item");
+  assert.match(await card(page, ARBITER).innerText(), /You overturned/, "the sent overturn shows no receipt");
+  await page.locator("#undoBtn").click();
+  assert.ok(await holds(page, (id) => !(id in window.__answers()), ARBITER.id), "Undo left the overturn answer");
+  assert.deepEqual(await page.evaluate((id) => window.__log.filter((l) => l[0] === "delete" && l[1] === "answers" && l[2] === id), ARBITER.id), [["delete", "answers", ARBITER.id]], "Undo did not delete answers/<id>");
+  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Undo wrote or deleted an items doc");
+  assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
+  // Undo hands the owner's pick back as a draft, as it does on a decision (undoSend): the Overturn is pressed again but unsent.
+  assert.equal(await pressed(page), "true", "Undo lost the owner's pressed Overturn");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the undone overturn is not ready to send again");
+});
+
+test("Withdraw of a sent overturn removes the answer and the ruling card is back, unpressed", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], answers: overturnAnswer }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.match(await card(page, ARBITER).innerText(), /You overturned/, "a saved overturn shows no receipt");
+  await card(page, ARBITER).getByRole("button", { name: "Change" }).click();
+  assert.equal(await pressed(page), "true", "Change on a saved overturn does not bring the pressed Overturn back");
+  await overturn(card(page, ARBITER)).click(); // unpress: nothing is left to send
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  await send(page);
+  assert.ok(await holds(page, (id) => !(id in window.__answers()), ARBITER.id), "Withdraw left the overturn answer");
+  assert.deepEqual(await page.evaluate(() => window.__log), [["delete", "answers", ARBITER.id]], "Withdraw wrote more than the one delete of answers/<id>");
+  assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
+  assert.equal(await pressed(page), "false", "the ruling card is not back to its unpressed state");
+});
