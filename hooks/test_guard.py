@@ -11803,7 +11803,7 @@ FAMILY = "command-in-item"
 CI_DOC = "c152-stale-branch-deletes"
 CI_STEPS = ["Open plans/c152-stale-branch-deletes.md", "Run its command"]
 CI_TERMINAL = ["Open Terminal", "Paste the command below and run it"]
-# Ruling (shiv, 2026-10-30 14:47 CDT): a task's `command` is {powershell, mac}, one string per shell, never one bash line.
+# A task's `command` is {powershell, mac}, one string per shell (decision act-in-place).
 CMD_BOTH_SHELLS = {"powershell": "git push origin --delete old-a", "mac": "git push origin --delete old-a"}
 
 
