@@ -128,7 +128,7 @@ const assertFocusOnFirstPick = (at, it, key) => {
   assert.notEqual(at.tag, "BODY", `${it.id}: focus fell to BODY after Enter on Take my pick`);
   assert.equal(at.id, `o-${it.id}-${key}`, `${it.id}: focus is not on the first key of the pick`);
 };
-const addNote = async (page, it, text) => { await card(page, it).getByRole("button", { name: "Add a note" }).click(); await page.fill(`#n-${it.id}`, text); };
+const addNote = async (page, it, text) => { await page.fill(`#n-${it.id}`, text); };
 const send = (page) => page.click("#send");
 const written = (page) => page.waitForFunction(() => window.__log.some((l) => l[0] === "set"));
 const geo = (page) => page.evaluate(() => ({
@@ -853,16 +853,17 @@ test("a press on the scrollbar gutter opens nothing and picks nothing, and a pre
   assert.equal(await page.locator("#dsheet").isVisible(), true, "a press on the picture did not open View");
 });
 
-test("a right-button press on the scrollbar, then Escape, leaves Enter working on Add a note, at 1280 wide", async (t) => {
+test("a right-button press on the scrollbar, then Escape, leaves Enter working on None of these, at 1280 wide", async (t) => {
   const it = picItem("stale-right", 43);
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
   await frameSettled(page, 2400);
   const r = await page.locator(boxSel(it.id)).boundingBox();
   await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "right" });
   await page.keyboard.press("Escape");
-  await card(page, it).getByRole("button", { name: "Add a note" }).focus();
+  await card(page, it).getByRole("button", { name: "None of these" }).focus();
   await page.keyboard.press("Enter");
-  assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, "the note did not open: a right press on the scrollbar left a stale state");
+  await page.waitForFunction((id) => document.getElementById(`b-none-${id}`)?.getAttribute("aria-pressed") === "true", it.id);
+  assert.equal(await page.getAttribute(`#b-none-${it.id}`, "aria-pressed"), "true", "Enter did not press None of these: a right press on the scrollbar left a stale state");
 });
 
 test("a middle press on the scrollbar leaves Space working on an option, at 1280 wide", async (t) => {
@@ -1193,6 +1194,19 @@ test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   await send(page);
   await c.getByText("Not withdrawn (denied)", { exact: false }).waitFor();
   assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
+});
+
+// The note box is open on every open card, with no Add a note button. A sent card has no box; a card under Change is open.
+test("the note box is open on every open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
+  const FRESH = mk("fresh-decision", 29);
+  const page = await open(t, { items: [DECISION, FRESH, TASK], answers: SAVED_A }); if (!page) return;
+  assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "a sent card shows a note box");
+  for (const it of [FRESH, TASK]) {
+    assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, `${it.id}: the note box is not open on a fresh card`);
+  }
+  assert.equal(await page.getByRole("button", { name: "Add a note" }).count(), 0, "a card renders an Add a note button");
+  await card(page, DECISION).getByRole("button", { name: "Change" }).click();
+  assert.equal(await page.locator(`#n-${DECISION.id}`).isVisible(), true, "a sent card under Change shows no note box");
 });
 
 test("a note with no option picked is an answer: choice none plus the note", async (t) => {
