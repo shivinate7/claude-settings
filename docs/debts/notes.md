@@ -699,3 +699,7 @@
 - role-handoff-watch-none-wording: role-handoff.md should say `Watch: none` only when the role owns no page; PR #858 (triage watches its page) allows it whenever `Open items: none` (skills/project-ops/templates/role-handoff.md). Decision: none.
 - op-model-hand-off-file-pinned: operating-model.md keeps the spelling "hand-off file" because skills/project-ops/tests/test_scaffold.py pins it; renaming it to "handoff" needs those pins moved in the same change. Decision: none.
 - report-guard-model-name-next: lint/report_guard.py flags an agent named only under Next as a Done item with no model, even as "(builder sonnet)". It fired 4 times in lane handoff-no-copied-lists, all false alarms. Decision: none.
+- op-model-wait-with-home: operating-model.md rotation step 3 says the file names each wait it handed over. A wait with a home, such as CI on a PR, can read as a copy. Decision: none.
+- check-handoff-id-letter-prefix: skills/project-ops/scripts/check_handoff.py passes `<URL> A12, B14` and `<URL> #A12`, since its ID pattern needs no word character before the digits. Decision: none.
+- check-handoff-count-false-alarm: skills/project-ops/scripts/check_handoff.py flags `<URL> (3 open)` as copied ids. Its message gives the fix. Decision: none.
+- check-handoff-bracket-after-url: skills/project-ops/scripts/check_handoff.py checks brackets only in the first URL, so `<URL> <placeholder>` passes where main refused it. A real home is still named. Decision: none.
