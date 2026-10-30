@@ -11,7 +11,7 @@ could not read gets an empty file <artifact id>.unreadable instead. A page with 
 unknown too.
 
 Verdict, one line per page, then a total line:
-  current  the fetched page holds page.html (white space, the designData mockups and the roadmap block ignored)
+  current  the fetched page holds page.html (white space, the designData mockups, the roadmap block and the <title> text ignored)
   behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
   unknown  the page was not read: another account, a missing file, an empty file
 Exit 0 only when every page is current. A behind or unknown page exits 1: an unread page is never
@@ -72,9 +72,16 @@ def empty_roadmap_block(text):
     return text[:found[0][2]] + text[found[1][1]:]
 
 
+def empty_titles(text):
+    """`text` with the text of each title element in its markup cut out; a title inside script text stays."""
+    for start, end in sorted((m[1], m[2]) for m in splice.scan(text) if m[0] == splice.TITLE)[::-1]:
+        text = text[:start] + text[end:]
+    return text
+
+
 def normal(text):
-    """The page text with every designData body and the roadmap block emptied, and white space collapsed."""
-    return " ".join(empty_roadmap_block(DESIGN.sub(r"\1\2", text)).split())
+    """The page text with every designData body, the roadmap block and each title's text emptied, and white space collapsed."""
+    return " ".join(empty_roadmap_block(DESIGN.sub(r"\1\2", empty_titles(text))).split())
 
 
 def skeleton_before(text):

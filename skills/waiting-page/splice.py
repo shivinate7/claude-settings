@@ -5,8 +5,9 @@
     python3 ~/.claude/skills/waiting-page/splice.py --page TEMPLATE.html --carry LIVE.html --out OUT.html
 
 The first form replaces the roadmap block. The second, --carry, is for a republish of a changed
-template: OUT.html is TEMPLATE.html with the live page's designData block and roadmap block put in,
-byte for byte, in place of the template's own. A live page with no roadmap marker outside script text
+template: OUT.html is TEMPLATE.html with the live page's designData block, roadmap block and <title>
+text put in, byte for byte, in place of the template's own (a live page with no title leaves the
+template's). A live page with no roadmap marker outside script text
 predates the block: only its designData block goes in, and the template keeps its empty roadmap block.
 It refuses, and writes nothing, when the template lacks either block, when either file has an unclosed,
 doubled or unpaired roadmap block or a doubled designData block, or when the live page has no designData
@@ -30,14 +31,16 @@ import sys
 
 OPEN, CLOSE = "roadmap:data", "/roadmap:data"
 DESIGN = "designData"
+TITLE = "title"
 DESIGN_ID = re.compile(r"""\bid\s*=\s*["']?designData["']?(?=[\s/>"'])""", re.I)
 RAW = ("script", "style", "textarea", "title")
 TAG = re.compile(r"<(%s)(?=[\s/>])" % "|".join(RAW), re.I)
 
 
 def scan(text):
-    """[(name, start, end)] in the markup, outside raw-text elements: each roadmap marker comment, and each
-    designData script element (start of its opening tag to the end of its closing tag)."""
+    """[(name, start, end)] in the markup, outside raw-text elements: each roadmap marker comment, each
+    designData script element (start of its opening tag to the end of its closing tag), and each
+    title element's text (TITLE, the raw text between its tags)."""
     found, at = [], 0
     while True:
         at = text.find("<", at)
@@ -72,6 +75,8 @@ def scan(text):
         if not close:
             return found
         at = close.end()
+        if tag.group(1).lower() == "title":
+            found.append((TITLE, end + 1, close.start()))
         if tag.group(1).lower() == "script" and DESIGN_ID.search(text, at_tag, end):
             shut = text.find(">", close.end())
             at = len(text) if shut < 0 else shut + 1
@@ -106,13 +111,22 @@ def design_span(text, what):
     return spans[0][1], spans[0][2]
 
 
+def title_span(text):
+    """(start, end) of the text of the first title element in the markup, or None when there is none."""
+    spans = [m for m in scan(text) if m[0] == TITLE]
+    return (spans[0][1], spans[0][2]) if spans else None
+
+
 def carry(template, live):
-    """`template` with the live page's designData block and roadmap block in place of its own, byte for byte.
+    """`template` with the live page's designData block, roadmap block and title text in place of its own, byte for byte.
     A live page with no roadmap marker in its markup predates the block: it gives only its designData block,
-    and the template keeps its empty roadmap block."""
+    and the template keeps its empty roadmap block. A live page with no title keeps the template's."""
     t_design, l_design = design_span(template, "the template"), design_span(live, "the live page")
     t_block = block_span(template, "the template")
     swaps = [(t_design, live[l_design[0]:l_design[1]])]
+    t_title, l_title = title_span(template), title_span(live)
+    if t_title and l_title:
+        swaps.append((t_title, live[l_title[0]:l_title[1]]))
     if markers(live):
         l_block = block_span(live, "the live page")
         swaps.append((t_block, live[l_block[0]:l_block[1]]))

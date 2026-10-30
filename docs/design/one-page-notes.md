@@ -54,7 +54,8 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
    memory (`rm-view`) stays for Plan, Changes, Reference and Records. Gain: what waits is first,
    each time. Loss: the owner who reads status first presses once on each load.
 6. Each part has one name, the name of its tab: "Questions" and "Status". The document title is
-   "<repo>: Questions" or "<repo>: Status". The tab row always shows, so the header shows the repo
+   "<repo> Queue", with " · Status" on the Status tab. Ruling: shiv, chat, 14:33 CDT Oct 30, 2026.
+   The tab row always shows, so the header shows the repo
    name only, with no "waiting on you" line. Ruling: reviewer's pick, taken by the orchestrator,
    round 3. Departs from: page.html `applyIdentity`, which titles the page "<repo>: waiting on you".
    With no repo name, the header shows the mark only, and the h1 holds the tab name for screen
