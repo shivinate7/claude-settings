@@ -696,3 +696,6 @@
 - layout-test-worktree-prune: lint/test_layout.py Identity runs `git worktree prune` on the real repo's git folder, which also drops stale worktree records of other sessions; unmeasured race. Decision: one-layout-every-repo.
 - wp-fit-w-scan-equal-value: the FIT_W restatement scan (skills/waiting-page/tests/page.test.mjs) flags an unrelated number equal to FIT_W. Its message gives no remedy for that case. 0 hits at 390, 2-43 at other common widths (measured). Decision: none.
 - feedback-guard-agent-burst: hooks/feedback_guard.py classes an agent hand-back as an owner burst and blocks Stop until it gets an item line (two blocks in lane wp-fit-w-one-home). Decision: none.
+- wp-more-context-focus: the "More context" button on a waiting-page card has no id, so Enter drops focus to the page body on repaint (the reply button got `b-morerp-<id>` for the same defect). Decision: item-field-rendered.
+- wp-field-warning-margin: the unknown-field disclosure's `<p>` keeps browser margins; `.status .cmd-more p { margin: 0 }` would tighten it. Decision: item-field-rendered.
+- wp-field-list-template-only: the item-field-rendered guard reads the template page.html, not the live page; an empty or dropped block silently stops it (CI's real-page case goes red). Decision: item-field-rendered.
