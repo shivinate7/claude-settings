@@ -742,6 +742,29 @@ class StaleInProgress(Fixture):
         self.assertIn("c2 (set to todo)", entries)
 
 
+    def test_session_without_tags_or_with_null_tags_is_tagless_not_skipped(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        tagless = [{"id": "session_test02", "session_status": "SESSION_STATUS_IDLE"},
+                   {"id": "session_test03", "session_status": "SESSION_STATUS_RUNNING", "tags": None}]
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")] + tagless)
+        page, out = self.build_from_main("--live", str(self.live))
+        self.assertEqual(build_info(page)["live"]["skipped"], [])
+        self.assertEqual(self.stale(out), (1, "c2 (set to todo)"))
+        with self.subTest("a tags string is still skipped"):
+            self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1"),
+                                   {"id": "session_test04", "session_status": "SESSION_STATUS_RUNNING", "tags": "cs-step:c1"}])
+            page, out = self.build_from_main("--live", str(self.live))
+            self.assertEqual(build_info(page)["live"]["skipped"], ["session 2"])
+            self.assertEqual(self.stale(out), (1, "unknown (1 session rows skipped)"))
+
+    def test_repo_tag_compares_without_case(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-repo:Owner/Fixture", "cs-step:c1")])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "c2 (set to todo)"))
+
+
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 
 
