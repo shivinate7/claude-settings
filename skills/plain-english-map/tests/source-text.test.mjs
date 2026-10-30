@@ -3,11 +3,10 @@
 // `scripts/lib/source-text.mjs` holds one scanner behind four readers: `blankComments`, `blankCommentsAndStrings`,
 // `stripComments` and `stripCommentsAndStrings`. Each takes the file name as its second argument. Only a name that ends
 // in `.tsx` or `.jsx` reads JSX: the text between a tag's `>` and the next `<` or `{` is text, so a quote, a `//` or a
-// `/*` in it opens nothing. A `.ts` or `.mjs` name, and a call with no name, reads no JSX, as before.
+// `/*` in it opens nothing. A `.ts` or `.mjs` name, and a call with no name, reads no JSX.
 // The cases are the three shapes of the rule building-scanner-respects-strings (a comment opener inside a string, a
 // multi-line template literal, a lone quote in text) and a generic arrow, which is no JSX tag.
-// Most of the JSX cases come from the q_max harness, where this scanner was first built. They are written again here
-// for the shared copy, because q_max vendors this skill and keeps no copy of its own.
+// The JSX cases sit here, beside the one shared scanner, so a project that uses this skill needs no copy of them.
 //
 // Run from this folder: `node --test source-text.test.mjs`. No case needs the `typescript` package.
 import { test } from 'node:test';
@@ -24,7 +23,7 @@ const JSX_FILES = ['x.tsx', 'x.jsx'];
 const PLAIN_FILES = [undefined, 'x.ts', 'x.mjs'];
 
 // ---- A lone quote in JSX text opens no string. A file that is read as JSX keeps the code after it, on the line and below.
-// Red before the scanner reads JSX: the apostrophe opens a string that runs to the end of the line. `blankCommentsAndStrings`
+// Without JSX reading, the apostrophe opens a string that runs to the end of the line. `blankCommentsAndStrings`
 // and `stripCommentsAndStrings` then blank `keep()`. `blankComments` and `stripComments` keep the string text, so the comment
 // in it stays a comment that is not blanked.
 for (const [name, read] of Object.entries(READERS)) {
@@ -51,7 +50,7 @@ for (const [name, read] of Object.entries(READERS)) {
   }
 }
 
-// A `//` or a `/*` in JSX text is text. Red before: the `//` blanks the rest of the line, and the `/*` opens a block that runs on.
+// A `//` or a `/*` in JSX text is text. Without JSX reading, the `//` blanks the rest of the line, and the `/*` opens a block that runs on.
 for (const [name, read] of Object.entries(READERS)) {
   for (const file of JSX_FILES) {
     test(`JSX: ${name}, ${file}: a comment opener in JSX text is text`, () => {
@@ -113,7 +112,7 @@ test('JSX: a `.tsx` file that ends with a tag open is read again with no JSX, so
 });
 
 // ---- Today's behaviour stays for a name with no JSX, and for a call with no name: `<p>Don't</p>` opens a string.
-// Green before and after. These pin the other half of the file-name switch.
+// These pin the other half of the file-name switch: no JSX reading without a `.tsx` or `.jsx` name.
 test('no JSX: a `.ts` name, a `.mjs` name and no name read the apostrophe as a string to the end of the line', () => {
   const src = "const el = <p>Don't</p>; keep(); // GATED\nconst after = 1;\n";
   for (const file of PLAIN_FILES) {
@@ -136,7 +135,7 @@ test('no JSX: a pair of quotes in JSX text is a string in a `.ts` file, a `.mjs`
   }
 });
 
-// ---- A generic arrow is no JSX tag, in every name. Green before and after: a `.ts` name reads no JSX, and the reader of a `.tsx`
+// ---- A generic arrow is no JSX tag, in every name. A `.ts` name reads no JSX, and the reader of a `.tsx`
 // name must not read a generic as a tag. A tag read there leaves the file open at its end, and one stray `</b>` after it closes the
 // file again, so the comment between stayed unblanked.
 // `= <T>(x) => x` is no valid `.tsx`, so only the `.ts` file holds it.
@@ -172,7 +171,7 @@ for (const [what, decl, files] of GENERICS) {
   }
 }
 
-// ---- A comment opener inside a string, and a multi-line template literal, in every name. Green before and after.
+// ---- A comment opener inside a string, and a multi-line template literal, in every name. JSX reading must not change either.
 for (const [what, src] of [
   ['`//` inside a string', 'const url = "https://x//y"; keep(url);'],
   ['`/*` in one string and `*/` in a later one', "const a = '/*'; keep(); const b = \"*/\";"],
@@ -235,8 +234,8 @@ test('import reader: importTargets keeps the type filter in a `.tsx` file whose 
   assert.deepEqual(importTargets('src/a.tsx', src, TRACKED, { types: false }), ['src/y.ts']);
 });
 
-// Green before and after: with the apostrophe on its own line, the string ends at the line break and the import below is read.
-test("import reader: importTargets finds an import below the line of an apostrophe in JSX text (q_max's own case)", () => {
+// With the apostrophe on its own line, the string ends at the line break and the import below is read. JSX reading must keep this read.
+test("import reader: importTargets finds an import below the line of an apostrophe in JSX text", () => {
   const src = "const el = <p>Don't</p>;\nimport { v } from './x.ts';\nconst f = <p>It's</p>;\n";
   assert.deepEqual(importTargets('src/a.tsx', src, TRACKED), ['src/x.ts']);
 });
@@ -254,7 +253,7 @@ test('import reader: a string and a comment are no import in a `.tsx` file, and 
   assert.deepEqual(importTargets('src/a.ts', src, TRACKED), ['src/x.ts']);
 });
 
-// ---- The readers in `scripts/` that pass the file name on. Each is red before for a `.tsx` name.
+// ---- The readers in `scripts/` that pass the file name on. Each must read a `.tsx` name as JSX.
 test('map-check: stageSitesOf finds a stage literal after an apostrophe in JSX text, only when it gets a `.tsx` name', () => {
   const stage = { variable: 'stage', callback: 'setStage' };
   const src = "export const V = () => <p>Don't</p>; stage = 'queued';\nsetStage('done');\n";
