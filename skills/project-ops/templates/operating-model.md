@@ -78,11 +78,11 @@ parent, or miss a message while busy.
   standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
   runs the merge tool on it. The owner is not asked.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
-  The check-in's message names where its list lives, never a copy of it.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   It ends each turn that leaves work in flight with a timed check-in, so a lost wake costs one gap.
-  The check-in's message names where its list lives, never a copy of it.
+- A check-in's message names the home of each list it tracks (a page collection, a roadmap ref, a git
+  ref or a GitHub query), never a copy.
 
 ## Filing
 
