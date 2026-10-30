@@ -640,7 +640,7 @@ class StaleInProgress(Fixture):
         self.assertEqual(count, 1)
         self.assertTrue(entries.startswith("unknown ("), entries)
 
-    def test_malformed_session_rows_are_skipped_and_named(self):
+    def test_malformed_session_rows_are_skipped_named_and_read_the_row_unknown(self):
         self.commit_step("c1", status="doing")
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1"),
                                {"id": "session_test02", "session_status": "SESSION_STATUS_RUNNING", "tags": "cs-step:c2"},
@@ -651,6 +651,7 @@ class StaleInProgress(Fixture):
         self.assertIn("session 2", skipped)
         self.assertIn("session 3", skipped)
         self.assertRegex(out, r"live file entries skipped: .*session 2")
+        self.assertEqual(self.stale(out), (1, "unknown (2 session rows skipped)"))
 
     def test_todo_and_done_steps_are_never_listed(self):
         self.commit_step("c2", status="done", order=2)
