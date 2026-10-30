@@ -68,7 +68,11 @@ review. A design reviewer still judges the built screen against your mockup late
 
 Critique. Before hand-off, run Skill `impeccable` with args `critique <mockup path>` on your own
 mockup. Fix each finding inside your write scope. A finding that needs a change outside it goes in
-the report. Guard rule `impeccable-review-only` refuses any other form.
+the report. Guard rule `impeccable-review-only` refuses any other form. In a blind lane, skip
+impeccable's Setup section and its "Launcher unavailable" fallback, because they read PRODUCT.md and
+DESIGN.md, and read only the critique reference and the mockup. In every lane, leave out the snapshot
+step: `critique-storage` is refused, and `.impeccable/` is outside your write scope. Put the closing
+questions of the critique under Input Needed, because a lane cannot chat.
 
 Deferred (owner, 2026-10-26): whether you run Claude Code's `/design` canvas yourself, or the owner
 runs it. Until the owner rules, draw HTML mockups only.
