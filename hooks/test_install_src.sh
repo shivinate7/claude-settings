@@ -3207,7 +3207,8 @@ caseK11() {
   fi
 }
 
-# ---- caseL: the merge --confirm allow rules come from the source checkout, and the log says what was written ----
+# ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
+# The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
 # allow_case NAME HAS: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
 # merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. Then one piped cloud install
 # from inside it. Sets h, co, rc and out.
@@ -3242,7 +3243,7 @@ caseL1() {
     bad "$name" "allow rules were written with no rules file: $(written_allow | tr '\n' ' ')"
   elif printf '%s\n' "$out" | grep -q "allow rules from\|merge/cloud_allow.json rules)"; then
     bad "$name" "the log claims rules that were not written: $(settings_lines)"
-  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge --confirm allow rules: $co at $sha has no rules in merge/cloud_allow.json"; then
+  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge allow rules: $co at $sha has no rules in merge/cloud_allow.json"; then
     bad "$name" "no WARNING names the checkout and its commit: $(settings_lines)"
   else
     ok "$name"
@@ -3260,7 +3261,7 @@ caseL2() {
     bad "$name" "install.sh exited $rc: $(install_problems)"
   elif [ "$(written_allow)" != "$(want_allow)" ]; then
     bad "$name" "allow rules [$(written_allow | tr '\n' ' ')] != the file's [$(want_allow | tr '\n' ' ')]"
-  elif ! printf '%s\n' "$out" | grep -qF "+ $count merge --confirm allow rules from $co at $sha)"; then
+  elif ! printf '%s\n' "$out" | grep -qF "+ $count merge allow rules from $co at $sha)"; then
     bad "$name" "the log does not name the count, the checkout and its commit: $(settings_lines)"
   else
     ok "$name"
