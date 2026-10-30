@@ -39,12 +39,46 @@ local_install_sh() {
   return 1
 }
 
-main() {
-  [ "$(uname -s)" = "Linux" ] || return 0
+# Run install.sh from $1 with --cloud under the cap. Sets rc: 124 when the cap stopped it. The
+# install runs in its own process group (setsid), so the cap stops its children too. Without
+# setsid, timeout stops bash only; without both, the run has no cap.
+run_install() {
+  rc=0
+  if command -v setsid >/dev/null 2>&1; then
+    setsid bash "$1" --cloud </dev/null &
+    pid=$!
+    n=0
+    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt "$CAP" ]; do sleep 1; n=$((n + 1)); done
+    if kill -0 "$pid" 2>/dev/null; then
+      # Children first, so the install's bash reaps them before it stops; then the whole group.
+      for member in $(pgrep -g "$pid" 2>/dev/null); do
+        [ "$member" = "$pid" ] || kill -TERM "$member" 2>/dev/null
+      done
+      sleep 1
+      kill -TERM -- "-$pid" 2>/dev/null
+      n=0
+      while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 3 ]; do sleep 1; n=$((n + 1)); done
+      kill -KILL -- "-$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      rc=124
+    else
+      wait "$pid" || rc=$?
+    fi
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "$CAP" bash "$1" --cloud </dev/null || rc=$?
+  else
+    bash "$1" --cloud </dev/null || rc=$?
+  fi
+}
 
-  # install.sh moves a checkout to main mid-run, so it runs from a temp copy, never in place.
-  tmp=$(mktemp 2>/dev/null) || { verdict "no source (mktemp failed)"; return 0; }
-  trap 'rm -f "$tmp"' EXIT
+main() {
+  [ "$(uname -s)" = "Linux" ] || { verdict "skipped: not Linux"; return 0; }
+
+  # install.sh moves a checkout to main mid-run, so it runs from a temp copy, never in place. The
+  # copy sits alone in its own dir: install.sh reads the dir of $0 as a source candidate.
+  dir=$(mktemp -d 2>/dev/null) || { verdict "no source (mktemp failed)"; return 0; }
+  trap 'rm -rf "$dir"' EXIT
+  tmp="$dir/install.sh"
 
   have=0
   if curl -fsS --max-time 20 "$RAW/install.sh" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
@@ -57,19 +91,16 @@ main() {
     return 0
   fi
 
-  rc=0
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$CAP" bash "$tmp" --cloud </dev/null || rc=$?
-  else
-    bash "$tmp" --cloud </dev/null || rc=$?
-  fi
+  run_install "$tmp"
 
-  if [ -f "$CLAUDE_DIR/agents/builder.md" ]; then
-    verdict "installed"
-  elif [ "$rc" -eq 124 ]; then
+  if [ "$rc" -eq 124 ]; then
     verdict "timed out after ${CAP}s"
-  else
+  elif [ "$rc" -ne 0 ]; then
     verdict "exit $rc"
+  elif [ -f "$CLAUDE_DIR/agents/builder.md" ]; then
+    verdict "installed"
+  else
+    verdict "exit 0, but agents/builder.md is missing"
   fi
   return 0
 }
