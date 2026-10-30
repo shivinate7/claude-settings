@@ -59,8 +59,8 @@ parent, or miss a message while busy.
      those pages.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
   3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
-     `role-handoff.md`, with that time. The file names each wait it handed over, each open
-     waiting-page item, and each page to watch. It runs
+     `role-handoff.md`, with that time. The file names each wait it handed over, the home of
+     the open waiting-page items (the items collection, by URL, never each item), and each page to watch. It runs
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from

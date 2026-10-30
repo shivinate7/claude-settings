@@ -30,10 +30,11 @@ Watches stopped at <time>
 answered each comment still open at that time, then wrote this file. The successor watches
 each one at once, and reads its comments since that time.>
 
-Open items: <n, ...> or none
+Open items: <items collection URL> or none
 
-<The number of each waiting-page item this role owns that is still open, or `none`. The successor
-rewrites `owner` on each one to itself.>
+<The URL of the page's items collection, where each open item this role owns is listed, or `none`.
+Never copy item ids here: a copy goes stale. The successor rewrites `owner` on each open item in
+that collection to itself.>
 
 Watch: <page URL>
 

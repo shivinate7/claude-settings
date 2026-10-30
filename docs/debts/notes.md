@@ -697,5 +697,4 @@
 - wp-fit-w-scan-equal-value: the FIT_W restatement scan (skills/waiting-page/tests/page.test.mjs) flags an unrelated number equal to FIT_W. Its message gives no remedy for that case. 0 hits at 390, 2-43 at other common widths (measured). Decision: none.
 - feedback-guard-agent-burst: hooks/feedback_guard.py classes an agent hand-back as an owner burst and blocks Stop until it gets an item line (two blocks in lane wp-fit-w-one-home). Decision: none.
 - role-handoff-watch-none-wording: role-handoff.md should say `Watch: none` only when the role owns no page; PR #858 (triage watches its page) allows it whenever `Open items: none` (skills/project-ops/templates/role-handoff.md). Decision: none.
-- check-handoff-none-regex-zero: check_handoff.py from PR #858 (triage watches its page) matches NONE `(none\b|0)` with no word boundary after `0`, so an `Open items:` value that starts with 0, such as `05`, reads as none. Decision: none.
 - op-model-hand-off-file-pinned: operating-model.md keeps the spelling "hand-off file" because skills/project-ops/tests/test_scaffold.py pins it; renaming it to "handoff" needs those pins moved in the same change. Decision: none.
