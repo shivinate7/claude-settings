@@ -3207,87 +3207,85 @@ caseK11() {
   fi
 }
 
-# ---- caseL: the merge --confirm allow rules come from origin/main, not the source checkout's HEAD ----------
-# allow_fixture NAME DROP: a GitHub fixture whose main has merge/cloud_allow.json, and a session's own checkout of
-# it at $work/NAME-co (unmarked, origin the GitHub URL). DROP=1 puts the checkout on a lane commit that removes the
-# file, as a batch runner's checkout left on a commit from before the rules landed. Sets fx, h and co.
-allow_fixture() {
-  fx="$work/$1-fx"; h="$work/$1-home"; co="$work/$1-co"
-  mkdir -p "$h"
-  make_github_fixture "$fx"
-  git clone -q "$fx/bare.git" "$co"
-  git -C "$co" config remote.origin.url https://github.com/shivinate7/claude-settings.git
-  git -C "$co" update-ref -d refs/remotes/origin/main
+# ---- caseL: the merge --confirm allow rules come from the source checkout, and the log says what was written ----
+# allow_case NAME HAS: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
+# merge/cloud_allow.json; HAS=0 is a checkout on a commit from before the rules landed. Then one piped cloud install
+# from inside it. Sets h, co, rc and out.
+allow_case() {
+  h=$(new_home); co="$work/$1-co"
+  make_checkout "$co" "# $1 content"
   if [ "$2" = 1 ]; then
-    git -C "$co" checkout -q -b lane
-    git -C "$co" rm -q merge/cloud_allow.json
-    git -C "$co" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "before the rules"
+    mkdir -p "$co/merge"; cp "$REPO_ROOT/merge/cloud_allow.json" "$co/merge/cloud_allow.json"
+    git -C "$co" add -A; git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -m rules
   fi
+  allow_install
 }
-# allow_install REDIRECT: a piped cloud install from inside $co, with HOME's GitHub URLs sent to REDIRECT. Sets rc and out.
+# One piped cloud install from inside $co, with HOME $h. Sets rc and out.
 allow_install() {
-  write_redirect "$h" "$1"
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
         CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
-# The `merge --confirm` allow rules in the written settings.json, one per line, sorted.
-written_merge_rules() { jq -r '.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))' "$h/.claude-cfg/settings.json" 2>/dev/null | sort; }
-want_merge_rules() { jq -r '.permissions.allow[]' "$REPO_ROOT/merge/cloud_allow.json" | sort; }
+# Every allow rule in the written settings.json, sorted. The source settings.json is `{}`, so all of them were added.
+written_allow() { jq -r '.permissions.allow[]?' "$h/.claude-cfg/settings.json" 2>/dev/null | sort; }
+want_allow() { jq -r '.permissions.allow[]' "$REPO_ROOT/merge/cloud_allow.json" | sort; }
 settings_lines() { printf '%s\n' "$out" | grep settings.json; }
 
 caseL1() {
-  name="caseL1: a checkout on a commit without merge/cloud_allow.json still gets main's merge --confirm allow rules"
-  allow_fixture l1 1
-  if [ -e "$co/merge/cloud_allow.json" ] || ! git -C "$fx/bare.git" cat-file -e main:merge/cloud_allow.json; then
-    bad "$name" "FIXTURE: the checkout must lack the file and main must have it"; return
-  fi
-  allow_install "$fx/bare.git"
+  name="caseL1: a checkout without merge/cloud_allow.json gets no merge allow rules and a WARNING, never a claim of rules"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  allow_case l1 0
+  sha=$(git -C "$co" rev-parse --short HEAD)
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $(install_problems)"
-  elif [ "$(written_merge_rules)" != "$(want_merge_rules)" ]; then
-    bad "$name" "settings.json merge rules [$(written_merge_rules | tr '\n' ' ')] != main's [$(want_merge_rules | tr '\n' ' ')]"
-  elif ! printf '%s\n' "$out" | grep -q "merge --confirm allow rules from origin/main at "; then
-    bad "$name" "the log does not name origin/main as the rules' source: $(settings_lines)"
-  elif [ "$(git -C "$co" rev-parse --abbrev-ref HEAD)" != lane ] || [ -n "$(git -C "$co" status --porcelain)" ]; then
-    bad "$name" "the install moved or dirtied the session's checkout"
-  elif [ "$(git -C "$co" rev-parse --is-shallow-repository)" != false ]; then
-    bad "$name" "the fetch made the session's checkout shallow"
+  elif [ -n "$(written_allow)" ]; then
+    bad "$name" "allow rules were written with no rules file: $(written_allow | tr '\n' ' ')"
+  elif printf '%s\n' "$out" | grep -q "allow rules from\|merge/cloud_allow.json rules)"; then
+    bad "$name" "the log claims rules that were not written: $(settings_lines)"
+  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge --confirm allow rules: $co at $sha has no merge/cloud_allow.json"; then
+    bad "$name" "no WARNING names the checkout and its commit: $(settings_lines)"
   else
     ok "$name"
   fi
+  rm -rf "$h"
 }
 
 caseL2() {
-  name="caseL2: with main unreachable and no file in the checkout, no rules are written and the log says so"
-  allow_fixture l2 1
-  allow_install "$work/no-such-github.git"
+  name="caseL2: a checkout with merge/cloud_allow.json adds exactly its rules, and the log names the count and the commit"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  allow_case l2 1
+  sha=$(git -C "$co" rev-parse --short HEAD)
+  count=$(want_allow | wc -l | tr -d ' ')
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $(install_problems)"
-  elif [ -n "$(written_merge_rules)" ]; then
-    bad "$name" "rules were written with no source: $(written_merge_rules | tr '\n' ' ')"
-  elif printf '%s\n' "$out" | grep -q "allow rules from\|merge/cloud_allow.json rules)"; then
-    bad "$name" "the log claims rules that were not written: $(settings_lines)"
-  elif ! printf '%s\n' "$out" | grep -q "WARNING: wrote .* with no merge --confirm allow rules"; then
-    bad "$name" "no WARNING names the missing rules: $(settings_lines)"
+  elif [ "$(written_allow)" != "$(want_allow)" ]; then
+    bad "$name" "allow rules [$(written_allow | tr '\n' ' ')] != the file's [$(want_allow | tr '\n' ' ')]"
+  elif ! printf '%s\n' "$out" | grep -qF "+ $count merge --confirm allow rules from $co at $sha)"; then
+    bad "$name" "the log does not name the count, the checkout and its commit: $(settings_lines)"
   else
     ok "$name"
   fi
+  rm -rf "$h"
 }
 
 caseL3() {
-  name="caseL3: with main unreachable, a checkout that has the file gives its own rules"
-  allow_fixture l3 0
-  allow_install "$work/no-such-github.git"
-  if [ $rc -ne 0 ]; then
-    bad "$name" "install.sh exited $rc: $(install_problems)"
-  elif [ "$(written_merge_rules)" != "$(want_merge_rules)" ]; then
-    bad "$name" "settings.json merge rules [$(written_merge_rules | tr '\n' ' ')] != the checkout's"
-  elif ! printf '%s\n' "$out" | grep -q "merge --confirm allow rules from $co at "; then
-    bad "$name" "the log does not name the checkout as the rules' source: $(settings_lines)"
+  name="caseL3: when jq cannot build settings.json, the log claims no write"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  h=$(new_home); co="$work/l3-co"
+  make_checkout "$co" "# l3 content"
+  printf '{ not json\n' > "$co/settings.json"
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -am broken
+  allow_install
+  if printf '%s\n' "$out" | grep -q "^claude-settings: wrote $h/.claude-cfg/settings.json"; then
+    bad "$name" "the log claims a write that jq refused: $(settings_lines)"
+  elif ! printf '%s\n' "$out" | grep -q "WARNING: could not write $h/.claude-cfg/settings.json"; then
+    bad "$name" "no WARNING names the failed write: $(settings_lines)"
+  elif [ -e "$h/.claude-cfg/settings.json.tmp" ]; then
+    bad "$name" "the partial settings.json.tmp was left behind"
   else
     ok "$name"
   fi
+  rm -rf "$h"
 }
 
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
