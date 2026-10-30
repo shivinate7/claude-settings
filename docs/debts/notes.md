@@ -116,6 +116,9 @@
 - in-throwaway-reads-paths-only: in_throwaway judges path text, so git --git-dir=/tmp/x with a real cwd passes as throwaway (hooks/guard_core.py)
 - inbox-midturn-prompt-untested: UserPromptSubmit fires for mid-turn owner messages (audit 2026-10-13), and the burst count leans on it; no test pins it (inbox hook)
 - inbox-partial-write-fence: a partial write, needing disk-full, can leave a fence open and merge later blocks into one message (inbox capture hook)
+- inbox-page-note-key-after-write: a failed write of the pagenotes key after the inbox write saves the note again on the next read of the answer (hooks/local_time.py page_note). Decision: owner-feedback-inbox
+- inbox-page-note-item-newline: an item id with a newline adds a line to the page-note label, so a one-line note can count as a burst (hooks/local_time.py page_note_text). Decision: owner-feedback-inbox
+- inbox-page-note-other-session: the page-note hook cannot tell another session's answer from its own, because answers carry no owner, so it saves every new note it reads (hooks/local_time.py page_note). Decision: owner-feedback-inbox
 - inbox-path-drop-silent: if the inbox path cannot be built, an owner message is dropped with one stderr line (inbox capture hook)
 - inbox-unreadable-drops-ids: an unreadable inbox drops open ids from the post-compaction note; the Stop guard still names the file (compact hook)
 - index-row-drop-no-finding: a records row can drop silently when a record is renamed to non-.md, or when one Drops-lines trailer excuses the page window-wide (hook_catalog.py, check_silent_undo.py)
