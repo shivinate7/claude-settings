@@ -90,20 +90,23 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     number the waiting page answers by. It is not an open id, so it needs no handoff id. It sits
     beside the ruling or task item that holds the decision, which still needs its own item and
     tracked home. An answer item is checked in every block that holds one, burst or not. A block
-    passes only with proof of the send. The proof is in the transcript at transcript_path (JSONL),
-    after an owner record whose text equals the block's verbatim text. An owner record is a user
-    record with no peer origin (origin.kind "peer" is a peer's words). After that record, an
-    assistant record must hold a tool_use block that is one of:
+    passes only with proof of the send. The proof is in the transcript at transcript_path (JSONL).
+    The k-th block whose text is T, counted in the inbox, anchors to the k-th owner record whose text
+    is T. Text is compared with line ends made the same, so CRLF and LF match. A closed answer item
+    (its line ends with `[closed]`) is never checked. An owner record is a user record with no peer
+    origin (origin.kind "peer" is a peer's words). After its anchor record, an assistant record must
+    hold a tool_use block that is one of:
       (a) named `mcp__claude-code-remote__send_message` or `SendMessage`, with input.message holding
           n as a whole token (digits not next to a letter, digit or `-`);
-      (b) named with a prefix of `ArtifactData` or `mcp__ArtifactData`, whose input, at any depth
-          (each op of a batch counts), has a key n equal to the item number, as an int or a string of
-          digits, and has collection `items`, or a doc_id or path that starts with `items/`.
+      (b) named `ArtifactData` or `mcp__ArtifactData` (a prefix match), with action `set`, `update` or
+          `batch` (a batch's ops count too). Its input, at any depth, has a key n equal to the item
+          number, as an int or a string of digits, and has collection `items`, or a doc_id or path that
+          starts with `items/`. Other actions, such as `query` or `get`, never count.
     Without that proof the block blocks. Its reason names the item id and page:<n>, and says to send
     the answer to the page writer. A home that is not page:<digits> blocks as a malformed answer
-    home. An absent, missing or unreadable transcript never blocks: stdout carries a systemMessage
-    that starts "Feedback guard: answer sends not checked" and names the reason, as the homes check
-    does.
+    home. An absent, missing or unreadable transcript, or one with no owner record for the block,
+    never blocks: stdout carries a systemMessage that starts "Feedback guard: answer sends not
+    checked" and names the reason, as the homes check does.
   - Another session's inbox is never read.
 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
@@ -908,8 +911,11 @@ def case_answer_artifactdata_n_proof_passes():
             ("collection items, data n \"98\"", "ArtifactData",
              {"action": "update", "collection": "items", "doc_id": "disk-cleanup",
               "data": {"n": "98"}}),
-            ("batch op, data n 98", "mcp__ArtifactData",
-             {"batch": [{"op": "update", "doc_id": "items/disk-cleanup", "data": {"n": 98}}]})):
+            ("set, doc_id items/disk-cleanup, data n 98", "ArtifactData",
+             {"action": "set", "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
+            ("batch, op with data n 98", "mcp__ArtifactData",
+             {"action": "batch", "batch": [{"op": "update", "doc_id": "items/disk-cleanup",
+                                           "data": {"n": 98}}]})):
         p = answer_run(new_cfg(), "answer-artifact", [("98: a", (ANSWER_ITEM,))],
                        [owner_rec("98: a"), used_rec(name, tool_input)])
         expect_silent("answer: %s, %s, passes" % (name, label), p)
@@ -941,9 +947,10 @@ def case_answer_artifactdata_n_other_numbers_blocks():
     for label, tool_input in (
             ("data n 980 on items/disk-cleanup", {"action": "update", "doc_id": "items/disk-cleanup",
                                                  "data": {"n": 980}}),
-            ("data n 198 in a batch op", {"batch": [{"op": "update", "doc_id": "items/disk-cleanup",
-                                                    "data": {"n": 198}}]}),
-            ("collection items and doc_id 98, no n key", {"collection": "items", "doc_id": "98"})):
+            ("data n 198 in a batch op", {"action": "batch", "batch": [{"op": "update",
+                                                    "doc_id": "items/disk-cleanup", "data": {"n": 198}}]}),
+            ("collection items and doc_id 98, no n key", {"action": "update", "collection": "items",
+                                                          "doc_id": "98"})):
         p = answer_run(new_cfg(), "answer-artifact-other", [("98: a", (ANSWER_ITEM,))],
                        [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
         expect_send_missing("answer: ArtifactData, %s, does not prove item 98" % label, p,
@@ -1001,6 +1008,64 @@ def case_answer_each_block_is_checked_in_its_turn():
                    [owner_rec("98: a"), send_rec("98: a"), owner_rec("a later note"),
                     said_rec("Noted.")])
     expect_silent("answer: the first block's send still counts after a later owner message", p)
+
+
+def case_answer_each_identical_block_needs_its_own_send():
+    """The k-th block whose text is T anchors to the k-th owner record whose text is T: the send
+    after owner record 1 proves block 1 only."""
+    p = answer_run(new_cfg(), "answer-kth",
+                   [("98: a", (ANSWER_ITEM,)), ("98: a", ("- fb-0958-8 [answer] -> page:98",))],
+                   [owner_rec("98: a"), send_rec("98: a"), owner_rec("98: a")])
+    expect_send_missing("answer: the second identical block has no send after its own owner record",
+                        p, "fb-0958-8", "98")
+    check("answer: the first identical block passes, so its item is not named",
+          "fb-0958-7" not in (block_reason(p) or ""), p.desc())
+
+
+def case_answer_artifactdata_other_actions_block():
+    for label, tool_input in (
+            ("action query, collection items, query n 98",
+             {"action": "query", "collection": "items", "query": {"n": 98}}),
+            ("action get, doc_id items/disk-cleanup, data n 98",
+             {"action": "get", "doc_id": "items/disk-cleanup", "data": {"n": 98}})):
+        p = answer_run(new_cfg(), "answer-action", [("98: a", (ANSWER_ITEM,))],
+                       [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
+        expect_send_missing("answer: ArtifactData, %s, does not prove item 98" % label, p,
+                            "fb-0958-7", "98")
+
+
+def case_answer_closed_item_is_never_checked():
+    for label, item in (("closed, no send", "- fb-0958-7 [answer] -> page:98 [closed]"),
+                        ("closed, malformed home", "- fb-0958-7 [answer] -> page:abc [closed]")):
+        p = answer_run(new_cfg(), "answer-closed", [("98: a", (item,))],
+                       [owner_rec("98: a"), said_rec("Noted.")])
+        expect_silent("answer: a closed answer item is never checked (%s)" % label, p)
+
+
+def case_answer_owner_record_missing_stands_down():
+    earlier = [owner_rec("an earlier question"), said_rec("An answer to it.")]
+    for label, records in (("the transcript has no owner record for the text", earlier),
+                           ("the transcript is empty (rotated)", [])):
+        p = answer_run(new_cfg(), "answer-no-owner", [("98: a", (ANSWER_ITEM,))], records)
+        obj = guard_json(p) or {}
+        msg = obj.get("systemMessage") or ""
+        check("answer: %s: exit 0, no block" % label, p.code == 0 and not is_block(obj), p.desc())
+        check("answer: %s: a systemMessage starts with the answer stand-down and names the owner record"
+              % label, msg.startswith(ANSWER_FAIL_OPEN) and "owner" in msg.lower(), p.desc())
+
+
+def case_answer_crlf_owner_text_matches_the_inbox():
+    p = answer_run(new_cfg(), "answer-crlf", [("98: a\nthe reason", (ANSWER_ITEM,))],
+                   [owner_rec("98: a\r\nthe reason"), send_rec("98: a")])
+    expect_silent("answer: an owner record with CRLF line ends matches the inbox's LF text", p)
+
+
+def case_answer_artifactdata_write_without_n_blocks():
+    p = answer_run(new_cfg(), "answer-no-n", [("98: a", (ANSWER_ITEM,))],
+                   [owner_rec("98: a"), used_rec("ArtifactData", {
+                       "action": "update", "doc_id": "items/disk-cleanup", "data": {"context": "x"}})])
+    expect_send_missing("answer: an ArtifactData update of items/disk-cleanup with no n blocks", p,
+                        "fb-0958-7", "98")
 
 
 # --------------------------------------------------------------------------- reorient note
@@ -1299,6 +1364,12 @@ CASES = (
     case_answer_bad_home_blocks,
     case_answer_transcript_missing_passes_with_system_message,
     case_answer_each_block_is_checked_in_its_turn,
+    case_answer_each_identical_block_needs_its_own_send,
+    case_answer_artifactdata_other_actions_block,
+    case_answer_closed_item_is_never_checked,
+    case_answer_owner_record_missing_stands_down,
+    case_answer_crlf_owner_text_matches_the_inbox,
+    case_answer_artifactdata_write_without_n_blocks,
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
