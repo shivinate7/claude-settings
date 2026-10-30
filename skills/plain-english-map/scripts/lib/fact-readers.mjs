@@ -17,7 +17,7 @@ import { blankCommentsAndStrings } from './source-text.mjs';
 
 const PY_FACTS = fileURLToPath(new URL('./py-facts.py', import.meta.url));
 const TS_EXT = /\.(?:ts|tsx|mts|cts|mjs|cjs|js|jsx)$/;
-// A file whose `#` starts a comment. The scanner below reads C-style comments, so a full-line `#` is blanked here.
+// A file whose `#` starts a comment. Only a full-line `#` comment is read as one: a trailing `# note` after code stays a stated limit.
 const HASH_COMMENT_EXT = /\.(?:sh|bash|zsh|ps1|rb|toml|ya?ml|conf|mk)$/;
 
 const fail = (req, reason, gone = false) => ({ file: req.file, symbol: req.symbol, ok: false, reason, ...(gone && { gone: true }) });
@@ -120,8 +120,9 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const readRegex = (req, text) => {
   if (req.op === 'uses') return fail(req, `a uses fact is read for Python and JavaScript files, and ${req.file} is neither`);
   // The blanked text keeps every offset, so a match there names the same span of the original, where a string value is still text.
-  let blank = blankCommentsAndStrings(text, req.file);
-  if (HASH_COMMENT_EXT.test(req.file)) blank = blank.replace(/^[ \t]*#.*$/gm, (m) => ' '.repeat(m.length));
+  // A full-line `#` comment goes first: the scanner reads C-style comments, so a lone quote in it would open a string that hides real code.
+  const scanned = HASH_COMMENT_EXT.test(req.file) ? text.replace(/^[ \t]*#.*$/gm, (m) => ' '.repeat(m.length)) : text;
+  const blank = blankCommentsAndStrings(scanned, req.file);
   const re = new RegExp(`^[ \\t]*(?:(?:export\\s+)?(?:let|const|var|readonly|static|final)\\s+)?${escapeRe(req.symbol)}\\s*(?::[^=\\n]*)?=(?!=)[ \\t]*([^\\n]*)$`, 'gm');
   let last = null;
   for (const m of blank.matchAll(re)) last = m;
