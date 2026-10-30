@@ -2729,6 +2729,26 @@ guardset1() {
   rm -rf "$h"
 }
 
+guardset3() {
+  name="guardset3: the guard set holds question_form.py and precompact_handoff.py, the modules guard.py imports for the question form, each equal to the flat copy"
+  guardset_install guardset3
+  missing=""
+  for m in question_form.py precompact_handoff.py; do
+    if [ ! -f "$cfg/hooks/guard.d/$set_id/$m" ]; then
+      missing="$missing $m (not in the set)"
+    elif ! cmp -s "$cfg/hooks/guard.d/$set_id/$m" "$cfg/hooks/$m"; then
+      missing="$missing $m (differs from the flat copy)"
+    fi
+  done
+  if [ "$rc" -ne 0 ] || [ -z "$set_id" ]; then
+    bad "$name" "setup: install exit $rc, stamped id [$set_id]: $(tail -n 3 "$work/guardset3-run")"
+  elif [ -n "$missing" ]; then
+    bad "$name" "guard.d/$set_id holds [$(ls "$cfg/hooks/guard.d/$set_id" | tr '\n' ' ')];$missing"
+  else ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 guardset2() {
   name="guardset2: the installed config watch reverts an unasked cap raise with no flat shared_names.py or git_reads.py beside it"
   guardset_install guardset2
@@ -3478,6 +3498,7 @@ run pinlive1
 run pinlive2
 run guardset1
 run guardset2
+run guardset3
 run win_sh1
 run win_sh2
 run win_sh3

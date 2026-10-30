@@ -279,7 +279,7 @@ put() {
   return 1
 }
 # land_guard_set SRC DEST: the guard files, as one set (owner ruling 2026-10-15, install-set). Step 1
-# writes every guard file, stamped with this run's id, and shared_names.py and git_reads.py, which the guard imports,
+# writes every guard file, stamped with this run's id, and shared_names.py, git_reads.py, question_form.py and precompact_handoff.py, which the guard imports,
 # into DEST/guard.d/<id>/, where no guard reads it
 # yet. Step 2 replaces DEST/guard.py, the one landing that switches: a stamped guard.py loads
 # guard.d/<its id>/. Step 3 lands the flat guard_*.py. The folder of the set before this one stays;
@@ -288,7 +288,7 @@ land_guard_set() {
   gdir="`$2/guard.d/`$id"
   prev=`$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "`$2/guard.py" 2>/dev/null | head -n1)
   mkdir -p "`$gdir" || { failed=1; return 1; }
-  for gf in "`$1"/guard.py "`$1"/guard_*.py "`$1"/shared_names.py "`$1"/git_reads.py; do
+  for gf in "`$1"/guard.py "`$1"/guard_*.py "`$1"/shared_names.py "`$1"/git_reads.py "`$1"/question_form.py "`$1"/precompact_handoff.py; do
     [ -f "`$gf" ] || continue
     put "`$gf" "`$gdir/`$(basename "`$gf")" || { rm -rf "`$gdir"; return 1; }
   done
@@ -576,8 +576,8 @@ function Test-LinksWork([string]$AnySrc) {
 function Install-GuardSet([string]$SrcDir, [string]$DestDir) {
     $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })
     if ($names.Count -eq 0 -or (Test-LinksWork $names[0].FullName)) { return }
-    # shared_names.py and git_reads.py, which the guard imports, ride in the set unstamped (no stamp target).
-    foreach ($shared in 'shared_names.py', 'git_reads.py') {
+    # shared_names.py, git_reads.py, question_form.py and precompact_handoff.py, which the guard imports, ride in the set unstamped (no stamp target).
+    foreach ($shared in 'shared_names.py', 'git_reads.py', 'question_form.py', 'precompact_handoff.py') {
         $names += @(Get-ChildItem -LiteralPath $SrcDir -File -Filter $shared -ErrorAction SilentlyContinue)
     }
     $script:GuardSetMode = $true
