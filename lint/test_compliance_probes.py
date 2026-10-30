@@ -579,6 +579,35 @@ class Ios(unittest.TestCase):
                 repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + command)
                 self.red(repo, "ci checks: gap - no workflow compiles the app")
 
+    @staticmethod
+    def paren_destination(quote):
+        """A simulator name with parentheses, as Xcode lists an iPad: the marks of a subshell are text in it."""
+        return "%splatform=iOS Simulator,name=iPad Pro (12.9-inch) (6th generation)%s" % (quote, quote)
+
+    def test_a_parenthesis_in_an_argument_ends_no_command(self):
+        for quote in ("'", '"'):
+            dest = self.paren_destination(quote)
+            line = "xcodebuild -scheme TallyUITests -destination %s test" % dest  # the action comes after the parentheses
+            for command in (line, "|\n          " + line,
+                            "|\n          xcodebuild -scheme TallyUITests \\\n            -destination %s \\\n            test" % dest):
+                with self.subTest(command=command):
+                    self.red(self.step(self.gold(), command), "slow tests: gap - " + self.FLOW)
+            command = "xcodebuild test -scheme Tally -destination %s -only-testing:TallyTests" % dest  # a unit filter after them
+            with self.subTest(command=command):
+                self.assertEqual(self.grade(self.step(self.both(), command), "slow tests"), "pass")
+
+    def test_a_compile_with_a_parenthesis_in_an_argument_counts_and_an_info_call_does_not(self):
+        for quote in ("'", '"'):
+            dest = self.paren_destination(quote)
+            for build in ("xcodebuild -scheme Tally -destination %s build" % dest, "|\n          xcodebuild -scheme Tally -destination %s build" % dest):
+                with self.subTest(command=build):
+                    repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + build)
+                    self.assertEqual(self.grade(repo, "ci checks"), "pass")
+            info = "xcodebuild -destination %s -showsdks" % dest  # the info flag comes after the parentheses
+            with self.subTest(command=info):
+                repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + info)
+                self.red(repo, "ci checks: gap - no workflow compiles the app")
+
     def nested_type(self, repo, target):
         """`repo` with the sources of `target` written as a path entry that carries its own `type: folder`."""
         return self.edit(repo, self.PROJ, "sources: [%s]" % target, "sources:\n      - path: %s\n        type: folder" % target)
