@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.3375,
   "why": "Found Oct 30 03:58 CDT (coordinator): the installed layout check fails in every child repo with FileNotFoundError on the ruling-kind action file, which the install does not copy; the copy run from claude-settings main passes. A child repo's session cannot run its own layout check.",
-  "note": "Incident: measured in q_max and mailaudit, Oct 30. Fix in claude-settings: the installed check must not need a file the install does not copy (install it, or read it only when present). Done check: the installed check passes in a child repo with no claude-settings checkout. Lane installed-layout-check started Oct 30 03:58 CDT (coordinator). Needs no answer. Port: yes, the lint installs everywhere. Placed after c198 (triage 12, Oct 30).",
+  "note": "Incident: measured in q_max and mailaudit, Oct 30. Fix in claude-settings: the installed check must not need a file the install does not copy (install it, or read it only when present). Done check: the installed check passes in a child repo with no claude-settings checkout. Lane installed-layout-check started Oct 30 03:58 CDT (coordinator). Needs no answer. Port: yes, the lint installs everywhere. Placed ahead of c95 (triage 12, Oct 30): a live lane.",
   "updatedAt": "2026-10-30T09:00:00Z"
 }
