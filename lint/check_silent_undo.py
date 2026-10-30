@@ -527,7 +527,8 @@ def reversals(cwd, old, new, files, earlier):
             gone = collections.Counter(l for o, _ in mine for l in o if any(l in n for _, n in theirs))
             if gone and all(avail[l] >= k for l, k in gone.items()):
                 continue
-            found.append((path, ("whole file restored" if whole else "hunk reversed") + (" (renamed to %s)" % dst if dst else ""), e))
+            how = "file deleted" if b == ZERO else "whole file restored" if whole else "hunk reversed"
+            found.append((path, how + (" (renamed to %s)" % dst if dst else ""), e))
     return found
 
 
