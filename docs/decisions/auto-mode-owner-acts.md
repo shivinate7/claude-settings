@@ -20,10 +20,11 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 |---|---|---|
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
+| Merge role (`merge/cloud_allow.json`, cloud only) | Exactly `~/.claude/bin/merge --role coordinator` and `~/.claude/bin/merge --role batch-runner`, with no `*` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only the batch's integration pull request, named as such there | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted | this record |
 
-The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
+The merge confirm and the merge role are permission allow rules, not `autoMode` entries. The classifier does not judge them.
 
 "Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a change of a PR's base branch. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a lane PR, which stays draft, or a PR with auto-merge on, since that merges it. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge. Nor `priority: now`, which interrupts the target's running turn. Nor a post people read, such as `visibility: posted_to_shared_channel`.
 
