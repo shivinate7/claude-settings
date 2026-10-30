@@ -9,7 +9,8 @@ A question stays only when it touches one of five things: his goals, his money, 
 - A waiting-page decision carries a line in `context` that starts `Your stake:`. The kind comes first after the colon: one of `goal`, `money`, `risk`, `rule`, `cannot undo`. Text follows it, saying what the pick costs him. The guard reads only this line, in any case, at a line start. The same words in the title, an option, `why` or elsewhere in `context` do not count.
 - Guard rule `owner-judge` (`hooks/guard.py`, constant `OWNER_STAKES`) refuses an `ArtifactData` set to `items` of `kind: decision`, or with no `kind`, whose `context` has no such line. It also judges an update that carries `kind: decision` and `context`. It also judges a `str_replace` on `context` whose `old_str` holds the line and whose `new_str` does not. It reads each write in a batch and data read from `file_path`.
   - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
-  - It passes an item with `stands: true`, an item with `port: true` (its Departs from line is the stake), a closed item (`status: "closed"`; it asks the owner nothing, and the chat-answer flow writes one), a task, an update with only status, rank or other fields, and a call to another artifact.
+  - It passes an item with `stands: true`, an item with `port: true` (its Departs from line is the stake), a task, an update with only status, rank or other fields, and a call to another artifact.
+  - It also passes a closed item (`status: "closed"`). A closed item asks the owner nothing, and the chat-answer flow writes one.
   - It reads last. Each older rule keeps naming its own refusals.
   - The reason names `Your stake`, the five kinds, and the way out: take your own pick and set `stands: true`.
   - It is built against a named incident, below. It landed 2026-10-30.
