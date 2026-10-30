@@ -3527,3 +3527,39 @@ for (const width of [390, 1280]) test(`a press on the empty part of a ranked opt
   await page.mouse.click(x, y);
   assert.deepEqual(await ticked(page, r), ["a"], `${r.id}: a press on the empty part of the links row did not tick the option, at ${width} wide`);
 });
+// An arbiter ruling (decision session-tiers, Arbiter, "On the page"): the writer files it as a closed item with by "arbiter",
+// home = the ruling's record id, pick = the ruled option, why and ruled. `by` is also the deadline field, so the page must tell
+// "arbiter" from a time. Every case keeps DECISION open and first: open() waits for an open card, so a red run fails on the
+// arbiter assertions, not on that wait.
+const ARBITER = mk("arbiter-d901", 901, { status: "closed", by: "arbiter", home: "D-901", pick: "a", why: "The arbiter ruled Red.", ruled: "2026-10-30T17:40:00Z" });
+const overturn = (from) => from.getByRole("button", { name: /^Overturn/ });
+
+test("a closed arbiter item shows as one card with its record id, the ruled option and one Overturn button", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.equal(await page.locator('[id^="item-"]').count(), 2, "the arbiter item is not drawn as exactly one card");
+  const text = await card(page, ARBITER).innerText();
+  assert.match(text, /D-901/, "the card does not name the ruling's record");
+  assert.match(text, /Red/, "the card does not name the ruled option");
+  assert.equal(await overturn(card(page, ARBITER)).count(), 1, "the card has not exactly one Overturn button");
+});
+
+test("Overturn then Send writes an overturn answer for the item and writes nothing to items", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(overturn(card(page, ARBITER)), "the arbiter card has no Overturn button");
+  await overturn(card(page, ARBITER)).click();
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], ARBITER.id), "Send wrote no answer for the arbiter item");
+  const a = (await answers(page))[ARBITER.id];
+  assert.deepEqual([a.item, a.choice], [ARBITER.id, "overturn"]);
+  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Overturn wrote or deleted an items doc");
+});
+
+test("a closed item with no by stays hidden next to a closed arbiter item", async (t) => {
+  const plain = mk("closed-plain", 902, { status: "closed" });
+  const page = await open(t, { items: [DECISION, ARBITER, plain] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.equal(await card(page, plain).count(), 0, "a closed item with no by is shown");
+  assert.equal(await page.locator('[id^="item-"]').count(), 2, "the page draws a card for a closed item that is no ruling");
+  assert.equal(await overturn(page).count(), 1, "the page offers Overturn on more than the arbiter item");
+});
