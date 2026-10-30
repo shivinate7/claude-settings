@@ -256,6 +256,11 @@ class Scaffold(TempDest):
 
 PAGE = "https://claude.ai/code/artifact/example"
 PAGE_TWO = "https://claude.ai/code/artifact/example-two"
+# A placeholder, or a URL that holds `<` or `>`, is no page.
+BAD_WATCHES = ("https://<page-url>", "<page URL>", "https://claude.ai/code/artifact/<id>",
+               "https://claude.ai/code/artifact/example>")
+# The words of a missing Watch line. A Watch line that is there but wrong names its fault instead.
+NO_WATCH_LINE = re.compile(r"(?i)\bno\s+`?watch\b")
 
 
 def handoff_text(open_items="none", watches=()):
@@ -303,9 +308,51 @@ class HandoffCheck(TempDest):
         self.assertEqual(problems(handoff_text("12, 14", [PAGE])), [])
         self.assertEqual(problems(handoff_text("12, 14", [PAGE, PAGE_TWO])), [])
 
-    def test_no_open_items_is_ok_with_or_without_a_watch_line(self):
-        self.assertEqual(problems(handoff_text("none")), [])
+    def test_no_open_items_still_needs_a_watch_url_or_watch_none(self):
+        # Every role that rotates owns a page, so each hand-off names a real Watch URL.
+        # The one exception is `Watch: none` together with `Open items: none`.
         self.assertEqual(problems(handoff_text("none", [PAGE])), [])
+        self.assertEqual(problems(handoff_text("none", ["none"])), [])
+        for watches in ((), ("<page URL>",)):
+            with self.subTest(watches=watches):
+                found = problems(handoff_text("none", watches))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"(?i)watch")
+
+    def test_open_items_with_watch_none_is_a_problem(self):
+        found = problems(handoff_text("12, 14", ["none"]))
+        self.assertEqual(len(found), 1, found)
+
+    def test_a_none_line_with_extra_text_is_none(self):
+        for items in ("none (all answered)", "None.", "0"):
+            with self.subTest(items=items):
+                self.assertEqual(problems(handoff_text(items, [PAGE])), [])
+                self.assertEqual(problems(handoff_text(items, ["none"])), [])
+
+    def test_a_number_that_holds_a_zero_is_not_none(self):
+        self.assertEqual(len(problems(handoff_text("10", ["none"]))), 1)
+
+    def test_a_placeholder_url_is_no_watch(self):
+        for items in ("12", "none"):
+            for watch in BAD_WATCHES + ("https://<page-url> (waiting page)",):
+                with self.subTest(items=items, watch=watch):
+                    found = problems(handoff_text(items, [watch]))
+                    self.assertEqual(len(found), 1, found)
+
+    def test_a_watch_line_with_trailing_text_counts(self):
+        for items in ("12", "none"):
+            with self.subTest(items=items):
+                self.assertEqual(problems(handoff_text(items, [PAGE + " (waiting page)"])), [])
+
+    def test_a_watch_line_that_is_wrong_says_what_is_wrong(self):
+        # A Watch line that is there must not draw the message of a missing one.
+        for watch in BAD_WATCHES + ("", "none"):
+            with self.subTest(watch=watch):
+                found = problems(handoff_text("12", [watch]))
+                self.assertEqual(len(found), 1, found)
+                self.assertNotRegex(found[0], NO_WATCH_LINE)
+                if watch not in ("", "none"):
+                    self.assertIn(watch, found[0])
 
     def test_a_missing_open_items_line_is_a_problem(self):
         for watches in ((), (PAGE,)):
@@ -341,7 +388,7 @@ class HandoffCheck(TempDest):
             self.assertIn(p, out + err)
 
     def test_cli_exits_2_on_bad_arguments_or_an_unreadable_file(self):
-        good = self.write(handoff_text("none"))
+        good = self.write(handoff_text("none", ["none"]))
         for args in ((), (good, good), (os.path.join(self.dest, "none.md"),), (self.dest,)):
             with self.subTest(args=args):
                 self.assertEqual(self.cli(*args)[0], 2)
