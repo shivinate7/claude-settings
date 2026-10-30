@@ -11577,7 +11577,8 @@ up("an update that carries options and a widening list pick is denied", "deny",
 up("an update that carries options and a non-widening list pick is allowed", "allow",
    {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
 up("a task with a list pick is not judged", "allow",
-   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"]))
+   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"],
+           context="Banchi's titles differ from the shared form.\n" + TN_WHY))
 # A list that holds a non-string member still names its string members. The page reads such a list as
 # not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
 up("a multi item whose list pick holds the widening key and a null is denied", "deny",
