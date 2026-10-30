@@ -33,6 +33,8 @@
   --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
 
 * { box-sizing: border-box; }
+/* The fixed send bar covers the bottom of the viewport, so a focused or scrolled-to element stops above it. */
+html { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
@@ -141,7 +143,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 
 /* Options side by side; each card's rows line up so lose sits beside lose. */
 .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
-.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; scroll-margin-top: 64px; scroll-margin-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; scroll-margin-top: 64px; }
 @supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
 .opt:hover { border-color: var(--faint); }
 .opt input { position: absolute; opacity: 0; pointer-events: none; }
@@ -1221,7 +1223,7 @@ function buildCard(it) {
   });
   nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
   card.append(nb);
-  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
+  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .takepick, .nonebtn, .donebtn, .note textarea").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
