@@ -32,8 +32,8 @@ Short and plain are one goal. Never trade one for the other.
   failed.<!-- rule:style-plain-words -->
 - Give each question with two or more options the question form, in the question box, in this order:
   `Goal: <the goal>` in the user's terms; `Problem (<stake>): <the problem in one plain sentence, and
-  why it needs their word>`, where stake is one of goal, money, risk, rule, cannot undo; one to
-  three `Based on (<kind>): <one premise>`, where kind is one of `premise-format`'s kinds. Each
+  why it needs their word>`. The stake is one of goal, money, risk, rule, cannot undo. Then one to
+  three `Based on (<kind>): <one premise>`. The kind is one of `premise-format`'s kinds. Each
   option's description says `Gain:` and `Lose:`, as effects on the user. An option that widens
   what a shared tool accepts, such as a second form, an allow-list entry or a per-repo exception,
   carries "Goes against your uniform ruling (t18)" and is never the recommended option. On the
