@@ -47,18 +47,18 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
   - The fence is at least three backticks and longer than the longest backtick run in the text.
     Opener and closer are bare backtick lines. Lines inside a fence are never headers or items.
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
-    Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, answer.
+    Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, page.
     home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
-    For answer, the home is `page:<digits>`: the number of the waiting-page item the message answers.
+    For page, the home is `page:<digits>`: the number of the waiting-page item the owner's ruling answers.
 
 Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd, and transcript_path when
   the session has a transcript. It reads the inbox, the handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md
-  and, for answers, the transcript. Exit 0 in every case. Stdout is one JSON object or nothing.
+  and, for page items, the transcript. Exit 0 in every case. Stdout is one JSON object or nothing.
   - Bursts. A turn's messages are the ones captured since the last guard run. They are a burst when
     they are two or more, or one message with three or more non-blank lines or two or more bullet
-    lines (`- `, `* `, `+ `, `1. `, `1) `). Only a burst's messages need items, except answer items,
-    which are checked in every block (see Answers). A lone message of one or two plain lines never
+    lines (`- `, `* `, `+ `, `1. `, `1) `). Only a burst's messages need items, except page items,
+    which are checked in every block (see Pages). A lone message of one or two plain lines never
     blocks, in any turn. A burst message with no items keeps blocking
     at later turn ends until it is jotted. The guard keeps its turn state beside the inbox, in
     <session_id>.inbox.turns. With no state file, every captured message counts as this turn's.
@@ -86,16 +86,17 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
   - An unreadable inbox (a directory at its path, or bytes that are not UTF-8) gives one block that
     names the inbox file. Why: a Stop hook's stderr does not reach the owner, so a silent pass would
     drop feedback. stop_hook_active still gives nothing, so the block costs one turn at most.
-  - Answers. `- <id> [answer] -> page:<n>` says that the owner's message answers page item n, the
+  - Pages. `- <id> [page] -> page:<n>` says that the owner's ruling answers waiting-page item n, the
     number the waiting page answers by. It is not an open id, so it needs no handoff id. It sits
-    beside the ruling or task item that holds the decision, which still needs its own item and
-    tracked home. An answer item is checked in every block that holds one, burst or not. A block
-    passes only with proof of the send. The proof is in the transcript at transcript_path (JSONL).
-    The k-th block whose text is T, counted in the inbox, anchors to the k-th owner record whose text
-    is T. Text is compared with line ends made the same, so CRLF and LF match. A closed answer item
-    (its line ends with `[closed]`) is never checked. An owner record is a user record with no peer
-    origin (origin.kind "peer" is a peer's words). After its anchor record, an assistant record must
-    hold a tool_use block that is one of:
+    beside the `[ruling]` item that holds the decision, which still needs its own item and tracked
+    home. A page item is checked in every block that holds one, burst or not, unless its line ends
+    with `[closed]`: a closed page item is never checked. A block passes only with proof of the
+    send. The proof is in the transcript at transcript_path (JSONL). The k-th block whose text is T,
+    counted in the inbox, anchors to the k-th owner record whose text is T. An owner record is a user
+    record, or an attachment of type `queued_command` (an owner message typed while the session
+    runs), with no peer origin (origin.kind "peer" is a peer's words). An attachment's text is its
+    `prompt`. Text is compared with line ends made the same, so CRLF and LF match. After its anchor
+    record, an assistant record must hold a tool_use block that is one of:
       (a) named `mcp__claude-code-remote__send_message` or `SendMessage`, with input.message holding
           n as a whole token (digits not next to a letter, digit or `-`);
       (b) named `ArtifactData` or `mcp__ArtifactData` (a prefix match), with action `set`, `update` or
@@ -103,10 +104,11 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
           number, as an int or a string of digits, and has collection `items`, or a doc_id or path that
           starts with `items/`. Other actions, such as `query` or `get`, never count.
     Without that proof the block blocks. Its reason names the item id and page:<n>, and says to send
-    the answer to the page writer. A home that is not page:<digits> blocks as a malformed answer
-    home. An absent, missing or unreadable transcript, or one with no owner record for the block,
-    never blocks: stdout carries a systemMessage that starts "Feedback guard: answer sends not
-    checked" and names the reason, as the homes check does.
+    the ruling to the page writer. A home that is not page:<digits> blocks as a malformed page home.
+    A block with no owner record for its text stands down: stdout carries a systemMessage that starts
+    "Feedback guard: page sends not checked" and names the reason, as the homes check does. An absent,
+    missing or unreadable transcript stands down every block the same way. A stand-down of one block
+    never turns off the checks of the other blocks.
   - Another session's inbox is never read.
 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
@@ -166,8 +168,8 @@ JOTTED_ITEMS = (
     "- fb-0958-5 [standing] -> handoff: process-only",
 )
 JOTTED_HANDOFF = "# Handoff\n- fb-0958-5 standing\n"
-ANSWER_ITEM = "- fb-0958-7 [answer] -> page:98"
-ANSWER_FAIL_OPEN = "Feedback guard: answer sends not checked"
+PAGE_ITEM = "- fb-0958-7 [page] -> page:98"
+PAGE_FAIL_OPEN = "Feedback guard: page sends not checked"
 SEND = "mcp__claude-code-remote__send_message"
 
 
@@ -828,7 +830,7 @@ def case_guard_unreadable_layout_fails_open_with_one_line():
     check("homes: no ruling or task item, no fail-open line", fail_open_line(p) == [], p.desc())
 
 
-# --------------------------------------------------------------------------- answer cases
+# --------------------------------------------------------------------------- page cases
 
 def transcript_of(cfg, sid):
     return os.path.join(cfg, "transcripts", sid + ".jsonl")
@@ -844,6 +846,14 @@ def owner_rec(text):
 
 def peer_rec(text):
     return {"type": "user", "origin": {"kind": "peer"}, "message": {"content": text}}
+
+
+def queued_rec(text):
+    """An owner message typed while the session runs. The shape is the keys of one real
+    queued_command attachment: type, attachment.type and attachment.prompt. Owner-typed records are
+    assumed to carry no origin; that is not verified."""
+    return {"type": "attachment", "isSidechain": False,
+            "attachment": {"type": "queued_command", "prompt": text}}
 
 
 def result_rec():
@@ -864,7 +874,7 @@ def send_rec(message):
     return used_rec(SEND, {"to": "coordinator", "message": message})
 
 
-def answer_run(cfg, sid, blocks, records):
+def page_run(cfg, sid, blocks, records):
     """Writes one inbox block per (text, items) pair, with minutes 04, 05, ... of one hour, then the
     transcript `records`, then runs the guard with the transcript's path in the payload."""
     write_file(inbox_of(cfg, sid), "".join(
@@ -876,35 +886,44 @@ def answer_run(cfg, sid, blocks, records):
 
 def expect_send_missing(name, p, item_id, page):
     """A block with no proof of the send: the reason names the item id and page:<n> and says to send
-    the answer to the page writer. The kind-list reason, which the old guard gave, does not count."""
+    the ruling to the page writer. The kind-list reason, which the old guard gave, does not count."""
     reason = block_reason(p) or ""
     check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
     check("%s: names %s" % (name, item_id), item_id in reason, reason)
     check("%s: names page:%s" % (name, page), "page:%s" % page in reason, reason)
-    check("%s: says to send the answer to the page writer" % name, "page writer" in reason.lower(),
+    check("%s: says to send the ruling to the page writer" % name, "page writer" in reason.lower(),
           reason)
     check("%s: not the kind-list reason" % name, "needs `[kind]" not in reason, reason)
 
 
-def case_answer_send_message_proof_passes():
+def expect_stand_down(name, p, word):
+    """No block, and a systemMessage that starts with the page stand-down and names `word`."""
+    obj = guard_json(p) or {}
+    msg = obj.get("systemMessage") or ""
+    check(name + ": exit 0, no block", p.code == 0 and not is_block(obj), p.desc())
+    check("%s: a systemMessage starts with the page stand-down and names the %s" % (name, word),
+          msg.startswith(PAGE_FAIL_OPEN) and word in msg.lower(), p.desc())
+
+
+def case_page_send_message_proof_passes():
     ruling = "- fb-0958-6 [ruling] -> decisions/a-ruling.md"
-    p = answer_run(new_cfg(), "answer-send", [("98: a", (ANSWER_ITEM, ruling))],
-                   [owner_rec("98: a"), send_rec("Answer to page item 98: a")])
-    expect_silent("answer: a send_message naming 98 after the owner record passes, beside a ruling", p)
-    p = answer_run(new_cfg(), "answer-result", [("98: a", (ANSWER_ITEM,))],
-                   [owner_rec("98: a"), used_rec("Read", {"file_path": "/x"}), result_rec(),
+    p = page_run(new_cfg(), "page-send", [("98: a", (PAGE_ITEM, ruling))],
+                 [owner_rec("98: a"), send_rec("Ruling on page item 98: a")])
+    expect_silent("page: a send_message naming 98 after the owner record passes, beside a ruling", p)
+    p = page_run(new_cfg(), "page-result", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"), used_rec("Read", {"file_path": "/x"}), result_rec(),
                     send_rec("98: a")])
-    expect_silent("answer: a tool_result between the owner record and the send still passes", p)
+    expect_silent("page: a tool_result between the owner record and the send still passes", p)
 
 
-def case_answer_sendmessage_proof_passes():
-    p = answer_run(new_cfg(), "answer-sendmessage", [("98: a", (ANSWER_ITEM,))],
-                   [owner_rec("98: a"), used_rec("SendMessage", {"to": "page-writer",
+def case_page_sendmessage_proof_passes():
+    p = page_run(new_cfg(), "page-sendmessage", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"), used_rec("SendMessage", {"to": "page-writer",
                                                                  "message": "page 98: a"})])
-    expect_silent("answer: a SendMessage naming 98 after the owner record passes", p)
+    expect_silent("page: a SendMessage naming 98 after the owner record passes", p)
 
 
-def case_answer_artifactdata_n_proof_passes():
+def case_page_artifactdata_n_proof_passes():
     for label, name, tool_input in (
             ("doc_id items/disk-cleanup, data n 98", "ArtifactData",
              {"action": "update", "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
@@ -916,34 +935,34 @@ def case_answer_artifactdata_n_proof_passes():
             ("batch, op with data n 98", "mcp__ArtifactData",
              {"action": "batch", "batch": [{"op": "update", "doc_id": "items/disk-cleanup",
                                            "data": {"n": 98}}]})):
-        p = answer_run(new_cfg(), "answer-artifact", [("98: a", (ANSWER_ITEM,))],
-                       [owner_rec("98: a"), used_rec(name, tool_input)])
-        expect_silent("answer: %s, %s, passes" % (name, label), p)
+        p = page_run(new_cfg(), "page-artifact", [("98: a", (PAGE_ITEM,))],
+                     [owner_rec("98: a"), used_rec(name, tool_input)])
+        expect_silent("page: %s, %s, passes" % (name, label), p)
 
 
-def case_answer_without_a_send_blocks():
-    p = answer_run(new_cfg(), "answer-no-send",
-                   [("98: a\nthe reason, line two\nand a third line",
-                     (ANSWER_ITEM, "- fb-0958-8 [note] -> noted"))],
-                   [owner_rec("98: a\nthe reason, line two\nand a third line"), said_rec("Noted.")])
-    expect_send_missing("answer: a burst with no send after the owner record", p, "fb-0958-7", "98")
+def case_page_without_a_send_blocks():
+    p = page_run(new_cfg(), "page-no-send",
+                 [("98: a\nthe reason, line two\nand a third line",
+                     (PAGE_ITEM, "- fb-0958-8 [note] -> noted"))],
+                 [owner_rec("98: a\nthe reason, line two\nand a third line"), said_rec("Noted.")])
+    expect_send_missing("page: a burst with no send after the owner record", p, "fb-0958-7", "98")
 
 
-def case_answer_send_before_the_owner_record_blocks():
-    p = answer_run(new_cfg(), "answer-early", [("98: a", (ANSWER_ITEM,))],
-                   [send_rec("98: a"), owner_rec("98: a"), said_rec("Noted.")])
-    expect_send_missing("answer: a send naming 98 before the owner record", p, "fb-0958-7", "98")
+def case_page_send_before_the_owner_record_blocks():
+    p = page_run(new_cfg(), "page-early", [("98: a", (PAGE_ITEM,))],
+                 [send_rec("98: a"), owner_rec("98: a"), said_rec("Noted.")])
+    expect_send_missing("page: a send naming 98 before the owner record", p, "fb-0958-7", "98")
 
 
-def case_answer_send_naming_other_numbers_blocks():
+def case_page_send_naming_other_numbers_blocks():
     for label, records in (
             ("send_message naming 980", [owner_rec("98: a"), send_rec("980: a")]),
             ("send_message naming 198", [owner_rec("98: a"), send_rec("198: a")])):
-        p = answer_run(new_cfg(), "answer-other", [("98: a", (ANSWER_ITEM,))], records)
-        expect_send_missing("answer: %s does not prove item 98" % label, p, "fb-0958-7", "98")
+        p = page_run(new_cfg(), "page-other", [("98: a", (PAGE_ITEM,))], records)
+        expect_send_missing("page: %s does not prove item 98" % label, p, "fb-0958-7", "98")
 
 
-def case_answer_artifactdata_n_other_numbers_blocks():
+def case_page_artifactdata_n_other_numbers_blocks():
     for label, tool_input in (
             ("data n 980 on items/disk-cleanup", {"action": "update", "doc_id": "items/disk-cleanup",
                                                  "data": {"n": 980}}),
@@ -951,121 +970,146 @@ def case_answer_artifactdata_n_other_numbers_blocks():
                                                     "doc_id": "items/disk-cleanup", "data": {"n": 198}}]}),
             ("collection items and doc_id 98, no n key", {"action": "update", "collection": "items",
                                                           "doc_id": "98"})):
-        p = answer_run(new_cfg(), "answer-artifact-other", [("98: a", (ANSWER_ITEM,))],
-                       [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
-        expect_send_missing("answer: ArtifactData, %s, does not prove item 98" % label, p,
+        p = page_run(new_cfg(), "page-artifact-other", [("98: a", (PAGE_ITEM,))],
+                     [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
+        expect_send_missing("page: ArtifactData, %s, does not prove item 98" % label, p,
                             "fb-0958-7", "98")
 
 
-def case_answer_peer_record_is_not_the_owner():
-    p = answer_run(new_cfg(), "answer-peer", [("98: a", (ANSWER_ITEM,))],
-                   [peer_rec("98: a"), send_rec("98: a")])
-    expect_send_missing("answer: a peer record with the same text is no owner anchor, no owner record",
+def case_page_peer_record_is_not_the_owner():
+    p = page_run(new_cfg(), "page-peer", [("98: a", (PAGE_ITEM,))],
+                 [peer_rec("98: a"), send_rec("98: a")])
+    expect_stand_down("page: a peer record with the same text is no owner record", p, "owner")
+    p = page_run(new_cfg(), "page-peer-then-owner", [("98: a", (PAGE_ITEM,))],
+                 [peer_rec("98: a"), send_rec("98: a"), owner_rec("98: a")])
+    expect_send_missing("page: the send follows a peer record only, the owner record comes last",
                         p, "fb-0958-7", "98")
-    p = answer_run(new_cfg(), "answer-peer-then-owner", [("98: a", (ANSWER_ITEM,))],
-                   [peer_rec("98: a"), send_rec("98: a"), owner_rec("98: a")])
-    expect_send_missing("answer: the send follows a peer record only, the owner record comes last",
-                        p, "fb-0958-7", "98")
 
 
-def case_answer_lone_short_message_is_checked():
-    p = answer_run(new_cfg(), "answer-lone", [("98: a", (ANSWER_ITEM,))],
-                   [owner_rec("98: a"), said_rec("Noted.")])
-    expect_send_missing("answer: a lone short message with no send", p, "fb-0958-7", "98")
+def case_page_lone_short_message_is_checked():
+    p = page_run(new_cfg(), "page-lone", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"), said_rec("Noted.")])
+    expect_send_missing("page: a lone short message with no send", p, "fb-0958-7", "98")
 
 
-def case_answer_bad_home_blocks():
+def case_page_bad_home_blocks():
     for home in ("page:abc", "page:", "page:9x", "handoff"):
-        item = "- fb-0958-9 [answer] -> %s" % home
-        p = answer_run(new_cfg(), "answer-bad-home", [("98: a", (item,))],
-                       [owner_rec("98: a"), send_rec("98: a")])
+        item = "- fb-0958-9 [page] -> %s" % home
+        p = page_run(new_cfg(), "page-bad-home", [("98: a", (item,))],
+                     [owner_rec("98: a"), send_rec("98: a")])
         reason = block_reason(p) or ""
-        check("answer: home %r blocks" % home, p.code == 0 and block_reason(p) is not None, p.desc())
-        check("answer: home %r is a malformed answer home, naming fb-0958-9" % home,
-              "malformed answer home" in reason.lower() and "fb-0958-9" in reason, reason)
+        check("page: home %r blocks" % home, p.code == 0 and block_reason(p) is not None, p.desc())
+        check("page: home %r is a malformed page home, naming fb-0958-9" % home,
+              "malformed page home" in reason.lower() and "fb-0958-9" in reason, reason)
 
 
-def case_answer_transcript_missing_passes_with_system_message():
+def case_page_transcript_missing_passes_with_system_message():
     for label, sid, state in (("no transcript_path in the payload", "tx-absent", "absent"),
                               ("the transcript file does not exist", "tx-missing", "missing"),
                               ("the transcript path is a directory", "tx-dir", "dir")):
         cfg = new_cfg()
-        write_file(inbox_of(cfg, sid), render_block("98: a", items=(ANSWER_ITEM,)))
+        write_file(inbox_of(cfg, sid), render_block("98: a", items=(PAGE_ITEM,)))
         path = transcript_of(cfg, sid)
         if state == "dir":
             os.makedirs(path)
         p = guard(cfg, sid, transcript=None if state == "absent" else path)
-        obj = guard_json(p) or {}
-        msg = obj.get("systemMessage") or ""
-        check("answer: %s: exit 0, no block" % label, p.code == 0 and not is_block(obj), p.desc())
-        check("answer: %s: a systemMessage starts with the answer stand-down and names the transcript"
-              % label, msg.startswith(ANSWER_FAIL_OPEN) and "transcript" in msg.lower(), p.desc())
+        expect_stand_down("page: %s" % label, p, "transcript")
 
 
-def case_answer_each_block_is_checked_in_its_turn():
-    p = answer_run(new_cfg(), "answer-two-blocks",
-                   [("98: a", (ANSWER_ITEM,)), ("a later note", ("- fb-0958-8 [note] -> noted",))],
-                   [owner_rec("98: a"), send_rec("98: a"), owner_rec("a later note"),
+
+def case_page_each_block_is_checked_in_its_turn():
+    p = page_run(new_cfg(), "page-two-blocks",
+                 [("98: a", (PAGE_ITEM,)), ("a later note", ("- fb-0958-8 [note] -> noted",))],
+                 [owner_rec("98: a"), send_rec("98: a"), owner_rec("a later note"),
                     said_rec("Noted.")])
-    expect_silent("answer: the first block's send still counts after a later owner message", p)
+    expect_silent("page: the first block's send still counts after a later owner message", p)
 
 
-def case_answer_each_identical_block_needs_its_own_send():
+def case_page_each_identical_block_needs_its_own_send():
     """The k-th block whose text is T anchors to the k-th owner record whose text is T: the send
     after owner record 1 proves block 1 only."""
-    p = answer_run(new_cfg(), "answer-kth",
-                   [("98: a", (ANSWER_ITEM,)), ("98: a", ("- fb-0958-8 [answer] -> page:98",))],
-                   [owner_rec("98: a"), send_rec("98: a"), owner_rec("98: a")])
-    expect_send_missing("answer: the second identical block has no send after its own owner record",
+    p = page_run(new_cfg(), "page-kth",
+                 [("98: a", (PAGE_ITEM,)), ("98: a", ("- fb-0958-8 [page] -> page:98",))],
+                 [owner_rec("98: a"), send_rec("98: a"), owner_rec("98: a")])
+    expect_send_missing("page: the second identical block has no send after its own owner record",
                         p, "fb-0958-8", "98")
-    check("answer: the first identical block passes, so its item is not named",
+    check("page: the first identical block passes, so its item is not named",
           "fb-0958-7" not in (block_reason(p) or ""), p.desc())
 
 
-def case_answer_artifactdata_other_actions_block():
+def case_page_artifactdata_other_actions_block():
     for label, tool_input in (
             ("action query, collection items, query n 98",
              {"action": "query", "collection": "items", "query": {"n": 98}}),
             ("action get, doc_id items/disk-cleanup, data n 98",
              {"action": "get", "doc_id": "items/disk-cleanup", "data": {"n": 98}})):
-        p = answer_run(new_cfg(), "answer-action", [("98: a", (ANSWER_ITEM,))],
-                       [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
-        expect_send_missing("answer: ArtifactData, %s, does not prove item 98" % label, p,
+        p = page_run(new_cfg(), "page-action", [("98: a", (PAGE_ITEM,))],
+                     [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
+        expect_send_missing("page: ArtifactData, %s, does not prove item 98" % label, p,
                             "fb-0958-7", "98")
 
 
-def case_answer_closed_item_is_never_checked():
-    for label, item in (("closed, no send", "- fb-0958-7 [answer] -> page:98 [closed]"),
-                        ("closed, malformed home", "- fb-0958-7 [answer] -> page:abc [closed]")):
-        p = answer_run(new_cfg(), "answer-closed", [("98: a", (item,))],
-                       [owner_rec("98: a"), said_rec("Noted.")])
-        expect_silent("answer: a closed answer item is never checked (%s)" % label, p)
+def case_page_closed_item_is_never_checked():
+    for label, item in (("closed, no send", "- fb-0958-7 [page] -> page:98 [closed]"),
+                        ("closed, malformed home", "- fb-0958-7 [page] -> page:abc [closed]")):
+        p = page_run(new_cfg(), "page-closed", [("98: a", (item,))],
+                     [owner_rec("98: a"), said_rec("Noted.")])
+        expect_silent("page: a closed page item is never checked (%s)" % label, p)
 
 
-def case_answer_owner_record_missing_stands_down():
-    earlier = [owner_rec("an earlier question"), said_rec("An answer to it.")]
+def case_page_owner_record_missing_stands_down():
+    earlier = [owner_rec("an earlier question"), said_rec("A reply to it.")]
     for label, records in (("the transcript has no owner record for the text", earlier),
                            ("the transcript is empty (rotated)", [])):
-        p = answer_run(new_cfg(), "answer-no-owner", [("98: a", (ANSWER_ITEM,))], records)
-        obj = guard_json(p) or {}
-        msg = obj.get("systemMessage") or ""
-        check("answer: %s: exit 0, no block" % label, p.code == 0 and not is_block(obj), p.desc())
-        check("answer: %s: a systemMessage starts with the answer stand-down and names the owner record"
-              % label, msg.startswith(ANSWER_FAIL_OPEN) and "owner" in msg.lower(), p.desc())
+        p = page_run(new_cfg(), "page-no-owner", [("98: a", (PAGE_ITEM,))], records)
+        expect_stand_down("page: %s" % label, p, "owner")
 
 
-def case_answer_crlf_owner_text_matches_the_inbox():
-    p = answer_run(new_cfg(), "answer-crlf", [("98: a\nthe reason", (ANSWER_ITEM,))],
-                   [owner_rec("98: a\r\nthe reason"), send_rec("98: a")])
-    expect_silent("answer: an owner record with CRLF line ends matches the inbox's LF text", p)
+
+def case_page_crlf_owner_text_matches_the_inbox():
+    p = page_run(new_cfg(), "page-crlf", [("98: a\nthe reason", (PAGE_ITEM,))],
+                 [owner_rec("98: a\r\nthe reason"), send_rec("98: a")])
+    expect_silent("page: an owner record with CRLF line ends matches the inbox's LF text", p)
 
 
-def case_answer_artifactdata_write_without_n_blocks():
-    p = answer_run(new_cfg(), "answer-no-n", [("98: a", (ANSWER_ITEM,))],
-                   [owner_rec("98: a"), used_rec("ArtifactData", {
+def case_page_artifactdata_write_without_n_blocks():
+    p = page_run(new_cfg(), "page-no-n", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"), used_rec("ArtifactData", {
                        "action": "update", "doc_id": "items/disk-cleanup", "data": {"context": "x"}})])
-    expect_send_missing("answer: an ArtifactData update of items/disk-cleanup with no n blocks", p,
+    expect_send_missing("page: an ArtifactData update of items/disk-cleanup with no n blocks", p,
                         "fb-0958-7", "98")
+
+
+def case_page_stand_down_does_not_turn_off_later_blocks():
+    """Block 1 has no owner record for its text, so it stands down. Block 2 still anchors and blocks."""
+    p = page_run(new_cfg(), "page-second-block",
+                 [("first", ("- fb-0958-7 [page] -> page:98",)),
+                  ("second", ("- fb-0958-8 [page] -> page:99",))],
+                 [owner_rec("second")])
+    expect_send_missing("page: the second block, with its own owner record and no send, blocks",
+                        p, "fb-0958-8", "99")
+    reason = block_reason(p) or ""
+    check("page: the first block, with no owner record, is not named in the block",
+          "fb-0958-7" not in reason, reason)
+    msg = (guard_json(p) or {}).get("systemMessage") or ""
+    check("page: the first block's stand-down is named in a systemMessage",
+          msg.startswith(PAGE_FAIL_OPEN) and "owner" in msg.lower(), p.desc())
+
+
+def case_page_owner_after_peer_passes():
+    p = page_run(new_cfg(), "page-peer-owner", [("yes", (PAGE_ITEM,))],
+                 [peer_rec("yes"), owner_rec("yes"), send_rec("Ruling on page 98: yes")])
+    expect_silent("page: a peer record, then an owner record with the same text and its send, passes",
+                  p)
+
+
+def case_page_queued_owner_record_anchors():
+    """An owner message typed while the session runs is an attachment, not a user record. It anchors."""
+    p = page_run(new_cfg(), "page-queued", [("98: a", (PAGE_ITEM,))], [queued_rec("98: a")])
+    expect_send_missing("page: a queued owner record with no send blocks", p, "fb-0958-7", "98")
+    p = page_run(new_cfg(), "page-queued-send", [("98: a", (PAGE_ITEM,))],
+                 [queued_rec("98: a"), send_rec("98: a")])
+    expect_silent("page: a queued owner record with a later send passes", p)
 
 
 # --------------------------------------------------------------------------- reorient note
@@ -1352,24 +1396,27 @@ CASES = (
     case_guard_standing_homed_to_handoff_passes,
     case_guard_task_home_from_the_todo_kind,
     case_guard_unreadable_layout_fails_open_with_one_line,
-    case_answer_send_message_proof_passes,
-    case_answer_sendmessage_proof_passes,
-    case_answer_artifactdata_n_proof_passes,
-    case_answer_without_a_send_blocks,
-    case_answer_send_before_the_owner_record_blocks,
-    case_answer_send_naming_other_numbers_blocks,
-    case_answer_artifactdata_n_other_numbers_blocks,
-    case_answer_peer_record_is_not_the_owner,
-    case_answer_lone_short_message_is_checked,
-    case_answer_bad_home_blocks,
-    case_answer_transcript_missing_passes_with_system_message,
-    case_answer_each_block_is_checked_in_its_turn,
-    case_answer_each_identical_block_needs_its_own_send,
-    case_answer_artifactdata_other_actions_block,
-    case_answer_closed_item_is_never_checked,
-    case_answer_owner_record_missing_stands_down,
-    case_answer_crlf_owner_text_matches_the_inbox,
-    case_answer_artifactdata_write_without_n_blocks,
+    case_page_send_message_proof_passes,
+    case_page_sendmessage_proof_passes,
+    case_page_artifactdata_n_proof_passes,
+    case_page_without_a_send_blocks,
+    case_page_send_before_the_owner_record_blocks,
+    case_page_send_naming_other_numbers_blocks,
+    case_page_artifactdata_n_other_numbers_blocks,
+    case_page_peer_record_is_not_the_owner,
+    case_page_lone_short_message_is_checked,
+    case_page_bad_home_blocks,
+    case_page_transcript_missing_passes_with_system_message,
+    case_page_each_block_is_checked_in_its_turn,
+    case_page_stand_down_does_not_turn_off_later_blocks,
+    case_page_owner_after_peer_passes,
+    case_page_queued_owner_record_anchors,
+    case_page_each_identical_block_needs_its_own_send,
+    case_page_artifactdata_other_actions_block,
+    case_page_closed_item_is_never_checked,
+    case_page_owner_record_missing_stands_down,
+    case_page_crlf_owner_text_matches_the_inbox,
+    case_page_artifactdata_write_without_n_blocks,
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
