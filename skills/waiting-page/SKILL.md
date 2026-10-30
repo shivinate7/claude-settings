@@ -339,7 +339,8 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
 
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
-   `db` and `comments` (the full form, `{comments: {}}`). Change nothing in the page. A page
+   `db` and `comments` (the full form, `{comments: {}}`). Before you publish, set the page's
+   `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
 3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
@@ -447,7 +448,7 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
    from plain `page.html`, as "Keep the page on main's code" step 2 says:
    `stale_pages.py --page <fetched page> --write <new page>`.
-   `--write` carries the live `designData` block and roadmap block into main's page, byte for byte. A live
+   `--write` carries the live `designData` block, roadmap block and `<title>` text into main's page, byte for byte. A live
    page with no roadmap block gives its `designData` block, and the template keeps its empty roadmap
    block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
    lacks either block, when the live page has no `designData` block, or when either file has a

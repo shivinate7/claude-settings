@@ -722,3 +722,4 @@
 - question-form-goal-not-first: prose before the Goal line passes, because only the order of the three form lines is checked (hooks/question_form.py). Decision: question-form.
 - ci-scope-question-form-unpinned: lint/test_ci_scope.py pins git_reads.py in the guard arm, but not question_form.py or precompact_handoff.py. Decision: question-form.
 - question-form-import-fails-open: an import defect in hooks/question_form.py or hooks/precompact_handoff.py turns off the six page rules (guard-crash) and the whole chat judge. Decision: question-form.
+- page-title-scan-edges: `splice.title_span` takes the last markup `<title>` outside an svg, so a later markup title wins, and a self-closing or unclosed `<svg` before it gives no title (carry keeps the template's; stale reads behind). page.html has one markup title, so no real page reaches either (lane page-name-queue). Decision: none.
