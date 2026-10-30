@@ -26,14 +26,17 @@ def read_transcript(path):
     return records
 
 
+def _is_peer(origin):
+    return isinstance(origin, dict) and origin.get("kind") == "peer"
+
+
 def is_last_human(rec):
     if rec.get("type") != "user":
         return False
     if rec.get("isSidechain"):
         return False
     # A cross-session reply is type user too, but it is a peer's words, never the owner's.
-    origin = rec.get("origin")
-    if isinstance(origin, dict) and origin.get("kind") == "peer":
+    if _is_peer(rec.get("origin")):
         return False
     msg = rec.get("message") or {}
     content = msg.get("content")
@@ -46,10 +49,6 @@ def is_last_human(rec):
         )
         return has_text and not has_tool_result
     return False
-
-
-def _is_peer(origin):
-    return isinstance(origin, dict) and origin.get("kind") == "peer"
 
 
 def owner_text(rec, notice_tags=()):
