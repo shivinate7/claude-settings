@@ -694,5 +694,5 @@
 - win-rest-runner-hang: batch 23 #840 checks-windows-rest: the Windows runner stopped mid-job twice (no log, step timeout never fired); same head passed on re-run; cause outside repo code, unmeasured.
 - layout-check-deleted-cwd: lint/check_layout.py with no --root and a deleted cwd (a removed worktree) prints a Traceback, exit 1, not its one refusal line; it never passes. Decision: one-layout-every-repo.
 - layout-test-worktree-prune: lint/test_layout.py Identity runs `git worktree prune` on the real repo's git folder, which also drops stale worktree records of other sessions; unmeasured race. Decision: one-layout-every-repo.
-- wp-fit-w-scan-equal-value: the FIT_W restatement scan (skills/waiting-page/tests/page.test.mjs) flags an unrelated number equal to FIT_W, and its message gives no remedy for that case; 0 hits at 390, 2-43 at other common widths (measured). Decision: none.
+- wp-fit-w-scan-equal-value: the FIT_W restatement scan (skills/waiting-page/tests/page.test.mjs) flags an unrelated number equal to FIT_W. Its message gives no remedy for that case. 0 hits at 390, 2-43 at other common widths (measured). Decision: none.
 - feedback-guard-subagent-burst: hooks/feedback_guard.py classes a subagent hand-back as an owner burst and blocks Stop until it gets an item line (two blocks in lane wp-fit-w-one-home). Decision: none.
