@@ -58,7 +58,7 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
    | 1280 | pass | pass |
    | 2200 | pass | pass |
 
-   - Sizes: the scroll box was measured at 132 × 480 at every width under 5A, and 134 × 480 for a `.dif` picture; under 5B its picture is 222 wide at 390, 219 at 1280 and 2200, and 188 at 1065. Fit pictures as today: phone 224 × 480. Folded focus: 289 × 310 at 390, 232 × 248 at 1280 and 2200, and 200 × 214 at 1065. A tall focus that fits: 146 × 480.
+   - Sizes: the scroll box was measured at 132 × 480 at every width under 5A, and 134 × 480 for a `.dif` picture. Under 5B its picture is 222 wide at 390, 219 at 1280 and 2200, and 188 at 1065. Fit pictures as today: phone 224 × 480. Folded focus: 289 × 310 at 390, 232 × 248 at 1280 and 2200, and 200 × 214 at 1065. A tall focus that fits: 146 × 480.
    - axe (wcag2a to wcag22aa) on `long` and `focus-in`: 0 violations for this change. It reported two others. `document-title` comes from the harness frame. `aria-prohibited-attr` on `.spark` is in today's page.html `sparkle()`: an aria-label on a `<b>` with no role. That is outside this lane.
    - Today's fit picture at full column width passes its column by 0.17px on each side. It is sub-pixel and inside the card padding. This change leaves it as it is.
 11. Card pictures for questions 1 and 2 (waiting-page items 83 and 84).
