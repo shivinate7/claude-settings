@@ -32,7 +32,8 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 When the owner names the wrong tier, or brings work that belongs to another tier, the session
 says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
 
-A coordinator may work in another repo, by hand-off or by its own lane PR there. Before it acts,
+A coordinator's work in another repo is compliance only, by hand-off or by its own lane PR there
+(decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
 it checks whether that repo has an active coordinator: a live session tagged both
 `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`. It reads every page of
 `list_sessions` and filters the tags itself. If one is active, it coordinates with it.
