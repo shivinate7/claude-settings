@@ -47,17 +47,19 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
   - The fence is at least three backticks and longer than the longest backtick run in the text.
     Opener and closer are bare backtick lines. Lines inside a fence are never headers or items.
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
-    Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing.
+    Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, answer.
     home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
+    For answer, the home is `page:<digits>`: the number of the waiting-page item the message answers.
 
 Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
-  is one JSON object: hook_event_name, session_id, stop_hook_active, cwd. It reads the inbox and the
-  handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md. Exit 0 in every case. Stdout is one JSON
-  object or nothing.
+  is one JSON object: hook_event_name, session_id, stop_hook_active, cwd, and transcript_path when
+  the session has a transcript. It reads the inbox, the handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md
+  and, for answers, the transcript. Exit 0 in every case. Stdout is one JSON object or nothing.
   - Bursts. A turn's messages are the ones captured since the last guard run. They are a burst when
     they are two or more, or one message with three or more non-blank lines or two or more bullet
-    lines (`- `, `* `, `+ `, `1. `, `1) `). Only a burst's messages need items. A lone message of
-    one or two plain lines never blocks, in any turn. A burst message with no items keeps blocking
+    lines (`- `, `* `, `+ `, `1. `, `1) `). Only a burst's messages need items, except answer items,
+    which are checked in every block (see Answers). A lone message of one or two plain lines never
+    blocks, in any turn. A burst message with no items keeps blocking
     at later turn ends until it is jotted. The guard keeps its turn state beside the inbox, in
     <session_id>.inbox.turns. With no state file, every captured message counts as this turn's.
   - stop_hook_active true: exit 0, nothing on stdout. It still counts the turn's messages.
@@ -84,6 +86,23 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
   - An unreadable inbox (a directory at its path, or bytes that are not UTF-8) gives one block that
     names the inbox file. Why: a Stop hook's stderr does not reach the owner, so a silent pass would
     drop feedback. stop_hook_active still gives nothing, so the block costs one turn at most.
+  - Answers. `- <id> [answer] -> page:<n>` says that the owner's message answers page item n, the
+    number the waiting page answers by. It is not an open id, so it needs no handoff id. It sits
+    beside the ruling or task item that holds the decision, which still needs its own item and
+    tracked home. An answer item is checked in every block that holds one, burst or not. A block
+    passes only with proof of the send. The proof is in the transcript at transcript_path (JSONL),
+    after an owner record whose text equals the block's verbatim text. An owner record is a user
+    record with no peer origin (origin.kind "peer" is a peer's words). After that record, an
+    assistant record must hold a tool_use block that is one of:
+      (a) named `mcp__claude-code-remote__send_message` or `SendMessage`, with input.message holding
+          n as a whole token (digits not next to a letter, digit or `-`);
+      (b) named with a prefix of `ArtifactData` or `mcp__ArtifactData`, whose input names `items/<n>`
+          as a whole token, or has collection `items` and doc_id n.
+    Without that proof the block blocks. Its reason names the item id and page:<n>, and says to send
+    the answer to the page writer. A home that is not page:<digits> blocks as a malformed answer
+    home. An absent, missing or unreadable transcript never blocks: stdout carries a systemMessage
+    that starts "Feedback guard: answer sends not checked" and names the reason, as the homes check
+    does.
   - Another session's inbox is never read.
 
 Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER_TEST overrides the
@@ -103,15 +122,17 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO, "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
-ROOT = tempfile.mkdtemp(prefix="feedback_inbox_cases_")
+ROOT = _test_temp.run_folder()
 FAILED = []
 RED_CASES = []
 CASE_COUNT = [0]
@@ -141,6 +162,9 @@ JOTTED_ITEMS = (
     "- fb-0958-5 [standing] -> handoff: process-only",
 )
 JOTTED_HANDOFF = "# Handoff\n- fb-0958-5 standing\n"
+ANSWER_ITEM = "- fb-0958-7 [answer] -> page:98"
+ANSWER_FAIL_OPEN = "Feedback guard: answer sends not checked"
+SEND = "mcp__claude-code-remote__send_message"
 
 
 
@@ -197,12 +221,14 @@ def capture(cfg, sid, prompt):
                                  "prompt": prompt, "cwd": cfg}), cfg)
 
 
-def guard(cfg, sid, stop_active=False, cwd=None):
+def guard(cfg, sid, stop_active=False, cwd=None, transcript=None):
     """Runs the guard. `cwd` is the session's folder in the payload: the shared fixture repo unless
-    a case names another."""
-    return run(GUARD_PATH, payload({"hook_event_name": "Stop", "session_id": sid,
-                                   "stop_hook_active": stop_active,
-                                   "cwd": cwd or fixture_repo()}), cfg)
+    a case names another. `transcript` is the payload's transcript_path, left out when None."""
+    obj = {"hook_event_name": "Stop", "session_id": sid, "stop_hook_active": stop_active,
+           "cwd": cwd or fixture_repo()}
+    if transcript is not None:
+        obj["transcript_path"] = transcript
+    return run(GUARD_PATH, payload(obj), cfg)
 
 
 GIT_ID = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
@@ -798,6 +824,172 @@ def case_guard_unreadable_layout_fails_open_with_one_line():
     check("homes: no ruling or task item, no fail-open line", fail_open_line(p) == [], p.desc())
 
 
+# --------------------------------------------------------------------------- answer cases
+
+def transcript_of(cfg, sid):
+    return os.path.join(cfg, "transcripts", sid + ".jsonl")
+
+
+def write_transcript(cfg, sid, records):
+    write_file(transcript_of(cfg, sid), "".join(json.dumps(rec) + "\n" for rec in records))
+
+
+def owner_rec(text):
+    return {"type": "user", "message": {"content": text}}
+
+
+def peer_rec(text):
+    return {"type": "user", "origin": {"kind": "peer"}, "message": {"content": text}}
+
+
+def result_rec():
+    return {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}
+
+
+def said_rec(text):
+    return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+
+
+def used_rec(name, tool_input):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": name, "input": tool_input}]}}
+
+
+def send_rec(message):
+    return used_rec(SEND, {"to": "coordinator", "message": message})
+
+
+def answer_run(cfg, sid, blocks, records):
+    """Writes one inbox block per (text, items) pair, with minutes 04, 05, ... of one hour, then the
+    transcript `records`, then runs the guard with the transcript's path in the payload."""
+    write_file(inbox_of(cfg, sid), "".join(
+        render_block(text, header="2026-10-13 10:%02d CDT (UTC-05:00)" % (4 + n), items=items)
+        for n, (text, items) in enumerate(blocks)))
+    write_transcript(cfg, sid, records)
+    return guard(cfg, sid, transcript=transcript_of(cfg, sid))
+
+
+def expect_send_missing(name, p, item_id, page):
+    """A block with no proof of the send: the reason names the item id and page:<n> and says to send
+    the answer to the page writer. The kind-list reason, which the old guard gave, does not count."""
+    reason = block_reason(p) or ""
+    check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("%s: names %s" % (name, item_id), item_id in reason, reason)
+    check("%s: names page:%s" % (name, page), "page:%s" % page in reason, reason)
+    check("%s: says to send the answer to the page writer" % name, "page writer" in reason.lower(),
+          reason)
+    check("%s: not the kind-list reason" % name, "needs `[kind]" not in reason, reason)
+
+
+def case_answer_send_message_proof_passes():
+    ruling = "- fb-0958-6 [ruling] -> decisions/a-ruling.md"
+    p = answer_run(new_cfg(), "answer-send", [("98: a", (ANSWER_ITEM, ruling))],
+                   [owner_rec("98: a"), send_rec("Answer to page item 98: a")])
+    expect_silent("answer: a send_message naming 98 after the owner record passes, beside a ruling", p)
+    p = answer_run(new_cfg(), "answer-result", [("98: a", (ANSWER_ITEM,))],
+                   [owner_rec("98: a"), used_rec("Read", {"file_path": "/x"}), result_rec(),
+                    send_rec("98: a")])
+    expect_silent("answer: a tool_result between the owner record and the send still passes", p)
+
+
+def case_answer_sendmessage_proof_passes():
+    p = answer_run(new_cfg(), "answer-sendmessage", [("98: a", (ANSWER_ITEM,))],
+                   [owner_rec("98: a"), used_rec("SendMessage", {"to": "page-writer",
+                                                                 "message": "page 98: a"})])
+    expect_silent("answer: a SendMessage naming 98 after the owner record passes", p)
+
+
+def case_answer_artifactdata_items_proof_passes():
+    for label, name, tool_input in (
+            ("doc_id 98 in collection items", "ArtifactData",
+             {"action": "update", "collection": "items", "doc_id": "98", "data": {"status": "closed"}}),
+            ("items/98 in the input", "mcp__ArtifactData",
+             {"batch": [{"op": "update", "path": "items/98"}]})):
+        p = answer_run(new_cfg(), "answer-artifact", [("98: a", (ANSWER_ITEM,))],
+                       [owner_rec("98: a"), used_rec(name, tool_input)])
+        expect_silent("answer: %s, %s, passes" % (name, label), p)
+
+
+def case_answer_without_a_send_blocks():
+    p = answer_run(new_cfg(), "answer-no-send",
+                   [("98: a\nthe reason, line two\nand a third line",
+                     (ANSWER_ITEM, "- fb-0958-8 [note] -> noted"))],
+                   [owner_rec("98: a\nthe reason, line two\nand a third line"), said_rec("Noted.")])
+    expect_send_missing("answer: a burst with no send after the owner record", p, "fb-0958-7", "98")
+
+
+def case_answer_send_before_the_owner_record_blocks():
+    p = answer_run(new_cfg(), "answer-early", [("98: a", (ANSWER_ITEM,))],
+                   [send_rec("98: a"), owner_rec("98: a"), said_rec("Noted.")])
+    expect_send_missing("answer: a send naming 98 before the owner record", p, "fb-0958-7", "98")
+
+
+def case_answer_send_naming_other_numbers_blocks():
+    for label, records in (
+            ("send_message naming 980", [owner_rec("98: a"), send_rec("980: a")]),
+            ("send_message naming 198", [owner_rec("98: a"), send_rec("198: a")]),
+            ("ArtifactData naming items/980", [owner_rec("98: a"), used_rec(
+                "ArtifactData", {"collection": "items", "doc_id": "980"})]),
+            ("ArtifactData naming items/198", [owner_rec("98: a"), used_rec(
+                "ArtifactData", {"collection": "items", "doc_id": "198"})])):
+        p = answer_run(new_cfg(), "answer-other", [("98: a", (ANSWER_ITEM,))], records)
+        expect_send_missing("answer: %s does not prove item 98" % label, p, "fb-0958-7", "98")
+
+
+def case_answer_peer_record_is_not_the_owner():
+    p = answer_run(new_cfg(), "answer-peer", [("98: a", (ANSWER_ITEM,))],
+                   [peer_rec("98: a"), send_rec("98: a")])
+    expect_send_missing("answer: a peer record with the same text is no owner anchor, no owner record",
+                        p, "fb-0958-7", "98")
+    p = answer_run(new_cfg(), "answer-peer-then-owner", [("98: a", (ANSWER_ITEM,))],
+                   [peer_rec("98: a"), send_rec("98: a"), owner_rec("98: a")])
+    expect_send_missing("answer: the send follows a peer record only, the owner record comes last",
+                        p, "fb-0958-7", "98")
+
+
+def case_answer_lone_short_message_is_checked():
+    p = answer_run(new_cfg(), "answer-lone", [("98: a", (ANSWER_ITEM,))],
+                   [owner_rec("98: a"), said_rec("Noted.")])
+    expect_send_missing("answer: a lone short message with no send", p, "fb-0958-7", "98")
+
+
+def case_answer_bad_home_blocks():
+    for home in ("page:abc", "page:", "page:9x", "handoff"):
+        item = "- fb-0958-9 [answer] -> %s" % home
+        p = answer_run(new_cfg(), "answer-bad-home", [("98: a", (item,))],
+                       [owner_rec("98: a"), send_rec("98: a")])
+        reason = block_reason(p) or ""
+        check("answer: home %r blocks" % home, p.code == 0 and block_reason(p) is not None, p.desc())
+        check("answer: home %r is a malformed answer home, naming fb-0958-9" % home,
+              "malformed answer home" in reason.lower() and "fb-0958-9" in reason, reason)
+
+
+def case_answer_transcript_missing_passes_with_system_message():
+    for label, sid, state in (("no transcript_path in the payload", "tx-absent", "absent"),
+                              ("the transcript file does not exist", "tx-missing", "missing"),
+                              ("the transcript path is a directory", "tx-dir", "dir")):
+        cfg = new_cfg()
+        write_file(inbox_of(cfg, sid), render_block("98: a", items=(ANSWER_ITEM,)))
+        path = transcript_of(cfg, sid)
+        if state == "dir":
+            os.makedirs(path)
+        p = guard(cfg, sid, transcript=None if state == "absent" else path)
+        obj = guard_json(p) or {}
+        msg = obj.get("systemMessage") or ""
+        check("answer: %s: exit 0, no block" % label, p.code == 0 and not is_block(obj), p.desc())
+        check("answer: %s: a systemMessage starts with the answer stand-down and names the transcript"
+              % label, msg.startswith(ANSWER_FAIL_OPEN) and "transcript" in msg.lower(), p.desc())
+
+
+def case_answer_each_block_is_checked_in_its_turn():
+    p = answer_run(new_cfg(), "answer-two-blocks",
+                   [("98: a", (ANSWER_ITEM,)), ("a later note", ("- fb-0958-8 [note] -> noted",))],
+                   [owner_rec("98: a"), send_rec("98: a"), owner_rec("a later note"),
+                    said_rec("Noted.")])
+    expect_silent("answer: the first block's send still counts after a later owner message", p)
+
+
 # --------------------------------------------------------------------------- reorient note
 
 KEEP = (" Keep each standing item in the handoff, and give each ruling and task its tracked home:"
@@ -1005,6 +1197,22 @@ def case_damaged_turn_state_counts_every_message():
                  named=("first short note", "second short note"))
 
 
+def case_run_folder_sweep_removes_old_siblings_keeps_new():
+    """test-temp-standard: the first request of a run removes sibling run folders older than one day
+    and keeps newer ones. Runs on a root under this run's folder, never the shared temp root."""
+    temp_root = os.path.join(ROOT, "sweep")
+    old = os.path.join(temp_root, "1-" + "a" * 32)
+    new = os.path.join(temp_root, "2-" + "b" * 32)
+    os.makedirs(old)
+    os.makedirs(new)
+    two_days_ago = time.time() - 2 * 24 * 60 * 60
+    os.utime(old, (two_days_ago, two_days_ago))
+    own = _test_temp.run_folder(temp_root)
+    check("sweep: an old sibling run folder goes", not os.path.exists(old), old)
+    check("sweep: a new sibling run folder stays", os.path.isdir(new), new)
+    check("sweep: this run's own folder is made", os.path.isdir(own), own)
+
+
 # Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
@@ -1066,6 +1274,18 @@ CASES = (
     case_guard_standing_homed_to_handoff_passes,
     case_guard_task_home_from_the_todo_kind,
     case_guard_unreadable_layout_fails_open_with_one_line,
+    case_answer_send_message_proof_passes,
+    case_answer_sendmessage_proof_passes,
+    case_answer_artifactdata_items_proof_passes,
+    case_answer_without_a_send_blocks,
+    case_answer_send_before_the_owner_record_blocks,
+    case_answer_send_naming_other_numbers_blocks,
+    case_answer_peer_record_is_not_the_owner,
+    case_answer_lone_short_message_is_checked,
+    case_answer_bad_home_blocks,
+    case_answer_transcript_missing_passes_with_system_message,
+    case_answer_each_block_is_checked_in_its_turn,
+    case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
 )
