@@ -395,9 +395,8 @@ UI_BUNDLE = "bundle.ui-testing"
 # commands, so `;`, `|`, `&` and a backtick are marks inside quotes too. A parenthesis in quotes is text, as in a simulator name
 # (`iPad Pro (12.9-inch)`), unless it closes a `$(` opened in the same quote.
 COMMAND_MARKS = {";", "|", "&", "$(", "(", ")", "`"}
-XCODEBUILD_TEST = r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])"
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
-XCODEBUILD_TEST_RE = re.compile(XCODEBUILD_TEST)
+XCODEBUILD_TEST_RE = re.compile(r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])")
 NO_DIAGNOSE = re.compile(r"(?<![\w-])-collect-test-diagnostics\s+never(?![-\w.])")
 DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*[\"']?[A-Z0-9]")
 
