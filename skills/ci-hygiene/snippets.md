@@ -9,8 +9,8 @@ gh run view <run-id> --json jobs --jq '
   | sort -rn | head
 ```
 
-Read the billed minutes each week. The `user` scope is the scope that worked here, and the docs
-name none. The endpoint works only for accounts on the enhanced billing platform:
+Read the billed minutes each week. In this repo, the `user` scope worked for this endpoint. The
+docs name no scope. The endpoint works only for accounts on the enhanced billing platform:
 
 ```sh
 gh auth refresh -s user
@@ -50,28 +50,37 @@ jobs:
           echo "slow=$slow" >> "$GITHUB_OUTPUT"
   slow-check:
     needs: detect
-    if: needs.detect.outputs.slow == 'true'
     runs-on: ubuntu-latest
-    steps: []   # the slow check
+    timeout-minutes: 60   # provisional, step 5
+    steps:
+      - name: Slow check
+        if: ${{ needs.detect.outputs.slow == 'true' }}   # the scope skip sits on the CI step
+        run: echo "run the slow check here"
 ```
 
 Replace the grep pattern with the paths the check reads. Schedule and manual runs skip
-detection, so `slow` stays true.
+detection, so `slow` stays true. If `slow` is false, the job still starts, so it bills its
+setup minutes (step 19).
 
-## 3b. Required jobs that skip
+## 3b. Required checks
+
+Read the protection rule:
 
 ```sh
 gh api repos/<owner>/<repo>/branches/<branch>/protection
 ```
 
-A required job that is skipped reports as passing. A required job that never starts, because of
-a path filter on the whole workflow, blocks the merge. Prefer `if:` on the job.
-Require a matrix through one fan-in job with `if: always()`. Its check name stays fixed when the
-matrix changes.
+Read `required_status_checks` in the output. It must name one check: `all-jobs-passed`.
+
+A skipped job fails the rollup. So skip a scoped-out suite at its CI step, and the job still
+passes. A required job that never starts, because of a path filter on the whole workflow, stops
+the merge. Require a matrix through one fan-in job with `if: always()`. Its check name stays fixed
+when the matrix changes.
 
 Rename a required check in the protection rule. `merge.requiredChecks` in `.github/stamp.json` says
-`"protection"` and needs no edit; a repo that pins a list there edits it too. A PUT needs an admin login. Push rights are not enough. A PUT replaces the whole
-rule, so send every field from the read above, with the new names:
+`"protection"` and needs no edit. A repo that pins a list there edits it too. A PUT needs an admin
+login. Push rights are not enough. A PUT replaces the whole rule, so send every field from the read
+above, with the new names:
 
 ```sh
 gh api -X PUT repos/<owner>/<repo>/branches/<branch>/protection --input <json>
@@ -98,22 +107,35 @@ jobs:
   static:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps: []   # the cheap checks, in one job
   shards:
     needs: static   # a red static job stops the shards
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@<full-sha>  # v4.x.x
         with: {persist-credentials: false}
       - uses: actions/setup-node@<full-sha>  # v4.x.x
         with: {node-version: 22, cache: npm}
       - run: npm ci
+  all-jobs-passed:
+    # The one required check. Lists every other job. Its draft guard keeps a draft run skipped.
+    needs: [static, shards]
+    if: ${{ always() && !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: shivinate7/claude-settings/actions/all-jobs-passed@<full-sha>  # <version>
+        with:
+          needs: ${{ toJSON(needs) }}
 ```
 
 A skipped `needs` job skips the job that needs it, so `if:` on `shards` stays: a draft skips both.
-A fan-in job (`all-jobs-passed`) runs on `if: always()` and fails on a skipped need. Give it
-`if: ${{ always() && !github.event.pull_request.draft }}`, so a draft skips it too.
+The rollup needs `always()`. Without it, GitHub skips the rollup when a needed job fails, and a
+skipped required check reads as green. Without the draft guard, the rollup fails on a draft,
+because every needed job is skipped there.
 
 ## 5b. Prove the head after `gh pr ready`
 
@@ -137,9 +159,21 @@ gh run list --commit <merge-sha> --json name,conclusion
   with: {persist-credentials: false}
 ```
 
-Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30) or `uses: ./path`.
+Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30) or `uses: ./path`. This repo's
+`checks.yml` uses `$/actions/<name>`.
 
-This repo's `.github/dependabot.yml` ignores every version update for `github-actions`:
+Pins of claude-settings' `ste-lint` action follow the session's tools. Check drift with the tool
+that reads the pin. It exits 3 when the pin lags:
+
+```sh
+bin/ste-changed origin/main
+```
+
+Move the pin in a lane of its own (decision `action-pins-follow-sessions`). Other pins keep
+full-SHA pinning. Which bot, if any, bumps them is set per repo.
+
+This repo's `.github/dependabot.yml` ignores every version update for `github-actions`, so only a
+security fix opens a PR (decision `dependabot-security-only`):
 
 ```yaml
 version: 2
@@ -155,9 +189,9 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
 ```
 
-Renovate (`renovate.json`) tracks three custom pins. It does not track actions.
+This repo's `renovate.json` tracks three custom pins. None of them is an action.
 
-Audit with zizmor. Run the CI command from the repo root. It is the zizmor step of
+Audit with zizmor. Run the CI command from the repo root. It is the zizmor CI step of
 `.github/workflows/checks.yml`:
 
 ```sh
@@ -219,6 +253,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@<full-sha>  # v4.x.x
         with: {persist-credentials: false}
@@ -246,3 +281,24 @@ and https://docs.github.com/en/actions/security-for-github-actions/security-guid
 
 Billing. Standard GitHub-hosted runners are free for public repos.
 Source: https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions
+
+## 19. Scope skip on a CI step
+
+Each job that needs `scope` starts. Its CI step carries the scope flag. The job never carries it.
+
+```yaml
+  shell-macos:
+    needs: scope
+    runs-on: macos-latest
+    timeout-minutes: 20   # provisional, step 5
+    steps:
+      - uses: actions/checkout@<full-sha>  # v5.0.0
+        with: {persist-credentials: false}
+      - name: Shell suite
+        if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
+        run: echo "run the shell suite here"
+```
+
+The scope flag comes from the scope job's outputs. A draft PR skips the scope job, so every job that
+needs it skips too (step 11). That draft skip is the only job-level skip. A job that runs only off
+pull requests skips at its CI steps the same way. A skipped job fails the rollup.
