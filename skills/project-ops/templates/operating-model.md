@@ -32,7 +32,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 When the owner names the wrong tier, or brings work that belongs to another tier, the session
 says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
 
-A coordinator's work in another repo is compliance only, by hand-off or by its own lane PR there
+A coordinator's work in another repo is compliance only, by handoff or by its own lane PR there
 (claude-settings decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
 it checks whether that repo has an active coordinator: a live session tagged both
 `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`. It reads every page of
@@ -60,12 +60,17 @@ parent, or miss a message while busy.
      those pages.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
   3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
-     `role-handoff.md`, with that time. The file names each wait it handed over.
+     `role-handoff.md`, with that time. The file names each wait it handed over, each open
+     waiting-page item, and each page to watch. It runs
+     `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
+     fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from
      the hand-off file and updates the roster. The coordinator sends no broadcast. Sessions read
      the roster.
-  5. The successor watches each page at once. It reads each page's comments since the time in
-     the hand-off file.
+  5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
+     before any other act. It reads each page's comments since the time in the hand-off file.
+     It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
+     that reads the answer, so an item left with the old `owner` gets no reader.
 - The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
