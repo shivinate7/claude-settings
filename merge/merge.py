@@ -2420,7 +2420,7 @@ def main(argv, host=None, lock=None):
         refuse_bad_pr(info, draft_ok=not a.confirm)  # a closed PR, or a draft under --confirm, stops before the config notice
         cfg = load_config(root, info["base"], a.config)
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
-            raise Stop("The standing merge grant is off for this repo (see its merge settings), so ask the owner to merge this PR.")
+            raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR.")
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
