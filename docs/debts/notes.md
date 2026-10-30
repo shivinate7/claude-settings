@@ -696,3 +696,4 @@
 - layout-test-worktree-prune: lint/test_layout.py Identity runs `git worktree prune` on the real repo's git folder, which also drops stale worktree records of other sessions; unmeasured race. Decision: one-layout-every-repo.
 - wp-fit-w-scan-equal-value: the FIT_W restatement scan (skills/waiting-page/tests/page.test.mjs) flags an unrelated number equal to FIT_W. Its message gives no remedy for that case. 0 hits at 390, 2-43 at other common widths (measured). Decision: none.
 - feedback-guard-agent-burst: hooks/feedback_guard.py classes an agent hand-back as an owner burst and blocks Stop until it gets an item line (two blocks in lane wp-fit-w-one-home). Decision: none.
+- designer-steps-test-one-sentence: hooks/test_blind_brief.py DesignerSteps wants the critique order as one sentence with `run`, `impeccable` and `critique`. A split, "invoke" for "run", or the order joined to the blind-lane Setup skip goes red, with a clear message. Decision: design-skills.
