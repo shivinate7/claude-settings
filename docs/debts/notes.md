@@ -670,3 +670,4 @@
 - install-move-status-exit: the checkout move reads `git status --porcelain` with its exit code ignored, so a failing status reads as clean (install.sh). Decision: session-tiers.
 - install-move-ignored-file: the checkout move overwrites an ignored local file when main tracks that path (install.sh). Decision: session-tiers.
 - install-move-test-gaps: caseM1-M4 have no shallow detached checkout, no failed-fetch case and no local-mode case (hooks/test_install_src.sh). Decision: session-tiers.
+- win-rest-runner-hang: batch 23 #840 checks-windows-rest: the Windows runner stopped mid-job twice (no log, step timeout never fired); same head passed on re-run; cause outside repo code, unmeasured.
