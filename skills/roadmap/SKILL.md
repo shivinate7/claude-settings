@@ -111,11 +111,18 @@ After each build the builder prints the upkeep list for the triage thread. It na
 - new top steps with no "Placed ahead of" line;
 - landed steps that wait for triage to close them;
 - steps marked `doing` or `active` with no live lane or open PR. A step is live when a session that is
-  not archived has the tag `cs-step:<step id>`, or an open pull request's branch equals the step id.
-  Both match the id exactly. Each entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)`
-  when a `Step:` trailer is on main. Triage sets each step back. The row reads one `unknown (<why>)` entry
-  when `--live` is missing or unreadable, has no `sessions` list, has a session row of the wrong shape, or
-  has a `readAt` over 60 minutes old (an old list counts a dead lane as live);
+  running or idle has the tag `cs-step:<step id>`, or an open pull request's branch equals the step
+  id. Both match the id exactly. The session also needs the tag `cs-repo:<owner>/<repo>` for this
+  repo's GitHub name, because `list_sessions` is account-wide and step ids repeat across repos. A step
+  whose status is none of `todo`, `doing`, `active` or `done` is listed as `<id> (unknown status
+  "<status>")`. Each other entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)` when
+  a `Step:` trailer is on main. Triage sets each step back. The row reads one `unknown (<why>)` entry,
+  never an empty list, in these cases:
+  - `--live` is missing or unreadable, or has no `sessions` list;
+  - a session row or a pull row has the wrong shape;
+  - the repo's GitHub name cannot be read;
+  - `readAt` is not an ISO time, has no time zone, is over 60 minutes old (an old list counts a dead
+    lane as live), or is more than 5 minutes ahead;
 - `Step:` trailers that name no step.
 
 ## Cost

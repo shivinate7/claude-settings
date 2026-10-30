@@ -28,10 +28,14 @@ entered the top TOP open places in the last day without a "Placed ahead of" line
 
 The upkeep list also names each step marked doing or active that has no live lane session and no open
 pull request, so triage can set it back (step roadmap-matches-lanes). A step is live when a session in
-the live file's "sessions" list is not archived and carries the tag cs-step:<step id>, or when an open
-pull request's branch equals the step id. Both matches are exact. The row reads one unknown entry, never an
-empty list, when the live file is missing, unreadable, over STALE_LIVE_MINUTES old, has no sessions list, or
-has a session row of the wrong shape.
+the live file's "sessions" list is running or idle (any other status does not count) and carries both
+the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
+branch equals the step id. Both matches are exact. The cs-repo tag is needed because list_sessions is
+account-wide and step ids repeat across repos. A step whose status is none of todo, doing, active or
+done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
+file is missing or unreadable; its readAt is not an ISO time, has no time zone, is over STALE_LIVE_MINUTES
+old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
+or a session row or pull row has the wrong shape.
 
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
@@ -55,7 +59,12 @@ STALE_DAYS = 5
 # A live file older than this counts a dead lane as live, so the stale-step row reads unknown.
 STALE_LIVE_MINUTES = 60
 STEP_TAG = "cs-step:"
-ARCHIVED = "SESSION_STATUS_ARCHIVED"
+REPO_TAG = "cs-repo:"
+# A session in any other status (archived, stopped, completed) does not keep its step live.
+LIVE_SESSION = ("SESSION_STATUS_RUNNING", "SESSION_STATUS_IDLE")
+# A readAt this far past the build time is clock skew; further than that is a bad stamp.
+FUTURE_MINUTES = 5
+KNOWN_STATUS = ("todo", "doing", "active", "done")
 TOP = 5
 DATA = "roadmap/data"
 # roadmap.html is left out: the builder rewrites it, so a conflict there is resolved by building.
@@ -429,7 +438,7 @@ def health(repo, extra, where, slug, branch):
             {"name": "Session board", "home": None, "read": BOARD_WHY}]
 
 
-def live_work(path, steps):
+def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
@@ -472,8 +481,10 @@ def live_work(path, steps):
     text = lambda row, key: isinstance(row.get(key), str) and row[key].strip()
     threads = keep("thread", raw.get("threads", []), lambda r: text(r, "title") and r.get("state") in STATES
                    and (r.get("step") is None or isinstance(r["step"], str)))
+    before_pulls = len(skipped)
     pulls = keep("pull", raw.get("pulls", []),
                  lambda r: type(r.get("number")) is int and text(r, "title"))
+    pulls_skipped = len(skipped) - before_pulls
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
     for row in threads:
         sid = row.get("step") or None
@@ -483,25 +494,34 @@ def live_work(path, steps):
         if sid and (sid not in steps or steps[sid].get("status") == "done"):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
-    stale_why, session_steps = None, []
+    why, session_steps = [], []  # the first reason wins
     if read.startswith("unknown"):
-        stale_why = read
+        why.append(read)
     else:
         minutes = live_age_minutes(read)
         if minutes is None:
-            stale_why = "unknown (the live file's readAt has no time zone: %r)" % (read,)
+            why.append("unknown (the live file's readAt has no time zone: %r)" % (read,))
         elif minutes > STALE_LIVE_MINUTES:
-            stale_why = "unknown (the live file was read %d minutes ago; read it again)" % minutes
-    if isinstance(raw.get("sessions"), list):
+            why.append("unknown (the live file was read %d minutes ago; read it again)" % minutes)
+        elif minutes < -FUTURE_MINUTES:
+            why.append("unknown (the live file's readAt is in the future)")
+    if not isinstance(raw.get("sessions"), list):
+        why.append("unknown (the live file has no sessions list)")
+    elif not slug:
+        why.append("unknown (the repo's GitHub name could not be read)")
+    else:
         before = len(skipped)
         sessions = keep("session", raw["sessions"], lambda r: isinstance(r.get("id"), str)
                         and isinstance(r.get("session_status"), str) and isinstance(r.get("tags"), list))
-        session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] != ARCHIVED
+        # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
+        session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] in LIVE_SESSION
+                                and REPO_TAG + slug in r["tags"]
                                 for t in r["tags"] if isinstance(t, str) and t.startswith(STEP_TAG)})
-        if len(skipped) > before and not stale_why:
-            stale_why = "unknown (%d session rows skipped)" % (len(skipped) - before)
-    elif not stale_why:
-        stale_why = "unknown (the live file has no sessions list)"
+        if len(skipped) > before:
+            why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
+    if pulls_skipped:
+        why.append("unknown (%d pull rows skipped)" % pulls_skipped)
+    stale_why = why[0] if why else None
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "staleWhy": stale_why}
@@ -633,7 +653,7 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
-    info["live"] = live_work(args.live, data["steps"] if data else None)
+    info["live"] = live_work(args.live, data["steps"] if data else None, slug)
     info["panels"].append({"name": "Live work", "home": "project threads and GitHub" if args.live else None,
                            "read": info["live"]["read"]})
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
@@ -667,8 +687,15 @@ def unlaned(open_, marks, work):
     if why:
         return [why]
     live = set(work["sessionSteps"]) | {p["branch"] for p in work["pulls"] if isinstance(p.get("branch"), str)}
-    return ["%s (set to done: landed in %s)" % (k, ", ".join(marks[k])) if k in marks else "%s (set to todo)" % k
-            for k, d in open_ if d.get("status") in ("doing", "active") and k not in live]
+    out = []
+    for k, d in open_:
+        status = d.get("status")
+        if status not in KNOWN_STATUS:
+            out.append('%s (unknown status "%s")' % (k, status))
+        elif status in ("doing", "active") and k not in live:
+            out.append("%s (set to done: landed in %s)" % (k, ", ".join(marks[k])) if k in marks
+                       else "%s (set to todo)" % k)
+    return out
 
 
 def upkeep(steps, added, marks, strays, work=None):
