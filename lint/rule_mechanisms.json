@@ -696,7 +696,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "command-in-item",
-        "reason": "The guard refuses a waiting-page task whose steps, joined, name a file and a command in it (decision act-in-place). It reads words, so a step that sends the owner to a file in other words passes."
+        "reason": "The guard refuses a waiting-page task whose steps, joined, name a file and a command in it, whose step holds a shell line in backticks, or whose command is not both powershell and mac (decision act-in-place). It reads words, so a step that sends the owner to a file in other words passes."
       },
       "test": "hooks/test_guard.py::command in item: a step that opens a plan file, then one that says run its command, is denied"
     },
