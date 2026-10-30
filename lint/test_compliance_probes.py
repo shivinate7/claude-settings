@@ -36,10 +36,33 @@ def kind_path(name):
 
 
 class Repo:
-    def __init__(self, test):
+    def __init__(self, test, origin=False):
+        """`origin`: a child clone of a bare origin, on main. `publish()` then makes origin/main, the base
+        a child's `git diff origin/main...HEAD` reads."""
         self.root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
         test.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", self.root], check=True)
+        if origin:
+            bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+            test.addCleanup(shutil.rmtree, bare, True)
+            subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
+            self.git("symbolic-ref", "HEAD", "refs/heads/main")
+            self.git("remote", "add", "origin", bare)
+
+    def git(self, *args):
+        subprocess.run(["git", "-C", self.root, "-c", "user.name=test", "-c", "user.email=test@example.com",
+                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+        return self
+
+    def publish(self):
+        """Commit what is staged as main and push it, so origin/main exists."""
+        return self.git("commit", "-q", "-m", "base").git("push", "-q", "origin", "main")
+
+    def branch(self, name):
+        return self.git("checkout", "-q", "-b", name)
+
+    def commit(self, message="change"):
+        return self.git("commit", "-q", "-m", message)
 
     def write(self, rel, text="x\n"):
         full = os.path.join(self.root, *rel.split("/"))
@@ -337,6 +360,116 @@ class Ios(unittest.TestCase):
         code, out = repo.run("ios")
         self.assertEqual(code, 0, out)
 
+    FLOW = ".github/workflows/ios.yml"
+    PROJ = "native/project.yml"
+    UNIT = ("  TallyTests:\n    type: bundle.unit-test\n    platform: iOS\n    sources: [TallyTests]\n"
+            "    dependencies:\n      - target: Tally\n")  # a hosted unit-test bundle, as XcodeGen writes one
+
+    def grade(self, repo, item):
+        """The grade of one item line of the ios group: pass, gap or partial."""
+        code, out = repo.run("ios")
+        for line in out.splitlines():
+            if line.strip().startswith(item + ":"):
+                return line.strip().split(": ", 1)[1].split(" - ", 1)[0]
+        self.fail("no '%s' line in:\n%s" % (item, out))
+
+    def step(self, repo, command):
+        """`repo` with `command` as one more step of the macOS job."""
+        return self.edit(repo, self.FLOW, "run: make app-build", "run: make app-build\n      - run: " + command)
+
+    def unit_only(self):
+        """The starter with its UI bundle swapped for a unit-test bundle: what a hosted-unit-test repo holds."""
+        repo = self.edit(self.gold(), self.PROJ, "TallyUITests", "TallyTests")
+        return self.edit(repo, self.PROJ, "bundle.ui-testing", "bundle.unit-test")
+
+    def both(self, scheme=True):
+        """The starter plus a unit bundle beside its UI bundle. `scheme`: the scheme's test action runs both."""
+        repo = self.edit(self.gold(), self.PROJ, "schemes:\n", self.UNIT + "schemes:\n")
+        if scheme:
+            repo = self.edit(repo, self.PROJ, "targets: [TallyUITests]", "targets: [TallyTests, TallyUITests]")
+        return repo
+
+    # Today every `xcodebuild ... test` on a pull request is a slow-tests gap, a unit-test bundle too. A run counts only
+    # when it covers a UI bundle (project.yml `type: bundle.ui-testing`): by its scheme's test targets, or `-only-testing:`.
+    TEST = "xcodebuild test -project native/Tally.xcodeproj -scheme Tally"
+
+    def test_a_unit_bundle_only_run_is_not_a_slow_test(self):
+        for command in (self.TEST, "cd native && xcodebuild test -scheme Tally",
+                        "xcodebuild test-without-building -project native/Tally.xcodeproj -scheme Tally"):
+            with self.subTest(command=command):
+                self.assertEqual(self.grade(self.step(self.unit_only(), command), "slow tests"), "pass")
+
+    def test_a_unit_filter_beside_a_ui_bundle_is_not_a_slow_test(self):
+        for flag in ("-only-testing:TallyTests", "-only-testing:TallyTests/GreetingTests/testHello"):
+            with self.subTest(flag=flag):
+                self.assertEqual(self.grade(self.step(self.both(), self.TEST + " " + flag), "slow tests"), "pass")
+
+    def test_a_ui_bundle_in_the_scheme_or_a_ui_filter_is_a_slow_test(self):
+        for repo, flag in ((self.both(), ""), (self.gold(), ""),  # the scheme's test action holds the UI bundle
+                           (self.both(), "-only-testing:TallyUITests"), (self.both(), "-only-testing:TallyUITests/LaunchTests/testLaunch"),
+                           (self.both(), "-only-testing:TallyTests -only-testing:TallyUITests"),
+                           (self.both(scheme=False), "-only-testing:TallyUITests")):  # the filter names a UI bundle the scheme lacks
+            with self.subTest(flag=flag):
+                self.red(self.step(repo, self.TEST + " " + flag), "slow tests: gap - " + self.FLOW)
+
+    def test_a_target_scheme_is_read_by_its_bundle_type(self):
+        # XcodeGen makes a scheme named for each target, so `-scheme <bundle>` runs that bundle alone. My reading of the
+        # coordinator's "the run covers": the unit bundle passes, the UI bundle is a gap.
+        self.assertEqual(self.grade(self.step(self.both(scheme=False), "xcodebuild test -scheme TallyTests"), "slow tests"), "pass")
+        self.red(self.step(self.both(scheme=False), "xcodebuild test -scheme TallyUITests"), "slow tests: gap - " + self.FLOW)
+
+    def test_ui_runners_stay_flagged_in_a_unit_only_project(self):
+        for command in ("make ui-test", "make native-check", "sim-test -scheme Tally", "cd native && sim-test -scheme Tally"):
+            with self.subTest(command=command):
+                self.red(self.step(self.unit_only(), command), "slow tests: gap - " + self.FLOW)
+        both_runs = self.step(self.step(self.unit_only(), self.TEST), "make ui-test")  # one pass step does not clear a gap step
+        self.red(both_runs, "slow tests: gap - " + self.FLOW)
+
+    def test_a_run_that_cannot_be_resolved_keeps_the_gap(self):
+        # No false pass: an unknown scheme or target, or no project.yml, could hold a UI bundle. Today each is a gap.
+        repo = self.step(self.unit_only(), "xcodebuild test -project native/Tally.xcodeproj -scheme Ghost")
+        self.red(repo, "slow tests: gap - " + self.FLOW)
+        repo = self.step(self.unit_only(), self.TEST + " -only-testing:Ghost")
+        self.red(repo, "slow tests: gap - " + self.FLOW)
+        repo = self.step(self.gold(), self.TEST + " -only-testing:TallyTests")  # no such target: a name ending in Tests is no proof
+        self.red(repo, "slow tests: gap - " + self.FLOW)
+        repo = self.step(self.unit_only(), self.TEST + " -only-testing:TallyTests")  # project.yml gone, a hand-kept project file left
+        subprocess.run(["git", "-C", repo.root, "rm", "-q", "--cached", self.PROJ], check=True)
+        repo.write("native/Tally.xcodeproj/project.pbxproj", "SWIFT_VERSION = 6.0;\n")
+        self.red(repo, "slow tests: gap - " + self.FLOW)
+
+    def test_a_filter_in_a_comment_does_not_narrow_the_run(self):
+        repo = self.step(self.both(), self.TEST + "  # -only-testing:TallyTests")
+        self.red(repo, "slow tests: gap - " + self.FLOW)
+
+    def test_the_run_line_is_scanned_past_strings_and_lone_quotes(self):
+        # Each command sits in a `run: |` block, where YAML reads no comment and the shell reads the quotes.
+        block = "|\n          %s"
+        quoted = block % (self.TEST + ' -destination "platform=iOS Simulator,name=iPhone #1" -only-testing:TallyTests')  # `#` in a string
+        lone = block % ("echo don't stop\n          " + self.TEST + " -only-testing:TallyTests")  # a lone quote in text
+        opener = block % ('echo "# not a comment"; ' + self.TEST + " -only-testing:TallyTests")
+        for command in (quoted, lone, opener):
+            with self.subTest(command=command):
+                self.assertEqual(self.grade(self.step(self.both(), command), "slow tests"), "pass")
+
+    def test_an_info_only_xcodebuild_is_not_an_app_compile(self):
+        for flags in ("-showsdks", "-list -project native/Tally.xcodeproj", "-showBuildSettings -scheme Tally", "-help", "-version"):
+            with self.subTest(flags=flags):
+                repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: xcodebuild " + flags)
+                self.red(repo, "ci checks: gap - no workflow compiles the app")
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: xcodebuild -showsdks  # xcodebuild build -scheme Tally")
+        self.red(repo, "ci checks: gap - no workflow compiles the app")  # a comment is no compile
+
+    def test_a_real_compile_beside_an_info_step_is_an_app_compile(self):
+        for command in ("xcodebuild build -project native/Tally.xcodeproj -scheme Tally", "xcodebuild -scheme Tally build", "xcodebuild build",
+                        "xcodebuild build-for-testing -scheme Tally", "xcodebuild clean build -scheme Tally",
+                        "xcodebuild -showsdks && xcodebuild -scheme Tally build"):
+            with self.subTest(command=command):
+                repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + command)
+                self.assertEqual(self.grade(repo, "ci checks"), "pass")
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: xcodebuild -showsdks\n      - run: make app-build")
+        self.assertEqual(self.grade(repo, "ci checks"), "pass")  # the info step comes first; the compile after it counts
+
     def test_repo_config_override_is_partial(self):
         repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')
         self.red(repo, "account ids: partial - tools/ios-ship.json overrides team_id")
@@ -435,11 +568,11 @@ def load_probes():
     return module
 
 
-def in_process(root):
-    """(exit code, stdout) of the probes' main on `root`, run in this process."""
+def in_process(root, group="words", probes=None):
+    """(exit code, stdout) of the probes' main on `root`, run in this process. `probes`: a module a case patched."""
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = load_probes().main(["words", root])
+        code = (probes or load_probes()).main([group, root])
     return code, out.getvalue()
 
 
@@ -723,6 +856,48 @@ class Scorecard(unittest.TestCase):
         row = next(line for line in body.splitlines() if line.startswith("| STE lint on UI files |"))
         self.assertIn("| partial | in shape |", row)
         self.assertIn("known gap", row)
+
+
+def listing(folder):
+    """Every path under `folder`, relative, so a case sees a file or folder a probe made."""
+    return sorted(os.path.relpath(os.path.join(base, name), folder)
+                  for base, dirs, files in os.walk(folder) for name in dirs + files)
+
+
+class BadRoot(unittest.TestCase):
+    """A root that is an option, or is no folder, is refused with the usage line and exit 2, for every group.
+    The scorecard group took `--help` as its root and wrote `--help/docs/health/compliance.md` under the cwd."""
+
+    def refused(self, group, root, folder):
+        before = listing(folder)
+        done = subprocess.run([sys.executable, PROBES, group, root], cwd=folder, input="", capture_output=True, text=True)
+        self.assertEqual(done.returncode, 2, (group, root, done.stdout, done.stderr))
+        self.assertIn("usage:", done.stderr, (group, root))
+        self.assertEqual(listing(folder), before, "%s %s made a file or folder" % (group, root))
+
+    def test_each_group_refuses_an_option_a_missing_folder_and_a_file(self):
+        for group in load_probes().GROUPS:
+            folder = tempfile.mkdtemp(prefix="badroot-", dir=RUN_FOLDER)
+            self.addCleanup(shutil.rmtree, folder, True)
+            os.makedirs(os.path.join(folder, "-x"))  # a real folder whose name starts with `-`: still read as an option
+            with open(os.path.join(folder, "a.txt"), "w", encoding="utf-8") as handle:
+                handle.write("x\n")
+            for root in ("--help", "-h", "-x", "no-such-folder", "a.txt"):
+                with self.subTest(group=group, root=root):
+                    self.refused(group, root, folder)
+
+    def test_a_folder_given_as_dot_or_dot_slash_name_is_still_read(self):
+        # The refusal must not catch the way probes.md passes a root (`.`) or a folder whose name starts with `-`.
+        repo = Repo(self).write("src/a.py")
+        folder = os.path.join(repo.root, "-x")
+        os.makedirs(folder)
+        subprocess.run(["git", "init", "-q", folder], check=True)
+        for cwd, root in ((repo.root, "."), (repo.root, "./-x")):
+            with self.subTest(root=root):
+                done = subprocess.run([sys.executable, PROBES, "layout", root], cwd=cwd, capture_output=True, text=True)
+                self.assertTrue(done.stdout.startswith("layout: "), (done.stdout, done.stderr))
+                self.assertNotIn("usage:", done.stderr)
+                self.assertIn(done.returncode, (0, 1), done.stdout)
 
 
 def tearDownModule():
