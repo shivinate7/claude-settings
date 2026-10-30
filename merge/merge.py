@@ -991,10 +991,11 @@ class Host:
         A cancel entry is dropped when another entry of that name is pass or pending (another run ran; concurrency cancels one of two
         same-head runs; a cancel beside only a skip or alone stays red; a fail or timeout is never dropped).
         Also red: a head with entries where none is pass or pending (all skipping): no check ran on it,
-        unless something is pending. `branch` fills the remedy's `--ref`.
-        Pending: a pending entry, or a required name with no entry, or a required DRAFT_SKIP_CHECK whose entries are all skipping
-        (a draft run on the same head skipped it; the ready run has not passed it yet). Any other required name that only skipped
-        reads green. A head where every entry is skipping stays red: red wins over that pending. `ignore` maps a name to its reason:
+        unless something is pending. `branch` fills the remedy's `--ref`. A dispatch run skips DRAFT_SKIP_CHECK, so when it is
+        required the remedy names `gh pr ready` or a new push, not a dispatch.
+        Pending: a pending entry, or a required name with no entry, or, when nothing is red, a required DRAFT_SKIP_CHECK whose
+        entries are all skipping (a draft run on the same head skipped it; the ready run has not passed it yet). Any other required
+        name that only skipped reads green. `ignore` maps a name to its reason:
         those checks are left out of red and pending, and named in `ignored`."""
         ignore = ignore or {}
         live = {k: rows for k, rows in got.items() if k not in ignore or k in names}
@@ -1002,8 +1003,10 @@ class Host:
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
-            red = [f"no check ran on this head (every check skipped). Run `gh workflow run checks.yml --ref {branch}`, or push anew after `gh pr ready`"]
-        if DRAFT_SKIP_CHECK in names and live.get(DRAFT_SKIP_CHECK) and all(b == "skipping" for b, _ in live[DRAFT_SKIP_CHECK]):
+            fix = ("Run `gh pr ready`, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
+                   else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after `gh pr ready`")
+            red = [f"no check ran on this head (every check skipped). {fix}"]
+        if not red and DRAFT_SKIP_CHECK in names and live.get(DRAFT_SKIP_CHECK) and all(b == "skipping" for b, _ in live[DRAFT_SKIP_CHECK]):
             pending = sorted(set(pending) | {DRAFT_SKIP_CHECK})
         ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
         return red, pending, ignored
