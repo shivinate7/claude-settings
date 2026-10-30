@@ -12111,7 +12111,7 @@ FAMILY = "item-field-rendered"
 # <script type="application/json" id="itemFields">[...]</script>. The page and the guard both read that
 # block, so no copy of the list lives anywhere else. An update may remove a field with
 # {"__delete__": true}, which passes. A key inside options or steps is not judged. A page with no block,
-# or a block that is no JSON list of strings, reads as unknown and the write passes. IF_SEAM names the
+# a block that is no JSON list of strings, or an empty list reads as unknown and the write passes. IF_SEAM names the
 # page.html the guard reads in place of the repo's own, so a case can hand the guard any page.
 
 IF_SEAM = "GUARD_ITEM_FIELDS_PAGE"
@@ -12123,9 +12123,12 @@ IF_BOGUS = "zzUnrenderedField"
 IF_REQUIRED = ("reply", "lastAnswer", "lane",
                "port", "stands", "kind", "holds", "group", "rank", "by", "pick", "options", "context",
                "id", "status", "title", "why", "steps", "links", "command", "multi", "ranked")
+# lastAnswer is an object, as the writer stores it.
+IF_LAST = {"choice": "b", "note": "n", "at": "2026-10-29T19:05:00Z"}
 IF_VALUE = {"port": False, "stands": True, "rank": 3, "multi": True, "ranked": True, "kind": "decision",
             "status": "open", "options": [{"key": "a", "label": "Keep the blue"}], "pick": "a",
-            "steps": ["Open the page."], "links": [{"label": "Page", "url": "https://example.com/p"}]}
+            "steps": ["Open the page."], "links": [{"label": "Page", "url": "https://example.com/p"}],
+            "lastAnswer": IF_LAST}
 IF_OWN = '["id", "kind", "status", "title", "context", "zzCustom"]'   # a block of a page of its own
 os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
 
@@ -12181,7 +12184,7 @@ ifr("an update with one unlisted field among listed ones is denied", "deny", {"r
 ifr("a field that differs from a listed one only in case is denied", "deny", {"Reply": "x"}, action="update")
 ifr("a set of listed fields only is allowed", "allow", if_item())
 ifr("a set that carries reply, lastAnswer and lane is allowed", "allow",
-    if_item(reply="Use the blue.", lastAnswer="Blue", lane="page-shows-last-answer", group="logo", rank=2, by="owner"))
+    if_item(reply="Use the blue.", lastAnswer=IF_LAST, lane="page-shows-last-answer", group="logo", rank=2, by="owner"))
 for _field in IF_REQUIRED:
     ifr("an update of %s is allowed once the page lists it" % _field, "allow", {_field: IF_VALUE.get(_field, "x")},
         action="update")
@@ -12250,14 +12253,27 @@ ifr_seam("a page of its own lists zzCustom, so a set that carries it is allowed"
 ifr_seam("a page of its own omits reply, so a set that carries it is denied", "deny", IF_PRETTY,
          if_item(reply="x"))
 
-# A page with no block, or a block that is no JSON list of strings, reads as unknown: the write passes.
+# A page with no block, a block that is no JSON list of strings, or an empty list reads as unknown: the write passes.
 for _slug, _body in (("no-block", "<p>No list here.</p>"),
                      ("object-block", if_block('{"id": true}')),
                      ("number-member", if_block('["id", 3]')),
                      ("broken-json", if_block('["id", ')),
+                     ("empty-list", if_block("[]")),
                      ("no-file", None)):
     ifr_seam("a page with %s is not judged" % _slug.replace("-", " "), "allow", if_page(_slug, _body),
              if_item(**{IF_BOGUS: "x"}))
+
+# An empty block lists no field, so it reads as unknown for every op, as the set above does for a set. The
+# update, the str_replace and the batch each pass on it.
+IF_EMPTY = if_page("empty-list-ops", if_block("[]"))
+ifr_seam("an empty itemFields block is not judged: an update with an unlisted field is allowed", "allow",
+         IF_EMPTY, {IF_BOGUS: "x"}, action="update")
+ifr_seam("an empty itemFields block is not judged: a str_replace on an unlisted field is allowed", "allow",
+         IF_EMPTY, None, action="str_replace", field=IF_BOGUS, old_str="blue", new_str="green")
+add("item field: an empty itemFields block is not judged: a batch with an unlisted field is allowed", "allow",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[ifr_write({IF_BOGUS: "x"}, "update"), ifr_write(if_item(**{IF_BOGUS: "x"}))])
+CASES[-1]["env"] = {IF_SEAM: IF_EMPTY}
 
 # The scanner cases: the block is found, and its list read, whatever text sits around it.
 # Comment openers sit inside strings, and their closers come after the block.

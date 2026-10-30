@@ -3705,6 +3705,20 @@ test("an opened reply stays open while the owner picks an option, and does not o
   assert.match(await page.locator(`#ctx-${it.id}`).getAttribute("class"), /clamp/);
 });
 
+// Enter on the reply's button keeps keyboard focus on it through the repaint that the press causes.
+test("Enter on More of the reply keeps focus on that button, which then reads Less", async (t) => {
+  const it = mk("rp-focus", 1, { reply: LA_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const more = card(page, it).getByRole("button", { name: "More of the reply", exact: true });
+  await need(more, "no More of the reply button on a long reply");
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  await need(card(page, it).getByRole("button", { name: "Less", exact: true }), "More of the reply did not become Less");
+  const at = await page.evaluate(() => ({ tag: document.activeElement.tagName, text: document.activeElement.textContent.trim(), controls: document.activeElement.getAttribute("aria-controls") }));
+  assert.deepEqual(at, { tag: "BUTTON", text: "Less", controls: "rp-" + it.id }, "focus did not stay on the reply's button after Enter");
+});
+
 test("a lane shows 'waits on lane <slug>' as one text run in the top row, after the wait, and adds no row", async (t) => {
   const on = mk("ln-on", 1, { lane: "ci-done-comment" }), off = mk("ln-off", 2);
   const page = await open(t, { items: [on, off] }); if (!page) return;
@@ -3812,13 +3826,27 @@ test("page.html carries one itemFields JSON block whose list holds reply, lastAn
   for (const f of [...Object.keys(DECISION), ...Object.keys(TASK)]) assert.ok(list.includes(f), `itemFields lacks ${f}, a field the page reads today`);
 });
 
-test("an item with a field the page does not list shows a visible warning that names each such field", async (t) => {
+// Rule ux-machine-text-hidden: the warning is one plain sentence, and the field names and the word itemFields sit in a closed disclosure.
+test("an item with a field the page does not list shows one plain warning, and its field names sit in a closed disclosure", async (t) => {
   const odd = mk("odd-field", 1, { zzflavour: "mint", zzspin: 3 });
   const page = await open(t, { items: [odd] }); if (!page) return;
-  const text = await page.locator("body").innerText();
-  assert.match(text, /zzflavour/, "the page does not name the unknown field zzflavour");
-  assert.match(text, /zzspin/, "the page does not name the unknown field zzspin");
   await need(card(page, odd), "the item with an unknown field is not drawn");
+  const warn = card(page, odd).locator('[role="status"]:visible');
+  await need(warn, "the unknown-field warning is not one visible status line");
+  const shown = flat(await warn.innerText());
+  assert.doesNotMatch(shown, /zzflavour|zzspin|itemFields/, `the visible warning names a field: ${shown}`);
+  assert.equal((shown.match(/[.!?](\s|$)/g) || []).length, 1, `the visible warning is not one sentence: ${shown}`);
+  const box = card(page, odd).locator("details").filter({ hasText: "zzflavour" });
+  await need(box, "the field names are not in a closed disclosure");
+  assert.equal(await box.evaluate((d) => d.open), false, "the disclosure starts open");
+  const NAMES = ["zzflavour", "zzspin", "itemFields"];
+  for (const name of NAMES) {
+    assert.ok((await box.getByText(name).count()) >= 1, `the disclosure does not hold ${name}`);
+    assert.equal(await box.getByText(name).first().isVisible(), false, `${name} shows before the disclosure is opened`);
+  }
+  await box.locator("summary").click();
+  assert.equal(await box.evaluate((d) => d.open), true, "the disclosure did not open");
+  for (const name of NAMES) assert.equal(await box.getByText(name).first().isVisible(), true, `${name} is not shown once the disclosure is open`);
 });
 
 test("items with only listed fields show no unknown-field warning, new fields included", async (t) => {
