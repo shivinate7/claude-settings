@@ -278,6 +278,8 @@ PAGE_TWO = "https://claude.ai/code/artifact/example-two"
 ITEMS = "https://claude.ai/code/artifact/example/items"  # the waiting page's items collection
 # Each is a list of ids or numbers, which a hand-off must not carry. `05` and `0, 4` start with a zero.
 IDS = ("12", "7", "10", "12, 14", "05", "0, 4", "A12, B14")
+# A URL beside an id list is still a copied id list: the ids go stale, the URL does not.
+IDS_BESIDE_URL = (f"12, 14, 15 ({PAGE})", f"{PAGE} 12, 14", f"#12 {PAGE}")
 # A placeholder, or a URL that holds `<` or `>`, is no page and no items home.
 BAD_WATCHES = ("https://<page-url>", "<page URL>", "https://claude.ai/code/artifact/<id>",
                "https://claude.ai/code/artifact/example>")
@@ -334,7 +336,7 @@ class HandoffCheck(TempDest):
 
     def test_a_list_of_ids_is_a_problem_that_names_the_url_home(self):
         # A copied id list goes stale after a compaction and keeps closed items (the triage incident).
-        for items in IDS:
+        for items in IDS + IDS_BESIDE_URL:
             with self.subTest(items=items):
                 found = problems(handoff_text(items, [PAGE]))
                 self.assertEqual(len(found), 1, found)
@@ -342,6 +344,13 @@ class HandoffCheck(TempDest):
                 self.assertRegex(found[0], r"(?i)\burl\b")
                 self.assertRegex(found[0], r"(?i)\bids?\b")
                 self.assertNotRegex(found[0], OFFERS_IDS)
+
+    def test_a_url_alone_or_with_words_or_digits_in_its_path_is_ok(self):
+        # The fix for ids beside a URL must not flag the URL itself: its path may hold digits.
+        for items in (ITEMS, PAGE, f"see {ITEMS}", "https://claude.ai/code/artifact/abc123/items",
+                      f"none, see {PAGE}"):
+            with self.subTest(items=items):
+                self.assertEqual(problems(handoff_text(items, [PAGE])), [])
 
     def test_a_placeholder_url_is_no_items_home(self):
         for items in BAD_WATCHES:
