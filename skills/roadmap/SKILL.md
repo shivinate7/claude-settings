@@ -113,7 +113,8 @@ After each build the builder prints the upkeep list for the triage thread. It na
 - steps marked `doing` or `active` with no live lane or open PR. A step is live when a session that is
   running or idle has the tag `cs-step:<step id>`, or an open pull request's branch equals the step
   id. Both match the id exactly. The session also needs the tag `cs-repo:<owner>/<repo>` for this
-  repo's GitHub name, because `list_sessions` is account-wide and step ids repeat across repos. A step
+  repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
+  repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
   whose status is none of `todo`, `doing`, `active` or `done` is listed as `<id> (unknown status
   "<status>")`. Each other entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)` when
   a `Step:` trailer is on main. Triage sets each step back. The row reads one `unknown (<why>)` entry,

@@ -30,7 +30,8 @@ The upkeep list also names each step marked doing or active that has no live lan
 pull request, so triage can set it back (step roadmap-matches-lanes). A step is live when a session in
 the live file's "sessions" list is running or idle (any other status does not count) and carries both
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
-branch equals the step id. Both matches are exact. The cs-repo tag is needed because list_sessions is
+branch equals the step id. The step id matches exactly; the GitHub name ignores case. A session row
+with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
 account-wide and step ids repeat across repos. A step whose status is none of todo, doing, active or
 done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
 file is missing or unreadable; its readAt is not an ISO time, has no time zone, is over STALE_LIVE_MINUTES
@@ -443,10 +444,12 @@ def live_work(path, steps, slug=None):
 
     Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
     "pulls": [{"number", "title", "branch"?, "draft"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
-    "sessions"?: [{"id", "session_status", "tags"}]} (triage copies the list_sessions rows, every page).
+    "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
+    list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
     names that is not an open step is listed in `strays`. The session rows feed only the stale-step upkeep row:
-    `sessionSteps` holds the step ids of non-archived sessions, and `staleWhy` says why that row reads unknown, or None.
+    `sessionSteps` holds the step ids of RUNNING or IDLE sessions carrying this repo's cs-repo tag, and `staleWhy`
+    says why that row reads unknown, or None.
     A live file with no sessions list still renders Live work.
     """
     if not path:
@@ -512,11 +515,14 @@ def live_work(path, steps, slug=None):
     else:
         before = len(skipped)
         sessions = keep("session", raw["sessions"], lambda r: isinstance(r.get("id"), str)
-                        and isinstance(r.get("session_status"), str) and isinstance(r.get("tags"), list))
+                        and isinstance(r.get("session_status"), str)
+                        and (r.get("tags") is None or isinstance(r["tags"], list)))
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
+        # GitHub names ignore case, so the slug compare does too.
+        ours = lambda t: isinstance(t, str) and t.startswith(REPO_TAG) and t[len(REPO_TAG):].lower() == slug.lower()
         session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] in LIVE_SESSION
-                                and REPO_TAG + slug in r["tags"]
-                                for t in r["tags"] if isinstance(t, str) and t.startswith(STEP_TAG)})
+                                and any(map(ours, r.get("tags") or []))
+                                for t in r.get("tags") or [] if isinstance(t, str) and t.startswith(STEP_TAG)})
         if len(skipped) > before:
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
     if pulls_skipped:

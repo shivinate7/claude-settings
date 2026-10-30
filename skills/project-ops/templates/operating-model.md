@@ -13,6 +13,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
+  A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
 - **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
