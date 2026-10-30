@@ -8,7 +8,7 @@ no answer on the items it inherits. Reason: measured incident, the owner's two t
 (rule building-guard-needs-incident). The check reads the `## Pages` section of the handoff
 (templates/role-handoff.md). It needs an `Open items:` line: `none`, or the URL of the page's items
 collection. A handoff never carries item ids, which go stale after a compaction, so an id, a number or a
-placeholder is a problem. It needs a `Watch:` line with a real page URL: the first http(s) URL in the value, with no `<` or `>`, and text may follow it.
+placeholder is a problem, and so is a number beside the URL. It needs a `Watch:` line with a real page URL: the first http(s) URL in the value, with no `<` or `>`, and text may follow it.
 The one exception is `Watch: none` together with `Open items: none`. A `Watch:` line that is there but wrong
 is a problem that quotes its value.
 Exit 0 ok, 1 a problem (each printed), 2 a bad argument or an unreadable file.
@@ -23,6 +23,8 @@ PAGES = re.compile(r"^## Pages[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
 NONE = re.compile(r"(?:none\b|0(?![\w,]))", re.I)
 WATCH_NONE = re.compile(r"none\b", re.I)
 URL = re.compile(r"https?://\S+")
+# A standalone number, as `12` or `#12`, outside any URL: a copied item id.
+ID = re.compile(r"(?<!\w)#?\d+(?!\w)")
 HOME = "Write `Open items: none`, or name the page's items collection by URL, not ids."
 
 
@@ -46,6 +48,8 @@ def handoff_problems(text):
         return [f"The `Open items:` line is not filled. {HOME}"]
     if not no_items and not _is_url(items):
         return [f'The `Open items:` line holds no items collection URL: "{items}". {HOME}']
+    if not no_items and ID.search(URL.sub(" ", items)):
+        return [f'The `Open items:` line copies ids beside the URL: "{items}". {HOME}']
     watches = WATCH.findall(pages)
     if not watches:
         return ["No `Watch:` line in the Pages section. Add `Watch: <page URL>`, one line per page. "
