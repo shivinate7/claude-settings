@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scrolling option pictures</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS (#pagecss) plus this step's changes (#newcss). */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+.tool code { overflow-wrap: anywhere; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No item, number, name or time on this page is real.</div>
+<header class="tool">
+  <h1>Waiting page c204: a tall option picture scrolls inside its 480px box</h1>
+  <div class="row" id="rowS"><span>State</span><button data-s="long" data-state="long">Tall, no focus</button><button data-s="long-end" data-state="long-end">Tall, at the end</button><button data-s="focus-in" data-state="focus-in">1A: tall focus scrolls the focus (pick)</button><button data-s="focus-whole" data-state="focus-whole">1B: tall focus scrolls the whole mockup</button><button data-s="fits" data-state="fits">Fits: as today</button><button data-s="keys" data-state="keys">Keyboard</button><button data-s="wide" data-state="wide">5B: scroll picture 221.8 wide</button><button class="hide" data-hide="focus-in" data-name="1A (focus only)">Hide 1A (focus only)</button><button class="hide" data-hide="focus-whole" data-name="1B (whole mockup)">Hide 1B (whole mockup)</button><button class="hide" data-hide="wide" data-name="5B (wider)">Hide 5B (wider)</button></div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button><button data-w="2200">Very wide 2200</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button id="labBtn">Labels on</button><button id="rmBtn">Reduced motion off</button>
+  </div>
+  <p>Deep links: <code>#s=long|long-end|focus-in|focus-whole|fits|keys|wide</code>, <code>&amp;w=all|390|1280|2200</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;rm=1</code>, <code>&amp;hide=focus-whole,wide</code>. The pictures in the frames are live: scroll them with a wheel, a drag or the scrollbar. A press on the picture opens View; a press on its scrollbar does not. 5A (today's scale, 120 wide) has no hide control: it is the scale in every state but <code>wide</code>. In <code>long</code>, picture C is marked as what sets its option apart (3px left border).</p>
+</header>
+<main id="stage"></main>
+
+<script type="text/plain" id="pagecss">
+/* page.html's own CSS at origin/main 1cc47f01, unchanged. */
+/* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
+   repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
+:root {
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+/* The repo's own icon sits on a tile chosen so most of its drawn pixels stand out (applyIcon). */
+.mark.icon { background: var(--tile, var(--on-hdr)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-hdr) 28%, transparent); }
+.mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .sub { font-size: 13.5px; opacity: .88; white-space: nowrap; }
+@media (max-width: 420px) { .who .sub { display: none; } }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.stands { border-radius: 50%; background: var(--gold-ink); }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
+.pairchips { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.pairchips .nchip { height: 32px; width: 48px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .chips-n { gap: 4px; }
+  .pairchips { display: flex; }
+  .nchip.sent::before { flex: none; margin-right: 0; }
+  .nchip, .pairchips .nchip { width: 100%; height: 32px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic .dfitwrap { justify-self: center; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+/* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { border-left: 0; margin-left: 0; padding: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .dfitwrap { border-left: 3px solid var(--acc); }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+.ready.on::before { content: "\2713  "; }
+/* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.alts .sp { flex: 1 1 0; }
+.alts .gone { visibility: hidden; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 8px; }
+.receipt .line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-height: 44px; font-size: 15.5px; }
+.receipt .line > .g { grid-column: 1; grid-row: 1; }
+.receipt .line b { grid-column: 2; grid-row: 1; }
+.receipt .line .read { grid-column: 2; grid-row: 2; }
+.receipt .line .changebtn { grid-column: 3; grid-row: 1; }
+.receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
+.receipt .line b { overflow-wrap: anywhere; color: var(--good); }
+.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
+.parked ul { margin: 6px 0 0; padding-left: 20px; }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
+.sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
+.sent-what { min-width: 0; display: grid; gap: 8px; }
+.sent-line { margin: 0; }
+.stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
+@keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
+.sent-list li { display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
+.dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
+#undoBtn { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+
+/* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
+.dprev { display: grid; gap: 8px; }
+.dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dprev .dbar .sp { flex: 1; }
+.dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
+.dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap.inert .dframe { pointer-events: none; }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+.dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
+body.sheet-open { overflow: hidden; }
+</script>
+
+<script type="text/plain" id="newcss">
+/* ---------- New (c204): a capped option picture that would pass 480px scrolls inside a 480px box. ---------- */
+/* The scale does not change: sc = min(1, W / w, max(480 / h, 120 / w)), as today. The picture scrolls only when h x sc > 480.
+   That is a box more than 4 times as tall as it is wide, such as a 390-wide mockup taller than 1560px. A picture that fits draws as today. */
+:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }   /* New. The frame is #fff in both themes, so the cue keeps one pair. Pill on #fff: 17.3:1, measured */
+.dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }   /* New. The scaled area: w x sc by h x sc. Its overflow is hidden, so the frame's transformed box adds no scroll range */
+.dfitwrap .dtop, .dfitwrap .dcue { display: none; }                          /* New. Shown only in the scroll case */
+.dfitwrap.scroll { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; }   /* Today: overflow hidden, and the box grows past 480. JS sets height 480 and width w x sc + 2 + gutter */
+.dfitwrap.scroll .dtop { display: block; position: sticky; top: 0; z-index: 1; height: 12px; margin-bottom: -12px; background: linear-gradient(rgb(22 27 34 / 0.28), rgb(22 27 34 / 0)); opacity: 0; pointer-events: none; }
+.dfitwrap.scroll.scrolled .dtop { opacity: 1; }                               /* Shade at the top edge once the picture is scrolled */
+.dfitwrap.scroll .dcue { display: flex; position: sticky; bottom: 0; z-index: 1; height: 40px; margin-top: -40px; align-items: flex-end; justify-content: center; padding-bottom: 8px; background: linear-gradient(rgb(22 27 34 / 0), rgb(22 27 34 / 0.28)); pointer-events: none; }
+.dfitwrap.scroll.at-end .dcue { opacity: 0; }                                 /* The cue goes at the end of the picture */
+.dfitwrap .dmore { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--pic-cue); color: var(--on-pic-cue); box-shadow: 0 0 0 1px var(--on-pic-cue); font: 600 12px/1 var(--body); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { html:not(.rm) .dfitwrap.scroll .dcue, html:not(.rm) .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
+/* Harness only: html.rm stands in for prefers-reduced-motion: reduce. kf draws the :focus-visible ring a keyboard press gives. */
+.opt .opic.kf { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+/* ---------- Sample labels: dashed "Today:" for what exists, "New:" for what this step adds (harness only, not for the builder). ---------- */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+
+/* Sample phone screens: drawn 390 wide and scaled, as the sandboxed frame is. Fixed colours: a mockup is its own page. */
+.phone { position: absolute; top: 0; left: 0; width: 390px; transform-origin: 0 0; background: #fff; color: #161b22; font: 17px/1.35 system-ui, sans-serif; overflow: hidden; pointer-events: none; }
+.phone > div { overflow: hidden; }
+.phone .pb { height: 40px; background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px; }
+.phone .ph { height: 64px; font-size: 24px; font-weight: 700; padding: 14px 20px; border-bottom: 1px solid #d9dee5; }
+.phone .pg { height: 44px; padding: 14px 20px 0; font-size: 14px; font-weight: 700; color: #565f6b; text-transform: uppercase; letter-spacing: .04em; }
+.phone .pr { height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px; border-bottom: 1px solid #e6e9ee; }
+.phone .pr small { color: #565f6b; font-size: 15px; }
+.phone .pr.late { background: #b3261e; color: #fff; }
+.phone .pr.late small { color: #fff; }
+.phone .tg { width: 44px; height: 26px; border-radius: 13px; background: #1d7445; position: relative; }
+.phone .tg::after { content: ""; position: absolute; right: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; }
+.phone .tg.off { background: #c3c9d1; }
+.phone .tg.off::after { right: auto; left: 3px; }
+.phone .pt { height: 48px; display: flex; gap: 8px; padding: 8px 16px; border-bottom: 1px solid #d9dee5; }
+.phone .pt span { flex: 1; display: grid; place-items: center; border-radius: 8px; background: #eef1f4; font-weight: 600; }
+.phone .pt span.on { background: #161b22; color: #fff; }
+.phone .psum { margin: 12px 16px; padding: 16px; border-radius: 12px; background: #f3f4f6; }
+.phone .pfold { height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: #f3f4f6; border-bottom: 1px solid #d9dee5; font-weight: 700; }
+.phone .ptab { position: absolute; left: 0; right: 0; bottom: 0; height: 72px; display: flex; justify-content: space-around; padding-top: 14px; border-top: 1px solid #d9dee5; background: #fff; font-weight: 600; }
+</script>
+
+<script>
+/* ---------- Sample drawing kit: the same markup page.html builds, from sample items ---------- */
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const G = (k) => `<span class="g ${k}" aria-hidden="true"></span>`;
+const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
+const SPARK = '<b class="spark" aria-label="My pick" title="My pick"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/></svg></b>';
+const lab = (kind, text) => text ? ` data-${kind}="${esc(text)}"` : "";
+const STATE_WORDS = { open: ", open", ready: ", ready to send", sent: ", answered, filing pending", filed: ", answered, filed" };
+
+// A rail chip, as renderRail's chip(): number, then the title (shown only at 961px and wider).
+function chip(c) {
+  const st = c.st || "open", cls = "nchip" + (st === "ready" ? " ready" : st === "sent" ? " sent" : st === "filed" ? " sent filed" : "");
+  return `<button type="button" class="${cls}" aria-label="${esc("No. " + c.n + ", " + c.title + STATE_WORDS[st])}" title="${esc(c.title)}"${lab("new", c.lab)}><span class="no">${c.n}</span><span class="nt">${esc(c.short || c.title)}</span></button>`;
+}
+// The overview rail. cfg.tiers maps a tier key to a list of chips; an entry with `group` is a dashed related-item frame.
+function rail(cfg) {
+  const all = Object.values(cfg.tiers).flat().flatMap((e) => e.group || [e]);
+  const total = all.length, sent = all.filter((c) => c.st === "sent" || c.st === "filed").length, ready = all.filter((c) => c.st === "ready").length;
+  let out = `<nav class="rail" aria-label="Overview"${lab("new", cfg.lab)}><div class="ov-prog"><div class="big"><b>${sent}</b>of ${total} sent</div><div class="sub${ready ? "" : " none"}"><i class="sw"></i>${ready} ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:${sent / total * 100}%"></i><i class="r" style="width:${ready / total * 100}%"></i></div></div>`;
+  TIERS.forEach((T) => {
+    const list = cfg.tiers[T.k]; if (!list || !list.length) return;
+    const open = list.flatMap((e) => e.group || [e]).filter((c) => c.st !== "sent" && c.st !== "filed").length;
+    const row = list.map((e) => e.group ? `<span class="pairchips" title="${esc(e.title)}"${lab("new", e.lab)}>${e.group.map(chip).join("")}</span>` : chip(e)).join("");
+    out += `<div class="ov-tier"><a class="ov-head" href="#tier-${T.k}" aria-label="${open} open, ${T.name}">${G(T.k)}${T.name}<span class="ct">${open}</span></a><div class="chips-n">${row}</div></div>`;
+  });
+  return out + "</nav>";
+}
+function tier(k, n, cards) {
+  const T = TIERS.find((t) => t.k === k);
+  return `<section class="tier" id="tier-${k}" aria-labelledby="th-${k}"><header><h2 id="th-${k}">${G(k)}${T.name}<span class="ct">${n}</span></h2></header>${cards}</section>`;
+}
+// An option card, as optCard(). `pic` is the picture span when the item has pictures.
+function optCard(it, o, pic) {
+  const sfx = it.n + "-" + o.key, sel = it.chosen === o.key;
+  return `<label class="opt${sel ? " sel" : ""}" for="o-${sfx}">${pic || ""}<input type="radio" name="g-${it.n}" id="o-${sfx}" value="${o.key}"${sel ? " checked" : ""} aria-labelledby="l-${sfx}" aria-describedby="h-${sfx}"><span class="head"><span class="key">${o.key}</span><span class="lab" id="l-${sfx}">${esc(o.label)}</span></span><p class="how" id="h-${sfx}">${esc(o.how)}</p><div class="tr"><div class="gain"><span class="s" aria-label="You gain">+</span><span>${esc(o.gain)}</span></div><div class="lose"><span class="s" aria-label="You lose">−</span><span>${esc(o.lose)}</span></div></div>${it.pick === o.key ? `<div class="pick">${SPARK}<span>${esc(it.why)}</span></div>` : '<span class="nopick"></span>'}</label>`;
+}
+// An open decision card, as buildCard() before a send.
+function openCard(it) {
+  const c = it.opts.find((o) => o.key === it.chosen), pk = it.opts.find((o) => o.key === it.pick);
+  return `<article class="card ${it.k}" id="item-${it.n}" aria-labelledby="t-${it.n}"${it.attrs || ""}><div class="top"><span class="num">No. ${it.n}</span><span>${esc(it.waited)}</span>${it.minutes ? `<span>about ${it.minutes} min</span>` : ""}</div><h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>${it.holds ? `<p class="stake holds">${G("holds")}<span>${esc(it.holds)}</span></p>` : ""}${it.ctx ? `<p class="ctx">${esc(it.ctx)}</p>` : ""}<div class="opts${it.pic ? " pics" : ""}" role="radiogroup" aria-label="Options for No. ${it.n}"${it.optsAttrs || ""}>${it.opts.map((o, i) => optCard(it, o, it.pic ? it.pic(o, i) : "")).join("")}</div><p class="ready${c ? " on" : ""}" aria-live="polite">${c ? "Ready to send: " + esc(c.label) + ", your choice." : ""}</p><div class="alts"><button class="btn dash" type="button" aria-pressed="false">None of these</button><button class="btn quiet" type="button">Add a note</button><span class="sp"></span><button class="btn alt${it.chosen === it.pick ? " gone" : ""}" type="button">Take my pick (${esc(pk ? pk.label : "")})</button></div></article>`;
+}
+// A short card for the list beside the rail: number, title, one line.
+function shortCard(it) {
+  return `<article class="card ${it.k}${it.st === "sent" || it.st === "filed" ? " answered" : ""}" aria-labelledby="t-${it.n}"><div class="top"><span class="num">No. ${it.n}</span><span>${esc(it.waited || "waiting 2 h")}</span></div><h3 class="title" id="t-${it.n}">${esc(it.title)}</h3></article>`;
+}
+function chrome(railHtml, listHtml, barHtml) {
+  return `<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1><span class="sub">waiting on you</span></div></div></header>
+<nav class="in tabs" aria-label="Page"><a href="#" aria-current="page">Questions</a><a href="#" role="button">Designs <span class="cnt">3</span></a></nav>
+<div class="in main">${railHtml}<div class="list">${listHtml}</div></div>${barHtml}`;
+}
+const plainBar = (st, send, off) => `<div class="bar" id="bar"><div class="in"><span class="st" id="barStatus">${st}</span><button class="btn send" type="button" id="send"${off ? " disabled" : ""}>${send}</button></div></div>`;
+
+/* ---------- c204: a card picture scrolls inside its box and opens on the area under review ---------- */
+// optPic calls fitFrame with maxH 480. Today a box more than 4 times as tall as it is wide draws taller than 480.
+// New: it draws 480 high and scrolls. 1A (pick): a focused card scrolls only over the focus box and opens at its top.
+// 1B: it scrolls over the whole mockup in the focus column and opens with the focus top at the box top.
+// 5B: the scroll case draws 221.8 wide, the width a 390 x 844 phone picture gets, in place of today's 120.
+const STATES = [
+  { id: "long", label: "Tall, no focus" },
+  { id: "long-end", label: "Tall, at the end" },
+  { id: "focus-in", label: "1A: tall focus scrolls the focus (pick)" },
+  { id: "focus-whole", label: "1B: tall focus scrolls the whole mockup" },
+  { id: "fits", label: "Fits: as today" },
+  { id: "keys", label: "Keyboard" },
+  { id: "wide", label: "5B: scroll picture 221.8 wide" },
+];
+const CAP = 480, FLOOR = 120, DW = 390, PHONE_W = 480 * 390 / 844;
+const rowsOf = (n, f) => Array.from({ length: n }, (_, j) => f(j)).join("");
+const SETS = ["Sound", "Vibrate", "Late alerts", "Quiet hours", "Map style", "Units", "Language", "Text size", "Dark look", "Auto lock", "Scan beep", "Photo proof", "Sign on glass", "Leave at door", "Call ahead", "Route order", "Fuel stops", "Breaks", "Shift start", "Shift end", "Backup", "Help"];
+const setRow = (j) => `<div class="pr"><span>${SETS[j % SETS.length]}</span><span class="tg${j % 3 === 1 ? " off" : ""}"></span></div>`;
+const ruleRow = (j) => `<div class="pr${j === 2 ? " late" : ""}"><span>Rule ${j + 1}: ${["late by 10 min", "no scan at stop", "door photo missing", "route changed", "fuel under 20%"][j % 5]}</span><small>${j === 2 ? "On" : ["Text", "Call", "Push"][j % 3]}</small></div>`;
+const block = (h, inner) => `<div style="height:${h}px">${inner}</div>`;
+// A sample mockup, 390 wide and H high. `focus` is the box the card shows, in mockup pixels, as fitScript reports it.
+const MOCKS = {
+  page: { H: 2400, html: () => `<div class="pb">Sample</div><div class="ph">Settings, one page</div>` + rowsOf(5, (g) => `<div class="pg">Group ${g + 1}</div>` + rowsOf(7, (j) => setRow(g * 7 + j))) + `<div class="pr"><b>End of settings</b><small>2400px</small></div>` },
+  tabs: { H: 844, html: () => `<div class="pb">Sample</div><div class="ph">Settings</div><div class="pt"><span class="on">General</span><span>Alerts</span><span>Route</span></div>` + rowsOf(10, setRow) + `<div class="ptab"><span>Today</span><span>Map</span><span>Me</span></div>` },
+  fold: { H: 1800, html: () => `<div class="pb">Sample</div><div class="ph">Settings by group</div>` + rowsOf(4, (g) => `<div class="pfold"><span>Group ${g + 1}</span><span>${g < 3 ? "▾" : "▸"}</span></div>` + (g < 3 ? rowsOf(7, (j) => setRow(g * 7 + j)) : "")) + `<div class="pr"><b>End of settings</b><small>1800px</small></div>` },
+  rulesAll: { H: 2600, focus: { x: 0, y: 300, w: 390, h: 1700 }, html: () => block(300, `<div class="pb">Sample</div><div class="ph">Alert rules</div><div class="psum">30 rules. Late parcels alert first.</div>`) + block(1700, `<div class="pg">Every rule (focus)</div>` + rowsOf(30, ruleRow)) + block(600, `<div class="pg">Below the focus</div>` + rowsOf(10, setRow)) },
+  rulesFold: { H: 1200, focus: { x: 0, y: 240, w: 390, h: 420 }, html: () => block(240, `<div class="pb">Sample</div><div class="ph">Alert rules</div><div class="psum">30 rules in 6 groups.</div>`) + block(420, rowsOf(2, (g) => `<div class="pfold"><span>Group ${g + 1}, 5 rules</span><span>▾</span></div>` + rowsOf(2, (j) => ruleRow(g * 5 + j))) + `<div class="pfold"><span>Group 3, 5 rules</span><span>▸</span></div>`) + block(540, rowsOf(9, setRow)) },
+  rulesCourier: { H: 2000, focus: { x: 0, y: 200, w: 390, h: 1300 }, html: () => block(200, `<div class="pb">Sample</div><div class="ph">Alert rules</div>`) + block(1300, rowsOf(4, (g) => `<div class="pfold"><span>Courier ${"NSEW"[g]}</span><span>▾</span></div>` + rowsOf(4, (j) => ruleRow(g * 4 + j)))) + block(500, rowsOf(8, setRow)) },
+};
+const ITEMS = {
+  settings: { title: "Pick the settings screen for the courier app", ctx: "Each option has a phone mockup. Press View to see it full screen.", opts: [
+    { key: "A", label: "One long page", how: "Every setting on one page, in groups.", gain: "Nothing hides.", lose: "A long scroll.", mock: "page" },
+    { key: "B", label: "Tabs, one per group", how: "Three tabs; each holds a short list.", gain: "Short lists.", lose: "A setting hides behind a tab.", mock: "tabs" },
+    { key: "C", label: "Groups that fold", how: "Groups open and close in place.", gain: "Shows the group names first.", lose: "One more press per group.", mock: "fold" }] },
+  rules: { title: "Pick the alert rules list", ctx: "Each picture shows the part being decided. Press View for the whole mockup.", opts: [
+    { key: "A", label: "Every rule on one list", how: "All 30 rules, late parcels first.", gain: "One place to read.", lose: "A long list.", mock: "rulesAll" },
+    { key: "B", label: "Rules in folded groups", how: "Six groups that open in place.", gain: "Short at first.", lose: "A rule hides in a group.", mock: "rulesFold" },
+    { key: "C", label: "Rules by courier", how: "One block per courier.", gain: "Shows who gets which alert.", lose: "A rule repeats per courier.", mock: "rulesCourier" }] },
+};
+function screen(s) {
+  const which = s.startsWith("focus") || s === "fits" ? "rules" : "settings", src = ITEMS[which];
+  const opts = s === "fits" ? [{ ...ITEMS.settings.opts[1] }, src.opts[1], src.opts[2]] : src.opts;
+  const mode = s === "focus-whole" ? "whole" : s === "wide" ? "wide" : "in";
+  const it = {
+    n: 4, k: "due", waited: "due in 5 h", title: s === "fits" ? "Pick the alert rules list (pictures that fit)" : src.title, ctx: src.ctx,
+    opts, pick: "A", why: "One place to read is the job.", chosen: "",
+    pic: (o) => {
+      const m = MOCKS[o.mock], b = m.focus;
+      const dif = s === "long" && o.key === "C";   // a picture marked as what sets the option apart: its 3px left border is in the gutter sum
+      return `<span class="opic${dif ? " dif" : ""}" role="button" tabindex="0" aria-label="View ${esc(o.label)} full screen${dif ? ". Its picture sets this option apart" : ""}" data-lab="${esc(o.label)}${dif ? ". Its picture sets this option apart" : ""}"><span class="dfitwrap inert" aria-hidden="true" id="pic-${o.key.toLowerCase()}" data-h="${m.H}"${b ? ` data-box="${b.x},${b.y},${b.w},${b.h}"` : ""} data-mode="${mode}"><span class="dtop" aria-hidden="true"></span><span class="dsizer"><span class="phone" aria-hidden="true" style="height:${m.H}px">${m.html()}</span></span><span class="dcue" aria-hidden="true"><span class="dmore">↓ More</span></span></span><span class="view" aria-hidden="true">${dif ? '<span class="ne" aria-hidden="true">≠</span>' : ""}View</span></span>`;
+    },
+  };
+  const r = rail({ tiers: { due: [{ n: 4, title: it.title }, { n: 5, title: "Name the record home for the stamp motion ruling" }], calm: [{ n: 9, title: "Keep each lane's own commit in the batch" }] } });
+  return chrome(r, tier("due", 2, openCard(it) + shortCard({ n: 5, k: "due", title: "Name the record home for the stamp motion ruling", waited: "due in 9 h" })), plainBar("<b>3</b> stay open.", "Send answers", true));
+}
+// fitFrame for a capped picture (maxH 480, maxScale 1). Today's scale and size, then the scroll case.
+function layout(wrap) {
+  const H = +wrap.dataset.h, bx = wrap.dataset.box ? wrap.dataset.box.split(",").map(Number) : null, mode = wrap.dataset.mode;
+  const box = bx ? { x: bx[0], y: bx[1], w: bx[2], h: bx[3] } : null, sizer = wrap.querySelector(".dsizer"), ph = wrap.querySelector(".phone");
+  const ww = Math.max(wrap.parentElement.clientWidth - 2, 1), bw = box ? box.w : DW, bh = box ? box.h : H;
+  let sc = Math.min(1, ww / bw, Math.max(CAP / bh, FLOOR / bw));
+  const today = { w: Math.ceil(bw * sc) + 2, h: Math.ceil(bh * sc), sc };
+  wrap.dataset.was = JSON.stringify(today);
+  const scroll = Math.ceil(bh * sc) > CAP;
+  wrap.classList.toggle("scroll", scroll);
+  if (scroll) {
+    wrap.tabIndex = -1;                                    // a scroller in a role=button is not a tab stop of its own; aria-hidden, as the View sheet holds the same mockup
+    const g = wrap.offsetWidth - wrap.clientWidth - 2;     // the gutter plus any border past 1px (a .dif picture's 3px left border), read with .scroll on; the gutter is 0 for overlay scrollbars
+    // 5B: the width a 390 x 844 phone picture gets, inside the column less the gutter. The column is floored, so the box never passes it.
+    const room = Math.floor(wrap.parentElement.getBoundingClientRect().width) - 2 - g;
+    if (mode === "wide") sc = Math.min(1, room / bw, PHONE_W / bw);
+    const pw = Math.min(Math.ceil(bw * sc), room), whole = mode === "whole" && box;
+    sizer.style.width = pw + "px"; sizer.style.height = Math.ceil((whole ? H : bh) * sc) + "px";
+    ph.style.transform = (box ? "translate(" + -box.x * sc + "px," + (whole ? 0 : -box.y * sc) + "px) " : "") + "scale(" + sc + ")";
+    wrap.style.width = pw + 2 + g + "px"; wrap.style.height = CAP + "px";
+    const o = wrap.closest(".opic"); o.setAttribute("aria-label", "View " + o.dataset.lab + " full screen. Arrow keys scroll its picture");
+  } else {
+    sizer.style.width = today.w - 2 + "px"; sizer.style.height = today.h + "px";
+    ph.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
+    wrap.style.width = today.w + "px"; wrap.style.height = today.h + "px";
+  }
+  wrap.dataset.sc = sc.toFixed(4);
+  return { box, sc, scroll, whole: mode === "whole" && box };
+}
+const edges = (w) => { w.classList.toggle("scrolled", w.scrollTop > 0); w.classList.toggle("at-end", w.scrollTop + w.clientHeight >= w.scrollHeight - 1); };
+function post(doc, s) {
+  doc.body.dataset.views = "0";
+  doc.querySelectorAll(".opic .dfitwrap").forEach((wrap) => {
+    const L = layout(wrap), opic = wrap.closest(".opic");
+    // The first scrollTop is set once per wrap, after the box is known; never again on a refit.
+    if (L.scroll && !wrap.dataset.opened) { wrap.dataset.opened = "1"; wrap.scrollTop = L.whole ? Math.round(L.box.y * L.sc) : 0; }
+    if (L.scroll) {
+      wrap.addEventListener("scroll", () => edges(wrap), { passive: true }); edges(wrap);
+      if (s === "long-end") { wrap.scrollTop = wrap.scrollHeight; edges(wrap); }
+    }
+    // A press on the picture opens View; a press on the scrollbar gutter does not.
+    opic.addEventListener("click", (e) => {
+      const r = wrap.getBoundingClientRect();
+      if (e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left + wrap.clientLeft + wrap.clientWidth && e.clientX <= r.right) return;
+      doc.body.dataset.views = String(+doc.body.dataset.views + 1);
+    });
+    // Arrow keys, Page Up and Down, Home and End scroll the picture while its button has focus. Enter and Space still open View.
+    opic.addEventListener("keydown", (e) => {
+      if (!wrap.classList.contains("scroll")) return;
+      const st = wrap.scrollTop, page = wrap.clientHeight - 40;
+      const to = { ArrowDown: st + 40, ArrowUp: st - 40, PageDown: st + page, PageUp: st - page, Home: 0, End: wrap.scrollHeight }[e.key];
+      if (to === undefined) return;
+      wrap.scrollTop = to;
+      if (wrap.scrollTop !== st) e.preventDefault();
+    });
+  });
+  const first = doc.querySelector(".opic");
+  if (s === "keys" && first) { first.classList.add("kf"); first.querySelector(".dfitwrap").scrollTop = 120; edges(first.querySelector(".dfitwrap")); }
+  doc.querySelectorAll(".opic").forEach((o) => {
+    const w = o.querySelector(".dfitwrap"), sc = w.classList.contains("scroll");
+    o.dataset[sc ? "new" : "today"] = sc ? (s === "focus-whole" ? "whole mockup scrolls, opens at the focus" : s === "wide" ? "scrolls, 221.8 wide" : "scrolls in a 480px box") : "fits whole";
+  });
+}
+
+/* ---------- Harness: state, size, theme and labels from the URL hash ---------- */
+// Each file defines STATES ([{id, label, opt}]), screen(s), and may define post(doc, s, w), FRAME_H and EXTRA_KEYS.
+const WIDTHS = [390, 1280, 2200], WNAME = { 390: "Phone", 1280: "Wide", 2200: "Very wide" };
+const P = { s: STATES[0].id, w: "all", t: "", lab: "on", rm: "", hide: [] };
+function readHash() {
+  P.s = STATES[0].id; P.w = "all"; P.t = ""; P.lab = "on"; P.rm = ""; P.hide = [];
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; });
+  if (!STATES.some((x) => x.id === P.s)) P.s = STATES[0].id;
+}
+function writeHash() {
+  const q = new URLSearchParams({ s: P.s, w: P.w });
+  if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.rm === "1") q.set("rm", "1"); if (P.hide.length) q.set("hide", P.hide.join(","));
+  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+}
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function docFor(s) {
+  return `<!doctype html><html lang="en" data-theme="${theme()}" class="${P.lab === "off" ? "nolab" : ""}${P.rm === "1" ? " rm" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>${screen(s)}</body></html>`;
+}
+function frame(w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = WNAME[w] + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "Waiting page at " + w + " wide"; f.style.width = w + "px"; f.dataset.w = w;
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = typeof FRAME_H === "number" ? FRAME_H : 900;
+    try { if (typeof FRAME_H !== "number") hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { try { if (typeof post === "function") post(f.contentDocument, P.s, w); } catch (e) {} fit(); setTimeout(fit, 250); });
+  f.srcdoc = docFor(P.s);
+  addEventListener("resize", fit);
+}
+function render() {
+  if (P.hide.includes(P.s)) { const v = STATES.find((x) => !P.hide.includes(x.id)); if (v) P.s = v.id; }
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { const ids = b.dataset.hide.split(","), off = ids.every((i) => P.hide.includes(i)); b.textContent = (off ? "Show " : "Hide ") + b.dataset.name; b.setAttribute("aria-pressed", String(off)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  const rb = document.getElementById("rmBtn"); if (rb) { rb.textContent = P.rm === "1" ? "Reduced motion on" : "Reduced motion off"; rb.setAttribute("aria-pressed", String(P.rm === "1")); }
+  document.getElementById("stage").replaceChildren();
+  (P.w === "all" ? WIDTHS : [Number(P.w) || 390]).forEach(frame);
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.id === "labBtn") P.lab = P.lab === "off" ? "on" : "off";
+  if (b.id === "rmBtn") P.rm = P.rm === "1" ? "" : "1";
+  if (b.id === "replay") { document.querySelectorAll("#stage iframe").forEach((f) => { try { if (typeof replay === "function") replay(f.contentDocument); } catch (x) {} }); return; }
+  if (b.dataset.hide) { const ids = b.dataset.hide.split(","), off = ids.every((i) => P.hide.includes(i)); P.hide = off ? P.hide.filter((i) => !ids.includes(i)) : [...new Set([...P.hide, ...ids])]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!P.t) render(); });
+readHash(); render();
+</script>
+</body>
+</html>

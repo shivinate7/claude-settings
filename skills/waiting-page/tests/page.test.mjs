@@ -565,7 +565,26 @@ test("a look question with three options, a GitHub folder link and no designs sh
 });
 
 const PICS = { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" };
-const picItem = (id, n) => mk(id, n, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })) });
+// Option A may take a focus, a declared size or a differing picture. The other options stay plain.
+const picItem = (id, n, { focus, size, differs } = {}) => mk(id, n, {
+  options: LOOK_OPTS.map((o) => (o.key === "a" && differs ? { ...o, differs } : o)), pick: "a",
+  designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, ...(o.key === "a" && focus ? { focus, ...(size ? { size } : {}) } : {}) })),
+});
+// A mockup h px tall, 390 wide: a gradient over a 50px band at the end.
+const TALL_PIC = (h) => `<body style="margin:0"><div style="height:${h - 50}px;background:linear-gradient(#2a6,#26a)"></div><div style="height:50px;background:#a62"></div></body>`;
+const FOCUS_TALL = '<body style="margin:0"><div style="height:300px;background:#ccc"></div><div id="panel" style="width:390px;height:1700px;background:linear-gradient(#a62,#26a)"></div><div style="height:600px;background:#999"></div></body>';
+// Waits until the frame has posted a mockup h px tall.
+const frameSettled = (page, h) => page.waitForFunction((H) => Object.values(FIT).some((c) => c.h === H), h);
+const boxSel = (id, key = "a") => `#item-${id} label.opt[for="o-${id}-${key}"] .dfitwrap`;
+// The box, its scroll, and the frame's place. g is the scrollbar gutter plus any border past 1px.
+const measure = (page, id, key = "a") => page.locator(boxSel(id, key)).evaluate((w) => {
+  const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect();
+  return { w: r.width, h: r.height, top: r.top, cw: w.clientWidth, ch: w.clientHeight, sh: w.scrollHeight, st: w.scrollTop, cls: w.className, fw: f.width, fTop: f.top, fBot: r.bottom - f.bottom, g: w.offsetWidth - w.clientWidth - 2, sizer: (w.querySelector(".dsizer") || w).getBoundingClientRect().height };
+});
+const cueState = (page, id, key = "a") => page.locator(boxSel(id, key)).evaluate((w) => {
+  const c = w.querySelector(".dcue"), t = w.querySelector(".dtop");
+  return { disp: getComputedStyle(c).display, op: +getComputedStyle(c).opacity, text: c.textContent, top: +getComputedStyle(t).opacity, cls: w.className };
+});
 
 test("each option's picture is inside its own option card; a tap on it opens the viewer and a tap on the card picks", async (t) => {
   const it = picItem("with-pictures", 31);
@@ -661,18 +680,22 @@ test("an item with some designs but not every option's design warns in the optio
   assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dwarn`).count(), 0);
 });
 
+// The owner's note on waiting-page item 55 (Oct 28, 17:50 CDT): a picture taller than its box scrolls inside it.
 for (const width of [390, 1440]) {
-  test(`a tall mockup is never cropped, at ${width} wide`, async (t) => {
+  test(`a tall mockup scrolls inside a 480px box, is never drawn taller, and its last row is reachable, at ${width} wide`, async (t) => {
     const it = picItem("tall", 35);
-    const tall = '<body style="margin:0"><div style="height:1200px;background:#2a6">tall</div></body>';
+    const tall = TALL_PIC(2400);
     const page = await open(t, { items: [it], designData: { ...PICS, "price-a": tall }, viewport: { width, height: 900 } }); if (!page) return;
     const wrap = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dfitwrap`);
     await page.waitForFunction((sel) => document.querySelector(sel).getBoundingClientRect().height > 300, `#item-${it.id} label.opt .dfitwrap`);
     const m = await wrap.evaluate((w) => { const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect(); return { wrapW: r.width, wrapH: r.height, frameW: f.width, frameH: f.height }; });
     const scale = m.frameW / 390;
-    assert.ok(Math.abs(m.frameH - 1200 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${1200 * scale}`);
-    assert.ok(m.wrapH >= m.frameH - 1, "the wrapper cuts the bottom of the mockup");
+    assert.ok(Math.abs(m.frameH - 2400 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${2400 * scale}`);
+    assert.ok(m.wrapH <= 480, `the box is ${m.wrapH} high, over 480`);
     assert.ok(m.frameW <= m.wrapW + 1, "the mockup is wider than the card");
+    await wrap.evaluate((w) => { w.scrollTop = w.scrollHeight; });
+    const fBot = await wrap.evaluate((w) => w.getBoundingClientRect().bottom - w.querySelector("iframe").getBoundingClientRect().bottom);
+    assert.ok(Math.abs(fBot - 1) <= 2, `the last row is ${fBot}px from the box bottom after the scroll`);
   });
 
   test(`a long option key stays on one line and never overlaps the title, at ${width} wide`, async (t) => {
@@ -688,6 +711,265 @@ for (const width of [390, 1440]) {
       assert.equal(m.ws, "nowrap", "the chip wraps");
       assert.ok(m.k.right <= m.b.left + 1 || m.k.bottom <= m.b.top + 1, `the chip overlaps the title for ${o.key}`);
     }
+  });
+}
+
+// ---------------------------------------------------------------- a picture taller than its box scrolls inside it
+for (const width of [390, 1440]) {
+  test(`a tall picture's scroll range is over 100px, and the picture fills the card's width, at ${width} wide`, async (t) => {
+    const it = picItem("scroll-range", 52);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width, height: 900 } }); if (!page) return;
+    await frameSettled(page, 2400);
+    const m = await measure(page, it.id);
+    assert.ok(m.sh - m.ch > 100, `the scroll range is ${m.sh - m.ch}px`);
+    assert.ok(Math.abs(m.fw - m.cw) <= 1, `the picture is ${m.fw} wide in a ${m.cw} wide box: the scrollbar took some of it`);
+  });
+}
+
+test("a focus box taller than the card scrolls inside the focus box and opens at its top, at 390 wide", async (t) => {
+  const it = picItem("focus-tall", 51, { focus: "#panel" });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": FOCUS_TALL }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2600);
+  await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+  const m = await measure(page, it.id);
+  const sc = m.fw / 390;
+  assert.ok(m.h <= 480, `the focus box is ${m.h} high, over 480`);
+  assert.ok(m.sh > m.ch, "the focus box does not scroll");
+  assert.ok(Math.abs(m.sh - Math.ceil(1700 * sc)) <= 2, `the scroll range is ${m.sh} high, not the focus box's ${Math.ceil(1700 * sc)}`);
+  assert.equal(m.st, 0, "the box did not open at its top");
+  assert.ok(Math.abs(m.fTop + 300 * sc - m.top) <= 2, "the focus does not start at the top of the box");
+});
+
+test("a resize or a repaint keeps the owner's scroll, the same box, and the scroll hint in the picture's name", async (t) => {
+  const it = picItem("once", 36);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await page.locator(boxSel(it.id)).evaluate((w) => { window.__w = w; w.scrollTop = 150; });
+  assert.equal((await measure(page, it.id)).st, 150, "the owner's scroll did not take");
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.waitForTimeout(300);
+  assert.equal((await measure(page, it.id)).st, 150, "a resize moved the scroll");
+  await choose(page, it, "b");
+  await page.waitForTimeout(300);
+  const after = await page.locator(boxSel(it.id)).evaluate((w) => ({ same: w === window.__w, st: w.scrollTop }));
+  assert.deepEqual(after, { same: true, st: 150 }, "a repaint replaced the box or moved its scroll");
+  const label = await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).getAttribute("aria-label");
+  assert.match(label, /Arrow keys scroll its picture$/, "a repaint dropped the scroll hint from the name");
+});
+
+test("the cue shows before the picture's end, goes at the end, and the shades add no height, at 390 wide", async (t) => {
+  const it = picItem("cue", 37);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const a = await cueState(page, it.id);
+  assert.equal(a.disp, "flex", "the cue is not drawn");
+  assert.equal(a.op, 1, "the cue is not fully shown before the end");
+  assert.equal(a.text, "↓ More");
+  assert.ok(!/at-end/.test(a.cls), "the picture is at its end before any scroll");
+  assert.equal(a.top, 0, "the top shade is shown before any scroll");
+  const m = await measure(page, it.id);
+  assert.ok(Math.abs(m.sh - m.sizer) <= 1, `the scroll height ${m.sh} is not the picture's ${m.sizer}`);
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = 200; });
+  await page.waitForFunction((sel) => +getComputedStyle(document.querySelector(sel + " .dtop")).opacity === 1, boxSel(it.id));
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = w.scrollHeight; });
+  await page.waitForFunction((sel) => +getComputedStyle(document.querySelector(sel + " .dcue")).opacity === 0, boxSel(it.id));
+});
+
+test("a touch drag scrolls the picture and opens nothing, and a tap opens View, at 390 wide", async (t) => {
+  const it = picItem("touch", 42);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const touch = (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+  await page.locator(boxSel(it.id)).scrollIntoViewIfNeeded();
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  const x = r.x + 40, y = r.y + 380;
+  await touch("touchStart", [{ x, y }]);
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await page.waitForTimeout(16); }
+  await touch("touchEnd", []);
+  await page.waitForTimeout(500);
+  assert.ok((await measure(page, it.id)).st > 0, "the touch drag did not scroll the picture");
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "the touch drag opened View");
+  await page.waitForTimeout(300);
+  const r2 = await page.locator(boxSel(it.id)).boundingBox();
+  await touch("touchStart", [{ x: r2.x + 40, y: r2.y + 200 }]);
+  await touch("touchEnd", []);
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "the tap did not open View");
+});
+
+test("a press on the scrollbar gutter opens nothing and picks nothing, and a press on the picture opens View, at 1280 wide", async (t) => {
+  const it = picItem("press", 41);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  assert.ok((await measure(page, it.id)).g > 0, "this browser draws no scrollbar gutter");
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100);
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the scrollbar opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the scrollbar picked the option");
+  // A drag that starts on the scroll thumb and ends on the picture scrolls it; it is not a press on the picture.
+  await page.mouse.move(r.x + r.width - 4, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 24, r.y + 250, { steps: 15 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a drag from the scrollbar onto the picture opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a drag from the scrollbar onto the picture picked the option");
+  await page.mouse.click(r.x + 20, r.y + 100);
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "a press on the picture did not open View");
+});
+
+test("a right-button press on the scrollbar, then Escape, leaves Enter working on Add a note, at 1280 wide", async (t) => {
+  const it = picItem("stale-right", 43);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "right" });
+  await page.keyboard.press("Escape");
+  await card(page, it).getByRole("button", { name: "Add a note" }).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, "the note did not open: a right press on the scrollbar left a stale state");
+});
+
+test("a middle press on the scrollbar leaves Space working on an option, at 1280 wide", async (t) => {
+  const it = picItem("stale-middle", 44);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "middle" });
+  await page.locator(`#o-${it.id}-b`).focus();
+  await page.keyboard.press("Space");
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Space did not pick option b: a middle press on the scrollbar left a stale state");
+});
+
+test("a press on the picture released on the scrollbar gutter opens nothing and picks nothing, at 1280 wide", async (t) => {
+  const it = picItem("press-out", 45);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.move(r.x + 20, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 4, r.y + 160, { steps: 10 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the picture released on the gutter opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the picture released on the gutter picked the option");
+});
+
+test("the picture is one tab stop: its arrow, page and end keys scroll it, Home goes back, and Enter opens View, at 390 wide", async (t) => {
+  const it = picItem("keys", 40);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const opic = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`);
+  const a = await opic.evaluate((o) => ({ label: o.getAttribute("aria-label"), tab: o.querySelector(".dfitwrap").getAttribute("tabindex"), hidden: o.querySelector(".dfitwrap").getAttribute("aria-hidden"), inert: o.querySelector("iframe").inert }));
+  assert.ok(a.tab === "-1" && a.hidden === "true" && a.inert, "the wrap or its frame is a tab stop: " + JSON.stringify(a));
+  assert.match(a.label, /Arrow keys scroll its picture$/, "the name lacks the scroll hint");
+  await opic.focus();
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown");
+  assert.equal((await measure(page, it.id)).st, 80, "two ArrowDown presses did not scroll 80px");
+  await page.keyboard.press("PageDown");
+  const m = await measure(page, it.id);
+  assert.equal(m.st, Math.min(80 + m.ch - 40, m.sh - m.ch), "PageDown did not scroll a page less 40px");
+  await page.keyboard.press("End");
+  const end = await measure(page, it.id);
+  assert.ok(end.st + end.ch >= end.sh - 1, "End did not reach the end");
+  const taken = await opic.evaluate((o) => { const e = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }); o.dispatchEvent(e); return e.defaultPrevented; });
+  assert.equal(taken, false, "at the end, ArrowDown was taken from the page");
+  await page.keyboard.press("Home");
+  assert.equal((await measure(page, it.id)).st, 0, "Home did not go to the top");
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "Enter did not open View");
+});
+
+for (const scheme of ["light", "dark"]) {
+  test(`the cue's pill and its text reach 4.5:1, and the box holds 480px, in the ${scheme} scheme`, async (t) => {
+    const it = picItem("pill", 38);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 }, scheme }); if (!page) return;
+    await frameSettled(page, 2400);
+    const [onFrame, onPill, h] = await page.evaluate(`(() => {${CONTRAST}
+      const rgb = (c) => "#" + c.match(/\\d+/g).slice(0, 3).map((x) => (+x).toString(16).padStart(2, "0")).join("");
+      const w = document.querySelector(${JSON.stringify(boxSel(it.id))}), pill = getComputedStyle(w.querySelector(".dmore"));
+      return [R(rgb(pill.backgroundColor), rgb(getComputedStyle(w).backgroundColor)), R(rgb(pill.color), rgb(pill.backgroundColor)), w.getBoundingClientRect().height];
+    })()`);
+    assert.ok(onFrame >= 4.5, `the pill is ${onFrame.toFixed(2)}:1 on the frame`);
+    assert.ok(onPill >= 4.5, `the text is ${onPill.toFixed(2)}:1 on the pill`);
+    assert.ok(h <= 480, `the box is ${h} high, over 480`);
+  });
+}
+
+// Each row: name, mockup, focus, mockup height, box width and height, the focus's top in the mockup, and a declared size.
+const FIT_CASES = [
+  ["a focus that fits", '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>', "#panel", 1400, 300, 200, 700],
+  ["a 1200px mockup", '<body style="margin:0"><div style="height:1200px;background:#2a6"></div></body>', undefined, 1200, 390, 1200, 0],
+  ["a focus with a declared size", '<body style="margin:0;width:700px"><div style="height:700px"></div><div id="panel" style="width:600px;height:400px;background:#a62"></div></body>', "#panel", 1100, 600, 400, 700, { w: 600, h: 400 }],
+];
+for (const width of [390, 1280, 1440]) {
+  for (const [name, mock, focus, H, bw, bh, ty, size] of FIT_CASES) {
+    test(`${name} is drawn as today, with no scroll and no cue, at ${width} wide`, async (t) => {
+      const it = picItem("fit", 39, { focus, size });
+      const page = await open(t, { items: [it], designData: { ...PICS, "price-a": mock }, viewport: { width, height: 900 } }); if (!page) return;
+      await frameSettled(page, H);
+      if (focus) await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+      const m = await measure(page, it.id);
+      const col = await page.locator(boxSel(it.id)).evaluate((w) => w.parentElement.clientWidth);
+      const sc = Math.min(1, (col - 2) / bw, Math.max(480 / bh, 120 / bw));
+      assert.equal(m.w, Math.ceil(bw * sc) + 2, "the box width");
+      assert.equal(m.h, Math.ceil(bh * sc), "the box height");
+      assert.ok(!/scroll/.test(m.cls), "a picture that fits scrolls");
+      assert.equal(await page.locator(boxSel(it.id)).evaluate((w) => { const c = w.querySelector(".dcue"); return !c || getComputedStyle(c).display === "none"; }), true, "the cue is drawn on a picture that fits");
+      const tf = await page.locator(`${boxSel(it.id)} iframe`).evaluate((f) => f.style.transform);
+      assert.ok(Math.abs(+/scale\(([-\d.e]+)\)/.exec(tf)[1] - sc) < 1e-6, `the scale is not the formula's ${sc}: ${tf}`);
+      if (focus) assert.ok(Math.abs(+/translate\([^,]*,\s*([-\d.e]+)px\)/.exec(tf)[1] + ty * sc) < 0.01, `the focus is not moved to ${-ty * sc}: ${tf}`);
+    });
+  }
+}
+
+test("a 1564px mockup at 390 wide scrolls in its box, and the cue shows", async (t) => {
+  const it = picItem("scroll-edge", 56);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1564) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1564);
+  const m = await measure(page, it.id);
+  assert.ok(m.sh - m.ch > 0, `the picture does not scroll: its scroll range is ${m.sh - m.ch}px`);
+  assert.equal((await cueState(page, it.id)).disp, "flex", "the cue is not drawn on a picture that scrolls");
+});
+
+test("a mockup 1px over the fitted height gives a box of at most 480 and no cue, at 390 wide", async (t) => {
+  const it = picItem("edge", 53);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1561) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1561);
+  const m = await measure(page, it.id);
+  assert.ok(m.h <= 480, `the box is ${m.h} high, over 480`);
+  assert.notEqual((await cueState(page, it.id)).disp, "flex", "the cue shows on a picture 1px over the fit");
+});
+
+test("a picture that differs from its siblings keeps its 3px border inside a 134px box, and still scrolls, at 1280 wide", async (t) => {
+  const it = picItem("dif", 5, { differs: ["picture"] });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const m = await measure(page, it.id);
+  assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif")), "the picture is not marked as differing");
+  assert.ok(Math.abs(m.w - 134) <= 1, `the box is ${m.w} wide, not 134`);
+  assert.ok(m.sh - m.ch > 100 && Math.abs(m.fw - m.cw) <= 1, "the differing picture does not scroll at the content width");
+});
+
+test("a tall picture adds no sideways scroll to the page at 390 wide, even scrolled to its end", async (t) => {
+  const it = picItem("sideways", 54);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = w.scrollHeight; });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+});
+
+// A 60-character URL has no break point, so the step must wrap inside the card rather than widen it.
+const LONG_URL = "https://waiting.test/" + "a".repeat(60 - "https://waiting.test/".length);
+for (const width of [430, 390, 360]) {
+  test(`a task step with an unbroken 60-character URL stays inside the card and the page, at ${width} wide`, async (t) => {
+    const it = { ...TASK, id: "long-url-task", n: 60, steps: [LONG_URL] };
+    const page = await open(t, { items: [it], viewport: { width, height: 900 } }); if (!page) return;
+    // The card's own box can stay on screen while a step inside it runs past the edge, so take the furthest right of the card and all it holds.
+    const right = await card(page, it).evaluate((c) => Math.max(c.getBoundingClientRect().right, ...[...c.querySelectorAll("*")].map((e) => e.getBoundingClientRect().right)));
+    assert.ok(right <= width, `the card runs to ${right} px, past the ${width} px screen`);
+    const scrollW = await page.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(scrollW <= width, `the page is ${scrollW} px wide on a ${width} px screen`);
   });
 }
 
