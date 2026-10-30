@@ -3315,7 +3315,7 @@ move_install() {
 }
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
 
-# The count comes from the rules file: it holds the role rules as well as the confirm rules (owner ruling 2026-10-30 15:05 CDT, waiting page item 92, option b).
+# The count comes from the rules file, which holds the role rules as well as the confirm rules, so a tier added to the file needs no edit here.
 caseM1() {
   name="caseM1: a clean, detached checkout on an old main commit moves to main and gets the merge allow rules"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi

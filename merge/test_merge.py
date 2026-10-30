@@ -9277,7 +9277,8 @@ CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
 # repo's own bin/merge. No rule runs merge/merge.py by path: that runs the working copy's file, which on an old lane branch has no role check.
 CLOUD_ALLOW_SHIMS = ("~/.claude/bin/merge",)
 CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
-# Owner ruling 2026-10-30 15:05 CDT (waiting page item 92, option b): one exact role rule per tier, no `*`. The tiers are merge.MERGE_ROLES.
+# A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES. No `*` and no word after the tier, so it cannot
+# pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design).
 CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS for tier in sorted(merge.MERGE_ROLES))
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
