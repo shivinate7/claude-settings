@@ -154,7 +154,11 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   # instead of staying silent, which would read as "up to date".
   #
   # CLAUDE_SETTINGS_FETCH_TIMEOUT overrides the 2 second bound, for tests.
-  if [ "$pointer_branch" = "main" ]; then
+  #
+  # A clone install.sh made (claude-settings.cloudMirror) is refreshed by install.sh in the same
+  # session start, so a behind count on it is a false alarm. The check skips it.
+  cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
+  if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
     if bounded_fetch "$d" main; then
       behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then

@@ -202,7 +202,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `safe-stop-queues-one-prompt` | `/safe-stop` is a command of the session-board mod (`session-board-mod-limits`, session-board keeps small records). | [`docs/decisions/safe-stop-queues-one-prompt.md`](../docs/decisions/safe-stop-queues-one-prompt.md) |
 | `session-board-mod-limits` | The session-board mod (`mods/session-board`, commands `/board` and `/safe-stop`) gives one view of all sessions and a safe stopping point, with no typing of "status?" into each one. | [`docs/decisions/session-board-mod-limits.md`](../docs/decisions/session-board-mod-limits.md) |
 | `session-end-sweep-is-disarmed-until-liveness-is-proven` | The `SessionEnd` hook in `settings.json` runs `janitor/session_end_sweep.py`. | [`docs/decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md`](../docs/decisions/session-end-sweep-is-disarmed-until-liveness-is-proven.md) |
-| `session-tiers` | Owner rulings, all 2026-10-28 CDT. | [`docs/decisions/session-tiers.md`](../docs/decisions/session-tiers.md) |
+| `session-tiers` | Owner rulings, 2026-10-28 CDT unless dated. | [`docs/decisions/session-tiers.md`](../docs/decisions/session-tiers.md) |
 | `shared-resource-owner` | Owner, 2026-10-27 13:22 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh2FS8R88VGL2A75ER5mnDyai), roadmap step c140: the HA Green box (4 GB) is loaded by home, degen and mailaudit. | [`docs/decisions/shared-resource-owner.md`](../docs/decisions/shared-resource-owner.md) |
 | `shoot-is-one-shared-command` | Owner, 2026-10-17: build one screenshot script in this repo. | [`docs/decisions/shoot-is-one-shared-command.md`](../docs/decisions/shoot-is-one-shared-command.md) |
 | `silent-undo-check-design` | `lint/check_silent_undo.py` is the one home. | [`docs/decisions/silent-undo-check-design.md`](../docs/decisions/silent-undo-check-design.md) |
@@ -282,6 +282,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`docs/debts/merge-head-race-remains.md`](../docs/debts/merge-head-race-remains.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`docs/debts/merge-records-stale-base.md`](../docs/debts/merge-records-stale-base.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`docs/debts/merge-silent-exit.md`](../docs/debts/merge-silent-exit.md) |
+| `multi-pick-option-order` | On a `multi` item that is not `ranked`, ticks keep option order, but `pick` may be in any order. | [`docs/debts/multi-pick-option-order.md`](../docs/debts/multi-pick-option-order.md) |
 | `nowindow-bin-no-fallback` | bin/verdict, bin/ste-changed, bin/ci-job and merge/launch.py import hooks/_nowindow.py with no fallback, so a copy-mode install that lands bin/ before hooks/ makes them fail. | [`docs/debts/nowindow-bin-no-fallback.md`](../docs/debts/nowindow-bin-no-fallback.md) |
 | `nowindow-ctrl-c-orphans` | With CREATE_NO_WINDOW the child gets its own hidden console, so Ctrl-C may not reach grandchildren. | [`docs/debts/nowindow-ctrl-c-orphans.md`](../docs/debts/nowindow-ctrl-c-orphans.md) |
 | `nowindow-fallback-silent` | A hook that falls back to plain subprocess says nothing, so the popups return unseen. | [`docs/debts/nowindow-fallback-silent.md`](../docs/debts/nowindow-fallback-silent.md) |
@@ -308,6 +309,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`docs/debts/verdict-pipe-drops-line.md`](../docs/debts/verdict-pipe-drops-line.md) |
 | `verdict-skip-reads-pass` | If a run prints SKIP lines and exits 0, `bin/verdict` prints only PASS. | [`docs/debts/verdict-skip-reads-pass.md`](../docs/debts/verdict-skip-reads-pass.md) |
+| `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
 
