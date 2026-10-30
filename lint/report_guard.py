@@ -24,9 +24,10 @@ a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-u
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 
 On any turn whose reply holds an Input Needed item that offers a pick with options, it also blocks
-unless the same main-session turn opened the question box (AskUserQuestion) or wrote the item to the
-repo's waiting page and the reply links that page (`decisions-reach-a-clickable-pick`). This check does
-not wait for a git write: the reply's labels are what it reads.
+unless the same main-session turn opened the question box (AskUserQuestion), or the repo has a
+waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
+waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
+check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
 """
 import json
 import os
@@ -418,13 +419,25 @@ OPTION_OR_RE = re.compile(r"(?<![\w'])[A-F] or [A-F](?![\w'])")
 OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.M)
 PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
 ASK_TOOL = "AskUserQuestion"
-DATA_TOOL = "ArtifactData"
-WAITING_COLLECTION = "items"
+
+# The chat-first wait (questions-go-to-owner, "Chat first, then the page"): 5 minutes, never 15, 25
+# or "twenty-five". A spelled "five" after a tens word is caught in the `tens` group and refused,
+# since a fixed-width lookbehind cannot hold the tens words.
+FIVE_MINUTES_RE = re.compile(
+    r"(?<![\w.-])(?:(?P<tens>(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[ -]+)?"
+    r"five[ -]minutes?|5[ -]?min(?:ute)?s?)\b", re.I)
+PAGE_WORDS_RE = re.compile(r"\bwaiting[ -]page\b", re.I)
 
 PICK_REFUSAL = (
-    "Pick guard: Input Needed offers a pick with options and gives no way to click it. Open the "
-    "question box, or put the item on the repo's waiting page and link that page in the reply."
+    "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat "
+    "and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only "
+    "with nothing running, open the question box."
 )
+
+
+def names_five_minutes(section):
+    """True when `section` names the 5-minute wait, never 15, 25 or twenty-five minutes."""
+    return any(not m.group("tens") for m in FIVE_MINUTES_RE.finditer(section))
 
 
 def input_needed_section(text):
@@ -475,37 +488,24 @@ def repo_root(cwd):
         here = parent
 
 
-def writes_waiting_item(inp):
-    """True when an ArtifactData call sets or updates a document in the waiting collection."""
-    if inp.get("action") == "batch":
-        return any(isinstance(w, dict) and w.get("op") in ("set", "update")
-                   and w.get("collection") == WAITING_COLLECTION for w in inp.get("writes") or [])
-    return inp.get("action") in ("set", "update") and inp.get("collection") == WAITING_COLLECTION
-
-
 def pick_has_a_control(records, text, cwd):
-    """True when the main session's turn opened the question box, or wrote an item to this repo's
-    waiting page and the reply links it. An agent's own calls (isSidechain) never count."""
-    page = None
+    """True when the main session's turn opened the question box, or this repo has a waiting page
+    and the reply links it or its Input Needed item names the 5-minute wait and the page. An
+    agent's own box (isSidechain) never counts."""
     for rec in records:
         if rec.get("isSidechain"):
             continue
-        for b in tool_uses(rec):
-            name = b.get("name")
-            if name == ASK_TOOL:
-                return True
-            if name != DATA_TOOL:
-                continue
-            inp = b.get("input") or {}
-            if not writes_waiting_item(inp):
-                continue
-            if page is None:
-                root = repo_root(cwd)
-                page = layout.waiting_page(root) if root else "unknown"
-            url = str(inp.get("url") or "").rstrip("/")
-            if page != "unknown" and url == page.rstrip("/") and page.rstrip("/") in text:
-                return True
-    return False
+        if any(b.get("name") == ASK_TOOL for b in tool_uses(rec)):
+            return True
+    root = repo_root(cwd)
+    page = layout.waiting_page(root) if root else "unknown"
+    if page == "unknown":
+        return False
+    page = page.rstrip("/")
+    section = input_needed_section(text)
+    if names_five_minutes(section) and PAGE_WORDS_RE.search(section):
+        return True
+    return bool(re.search(re.escape(page) + r"(?![\w-])", text))
 
 
 def _marker_path(hook):
