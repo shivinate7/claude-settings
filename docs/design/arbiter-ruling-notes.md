@@ -27,7 +27,7 @@ media queries: phone 390 (≤520), mid 800 (≤960), wide 1280. Light and dark.
 - B (`#s=open`): the section shows open on load. Gain: each ruling shows. Lose: the list grows with each ruling.
 - A section with a pressed Overturn in the viewer's draft loads open (`ux-keep-what-was-made`).
   The open or closed choice may stay in `localStorage` as a per-viewer convenience.
-- Pick: A.
+- Pick: A. Built: B. The section loads open, because the page tests press Overturn with no earlier press on the head. The head still closes it, until the next load.
 
 ## 3. The ruling card
 
@@ -59,11 +59,11 @@ media queries: phone 390 (≤520), mid 800 (≤960), wide 1280. Light and dark.
   or in the rail's "of N sent" and "ready to send". A pressed Overturn counts in the bar's "ready" only, so
   Send shows its count and the rail never passes 100%.
 
-## 6. For the builder (contract as given; not changed here)
+## 6. For the builder (the marker is `arbiter: true`)
 
-- `by` is already the deadline field (`rawTier`, `buildCard`: `it.by && validT(it.by)`). Test `by === "arbiter"`
-  exactly, and keep rulings out of `rawTier` and the deadline line. See Input Needed in the lane report.
-- The filter at `items` `onSnapshot`: keep `status !== "closed" || (status === "closed" && by === "arbiter")`.
+- `by` is already the deadline field (`rawTier`, `buildCard`: `it.by && validT(it.by)`). The ruling marker is `arbiter: true`, not `by`. Test `arbiter === true`
+  with `status === "closed"`, and keep rulings out of `rawTier` and the deadline line. `by` stays the deadline.
+- The filter at `items` `onSnapshot`: keep `status !== "closed" || (status === "closed" && arbiter === true)`.
 - `"overturn"` is not an option key. These need a branch: `draftReady`, `readyText`, `receipt`, `choiceText`
   (noticeText "91 overturn"), `answerLine`, and the Undo notice. That notice says " are open again." For an overturn,
   "the ruling stands again" is true. The writer refuses an option keyed `overturn`, as it refuses `none`.

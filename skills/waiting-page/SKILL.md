@@ -38,6 +38,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
+  - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
+    The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
+    `home` the ruling's record id, `pick` the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
+    The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item stays hidden.
+    A ruling is never in a tier and never counts as open.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
     ranked items, oldest first. A group sits together at its best member's `rank`.
@@ -218,7 +223,7 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
    item in the reply, in one line. Give the page URL for an open item only: the page hides a closed
-   item. The owner already saw the question in chat, so open no new question box. A box stops the
+   item, except an arbiter ruling. The owner already saw the question in chat, so open no new question box. A box stops the
    session until the owner answers. Running work continues with no one to brake it. You may end the
    turn: each agent's end wakes the session.
 4. Keep working on what does not depend on the answer.
@@ -261,8 +266,10 @@ closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
   answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
   `+`, in rank order when `ranked`.
+- `choice: "overturn"` is clear on an arbiter ruling only (an item with `arbiter: true`). It means the owner
+  overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
-  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`. On a `multi` item,
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`, or `overturn` on an arbiter ruling. On a `multi` item,
   `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
   A list on a pick-one item, or a string other than `none` on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
@@ -271,7 +278,7 @@ closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close
 
 ## Route and close
 
-Sort the answer first. A `none` answer takes step 3 only. A task answer with no `done` is a question
+Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
@@ -290,6 +297,10 @@ once as a note on its step (the item's home), never held for the lane. A chat an
    enough to write them, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to
    its version), and leave the item open. Say in the terminal what was not clear.
+5. An `overturn` answer: the item's `owner` session reopens the ruling's item. It updates `items/<id>` to
+   `status` `open`, removes `arbiter`, and sets `added` to now. It puts this line first in `context`:
+   "The arbiter ruled <label>; you overturned it at <time>." Then it adds a "Your stake:" line. Then it deletes
+   `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
 ## Make a repo's page
 

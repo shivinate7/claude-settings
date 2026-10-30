@@ -712,7 +712,7 @@ const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.
 const SPARK = '<b class="spark" aria-label="My pick" title="My pick"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg></b>';
 
 // The sample store, in the item JSON shape. Each ruling follows the lane's contract:
-// kind "decision", status "closed", by "arbiter", home = the ruling's record id, options, pick, why, ruled.
+// kind "decision", status "closed", arbiter true, home = the ruling's record id, options, pick, why, ruled.
 const STORE = [
   { id: "report-home", n: 12, kind: "decision", status: "open", owner: "lane report-home", home: "c231", added: "2026-10-30T07:10:00-05:00",
     title: "Where should the nightly report land?", context: "Your stake: goal — you read the report each morning.\nThe report is a file in the repo today.", ref: "c231, the nightly report",
@@ -720,12 +720,12 @@ const STORE = [
     pick: "status", why: "You open this page each morning anyway." },
   { id: "sign-in-mac", n: 14, kind: "task", status: "open", owner: "lane mac-builds", home: "c233", added: "2026-10-30T08:40:00-05:00",
     title: "Sign in to the build Mac once", context: "The overnight build needs a signed-in user.", ref: "c233, overnight builds", steps: ["Open the Mac's login screen", "Sign in with the build account"], minutes: 2 },
-  { id: "preview-life", n: 91, kind: "decision", status: "closed", by: "arbiter", owner: "lane preview-server", home: "preview-server-life",
+  { id: "preview-life", n: 91, kind: "decision", status: "closed", arbiter: true, owner: "lane preview-server", home: "preview-server-life",
     added: "2026-10-30T12:31:00-05:00", ruled: "2026-10-30T12:44:00-05:00",
     title: "How long does a lane keep its preview server?",
     options: [{ key: "lane", label: "Until the lane ends" }, { key: "hour", label: "One hour, then it stops" }],
     pick: "hour", why: "A server left on holds a port that the next lane needs. A lane starts a new one in seconds." },
-  { id: "shot-home", n: 90, kind: "decision", status: "closed", by: "arbiter", owner: "lane review-shots", home: "screenshot-home",
+  { id: "shot-home", n: 90, kind: "decision", status: "closed", arbiter: true, owner: "lane review-shots", home: "screenshot-home",
     added: "2026-10-29T15:50:00-05:00", ruled: "2026-10-29T16:05:00-05:00",
     title: "Where do a review's screenshots go?",
     options: [{ key: "pr", label: "In the pull request only" }, { key: "repo", label: "In the repo's design folder" }],
@@ -733,7 +733,7 @@ const STORE = [
   // Closed, but not by the arbiter: the page hides it, as today.
   { id: "old-question", n: 88, kind: "decision", status: "closed", owner: "lane old", home: "c201", title: "An answered question", options: [{ key: "a", label: "A" }], pick: "a", why: "" },
 ];
-const isRuling = (it) => it.status === "closed" && it.by === "arbiter";
+const isRuling = (it) => it.status === "closed" && it.arbiter === true;
 // The page's filter, extended: an open item, or a ruling. Every other closed item stays hidden.
 const SHOWN = STORE.filter((it) => it.status !== "closed" || isRuling(it));
 const OPEN = SHOWN.filter((it) => !isRuling(it));
