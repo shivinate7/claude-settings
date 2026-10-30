@@ -9,7 +9,9 @@ the guard's HAIKU_ROLES.
     python3 lint/check_agent_models.py [file ...]
 
 With no argument it checks agents/*.md and skills/*/SKILL.md. Exits 0 and prints nothing when
-clean. Exits 1 and names each file that sets a Haiku model.
+clean. Exits 1 and names each file that sets a Haiku model, and the model record
+docs/decisions/agent-model-cap.md when its `lane session` row's effort cell does not start
+with the guard's LANE_EFFORT.
 """
 import glob
 import importlib.util
@@ -23,6 +25,9 @@ _spec = importlib.util.spec_from_file_location("guard", os.path.join(ROOT, "hook
 _guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_guard)
 HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
+LANE_EFFORT = _guard.LANE_EFFORT
+LANE_RECORD = os.path.join("docs", "decisions", "agent-model-cap.md")
+LANE_ROW = re.compile(r"^\|\s*lane session\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
 MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 
 
@@ -50,16 +55,37 @@ def is_haiku_role(path: str) -> bool:
             and os.path.splitext(os.path.basename(path))[0].lower() in HAIKU_ROLES)
 
 
+def is_lane_record(path: str) -> bool:
+    return os.path.abspath(path).endswith(os.sep + LANE_RECORD)
+
+
+def lane_effort_problem(text: str) -> str:
+    """Why the lane session row's effort cell is not the lane effort, or "" when it is."""
+    rows = LANE_ROW.findall(text)
+    if len(rows) != 1:
+        return "needs one `lane session` row with a model and an effort cell, found %d" % len(rows)
+    if not rows[0].startswith(LANE_EFFORT):
+        return "the `lane session` row's effort cell must start with %r (the guard's LANE_EFFORT), found %r" % (
+            LANE_EFFORT, rows[0])
+    return ""
+
+
 def main(argv) -> int:
     files = argv or sorted(
         glob.glob(os.path.join(ROOT, "agents", "*.md"))
         + glob.glob(os.path.join(ROOT, "skills", "*", "SKILL.md"))
+        + [os.path.join(ROOT, LANE_RECORD)]
     )
     bad = 0
     for path in files:
         with open(path, encoding="utf-8-sig") as handle:
             text = handle.read()
-        if frontmatter(text) is None:
+        if is_lane_record(path):
+            problem = lane_effort_problem(text)
+            if problem:
+                print("%s: %s." % (path, problem))
+                bad = 1
+        elif frontmatter(text) is None:
             print("%s: frontmatter never closes. Cannot read its model." % path)
             bad = 1
         elif haiku_model(text) and not is_haiku_role(path):
