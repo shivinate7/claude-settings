@@ -9276,7 +9276,7 @@ class MergeRoleCheck(CloudSession):
                 self.assertEqual(self.host.pr_calls, [])
 
 class StandingGrantSwitch(CloudSession):
-    """merge.standingGrant (decision standing-merge-grant, owner ruling 2026-10-30 15:06 CDT) switches the standing merge grant.
+    """merge.standingGrant (decision standing-merge-grant) switches the standing merge grant.
     The value is read from origin's base with the rest of the merge block, never from the PR tree. Absent or true: `--confirm` runs as
     before. False: `--confirm` in a cloud session whose recorded role is coordinator or batch-runner is refused with the owner-ask line,
     after the PR read and before the lock or any claim. Outside the cloud, and for every preview, false changes nothing. A value that
