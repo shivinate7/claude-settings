@@ -730,10 +730,8 @@ GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanec
 
 
 def main(argv):
-    if len(argv) != 2 or argv[0] not in GROUPS:
-        print("usage: compliance_probes.py {%s} <child root>" % ",".join(GROUPS), file=sys.stderr)
-        return 2
-    if argv[1].startswith("-") or not os.path.isdir(argv[1]):  # an option or a typo would make scorecard write under the cwd
+    # A root that is an option or no folder is refused: scorecard would write under the cwd.
+    if len(argv) != 2 or argv[0] not in GROUPS or argv[1].startswith("-") or not os.path.isdir(argv[1]):
         print("usage: compliance_probes.py {%s} <child root>" % ",".join(GROUPS), file=sys.stderr)
         return 2
     root = os.path.abspath(argv[1])
