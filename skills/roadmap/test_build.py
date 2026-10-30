@@ -3,6 +3,7 @@
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
 import contextlib
+import datetime
 import hashlib
 import io
 import json
@@ -83,6 +84,17 @@ def build_info(page):
     return json.loads(found.group(1).replace("<\\/", "</"))
 
 
+def iso_ago(minutes):
+    """An ISO UTC time this many minutes before now (after it when negative), shaped as readAt."""
+    when = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def session_row(sid, status, *tags):
+    """One sessions row, as triage copies it from list_sessions."""
+    return {"id": sid, "session_status": status, "tags": list(tags)}
+
+
 def make_repo(root, steps=None, meta=None):
     """The one roadmap fixture repo, under `root`: `main` holds the record homes, `roadmap` holds
     roadmap/data/. Leaves HEAD on `roadmap`. `steps` and `meta` add files ({stem: JSON}) to its data."""
@@ -134,6 +146,7 @@ class Fixture(unittest.TestCase):
         self.repo = make_repo(self.tmp.name)
         self.data = self.repo / "roadmap" / "data"
         self.out = pathlib.Path(self.tmp.name) / "page.html"
+        self.live = pathlib.Path(self.tmp.name) / "live.json"
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -149,6 +162,16 @@ class Fixture(unittest.TestCase):
         code, out = run_build("--repo", str(self.repo), "--out", str(self.out), *extra)
         self.assertIn(code, (0, None), out)
         return self.out.read_text(encoding="utf-8"), out
+
+    def write_live(self, value):
+        self.live.write_text(value if isinstance(value, str) else json.dumps(value), encoding="utf-8")
+
+    def panel(self, page, name="Live work"):
+        return {p["name"]: p for p in build_info(page)["panels"]}[name]
+
+    def use_origin(self, slug):
+        """Point the fixture repo's origin at GitHub, so github_slug reads `slug`."""
+        git(self.repo, "remote", "add", "origin", "git@github.com:%s.git" % slug)
 
 
 class TodaysPage(Fixture):
@@ -313,7 +336,7 @@ class RecordsAndHealth(Fixture):
             git(self.repo, "add", "-A")
             git(self.repo, "commit", "-q", "-m", "d%d" % n)
         (self.repo / "decisions" / ".hidden").write_text("x", encoding="utf-8")
-        git(self.repo, "remote", "add", "origin", "git@github.com:owner/fixture.git")
+        self.use_origin("owner/fixture")
 
     def records(self, page):
         return {r["kind"]: r for r in build_info(page)["records"]}
@@ -425,13 +448,6 @@ class LiveWork(Fixture):
         self.write_step("c2", dict(STEP, order=2, status="done"))
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "done step")
-        self.live = pathlib.Path(self.tmp.name) / "live.json"
-
-    def write_live(self, value):
-        self.live.write_text(value if isinstance(value, str) else json.dumps(value), encoding="utf-8")
-
-    def panel(self, page):
-        return {p["name"]: p for p in build_info(page)["panels"]}["Live work"]
 
     def test_no_live_file_reads_unknown(self):
         page, _ = self.build_from_main()
@@ -512,6 +528,241 @@ class LiveWork(Fixture):
         self.write_live({"readAt": "x", "threads": [{"title": "</script><!-- y", "state": "working"}], "pulls": []})
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertNotIn("</script><!--", page)
+
+
+class StaleInProgress(Fixture):
+    """The upkeep row for each doing or active step with no live lane and no open PR. Its entries read
+    `<id> (set to todo)`, `<id> (set to done: landed in #N)`, or one `unknown (<why>)` when unreadable."""
+
+    ROW = "in progress with no live lane or open PR"
+    SLUG = "owner/fixture"
+    REPO = "cs-repo:" + SLUG
+
+    def setUp(self):
+        super().setUp()
+        self.use_origin(self.SLUG)
+
+    def session_in_repo(self, sid, status, *tags):
+        """A sessions row for this fixture repo, carrying the cs-repo tag the builder checks."""
+        return session_row(sid, status, self.REPO, *tags)
+
+    def commit_step(self, sid, **fields):
+        """Write a step on the record branch and commit it, where a build from main reads it."""
+        self.write_step(sid, dict(STEP, **fields))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "step " + sid)
+
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None):
+        """Write the --live file. The sessions key appears only when given. readAt is five minutes old by default."""
+        value = {"readAt": read_at or iso_ago(5), "threads": list(threads), "pulls": list(pulls)}
+        if sessions is not None:
+            value["sessions"] = list(sessions)
+        self.write_live(value)
+        return value
+
+    def out_with_live(self):
+        _, out = self.build_from_main("--live", str(self.live))
+        return out
+
+    def stale(self, out):
+        """(count, entries) of the stale row. Fails when the output holds no such row."""
+        summary = re.search(r"^upkeep: .*?%s: (\d+)" % re.escape(self.ROW), out, re.M)
+        if summary is None:
+            self.fail("the upkeep output has no %r row:\n%s" % (self.ROW, out))
+        detail = re.search(r"^  %s: (.*)$" % re.escape(self.ROW), out, re.M)
+        return int(summary.group(1)), (detail.group(1) if detail else "")
+
+    def listed_ids(self, entries):
+        return re.findall(r"([^,()\s]+) \(set to ", entries)
+
+    def test_doing_step_with_a_live_session_is_not_listed(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # no session, so it is listed and an empty row cannot pass
+        for status in ("SESSION_STATUS_RUNNING", "SESSION_STATUS_IDLE"):
+            with self.subTest(status=status):
+                self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
+                count, entries = self.stale(self.out_with_live())
+                self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
+
+    def test_doing_step_whose_id_is_an_open_pull_branch_is_not_listed(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        self.publish(sessions=[], pulls=[{"number": 874, "title": "Lane c1", "branch": "c1"}])
+        count, entries = self.stale(self.out_with_live())
+        self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
+
+    def test_doing_and_active_steps_with_neither_are_set_to_todo(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="active", order=2)
+        self.publish(sessions=[])
+        count, entries = self.stale(self.out_with_live())
+        self.assertEqual(count, 2)
+        self.assertIn("c1 (set to todo)", entries)
+        self.assertIn("c2 (set to todo)", entries)
+
+    def test_archived_session_does_not_keep_its_step_live(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_ARCHIVED", "cs-step:c1")])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+
+    def test_step_page_does_not_match_tag_or_branch_page_name_queue(self):
+        self.commit_step("page", status="doing", note="Lane page-name-queue: draft PR #874")
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:page-name-queue")],
+                     pulls=[{"number": 874, "title": "Page name queue", "branch": "page-name-queue"}])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "page (set to todo)"))
+
+    def test_step_trailer_on_main_sets_the_step_to_done(self):
+        self.commit_step("c1", status="doing")
+        self.on_main()
+        (self.repo / "landed.txt").write_text("x", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "landed (#12)\n\nStep: c1")
+        self.publish(sessions=[])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to done: landed in #12)"))
+
+    def test_live_file_with_no_sessions_list_reads_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        value = self.publish(threads=[{"title": "Build a", "state": "working", "step": "c1"}],
+                             pulls=[{"number": 9, "title": "nine"}])
+        page, out = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.stale(out), (1, "unknown (the live file has no sessions list)"))
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+        live = build_info(page)["live"]
+        self.assertEqual([t["title"] for t in live["threads"]], ["Build a"])
+        self.assertEqual([p["number"] for p in live["pulls"]], [9])
+
+    def test_read_at_two_hours_old_reads_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        value = self.publish(sessions=[], read_at=iso_ago(120))
+        page, out = self.build_from_main("--live", str(self.live))
+        count, entries = self.stale(out)
+        found = re.fullmatch(r"unknown \(the live file was read (\d+) minutes ago; read it again\)", entries)
+        self.assertEqual(count, 1)
+        self.assertIsNotNone(found, entries)
+        self.assertIn(int(found.group(1)), range(119, 122))
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+
+    def test_read_at_five_minutes_old_lists_normally(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+
+    def test_read_at_that_is_not_a_time_reads_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[], read_at="yesterday")
+        count, entries = self.stale(self.out_with_live())
+        self.assertEqual(count, 1)
+        self.assertTrue(entries.startswith("unknown ("), entries)
+
+    def test_malformed_session_rows_are_skipped_named_and_read_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1"),
+                               {"id": "session_test02", "session_status": "SESSION_STATUS_RUNNING", "tags": "cs-step:c2"},
+                               "session_test03"])
+        page, out = self.build_from_main("--live", str(self.live))
+        skipped = build_info(page)["live"]["skipped"]
+        self.assertNotIn("session 1", skipped)
+        self.assertIn("session 2", skipped)
+        self.assertIn("session 3", skipped)
+        self.assertRegex(out, r"live file entries skipped: .*session 2")
+        self.assertEqual(self.stale(out), (1, "unknown (2 session rows skipped)"))
+
+    def test_todo_and_done_steps_are_never_listed(self):
+        self.commit_step("c2", status="done", order=2)
+        self.commit_step("c3", status="todo", order=3)
+        self.commit_step("c4", status="doing", order=4)  # control: listed, so an empty row cannot pass
+        self.publish(sessions=[])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "c4 (set to todo)"))
+
+    def test_no_live_file_reads_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        _, out = self.build_from_main()
+        count, entries = self.stale(out)
+        self.assertEqual(count, 1)
+        self.assertTrue(entries.startswith("unknown (") and "--live" in entries, entries)
+
+    def test_unreadable_live_file_reads_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        self.write_live("{not json")
+        count, entries = self.stale(self.out_with_live())
+        self.assertEqual(count, 1)
+        self.assertTrue(entries.startswith("unknown ("), entries)
+
+    def test_read_at_more_than_five_minutes_ahead_reads_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[], read_at=iso_ago(-10))
+        self.assertEqual(self.stale(self.out_with_live()), (1, "unknown (the live file's readAt is in the future)"))
+        with self.subTest("two minutes ahead is within the tolerance"):
+            self.publish(sessions=[], read_at=iso_ago(-2))
+            self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+
+    def test_session_outside_running_and_idle_is_not_live(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        for status in ("SESSION_STATUS_STOPPED", "SESSION_STATUS_COMPLETED"):
+            with self.subTest(status=status):
+                self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
+                count, entries = self.stale(self.out_with_live())
+                self.assertEqual((count, sorted(self.listed_ids(entries))), (2, ["c1", "c2"]))
+
+    def test_session_counts_only_with_this_repos_cs_repo_tag(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        rows = {
+            "this repo's tag keeps c1 live": (session_row("session_test01", "SESSION_STATUS_RUNNING",
+                                                          self.REPO, "cs-step:c1"), ["c2"]),
+            "no cs-repo tag leaves c1 listed": (session_row("session_test01", "SESSION_STATUS_RUNNING",
+                                                            "cs-step:c1"), ["c1", "c2"]),
+            "another repo's tag leaves c1 listed": (session_row("session_test01", "SESSION_STATUS_RUNNING",
+                                                                "cs-repo:other/repo", "cs-step:c1"), ["c1", "c2"]),
+        }
+        for name, (row, listed) in rows.items():
+            with self.subTest(name):
+                self.publish(sessions=[row])
+                count, entries = self.stale(self.out_with_live())
+                self.assertEqual((count, sorted(self.listed_ids(entries))), (len(listed), listed))
+        git(self.repo, "remote", "remove", "origin")
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")])
+        self.assertEqual(self.stale(self.out_with_live()),
+                         (1, "unknown (the repo's GitHub name could not be read)"))
+
+    def test_skipped_pull_rows_make_the_row_unknown(self):
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[], pulls=[{"number": 9, "title": "ok"}, {"number": "10", "title": "bad number"},
+                                         {"number": 11}])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "unknown (2 pull rows skipped)"))
+
+    def test_open_step_with_an_unknown_status_is_listed_with_that_status(self):
+        self.commit_step("c1", status="waiting")
+        self.commit_step("c2", status="doing", order=2)  # control: listed as todo
+        self.publish(sessions=[])
+        count, entries = self.stale(self.out_with_live())
+        self.assertEqual(count, 2)
+        self.assertIn('c1 (unknown status "waiting")', entries)
+        self.assertIn("c2 (set to todo)", entries)
+
+
+    def test_session_without_tags_or_with_null_tags_is_tagless_not_skipped(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        tagless = [{"id": "session_test02", "session_status": "SESSION_STATUS_IDLE"},
+                   {"id": "session_test03", "session_status": "SESSION_STATUS_RUNNING", "tags": None}]
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")] + tagless)
+        page, out = self.build_from_main("--live", str(self.live))
+        self.assertEqual(build_info(page)["live"]["skipped"], [])
+        self.assertEqual(self.stale(out), (1, "c2 (set to todo)"))
+        with self.subTest("a tags string is still skipped"):
+            self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1"),
+                                   {"id": "session_test04", "session_status": "SESSION_STATUS_RUNNING", "tags": "cs-step:c1"}])
+            page, out = self.build_from_main("--live", str(self.live))
+            self.assertEqual(build_info(page)["live"]["skipped"], ["session 2"])
+            self.assertEqual(self.stale(out), (1, "unknown (1 session rows skipped)"))
+
+    def test_repo_tag_compares_without_case(self):
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)  # control: listed
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-repo:Owner/Fixture", "cs-step:c1")])
+        self.assertEqual(self.stale(self.out_with_live()), (1, "c2 (set to todo)"))
 
 
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
