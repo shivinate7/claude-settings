@@ -3,7 +3,7 @@
   "phase": "rollout",
   "order": 299.5,
   "why": "home's c163 lane (Oct 28, home#370) left these on purpose: SPEC.md stayed because two open branches edit it; the probe reads four core kinds as out; open branches add files outside the layout.",
-  "note": "Debt. Left: SPEC.md to docs/specs/ once home's two open branches that edit it merge; four core kinds missing (.claude/rules/, docs/decisions/, docs/specs/, docs/records.md), each added or given a one-line reason; open branches add mockups at docs/design/ root (the layout wants docs/design/mockups/) and a root probe-lag/ folder, which move when those branches merge. Due after: home's open branches merge. Needs no answer. Port: this is home's visit. Placed ahead of r5 (triage, Oct 28): c163's follow-up. Lane started Oct 30 16:13 CDT.",
-  "status": "doing",
-  "updatedAt": "2026-10-30T21:25:00Z"
+  "note": "Debt. Left: SPEC.md to docs/specs/ once home's two open branches that edit it merge; four core kinds missing (.claude/rules/, docs/decisions/, docs/specs/, docs/records.md), each added or given a one-line reason; open branches add mockups at docs/design/ root (the layout wants docs/design/mockups/) and a root probe-lag/ folder, which move when those branches merge. Due after: home's open branches merge. Needs no answer. Port: this is home's visit. Placed ahead of r5 (triage, Oct 28): c163's follow-up. Oct 30 16:14 CDT: items 2 and 3 done on home main (layout probe in shape at 8e5feb5). Due after home #390 merges: the SPEC.md and duo-folded-blockers.html moves wait on home #390 (shiv lands #386 and #390); the automations-v3 mockups wait on home #288 (a draft sharing no history with main; rebase or close is shiv's call).",
+  "status": "todo",
+  "updatedAt": "2026-10-30T21:30:00Z"
 }
