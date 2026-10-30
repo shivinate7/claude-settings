@@ -327,10 +327,10 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     const after = await cardsNow(page);
     const witness = "item-" + items[3].id;
     const was = before.find((c) => c.id === witness), settled = after.find((c) => c.id === witness);
-    assert.ok(was.top > 0 && was.top < innerHeight, "the witness is off screen before Send: " + was.top);
+    assert.ok(was.top > 0 && was.top < viewport.height, "the witness is off screen before Send: " + was.top);
     assert.equal(settled.receipt, false, "the witness became a receipt on Send");
     assert.ok(Math.abs(settled.top - was.top) <= 1, `the witness moved on Send: ${was.top} to ${settled.top}`);
-    for (const b of before.filter((c) => c.bottom > 0 && c.top < innerHeight)) {
+    for (const b of before.filter((c) => c.bottom > 0 && c.top < viewport.height)) {
       const a = after.find((c) => c.id === b.id);
       if (a.receipt && !b.receipt) assert.ok(a.h < b.h - 1, `a receipt kept its height on Send: ${b.id} ${b.h} to ${a.h}`);
       else if (!a.receipt) assert.ok(Math.abs(a.h - b.h) <= 1, `a card that stays changed height on Send: ${b.id} ${b.h} to ${a.h}`);
@@ -2289,6 +2289,10 @@ async function sentMidScreen(t, { width, height, scheme, anchored }) {
   const page = await open(t, { items: [...LEADS, target, below, ...FILLER], scheme, viewport: { width, height } }); if (!page) return;
   if (!anchored) await noAnchor(page);
   await choose(page, target, "a");
+  // The page can reflow after its first frames, and scroll anchoring follows that reflow, so the card is placed once more after the frames settle.
+  await frameWait(page, 3);
+  await placeAt(page, target, 0.2);
+  await frameWait(page, 3);
   await placeAt(page, target, 0.2);
   const full = (await card(page, target).boundingBox()).height;
   const at = (await posOf(page, [below]))[below.id].top;
