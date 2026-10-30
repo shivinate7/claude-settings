@@ -331,7 +331,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .dprev .dbar .sp { flex: 1; }
 .dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
 .dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
-.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
 .dfitwrap.inert .dframe { pointer-events: none; }
 /* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
 :root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
@@ -1523,7 +1523,7 @@ function withState(html, state) {
   return m ? m[0] + sc + html.slice(m[0].length) : sc + html;
 }
 const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
-// A mockup is drawn 390 wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
+// A mockup is drawn FIT_W wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const MIN_PIC = 120; // a capped picture is never narrower than this, however tall the mockup
 const FIT_W = 390;
 let FITS = [];
