@@ -4,7 +4,7 @@
 Claude Code's auto-mode classifier reads autoMode from ~/.claude/settings.json, which install.sh
 links or copies from this repo's settings.json. Its built-in "Git Destructive" rule re-asked the
 owner about a branch delete after the archive push that guard_branch_worktree's remedy hands over
-(decision archived-branch-delete-allowed). This suite pins:
+(decision auto-mode-owner-acts). This suite pins:
 - autoMode.allow keeps the built-in exceptions ("$defaults"), and no autoMode list drops its own.
 - One allow entry quotes every command in the guard's remedy verbatim, read from
   BRANCH_DELETE_DENY_REASON itself, so a change to the remedy fails here until the entry follows.

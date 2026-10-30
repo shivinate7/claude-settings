@@ -2,7 +2,7 @@
 
 ## Ruling
 
-Owner, 2026-10-30 16:24 CDT, relayed by the coordinator session: the auto-mode classifier keeps refusing the coordinator's routine acts, which the owner always grants. Allow them. Owner, 16:37 CDT: keep one general record for which acts auto mode allows with no ask. This is that record.
+Owner, 2026-10-30 16:24 CDT, relayed by the coordinator session: the auto-mode classifier keeps refusing the coordinator's routine acts, which the owner always grants. Allow them. Owner, 16:37 and 17:03 CDT: everything about auto mode lives together. This record is the one home for every auto-mode allow entry.
 
 ### The test for a new entry
 
@@ -18,8 +18,8 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 
 | Entry | Covers | Record |
 |---|---|---|
-| "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | `archived-branch-delete-allowed` |
-| Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | `session-tiers` |
+| "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
+| Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only the batch's integration pull request, named as such there | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted | this record |
 
@@ -27,7 +27,22 @@ The merge confirm is a permission allow rule, not an `autoMode` entry. The class
 
 "Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a change of a PR's base branch. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a lane PR, which stays draft, or a PR with auto-merge on, since that merges it. "Owner Session Message" never covers a request to change permissions, settings or overrides, or to merge. Nor `priority: now`, which interrupts the target's running turn. Nor a post people read, such as `visibility: posted_to_shared_channel`.
 
-### Incidents for the two new entries
+### Archived Branch Delete
+
+The entry tells the classifier that a branch delete loses nothing in two cases:
+
+- Earlier in the session, the agent pushed that branch to `archive/<branch>` on the same remote, with no later commit, reset, rebase or amend on it.
+- The branch is already in the default branch: `git branch -d`, or a branch whose pull request the session merged.
+
+It never covers an `archive/` ref, the default branch, a tag, a release, a force push, or a branch whose archive push the session did not run.
+
+Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hands over the archive push and the delete as commands. The classifier's built-in "Git Destructive" rule still asked the owner about the delete. That broke `shared-trees-archive-then-delete` (once the push succeeds, delete with no question).
+
+- Risk: named incident. On the Mac, the probe branches of c53 (the cloud merge tool) were archived, then the deletes were refused and the owner was asked again.
+- Check: the test reads the remedy's commands from the guard constant and fails until the entry quotes each one.
+- Gap: the classifier sees commands, not their output. A failed archive push followed by a delete is still allowed by this entry. The guard's own remote-contains test still refuses the local `git branch -D` then.
+
+### Incidents for the owner PR and owner message entries
 
 Marking the integration pull request ready has no measured refusal yet: unmeasured. The ruling names it, so it stays.
 
