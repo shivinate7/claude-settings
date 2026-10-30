@@ -119,13 +119,16 @@ const assertVersion2Files = (dir, eol) => {
   );
 };
 
-test('F0. map-config.mjs exports MAP_FORMAT_VERSION as the whole number 2', () => {
+// The fixture holds the version the skill writes. A version bump moves the fixture with it, so this case goes red until it does.
+test('F0. map-config.mjs exports MAP_FORMAT_VERSION as a whole number, and the fixture holds that same version', () => {
   needFile('scripts/lib/map-config.mjs');
   const script = `const m = await import(${JSON.stringify(pathToFileURL(CONFIG).href)});
 console.log(JSON.stringify(m.MAP_FORMAT_VERSION ?? null));`;
   const r = run(['--input-type=module', '-'], scratchRepo(), script);
   assert.equal(r.status, 0, `the module must load\n${out1500(r)}`);
-  assert.equal(JSON.parse(r.stdout.trim().split('\n').pop()), 2, 'MAP_FORMAT_VERSION must be 2: one real step, from 1 to 2, and the fixture is at 2');
+  const version = JSON.parse(r.stdout.trim().split('\n').pop());
+  assert.ok(Number.isInteger(version), `MAP_FORMAT_VERSION must be a whole number, and it is ${JSON.stringify(version)}`);
+  assert.equal(JSON.parse(readFileSync(join(FIXTURE, 'map.config.json'), 'utf8')).formatVersion, version, 'the fixture must hold MAP_FORMAT_VERSION as its formatVersion');
 });
 
 test('1a. the upgrade command turns the version 1 map into the version 2 map, keeps each sentence, sets formatVersion, and the check then passes', () => {
@@ -141,7 +144,7 @@ test('1a. the upgrade command turns the version 1 map into the version 2 map, ke
   assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort(), 'the upgrade must add and remove no file');
   for (const [f, sig] of after) if (!CHANGED.includes(f)) assert.equal(sig, before.get(f), `the upgrade must not write ${f}`);
   const c = run([CHECK], dir);
-  assert.equal(verdicts(c.out), expected(), `the check must print one PASS line for each of MAP1 to MAP8\n${out1500(c)}`);
+  assert.equal(verdicts(c.out), expected(), `the check must print one PASS line for each of MAP1 to MAP9\n${out1500(c)}`);
   assert.equal(c.status, 0, `the check must exit 0 on the upgraded map\n${out1500(c)}`);
 });
 
@@ -187,6 +190,31 @@ test('2b. a run on a map of the current version changes no file, also where a se
   const r = run([UPGRADE], dir);
   assert.equal(r.status, 0, `the run must exit 0\n${out1500(r)}`);
   assert.ok(same(before, snapshot(dir)), 'a step must run only for a map that is older than its target version');
+});
+
+// Step 6 (version 2 to 3). The upgrade writes the config in two-space JSON, so the case starts from that form, and a second run must change nothing.
+test('2c. a version 2 map upgraded to version 3 changes only the formatVersion line, and a second run changes no file', () => {
+  needFile('scripts/map-upgrade.mjs');
+  const dir = withVersion(scratchRepo(), 2);
+  const cfg = join(dir, 'map.config.json');
+  const beforeText = readFileSync(cfg, 'utf8');
+  const before = snapshot(dir);
+  // The scope first: the map is at version 2, or the upgrade proves nothing.
+  assert.equal(JSON.parse(beforeText).formatVersion, 2, 'the scratch map must be at version 2');
+  const r = run([UPGRADE], dir);
+  assert.equal(r.status, 0, `the upgrade must exit 0\n${out1500(r)}`);
+  const afterText = readFileSync(cfg, 'utf8');
+  assert.equal(JSON.parse(afterText).formatVersion, 3, `the upgrade must set formatVersion to 3\n${out1500(r)}`);
+  const lines = (s) => s.split('\n');
+  assert.equal(lines(afterText).length, lines(beforeText).length, 'the upgrade must keep the config line count');
+  const changed = lines(beforeText).flatMap((l, i) => (l === lines(afterText)[i] ? [] : [[l, lines(afterText)[i]]]));
+  assert.deepEqual(changed, [['  "formatVersion": 2,', '  "formatVersion": 3,']], 'only the formatVersion line may change');
+  const once = snapshot(dir);
+  assert.deepEqual([...once.keys()].sort(), [...before.keys()].sort(), 'the upgrade must add and remove no file');
+  for (const [f, sig] of once) if (f !== 'map.config.json') assert.equal(sig, before.get(f), `the upgrade must not write ${f}`);
+  const second = run([UPGRADE], dir);
+  assert.equal(second.status, 0, `the second run must exit 0\n${out1500(second)}`);
+  assert.ok(same(once, snapshot(dir)), 'the second run must write no file, add none and remove none');
 });
 
 // A refusal: exit non-zero, a message that says to update the skill and is no "unknown key" error, no PASS line, and no write.
@@ -301,7 +329,7 @@ test('6. a config with an explicit "formatVersion": 1 is upgraded to 2, and the 
   assert.equal(versionOf(), 2, `the new version must win over the old "formatVersion": 1\n${out1500(r)}`);
   assertVersion2Files(dir, '\n');
   const c = run([CHECK], dir);
-  assert.equal(verdicts(c.out), expected(), `the check must print one PASS line for each of MAP1 to MAP8\n${out1500(c)}`);
+  assert.equal(verdicts(c.out), expected(), `the check must print one PASS line for each of MAP1 to MAP9\n${out1500(c)}`);
   assert.equal(c.status, 0, `the check must exit 0 on the upgraded map\n${out1500(c)}`);
 });
 

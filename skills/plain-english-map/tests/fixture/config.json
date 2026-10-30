@@ -1,0 +1,4 @@
+{
+  "retry": { "wait_s": 30 },
+  "workers": [{ "name": "alpha" }, { "name": "beta" }]
+}
