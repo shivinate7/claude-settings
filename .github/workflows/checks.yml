@@ -150,6 +150,9 @@ jobs:
       - name: Call judge fixture suite
         run: python3 hooks/test_call_judge.py
 
+      - name: Question form fixture suite
+        run: python3 hooks/test_question_form.py
+
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
@@ -708,6 +711,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 hooks/test_call_judge.py
 
+      - name: Question form fixture suite
+        if: ${{ !cancelled() }}
+        run: python3 hooks/test_question_form.py
+
       - name: Remove-prompt answer fixture suite
         if: ${{ !cancelled() }}
         run: python3 hooks/test_rm_prompt_answer.py
@@ -1200,6 +1207,10 @@ jobs:
       - name: Call judge fixture suite
         if: ${{ !cancelled() }}
         run: python hooks/test_call_judge.py
+
+      - name: Question form fixture suite
+        if: ${{ !cancelled() }}
+        run: python hooks/test_question_form.py
 
       - name: Remove-prompt answer fixture suite
         if: ${{ !cancelled() }}
