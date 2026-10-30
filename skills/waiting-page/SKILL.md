@@ -47,7 +47,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
     an allow-list entry or a per-repo exception. Its card shows "Goes against your uniform ruling (t18)": a repo
-    that differs from a shared format changes to match it. `pick` never names such an option. The writer refuses
+    that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
@@ -56,6 +56,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
     with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
+      `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
+      On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. `why` stays one text.
+      A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
     (a number, or text such as `3 min`).
@@ -68,7 +72,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
   a note with no `done`. "Take my pick", and a pick that
-  stands, write `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes
+  stands, write `choice` equal to `pick`, with the note `accepted pick`. On a `multi` item `choice` is a
+  list of option keys, in rank order when `ranked`, and "Take my pick" writes the whole `pick` list. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
@@ -134,6 +139,31 @@ gives no page URL: no item exists yet.
     answer ends in the page's record.
 - A lane has no chat with the owner. Its question goes in its report.
 
+- The writer keeps the page on main's code (see "Keep the page on main's code").
+
+## Keep the page on main's code
+
+The writer runs this at each wake and before each republish. A lane never runs it. Every republish
+is main's `page.html` with the live `designData` kept, never the live page's own code (owner,
+2026-10-29 14:47 CDT; decision `questions-go-to-owner`).
+
+1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
+   A read that gives a summary, not the raw page, is `unknown`.
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out>`. It
+   compares the page's code outside `designData` with `skills/waiting-page/page.html` on
+   claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
+   read. Code outside main's page, other than the host's document skeleton, is `behind`.
+3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+   `<out>` is main's page with the live `designData` kept. When you also add a design, do it in
+   `<out>` first and republish once ("Add a design").
+4. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
+   could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
+   `origin/main` in it). Only main proves a page current; the installed copy never does.
+
+Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
+one short read-only git process, with no fetch. It writes `<out>` only, and no file without
+`--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
+
 ## Add an item
 
 0. A lane's question comes in the lane's report. Write the item from that report, with yourself as
@@ -160,10 +190,13 @@ gives no page URL: no item exists yet.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
      and a one-sentence `why`. Set `group` on both items.
+   - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
+     Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
+     The page hides "Take my pick" when the ticks equal `pick`, and shows none when `pick` is not valid.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
-     open: choosing another option is the only way out. A question that touches a rule starts blank.
+     open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
    item in the reply, in one line. Give the page URL for an open item only: the page hides a closed
    item. The owner already saw the question in chat, so open no new question box. A box stops the
@@ -207,9 +240,12 @@ closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close
   the owner withdrew it: the item is still open, and nothing is ruled.
 - `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
-  answer for item 27.
+  answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
+  `+`, in rank order when `ranked`.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
-  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`. On a `multi` item,
+  `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
+  A list on a pick-one item, or a string other than `none` on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
@@ -230,7 +266,7 @@ once as a note on its step (the item's home), never held for the lane. A chat an
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Then delete `answers/<id>`, so the answer cannot count for a later item.
 3. If the answer is `none`, write new `options`, `pick` and `why` from the
-   owner's note, and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
+   owner's note (a `multi` item's new `pick` is a list), and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If the note is not
    enough to write them, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to
@@ -276,8 +312,9 @@ The page refuses an item where they do, or where a `focus` finds nothing.
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
    Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
-   JSON in `<script type="application/json" id="designData">`.
+3. Build the new page as "Keep the page on main's code" steps 1 and 2 say, with `--write <out>`.
+   In `<out>`, add `"slug": "<html string>"` to the JSON in
+   `<script type="application/json" id="designData">`. Never edit the live page's own code.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element whole, scaled to fit the card, so the part being decided is in frame.
@@ -296,7 +333,7 @@ The page refuses an item where they do, or where a `focus` finds nothing.
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Republish the page to the same URL with the same capabilities. The database stays.
+5. Republish `<out>` to the same URL with the same capabilities. The database stays.
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
    the orchestrator does (see "Add an item").
@@ -315,9 +352,9 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    raw HTML, or that does not name this account a writer, is unreadable too.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
-3. For each `behind` page, republish `page.html` to the same URL with the capabilities `db` and
-   `{comments: {}}`. Keep the page's `designData` block for the items still open. A republish with
-   less drops the saved items or the wake.
+3. For each `behind` page, run `stale_pages.py --page <folder>/<artifact id>.html --write <out>`, and
+   republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`. `<out>` keeps
+   the page's `designData` block. A republish with less drops the saved items or the wake.
 4. Update one page first, then read its items: they must all still be there. That the database
    survives a republish is unmeasured.
 5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
