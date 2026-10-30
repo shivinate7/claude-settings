@@ -8,12 +8,33 @@
 # from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves the pin
 # before CI spends a run (decision action-pins-follow-sessions). A pin this clone does not hold is
 # reported as unknown and changes no exit code.
+# Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
+# global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, shutil, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
+
+
+def find_root():
+    """The checkout that holds the lint step: this file's own clone, else the one the global CLAUDE.md points at."""
+    own = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    if os.path.isfile(os.path.join(own, LINT_ACTION)):
+        return own
+    try:
+        import guard_pointer  # noqa: E402  the one reader of the pointer line (hooks/guard_pointer.py)
+        pointed = guard_pointer.pointer_checkout()
+    except ImportError:
+        pointed = ""
+    if pointed and os.path.isfile(os.path.join(pointed, LINT_ACTION)):
+        return pointed
+    sys.exit("ste-changed: no claude-settings checkout found. Looked at the `@<dir>/CLAUDE.md` pointer line "
+             "in the CLAUDE.md of the config dir.")
+
+
+ROOT = find_root()
 ACTION = os.path.join(ROOT, "actions", "ste-lint")
 # Every file of this repo the CI step runs: the action, run.sh's linter, and the linter's own imports.
 LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/ste_lint.py",

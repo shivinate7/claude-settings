@@ -6,8 +6,11 @@ Excludes are the target repo's own .ste-lint-exclude plus the action's `exclude`
 Also asserts the file's last line counts with no final newline, '**' matches at the root, and a run from a subdirectory.
 Also asserts a planted json.py, json/ package or ste_emit.py in the linted repo never runs on import, and the summary still prints.
 Also asserts the command's pin check: a CI pin whose lint differs exits 3 and names the pin and the remedy,
-an unrelated commit is no drift, an unknown pin changes no exit code, and LINT_FILES holds every file the step runs."""
-import ast, os, re, subprocess, sys, tempfile
+an unrelated commit is no drift, an unknown pin changes no exit code, and LINT_FILES holds every file the step runs.
+Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
+bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
+CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback."""
+import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -28,6 +31,24 @@ BASE_FILES = {"a.md": "# T\n\nShort line.\n"}
 STEP_ENV = ("EVENT_NAME", "BASE_REF", "DEFAULT_BRANCH", "REF_NAME", "SCOPE", "FAIL", "PATHS_GLOB",
             "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE")
 FINDING = re.compile(r"^\S.*:\d+: [A-Z]+\d+ ")
+
+# Test temp files (decision test-temp-standard): one run folder for this run, from the repo's one helper.
+# Every case below makes its folder inside it, and the run folder is removed at exit.
+sys.path.append(os.path.join(ROOT, "lint"))
+sys.path.append(os.path.join(ROOT, "testing"))
+import _test_temp  # noqa: E402
+import tracked_tree  # noqa: E402  copies what git lists, so no case here lists files
+RUN_FOLDER = _test_temp.run_folder()
+atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
+
+
+@contextlib.contextmanager
+def scratch(label):
+    d = tempfile.mkdtemp(prefix=label + "-", dir=RUN_FOLDER)
+    try:
+        yield d
+    finally:
+        tracked_tree.rm_tree(d)
 
 
 def git(cwd, *a):
@@ -498,42 +519,65 @@ check("LINT_FILES holds the linter run.sh runs",
       "lint/ste_lint.py" in LINT_FILES and "../../lint/ste_lint.py" in open(os.path.join(HERE, "run.sh")).read(), "")
 
 
+def head(cs):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=cs, capture_output=True, text=True).stdout.strip()
+
+
+def scratch_clone(cs):
+    """A claude-settings clone at `cs`: the files bin/ste-changed and install.sh read, copied from what git lists here
+    (tracked_tree), so the installed hooks hold every module the command may import. History: A, then C changes the
+    lint, then D changes only README.md (HEAD, main and origin/main). E, off D on a side branch, changes the lint again.
+    Returns {label: sha}."""
+    tracked_tree.copy_tracked(cs, "bin", "hooks", "lint", "actions/ste-lint")
+    for rel in (".ste-lint-exclude", "landed-dirs.txt", "install.sh"):
+        shutil.copy2(os.path.join(ROOT, rel), os.path.join(cs, rel))
+    write(cs, "CLAUDE.md", "# claude-settings fixture\n")  # install.sh takes a folder with these two as its source
+    write(cs, "settings.json", "{}\n")
+    write(cs, "README.md", "x\n")
+    git(os.path.dirname(cs), "init", "-q", "-b", "main", cs)
+    shas = {}
+    for label, rel in (("A", None), ("C", "lint/ste_lint.py"), ("D", "README.md")):
+        if rel:
+            write(cs, rel, "\n# %s\n" % label, "a")
+        git(cs, "add", "."); git(cs, "commit", "-qm", label)
+        shas[label] = head(cs)
+    git(cs, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(cs, "checkout", "-q", "-b", "side")
+    write(cs, "lint/ste_lint.py", "\n# E\n", "a")
+    git(cs, "commit", "-qam", "E")
+    shas["E"] = head(cs)
+    git(cs, "checkout", "-q", "main")
+    return shas
+
+
+def pin_child(d, shas, pin, change=lambda work: None, dead=None):
+    """A child repo under `d` whose CI pins ste-lint at `pin`: a label of `shas`, or a sha. `dead` is a label
+    that is pinned in a comment only. Returns its working folder."""
+    wf = ("on: pull_request\njobs:\n  l:\n    steps:\n      - uses: o/claude-settings/actions/ste-lint@%s # main\n"
+          % shas.get(pin, pin))
+    if dead:
+        wf += "      # - uses: o/claude-settings/actions/ste-lint@%s\n" % shas[dead]
+    return make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, change)
+
+
+def run_ste_changed(cmd, work, home=None):
+    """`cmd main` in `work`, with the step's variables and CLAUDE_CONFIG_DIR stripped. `home` replaces HOME, so a
+    command that reads ~/.claude reads the temp one. Returns (rc, output)."""
+    env = {k: v for k, v in os.environ.items() if k not in STEP_ENV + ("CLAUDE_CONFIG_DIR",)}
+    if home:
+        env["HOME"] = home
+    p = subprocess.run([sys.executable, cmd, "main"], cwd=work, env=env, capture_output=True, text=True)
+    return p.returncode, p.stdout + p.stderr
+
+
 def pin_case(pin, change=lambda work: None, dead=None):
     """Run the scratch clone's command in a child repo whose CI pins ste-lint at `pin`. `pin` may name a
     commit label of the scratch clone. Returns (rc, output, {label: sha})."""
-    with tempfile.TemporaryDirectory() as d:
+    with scratch("pin") as d:
         cs = os.path.join(d, "claude-settings")
-        tops = ("bin/ste-changed", "hooks/_nowindow.py", ".ste-lint-exclude", "actions/ste-lint/action.yml",
-                "actions/ste-lint/run.sh")
-        for rel in tops + tuple("lint/" + n for n in os.listdir(os.path.join(ROOT, "lint"))
-                                if n.endswith((".py", ".json"))):
-            dst = os.path.join(cs, rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            with open(os.path.join(ROOT, rel), "rb") as f, open(dst, "wb") as g:
-                g.write(f.read())
-        write(cs, "README.md", "x\n")
-        git(d, "init", "-q", "-b", "main", cs)
-        shas = {}
-        for label, rel in (("A", None), ("C", "lint/ste_lint.py"), ("D", "README.md")):
-            if rel:
-                write(cs, rel, "\n# %s\n" % label, "a")
-            git(cs, "add", "."); git(cs, "commit", "-qm", label)
-            shas[label] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cs, capture_output=True, text=True).stdout.strip()
-        git(cs, "update-ref", "refs/remotes/origin/main", "HEAD")
-        git(cs, "checkout", "-q", "-b", "side")
-        write(cs, "lint/ste_lint.py", "\n# E\n", "a")
-        git(cs, "commit", "-qam", "E")
-        shas["E"] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cs, capture_output=True, text=True).stdout.strip()
-        git(cs, "checkout", "-q", "main")
-        sha = shas.get(pin, pin)
-        wf = "on: pull_request\njobs:\n  l:\n    steps:\n      - uses: o/claude-settings/actions/ste-lint@%s # main\n" % sha
-        if dead:
-            wf += "      # - uses: o/claude-settings/actions/ste-lint@%s\n" % shas[dead]
-        work = make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, change)
-        env = {k: v for k, v in os.environ.items() if k not in STEP_ENV}
-        p = subprocess.run([sys.executable, os.path.join(cs, "bin", "ste-changed"), "main"], cwd=work, env=env,
-                           capture_output=True, text=True)
-        return p.returncode, p.stdout + p.stderr, shas
+        shas = scratch_clone(cs)
+        rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"), pin_child(d, shas, pin, change, dead))
+        return rc, out, shas
 
 
 rc, out, shas = pin_case("A")
@@ -556,4 +600,96 @@ check("unknown pin: a commit this clone does not hold is unknown and exits 0",
 rc, out, _ = pin_case("A", default_change)
 check("lint red and drift: the lint's exit code wins, and the drift line still prints",
       rc == 1 and "older than this copy's lint" in out, out)
+
+
+# The installed copy. install.sh lands bin/ste-changed in ~/.claude: a copy in cloud mode, a symlink into the
+# <clone>-live checkout in local mode. In the copy, the command's own folder holds no actions/ and is no git clone.
+# The checkout is the one the global CLAUDE.md names on its `@<dir>/CLAUDE.md` line. The cases run the clone's own
+# install.sh into a temp HOME, so each one reads what an install lands. Only PATH and HOME reach the installer:
+# CLAUDE_CODE_REMOTE in the caller's environment would force cloud mode, and CLAUDE_CONFIG_DIR would move ~/.claude.
+# A pipx stub stands in for the cloud-only `pip install --user pipx`, which needs the network.
+def install_case(mode, pointer=None, mkdirs=()):
+    """The scratch clone's install.sh in `mode` ("cloud": --cloud; "local": symlinks) into a temp HOME, then
+    ~/.claude/bin/ste-changed in a child repo whose CI pins ste-lint at the older commit A. A text in `pointer`
+    replaces ~/.claude/CLAUDE.md after the install; `mkdirs` are folders made under HOME first. Returns a dict."""
+    with scratch("install-" + mode) as d:
+        home = os.path.join(d, "home")
+        clone = os.path.join(home, "claude-settings")
+        shas = scratch_clone(clone)
+        write(os.path.join(d, "stub-bin"), "pipx", "#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(d, "stub-bin", "pipx"), 0o755)
+        env = {"PATH": os.path.join(d, "stub-bin") + os.pathsep + os.environ["PATH"], "HOME": home}
+        p = subprocess.run([BASH, os.path.join(clone, "install.sh"), *(["--cloud"] if mode == "cloud" else [])],
+                           cwd=d, env=env, capture_output=True, text=True)
+        cfg, installed = os.path.join(home, ".claude"), os.path.join(home, ".claude", "bin", "ste-changed")
+        md = os.path.join(cfg, "CLAUDE.md")
+        facts = {"shas": shas, "install_rc": p.returncode, "install_out": p.stdout + p.stderr,
+                 "is_file": os.path.isfile(installed), "is_link": os.path.islink(installed),
+                 "real": os.path.realpath(installed), "live": os.path.realpath(clone + "-live"),
+                 "actions": os.path.exists(os.path.join(cfg, "actions")),
+                 "pointer": open(md, encoding="utf-8").read().split("\n")[0] if os.path.exists(md) else ""}
+        for rel in mkdirs:
+            os.makedirs(os.path.join(home, rel))
+        if pointer is not None:
+            write(cfg, "CLAUDE.md", pointer)
+        facts["rc"], facts["out"] = run_ste_changed(installed, pin_child(d, shas, "A"), home)
+        return facts
+
+
+def shown(r):
+    return "install exit %s:\n%s\n--- command, exit %s ---\n%s" % (r["install_rc"], r["install_out"], r["rc"], r["out"])
+
+
+def drifted_from_checkout(r):
+    """The pin check ran against the checkout: exit 3, the pin and the remedy that names that checkout's main."""
+    return (r["rc"] == 3 and "Traceback" not in r["out"] and "Unknown whether it matches" not in r["out"]
+            and "CI pins ste-lint at %s" % r["shas"]["A"][:7] in r["out"]
+            and "Move the pin to %s" % r["shas"]["D"] in r["out"])
+
+
+NAMES_CHECKOUT = re.compile(r"(?<![\w/\\.-])claude-settings(?![\w/\\-])")  # the word, never a part of a path
+
+
+def one_line_no_traceback(r):
+    """The command failed with one non-blank line that names the claude-settings checkout in words, and no traceback.
+    Every fixture path holds "claude-settings", so a caught exception that prints its own path does not count."""
+    lines = [l for l in r["out"].splitlines() if l.strip()]
+    return (r["rc"] != 0 and "Traceback" not in r["out"] and "Errno" not in r["out"] and len(lines) == 1
+            and bool(NAMES_CHECKOUT.search(lines[0])))
+
+
+with scratch("sweep") as root:
+    own, old, new = (os.path.join(root, "%d-%s" % (n, uuid.uuid4().hex)) for n in (1, 2, 3))
+    for folder in (own, old, new):
+        os.makedirs(folder)
+    two_days_ago = time.time() - 2 * 24 * 60 * 60
+    os.utime(old, (two_days_ago, two_days_ago))
+    _test_temp.sweep(root, own)
+    check("test temp: the sweep removes a sibling run folder over a day old and keeps a new one and its own",
+          not os.path.exists(old) and os.path.isdir(new) and os.path.isdir(own), str(sorted(os.listdir(root))))
+
+if os.name == "nt":
+    print("skip - installed copy: install.sh does not run on Windows")
+else:
+    r = install_case("cloud")
+    check("installed copy, cloud: install.sh exits 0 and copies bin/ste-changed, with no actions/ beside it",
+          r["install_rc"] == 0 and r["is_file"] and not r["is_link"] and not r["actions"], shown(r))
+    check("installed copy, cloud: the global CLAUDE.md names the checkout", r["pointer"] == "@~/claude-settings/CLAUDE.md",
+          r["pointer"])
+    check("installed copy, cloud: a drifted pin exits 3 with the pin message read from the checkout the pointer names",
+          drifted_from_checkout(r), shown(r))
+    for label, text, mkdirs in (
+            ("no pointer line", "# my own rules\n", ()),
+            ("the pointer names a folder that is gone", "@~/no-such-checkout/CLAUDE.md\n", ()),
+            ("the pointer names a folder that is no claude-settings checkout", "@~/other-repo/CLAUDE.md\n",
+             ("other-repo",))):
+        r = install_case("cloud", text, mkdirs)
+        check("installed copy, cloud, %s: install.sh exits 0" % label, r["install_rc"] == 0 and r["is_file"], shown(r))
+        check("installed copy, cloud, %s: exits non-zero with one line naming claude-settings, no traceback" % label,
+              one_line_no_traceback(r), shown(r))
+    r = install_case("local")
+    check("installed copy, local: install.sh exits 0 and links bin/ste-changed into the pinned checkout",
+          r["install_rc"] == 0 and r["is_link"]
+          and r["real"] == os.path.join(r["live"], "bin", "ste-changed"), shown(r) + "\nlinks to " + r["real"])
+    check("installed copy, local: a drifted pin exits 3 with the pin message", drifted_from_checkout(r), shown(r))
 sys.exit(1 if failed else 0)

@@ -10,6 +10,7 @@ Outcome protected: a lane never loses a CI run, or its place in the batch, to a 
 
 - Rule `git-integration-branch-merge`: a CI lint red that `bin/ste-changed` passes, while it blames an old ste-lint pin, is not a strike. The session moves that pin to claude-settings main in a lane of its own, with no question. Its reviewer checks only that the lane changes pin lines alone, to a main commit that descends from the old pin. claude-settings main already reviewed the lint change. Other action pins keep the normal rule, because they are checks with no local twin.
 - A commented-out pin is not a pin.
+- `bin/ste-changed` lints and reads pins from one checkout: the one beside its real path when that holds `actions/ste-lint`, else the one the global CLAUDE.md points at (hooks/guard_pointer.py `pointer_checkout`). A copy install has no `actions/` and is no git repo.
 - `bin/ste-changed` reads each `claude-settings/actions/ste-lint@<sha>` pin in the linted repo's `.github/workflows`. It compares the files the step runs (`LINT_FILES`) at the pin with this copy's. On a difference it prints the pin, its date, its line and the remedy, and exits 3 even when the lint passed. An equal pin prints one line and changes nothing. A pin this clone does not hold is unknown and changes no exit code.
 - Pins stay current on demand: the session that runs the tool sees the drift and moves the pin. No bot and no schedule. Rule `outcomes-mechanize-rules` allows on-demand reads, never a timer.
 

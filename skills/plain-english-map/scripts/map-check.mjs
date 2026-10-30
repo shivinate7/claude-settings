@@ -653,8 +653,8 @@ const NOTE_RE = /^\s*(?:\/\*\*?|\/\/|\*)?\s*In plain words:/;
 const HASH_NOTE_RE = /^\s*#\s*In plain words:/;
 const SQL_NOTE_RE =/^\s*--\s*In plain words:/;
 
-const commentText = (text) => {
-  const blanked = blankComments(text);
+const commentText = (text, file) => {
+  const blanked = blankComments(text, file);
   let out = '';
   for (let i = 0; i < text.length; i++) out += blanked[i] !== text[i] || text[i] === '\n' ? text[i] : ' ';
   return out.split('\n');
@@ -667,7 +667,7 @@ export const plainWordsNotes = (files) =>
     .flatMap((path) => {
       const raw = files[path].split('\n');
       if (/\.(py|sh)$/.test(path)) return raw.flatMap((line, i) => (HASH_NOTE_RE.test(line) ? [path + ':' + (i + 1)] : []));
-      return commentText(files[path]).flatMap((line, i) =>
+      return commentText(files[path], path).flatMap((line, i) =>
         NOTE_RE.test(line) || SQL_NOTE_RE.test(raw[i]) ? [path + ':' + (i + 1)] : []
       );
     });
@@ -694,18 +694,18 @@ export const seamHasCallSite = (seam, files, read, readSites) =>
   files.some((p) => {
     if (!/\.(ts|tsx|mjs|js|cjs)$/.test(p) || p === seam || isTestPath(p)) return false;
     const source = read(p);
-    return importsSeam(blankCommentsAndStrings(source), blankComments(source), seam) && readSites({ [p]: source }).length > 0;
+    return importsSeam(blankCommentsAndStrings(source, p), blankComments(source, p), seam) && readSites({ [p]: source }).length > 0;
   });
 
 /** Reads the stage literals a worker records: `<variable> = '<lit>'` and `<callback>('<lit>'`, the names from `workerStage` in the config. The literal may sit on the line after `<callback>(`. A config with no `workerStage` has no stages. */
-export const stageSites = (source, cfg = repoMapConfig()) => {
+export const stageSites = (source, cfg = repoMapConfig(), file) => {
   const stage = validateMapConfig(cfg).workerStage;
-  return stage ? stageSitesOf(source, stage) : [];
+  return stage ? stageSitesOf(source, stage, file) : [];
 };
 
 /** The stage sites of one source for one `workerStage` pair. The validator asks it, before a config is valid. */
-export const stageSitesOf = (source, stage) => {
-  const code = blankCommentsAndStrings(source), clean = blankComments(source);
+export const stageSitesOf = (source, stage, file) => {
+  const code = blankCommentsAndStrings(source, file), clean = blankComments(source, file);
   const out = [];
   // A name left out of `stage` has no alternative, so no source can satisfy it.
   const alts = [stage.variable && `${escapeRe(stage.variable)}\\s*=(?!=)`, stage.callback && `${escapeRe(stage.callback)}\\s*\\(`].filter(Boolean);
@@ -734,8 +734,8 @@ const around = (sf, line) => {
 };
 
 /** A stage makes a model call where its span, from its literal to the next stage's literal, hands a transport on. Returns { step, line }. */
-const stageCalls = (source, stages) => {
-  const lines = blankCommentsAndStrings(source).split('\n'), out = [];
+const stageCalls = (source, stages, file) => {
+  const lines = blankCommentsAndStrings(source, file).split('\n'), out = [];
   // `const gatedTransport = gate(countedTransport(...))` builds a transport. A name inside that initializer is a wrapper, not a call.
   const building = [], sf = parse('stage-calls.ts', source);
   kids(sf, (n) => {
@@ -868,8 +868,8 @@ const routeByHandler = (sf, spans, line) => {
 export const pinFields = (pins) => ({ pins, tier: pins.length === 1 ? pins[0].tier : null, effort: pins.length === 1 ? pins[0].effort : null });
 
 const fileRows = (p, source, outside, pins, idx, cfg, found) => {
-  const code = blankCommentsAndStrings(source).split('\n');
-  const stages = stageSites(source, cfg), lines = blankComments(source).split('\n');
+  const code = blankCommentsAndStrings(source, p).split('\n');
+  const stages = stageSites(source, cfg, p), lines = blankComments(source, p).split('\n');
   const literal = (line, key) => lines[line - 1].match(new RegExp(`\\b${key}\\s*:\\s*(['"])(\\w+)\\1`))?.[2] ?? null;
   const sites = found.map(({ line, step }) => ({ line, step, tier: literal(line, 'tier'), effort: literal(line, 'effort') }));
   // The hook of a call reads the running stage: `step: <variable>`.
@@ -897,7 +897,7 @@ const fileRows = (p, source, outside, pins, idx, cfg, found) => {
   });
   let parsed = null;
   const sfAll = () => (parsed ??= parse(p, source));
-  const calls = stageCalls(source, stages).map(({ step, line }) => ({ line, step, ...pinFields(calleePin(sfAll(), line, pins, idx)) }));
+  const calls = stageCalls(source, stages, p).map(({ step, line }) => ({ line, step, ...pinFields(calleePin(sfAll(), line, pins, idx)) }));
   const spans = routeSpans(p, source);
   const routeOf = (line) => spans.filter((r) => r.from <= line && line <= r.to).sort((a, b) => (a.to - a.from) - (b.to - b.from))[0]?.route
     ?? (spans.length ? routeByHandler(sfAll(), spans, line) : null);
@@ -957,7 +957,7 @@ export const aiCallRows = (sources, cfg = repoMapConfig()) => {
   return callerPaths(sources, cfg).flatMap((p) => {
     const outside = /(^|\/)[^/]*Cli\.[a-z]+$/.test(p) ? 'cli' : null;
     // A file is a caller only when it imports the seam, as `seamHasCallSite` holds. A stage row needs no import.
-    const imports = importsSeam(blankCommentsAndStrings(sources[p]), blankComments(sources[p]), seamOf(cfg));
+    const imports = importsSeam(blankCommentsAndStrings(sources[p], p), blankComments(sources[p], p), seamOf(cfg));
     return fileRows(p, sources[p], outside, pins, lazyIdx, cfg, imports ? sites.filter((s) => s.file === p) : []);
   });
 };
