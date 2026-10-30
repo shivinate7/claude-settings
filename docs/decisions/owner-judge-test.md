@@ -2,7 +2,7 @@
 
 ## The ruling
 
-A session asks the owner a decision only when he can judge it from what he already knows. Owner, 2026-10-29 13:44 CDT: ask nothing his past rulings answer. Before it writes a decision to the waiting page (skill `waiting-page`), the session runs the owner-judge test: can the owner judge this from what he already knows? An undoable choice about internals he has no stake in is not asked. The session takes its own pick and sets `stands: true`.
+A session asks the owner a decision only when he can judge it from what he already knows. Owner, 2026-10-29 13:44 CDT, decision `session-tiers`: "I shouldn't be expected to be around to do something I'd already signed off for". Before it writes a decision to the waiting page (skill `waiting-page`), the session runs the owner-judge test: can the owner judge this from what he already knows? An undoable choice about internals he has no stake in is not asked. The session takes its own pick and sets `stands: true`.
 
 A question stays only when it touches one of five things: his goals, his money, a risk he would care about, a rule, or an act that cannot be undone. The decision names which, in a line in `context`.
 
