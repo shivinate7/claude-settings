@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Card Store Phone</title>
+<style>
+/* Role colours, light. Every hex is this lane's own choice (blind lane, house tokens.md gives no value). */
+:root {
+  color-scheme: light;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --radius: 8px;
+  --page: #dcd7cc;
+  --surface: #f6f4ef; --surface-raised: #ffffff; --surface-sunk: #e9e5dc;
+  --text: #1c1b18; --text-muted: #5b574e; --line: #d3cdc0;
+  --accent: #0a6b5d; --on-accent: #ffffff; --accent-bg: #dcefeb;
+  --attn: #7f5200; --on-attn: #ffffff; --attn-bg: #fbeccc;
+  --pull: #a13a12; --on-pull: #ffffff; --pull-bg: #fae3d8;
+  --done: #2c6a31; --done-bg: #e2eee0;
+  --danger: #a11f2a; --danger-bg: #f8e1e2;
+  --held: #615d55;
+  --camera: #0d0d0c; --on-camera: #f4f2ec;
+  --scrim: rgb(0 0 0 / 0.38);
+  --bar: rgb(255 255 255 / 0.9);
+  --hatch: #c4bdb0;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 8px 24px rgb(0 0 0 / 0.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0a0a09;
+    --surface: #141412; --surface-raised: #1e1d1a; --surface-sunk: #0c0c0b;
+    --text: #efece5; --text-muted: #aaa597; --line: #36342e;
+    --accent: #5cc8b4; --on-accent: #06251f; --accent-bg: #12342e;
+    --attn: #f2b84b; --on-attn: #2a1c00; --attn-bg: #3a2a0d;
+    --pull: #f39167; --on-pull: #2a1006; --pull-bg: #3d1e12;
+    --done: #86c98a; --done-bg: #1a2e1b;
+    --danger: #ff8189; --danger-bg: #3c171a;
+    --held: #a29d91;
+    --scrim: rgb(0 0 0 / 0.6);
+    --bar: rgb(30 29 26 / 0.92);
+    --hatch: #3d3a33;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0a0a09;
+  --surface: #141412; --surface-raised: #1e1d1a; --surface-sunk: #0c0c0b;
+  --text: #efece5; --text-muted: #aaa597; --line: #36342e;
+  --accent: #5cc8b4; --on-accent: #06251f; --accent-bg: #12342e;
+  --attn: #f2b84b; --on-attn: #2a1c00; --attn-bg: #3a2a0d;
+  --pull: #f39167; --on-pull: #2a1006; --pull-bg: #3d1e12;
+  --done: #86c98a; --done-bg: #1a2e1b;
+  --danger: #ff8189; --danger-bg: #3c171a;
+  --held: #a29d91;
+  --scrim: rgb(0 0 0 / 0.6);
+  --bar: rgb(30 29 26 / 0.92);
+  --hatch: #3d3a33;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  background: var(--page); color: var(--text);
+  font-size: 17px; line-height: 22px;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, p, ol, ul, figure { margin: 0; }
+ol, ul { padding: 0; list-style: none; }
+button { font: inherit; color: inherit; }
+b { font-weight: 600; }
+
+/* Dynamic Type text styles at the default size (Apple typography page, read 2026-10-30). */
+.t-lt { font-size: 34px; line-height: 41px; font-weight: 700; }
+.t-t1 { font-size: 28px; line-height: 34px; font-weight: 700; }
+.t-t2 { font-size: 22px; line-height: 28px; font-weight: 700; }
+.t-t3 { font-size: 20px; line-height: 25px; font-weight: 600; }
+.t-hl { font-size: 17px; line-height: 22px; font-weight: 600; }
+.t-body { font-size: 17px; line-height: 22px; }
+.t-co { font-size: 16px; line-height: 21px; }
+.t-sh { font-size: 15px; line-height: 20px; }
+.t-fn { font-size: 13px; line-height: 18px; }
+.t-c1 { font-size: 12px; line-height: 16px; }
+.muted { color: var(--text-muted); }
+
+/* ---------- Page chrome (outside the phones) ---------- */
+.banner {
+  background: var(--attn-bg); color: var(--attn); border-bottom: 2px dashed var(--attn);
+  padding: var(--space-2) var(--space-4); text-align: center; font-weight: 600;
+}
+.page-head { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-1); }
+.controls {
+  padding: 0 var(--space-4) var(--space-3); display: flex; flex-direction: column; gap: var(--space-3);
+}
+.ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ctl-k { font-size: 13px; line-height: 18px; color: var(--text-muted); min-width: 64px; }
+.chip-pair { display: inline-flex; align-items: stretch; }
+.chip {
+  min-height: 44px; padding: 0 var(--space-3); border-radius: var(--radius);
+  background: var(--surface-raised); border: 1px solid var(--line); cursor: pointer;
+  font-size: 15px; line-height: 20px;
+}
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.chip-pair .chip:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.chip-hide {
+  min-width: 44px; min-height: 44px; border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--surface-raised); border: 1px solid var(--line); border-inline-start: 0; cursor: pointer;
+  color: var(--text-muted);
+}
+.state-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.caption {
+  margin: 0 var(--space-4); padding: var(--space-3) var(--space-4); background: var(--surface);
+  border-radius: var(--radius); display: flex; flex-direction: column; gap: var(--space-2);
+}
+.caption a { color: var(--accent); }
+.tag-new {
+  align-self: flex-start; border: 1.5px dashed var(--text-muted); border-radius: var(--radius);
+  padding: 2px var(--space-2); font-size: 13px; line-height: 18px;
+}
+.stage {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-8);
+  padding: var(--space-4); overflow-x: auto;
+}
+.pose { display: flex; flex-direction: column; gap: var(--space-2); }
+.pose figcaption { font-size: 13px; line-height: 18px; color: var(--text-muted); }
+
+/* ---------- Device frames: sizes measured on the iPhone Duo simulator (brief) ---------- */
+.frame {
+  position: relative; background: var(--surface); color: var(--text); overflow: hidden;
+  border-radius: 28px; outline: 8px solid #050505; box-shadow: var(--shadow); flex: none;
+}
+.frame.folded {
+  width: 466px; height: 678px; display: flex;
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: max(env(safe-area-inset-right), 84px);
+  padding-bottom: max(env(safe-area-inset-bottom), 34px);
+}
+.frame.folded > .screen { flex: 1; min-width: 0; position: relative; display: flex; }
+.inset-trail {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 84px;
+  background: repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 8px);
+  border-inline-start: 1px dashed var(--hatch);
+}
+.home-ind { position: absolute; left: 0; right: 84px; bottom: 0; height: 34px; display: grid; place-items: center; }
+.home-ind::after { content: ""; width: 120px; height: 5px; border-radius: 3px; background: var(--text); opacity: 0.8; }
+.frame.folded.kb { padding: 0; flex-direction: column; }
+.frame.folded.kb > .screen { flex: 0 0 250px; }
+.frame.folded.kb .inset-trail, .frame.folded.kb .home-ind { display: none; }
+
+.frame.unfolded {
+  width: 951px; height: 644px; display: grid;
+  grid-template-columns: 455.5px 40px 455.5px; grid-template-rows: 1fr;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.frame.unfolded.kb { grid-template-rows: 263px 1fr; }
+.pane { position: relative; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.fold {
+  background: repeating-linear-gradient(90deg, var(--hatch) 0 1px, transparent 1px 6px), var(--surface);
+}
+.kbd {
+  display: none; grid-column: 1 / -1; background: var(--surface-sunk); border-top: 1px solid var(--line);
+  padding: var(--space-2); flex-direction: column; gap: var(--space-2); align-items: center; justify-content: flex-start;
+}
+.frame.kb .kbd { display: flex; }
+.frame.folded .kbd { flex: 1; }
+.kbd-row { display: flex; gap: var(--space-1); width: 100%; justify-content: center; }
+.kbd-row span {
+  flex: 0 1 40px; height: 44px; border-radius: 6px; background: var(--surface-raised);
+  display: grid; place-items: center; font-size: 17px; color: var(--text); box-shadow: 0 1px 0 var(--line);
+}
+.kbd-cap { font-size: 12px; line-height: 16px; color: var(--text-muted); }
+/* Unfolded, the keyboard is split at the fold: the fold strip holds no key and no text. */
+.frame.unfolded.kb .kbd { display: grid; grid-template-columns: 455.5px 40px 455.5px; padding: 0; }
+.kbd-half { display: flex; flex-direction: column; gap: var(--space-2); align-items: center; padding: var(--space-2); }
+.kbd-fold { background: repeating-linear-gradient(90deg, var(--hatch) 0 1px, transparent 1px 6px), var(--surface-sunk); }
+
+/* ---------- App primitives (inside a screen or a pane) ---------- */
+.scr {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface);
+  position: relative; overflow: hidden; container-type: inline-size;
+}
+.nav { flex: none; padding: var(--space-1) var(--space-4) 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.nav-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 44px; }
+.nav-row > :last-child { justify-self: end; }
+.nav-btn {
+  min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; gap: 2px;
+  background: none; border: 0; padding: 0; color: var(--accent); font-size: 17px; cursor: pointer;
+}
+.nav-mid { font-weight: 600; text-align: center; }
+.nav-prog { color: var(--text-muted); font-size: 15px; }
+.body {
+  flex: 1; min-height: 0; overflow: auto; padding: var(--space-2) var(--space-4) var(--space-4);
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+.body.center { justify-content: center; align-items: center; text-align: center; }
+.foot {
+  flex: none; padding: var(--space-2) var(--space-4) var(--space-3); display: flex; flex-direction: column;
+  gap: var(--space-2); border-top: 1px solid var(--line); background: var(--surface);
+}
+.stack-1 { display: flex; flex-direction: column; gap: var(--space-1); }
+.stack-2 { display: flex; flex-direction: column; gap: var(--space-2); }
+.stack-3 { display: flex; flex-direction: column; gap: var(--space-3); }
+.cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+
+.btn {
+  min-height: 50px; border-radius: var(--radius); border: 0; padding: 0 var(--space-4);
+  font-size: 17px; line-height: 22px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+}
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-tint { background: var(--accent-bg); color: var(--accent); }
+.btn-plain { background: none; color: var(--accent); min-height: 44px; }
+.btn-stop { background: var(--danger-bg); color: var(--danger); }
+.btn-cam { background: rgb(255 255 255 / 0.16); color: var(--on-camera); }
+
+.ic { flex: none; }
+
+/* Floating tab bar (concept A). The capsule is the system control's own shape. */
+.tabbar {
+  flex: none; margin: 0 var(--space-4) var(--space-2); display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  background: var(--bar); border: 1px solid var(--line); border-radius: 999px; padding: var(--space-1);
+  box-shadow: var(--shadow);
+}
+.tab {
+  min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border: 0; background: none; border-radius: 999px; color: var(--text-muted); font-size: 12px; line-height: 16px;
+}
+.tab[aria-current="page"] { color: var(--accent); background: var(--accent-bg); font-weight: 600; }
+
+/* Segmented control */
+.seg-ctl { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--surface-sunk); border-radius: var(--radius); padding: 2px; }
+.seg-ctl button { min-height: 44px; border: 0; background: none; border-radius: 6px; font-size: 15px; color: var(--text); }
+.seg-ctl button[aria-pressed="true"] { background: var(--surface-raised); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); }
+
+/* Inset grouped list */
+.group { background: var(--surface-raised); border-radius: var(--radius); display: flex; flex-direction: column; }
+.row {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3); min-height: 56px; border: 0; border-top: 1px solid var(--line);
+  background: none; text-align: start; width: 100%;
+}
+.row:first-child { border-top: 0; }
+.row.sel { background: var(--accent-bg); }
+.row.dim { color: var(--text-muted); }
+.row .chev { color: var(--text-muted); }
+.gh { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); padding: 0 var(--space-1); }
+.list-sec { display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* Status shapes: the word shows once, in a legend; each row shows only the shape. */
+.sh { flex: none; display: inline-block; width: 12px; height: 12px; }
+.sh-pull { background: var(--pull); border-radius: 50%; }
+.sh-wait { background: var(--attn); width: 10px; height: 10px; transform: rotate(45deg); margin: 1px; }
+.sh-listed { border: 2px solid var(--accent); border-radius: 50%; }
+.sh-held { background: var(--held); height: 4px; border-radius: 2px; }
+.sh-reading { border: 2px dotted var(--text-muted); border-radius: 50%; }
+.legend { display: flex; flex-wrap: wrap; gap: var(--space-3); font-size: 13px; line-height: 18px; color: var(--text-muted); }
+.legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+/* Card picture (sample art: a coloured card, no real card image) */
+.art {
+  position: relative; aspect-ratio: 63 / 88; border-radius: 4px; flex: none; overflow: hidden;
+  background: linear-gradient(160deg, hsl(var(--h) 55% 62%), hsl(var(--h) 45% 28%));
+  box-shadow: inset 0 0 0 3px hsl(var(--h) 35% 86%);
+}
+.art::before {
+  content: ""; position: absolute; inset: 14% 11% 40% 11%; border-radius: 2px;
+  background: hsl(var(--h) 45% 82% / 0.55);
+}
+.art-name {
+  position: absolute; left: 10%; right: 10%; bottom: 9%; color: #fff; font-weight: 700;
+  font-size: calc(var(--w) * 0.1); line-height: 1.15; text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+}
+.art.glare::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle at 72% 78%, rgb(255 255 255 / 0.97) 0 18%, rgb(255 255 255 / 0) 46%);
+}
+.art.blur { filter: blur(2px); }
+.art.dim { opacity: 0.6; }
+.art.hit { outline: 3px solid var(--pull); outline-offset: 3px; }
+.art.tilt { transform: rotate(-4deg); }
+
+/* Count row: card tops seen from above, front of the box on the left */
+.count-wrap { display: flex; flex-direction: column; gap: var(--space-1); }
+.count-ends { display: flex; justify-content: space-between; font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.count { display: flex; align-items: flex-end; gap: var(--space-1); overflow: hidden; }
+.ct-div { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.ct-tab {
+  background: var(--text); color: var(--surface); font-size: 13px; line-height: 18px; font-weight: 600;
+  padding: 1px var(--space-2); border-radius: 4px 4px 0 0;
+}
+.ct-divbar { width: 6px; height: 60px; background: var(--text); border-radius: 0 0 2px 2px; }
+.ct-card { flex: none; width: 24px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.ct-edge { width: 24px; height: 52px; background: var(--surface-sunk); border: 1px solid var(--line); border-radius: 3px; }
+.ct-n { font-size: 13px; line-height: 18px; color: var(--text-muted); }
+.ct-card.hit .ct-edge { background: var(--pull); border-color: var(--pull); height: 60px; }
+.ct-card.hit .ct-n { color: var(--pull); font-weight: 700; }
+.ct-gap { flex: none; align-self: center; color: var(--text-muted); font-size: 15px; padding-bottom: 20px; }
+
+/* Box strip: the whole box from front to back */
+.strip { display: flex; flex-direction: column; gap: 2px; }
+.strip-bar { position: relative; display: flex; gap: 2px; height: 16px; }
+.strip-seg { flex: var(--n) 1 0; min-width: 0; background: var(--surface-sunk); border: 1px solid var(--line); border-radius: 2px; }
+.strip-seg.on { background: var(--pull-bg); border-color: var(--pull); }
+.strip-mark { position: absolute; top: -4px; bottom: -4px; width: 4px; margin-left: -2px; background: var(--pull); border-radius: 2px; left: var(--at); }
+.strip-mark.wait { background: var(--attn); }
+
+/* Neighbours: the card in front, this card, the card behind */
+.nb { display: grid; grid-template-columns: 1fr 1.35fr 1fr; gap: var(--space-3); align-items: end; }
+.nb figure { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
+.nb figcaption { font-size: 12px; line-height: 16px; color: var(--text-muted); text-align: center; }
+.nb figure.this figcaption { color: var(--pull); font-weight: 600; }
+
+.step { display: flex; flex-direction: column; gap: var(--space-2); }
+.step-k { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text-muted); }
+.card-panel { background: var(--surface-raised); border-radius: var(--radius); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-3); }
+
+details.why { font-size: 13px; line-height: 18px; color: var(--text-muted); }
+details.why summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--accent); }
+.notice {
+  border-radius: var(--radius); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--danger-bg); color: var(--text);
+}
+.notice .notice-k { color: var(--danger); font-weight: 600; }
+.done-line {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  background: var(--done-bg); color: var(--done); border-radius: var(--radius); padding: 0 var(--space-1) 0 var(--space-3);
+  min-height: 50px; font-weight: 600;
+}
+.done-line button { min-height: 44px; min-width: 64px; border: 0; background: none; color: var(--done); font-weight: 600; text-decoration: underline; }
+
+.progress { height: 6px; background: var(--surface-sunk); border-radius: 3px; overflow: hidden; }
+.progress > i { display: block; height: 100%; background: var(--accent); width: var(--p); }
+.route-prog { display: flex; gap: 2px; padding: 0 var(--space-4); flex: none; }
+.route-prog i { flex: 1; height: 6px; border-radius: 2px; background: var(--surface-sunk); }
+.route-prog i.d { background: var(--done); }
+.route-prog i.c { background: var(--pull); }
+
+/* Alert over a pane */
+.scrim { position: absolute; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: var(--space-6); z-index: 5; }
+.alert {
+  width: 100%; max-width: 300px; background: var(--surface-raised); border-radius: var(--radius); overflow: hidden;
+  display: flex; flex-direction: column; box-shadow: var(--shadow);
+}
+.alert-body { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); text-align: center; }
+.alert-btns { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+.alert-btns button { min-height: 50px; border: 0; background: none; color: var(--accent); font-size: 17px; }
+.alert-btns button + button { border-inline-start: 1px solid var(--line); font-weight: 600; }
+.alert-btns .focus { outline: 3px solid var(--accent); outline-offset: -5px; border-radius: 6px; }
+
+/* Camera */
+/* The camera view is dark in both themes, so its status shapes take the dark-theme role values. */
+.cam { flex: 1; display: flex; flex-direction: column; background: var(--camera); color: var(--on-camera); position: relative; min-height: 0;
+  --attn: #f2b84b; --accent: #5cc8b4; }
+.cam-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 44px; padding: var(--space-1) var(--space-4) 0; }
+.cam-top > :last-child { justify-self: end; }
+.cam-top .nav-btn { color: var(--on-camera); }
+.cam-view {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3);
+  background: radial-gradient(ellipse at 50% 55%, #3b3832 0%, #191816 55%, #0d0d0c 100%);
+}
+.cam-guide { border: 2px dashed rgb(244 242 236 / 0.7); border-radius: var(--radius); padding: var(--space-3); }
+.cam-bottom { padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+.cam-count { display: flex; align-items: baseline; gap: var(--space-2); justify-content: center; }
+.cam-thumbs { display: flex; gap: var(--space-3); justify-content: center; align-items: flex-end; }
+.cam-thumbs figure { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); font-size: 12px; line-height: 16px; }
+.cam .legend { color: rgb(244 242 236 / 0.85); justify-content: center; }
+.cam .sh-reading { border-color: rgb(244 242 236 / 0.85); }
+
+/* Candidate rows */
+.cand {
+  display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-3); align-items: center; width: 100%;
+  min-height: 72px; padding: var(--space-2) var(--space-3); border-radius: var(--radius);
+  background: var(--surface-raised); border: 1px solid var(--line); text-align: start; cursor: pointer;
+}
+
+/* Shelf map (concepts B and C) */
+.shelf { display: flex; flex-direction: column; gap: var(--space-3); }
+.shelf-row { display: flex; flex-direction: column; gap: var(--space-1); }
+.shelf-boxes { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--space-3) var(--space-1); padding-bottom: var(--space-1); border-bottom: 3px solid var(--line); }
+.bx {
+  position: relative; min-height: 52px; padding: 0; border-radius: var(--radius); cursor: pointer;
+  background: var(--surface-raised); border: 1px solid var(--line); color: var(--text-muted);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; line-height: 16px;
+}
+.bx b { font-size: 20px; line-height: 25px; color: var(--text); }
+.bx.lp { background: var(--pull-bg); border: 2px solid var(--pull); color: var(--pull); }
+.bx.lp b { color: var(--pull); }
+.bx.lw { background: var(--attn-bg); border: 2px solid var(--attn); color: var(--attn); }
+.bx.lw b { color: var(--attn); }
+.bx.lr { background: var(--accent-bg); border: 2px solid var(--accent); color: var(--accent); }
+.bx.lr b { color: var(--accent); }
+.bx.here { outline: 3px solid var(--text); outline-offset: 2px; }
+.bx-n {
+  position: absolute; bottom: -11px; right: 0; min-width: 22px; height: 22px; border-radius: 11px; padding: 0 6px;
+  font-size: 12px; line-height: 22px; font-weight: 700; background: var(--pull); color: var(--on-pull);
+}
+.bx.lw .bx-n { background: var(--attn); color: var(--on-attn); }
+.shelf.mini .shelf-boxes { gap: var(--space-1); }
+.shelf.mini .bx { min-height: 22px; border-radius: 4px; cursor: default; }
+.shelf.mini .bx.lp { background: var(--pull-bg); border-width: 1px; }
+.shelf.mini .bx.here { background: var(--pull); border-color: var(--pull); outline: 3px solid var(--text); }
+.shelf.mini { gap: var(--space-2); }
+
+/* Box x-ray (concept B): each card is one edge; sections are rows */
+.xr { display: flex; flex-direction: column; gap: var(--space-3); }
+.xr-sec { display: flex; flex-direction: column; gap: var(--space-1); }
+.xr-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; line-height: 20px; }
+.xr-bar { display: flex; flex-wrap: wrap; gap: 1px; align-items: flex-end; min-height: 32px; }
+.xr-e { width: 2px; height: 28px; background: var(--line); }
+.xr-e.t { width: 4px; height: 36px; background: var(--pull); }
+.xr-e.w { width: 4px; height: 36px; background: var(--attn); }
+.xr-e.h { background: var(--held); }
+.xr-e.new { background: var(--accent); }
+.pill {
+  display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-3);
+  border-radius: 999px; border: 2px solid var(--pull); background: var(--pull-bg); color: var(--pull); font-size: 15px; font-weight: 600;
+}
+.pill.w { border-color: var(--attn); background: var(--attn-bg); color: var(--attn); }
+
+/* Bottom sheet inside a screen */
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; top: 96px; background: var(--surface-raised);
+  border-radius: var(--radius) var(--radius) 0 0; box-shadow: 0 -8px 24px rgb(0 0 0 / 0.2);
+  display: flex; flex-direction: column; z-index: 4;
+}
+.sheet .body, .sheet .foot { background: var(--surface-raised); }
+.grabber { align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--line); margin-top: var(--space-2); }
+
+/* Route choice tiles (concept C start) */
+.choice {
+  display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-3); align-items: center; width: 100%;
+  padding: var(--space-4); border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-raised);
+  text-align: start; cursor: pointer; min-height: 120px;
+}
+.choice .ic-big { width: 48px; height: 48px; border-radius: var(--radius); display: grid; place-items: center; }
+.choice.pull .ic-big { background: var(--pull-bg); color: var(--pull); }
+.choice.list .ic-big { background: var(--accent-bg); color: var(--accent); }
+.route { display: flex; flex-direction: column; gap: var(--space-2); }
+.route li { display: grid; grid-template-columns: 24px 1fr auto; gap: var(--space-2); align-items: center; min-height: 44px; padding: var(--space-1) var(--space-3); border-radius: var(--radius); background: var(--surface-raised); }
+.route li.cur { outline: 2px solid var(--pull); }
+.route li.d { color: var(--text-muted); }
+.env { width: 100%; max-width: 240px; aspect-ratio: 16 / 10; border: 2px solid var(--text); border-radius: 6px; position: relative; background: var(--surface-raised); display: grid; place-items: center; overflow: hidden; }
+.env::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 50%; border-bottom: 2px solid var(--text); clip-path: polygon(0 0, 100% 0, 50% 100%); background: var(--surface-sunk); }
+.env span { position: relative; margin-top: 30%; font-weight: 600; }
+.dots { display: flex; gap: var(--space-1); }
+.dots i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--done); }
+.dots i.f { background: var(--done); }
+.big-check { width: 88px; height: 88px; border-radius: 50%; background: var(--done-bg); color: var(--done); display: grid; place-items: center; }
+.big-check.ok { background: var(--accent-bg); color: var(--accent); }
+.field {
+  display: flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-3);
+  background: var(--surface-sunk); border-radius: var(--radius); color: var(--text-muted);
+}
+.field .typed { color: var(--text); }
+.field .caret { width: 2px; height: 22px; background: var(--accent); margin-left: -6px; }
+.scroll-x { overflow: hidden; }
+</style>
+</head>
+<body>
+<div class="banner" role="note">Sample. No figure, name, price, order or buyer on this page is real.</div>
+
+<header class="page-head">
+  <h1 class="t-t2">Card store phone: three concepts</h1>
+  <p class="t-sh">Lane kind: blind &middot; Lane: phone-blind-3 &middot; Device: iPhone Duo, folded first, then unfolded.</p>
+  <p class="t-fn muted">Blind lane: today's screens were not seen, so every part is marked New. Nothing is marked Today.</p>
+</header>
+
+<nav class="controls" aria-label="Mockup controls">
+  <div class="ctl-row" id="concept-row"><span class="ctl-k">Concept</span></div>
+  <div class="ctl-row" id="state-row"></div>
+  <div class="ctl-row" id="theme-row">
+    <span class="ctl-k">Theme</span>
+    <button class="chip" data-t="auto">System</button>
+    <button class="chip" data-t="light">Light</button>
+    <button class="chip" data-t="dark">Dark</button>
+  </div>
+</nav>
+
+<section class="caption" id="caption" aria-live="polite"></section>
+
+<main class="stage">
+  <figure class="pose">
+    <figcaption id="cap-folded">iPhone Duo, folded: frame 466 &times; 678, safe content 382 &times; 644, trailing inset 84, bottom inset 34.</figcaption>
+    <div class="frame folded" data-device="iphone-duo-folded" id="frame-folded">
+      <div class="screen" id="screen-folded"></div>
+      <div class="kbd" aria-hidden="true"></div>
+      <div class="inset-trail" aria-hidden="true"></div>
+      <div class="home-ind" aria-hidden="true"></div>
+    </div>
+  </figure>
+  <figure class="pose">
+    <figcaption id="cap-unfolded">iPhone Duo, unfolded: 951 wide, fold strip 455.5 to 495.5 holds nothing. Height 644 is not measured.</figcaption>
+    <div class="frame unfolded" data-device="iphone-duo-unfolded" id="frame-unfolded">
+      <div class="pane" id="pane-left"></div>
+      <div class="fold" aria-hidden="true"></div>
+      <div class="pane" id="pane-right"></div>
+      <div class="kbd" aria-hidden="true"></div>
+    </div>
+  </figure>
+</main>
+
+<script>
+"use strict";
+/* ================= Icons ================= */
+const svg = (d, s = 22) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const P = {
+  back: 'M15 5l-7 7 7 7', chev: 'M9 6l6 6-6 6', check: 'M5 12.5l4.5 4.5L19 7',
+  pull: 'M4 13v7h16v-7M12 3v12M7.5 7.5L12 3l4.5 4.5',
+  camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 10a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z',
+  boxes: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  search: 'M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13zM15.5 15.5L20 20',
+  env: 'M3 6h18v12H3zM3 6l9 7 9-7', shelf: 'M3 5h18M3 12h18M3 19h18M5 5v14M19 5v14',
+  plus: 'M12 5v14M5 12h14', x: 'M6 6l12 12M18 6L6 18', pause: 'M8 5v14M16 5v14',
+  divider: 'M6 3v18M6 4h8l-2 3 2 3H6', retake: 'M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5',
+};
+const I = Object.fromEntries(Object.entries(P).map(([k, d]) => [k, svg(d)]));
+const big = (k) => svg(P[k], 28);
+
+/* ================= Sample data ================= */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ord = n => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+
+const SHELF = [
+  ['Pokémon 1', 'Pokémon 2', 'Pokémon 3', 'Pokémon 4', 'Pokémon 5', 'Pokémon 6'],
+  ['Pokémon 7', 'Pokémon 8', 'Pokémon 9', 'Pokémon 10', 'Pokémon 11', 'Pokémon 12'],
+  ['Pokémon 13', 'Pokémon 14', 'Magic 1', 'Magic 2', 'Magic 3', 'Magic 4'],
+  ['Magic 5', 'Magic 6', 'Magic 7', 'Magic 8', 'Magic 9', 'Magic 10'],
+  ['Lorcana 1', 'Lorcana 2', 'Lorcana 3', 'Lorcana 4', 'Lorcana 5', 'Lorcana 6'],
+];
+const SHELF_NAME = ['Top shelf', 'Shelf 2', 'Shelf 3', 'Shelf 4', 'Bottom shelf'];
+const where = box => { for (let r = 0; r < SHELF.length; r++) { const i = SHELF[r].indexOf(box); if (i >= 0) return `${SHELF_NAME[r]}, ${ord(i + 1)} from the left`; } return ''; };
+
+const BOX = {
+  'Pokémon 3': { total: 212, secs: [['Commons', 88], ['Uncommons', 54], ['Rares', 48], ['Holo', 22]] },
+  'Pokémon 7': { total: 212, secs: [['Commons', 96], ['Uncommons', 60], ['Rares', 40], ['Holo', 16]] },
+};
+const secStart = (box, sec) => { let n = 0; for (const [s, c] of BOX[box].secs) { if (s === sec) return n; n += c; } return n; };
+
+const K = {};
+const card = (id, o) => { K[id] = Object.assign({ id }, o); if (o.box && BOX[o.box] && o.sec) K[id].abs = secStart(o.box, o.sec) + o.nth; };
+card('mew', { name: 'Mew ex', set: '151', no: '151/165', print: 'Double Rare', cond: 'Lightly Played', h: 320, box: 'Pokémon 3', sec: 'Holo', nth: 3, buyer: 'B' });
+card('gard', { name: 'Gardevoir ex', set: 'Scarlet & Violet', no: '086/198', print: 'Double Rare', cond: 'Near Mint', h: 140, box: 'Pokémon 3', sec: 'Rares', nth: 22, buyer: 'T' });
+card('pika', { name: 'Pikachu ex', set: 'Surging Sparks', no: '057/191', print: 'Holo', cond: 'Near Mint', h: 48, box: 'Pokémon 3', sec: 'Rares', nth: 5, buyer: 'R', prev: ['Raichu', 32], next: ['Zapdos ex', 58] });
+card('umb', { name: 'Umbreon V', h: 250, box: 'Pokémon 8', sec: 'Holo', nth: 7, buyer: 'C' });
+card('eevee', { name: 'Eevee', h: 30, box: 'Pokémon 8', sec: 'Commons', nth: 31, buyer: 'D' });
+card('zard', { name: 'Charizard ex', h: 12, box: 'Pokémon 12', sec: 'Rares', nth: 2, buyer: 'R' });
+card('snor', { name: 'Snorlax', h: 200, box: 'Pokémon 12', sec: 'Uncommons', nth: 14, buyer: 'E' });
+card('squirt', { name: 'Squirtle', h: 205, box: 'Pokémon 12', sec: 'Commons', nth: 9, buyer: 'F' });
+card('elves', { name: 'Llanowar Elves', h: 110, box: 'Magic 1', sec: 'Green', nth: 20, buyer: 'G' });
+card('bolt', { name: 'Lightning Bolt', h: 6, box: 'Magic 1', sec: 'Red', nth: 12, buyer: 'K' });
+card('counter', { name: 'Counterspell', h: 215, box: 'Magic 1', sec: 'Blue', nth: 3, buyer: 'K' });
+card('swords', { name: 'Swords to Plowshares', h: 50, box: 'Magic 1', sec: 'White', nth: 8, buyer: 'H' });
+card('sol', { name: 'Sol Ring', h: 35, box: 'Magic 6', sec: 'Colorless', nth: 1, buyer: 'J' });
+card('thought', { name: 'Thoughtseize', h: 280, box: 'Magic 6', sec: 'Black', nth: 6, buyer: 'L' });
+card('maui', { name: 'Maui', h: 0, box: 'Lorcana 2', sec: 'Ruby', nth: 2, buyer: 'N' });
+card('elsa', { name: 'Elsa', h: 270, box: 'Lorcana 2', sec: 'Amethyst', nth: 4, buyer: 'M' });
+card('stitch', { name: 'Stitch', h: 40, box: 'Lorcana 2', sec: 'Amber', nth: 11, buyer: 'M' });
+// Candidates and seller cards
+card('cm1', { name: 'Charmander', set: 'Obsidian Flames', no: '026/197', print: 'Reverse Holo', price: '$0.62', h: 16 });
+card('cm2', { name: 'Charmander', set: '151', no: '004/165', print: 'Reverse Holo', price: '$1.10', h: 22 });
+card('cmx', { name: 'Charmander', h: 18 });
+card('bulb', { name: 'Bulbasaur', h: 120 });
+card('ivy', { name: 'Ivysaur', h: 130 });
+card('pikasearch', { name: 'Pikachu', h: 50 });
+K.pika.price = '$6.12';
+
+const ROUTE = [
+  { box: 'Pokémon 3', cards: ['mew', 'gard', 'pika'] },
+  { box: 'Pokémon 8', cards: ['umb', 'eevee'] },
+  { box: 'Pokémon 12', cards: ['zard', 'snor', 'squirt'] },
+  { box: 'Magic 1', cards: ['elves', 'bolt', 'counter', 'swords'] },
+  { box: 'Magic 6', cards: ['sol', 'thought'] },
+  { box: 'Lorcana 2', cards: ['maui', 'elsa', 'stitch'] },
+];
+const ORDER_NO = { R: '7C41-0912-B3', K: '2A90-1187-D1', M: '5E02-3341-A8' };
+const buyer = b => `Sample Buyer ${b}.`;
+const buyerCards = b => Object.values(K).filter(c => c.buyer === b);
+
+/* ================= Shared parts ================= */
+const art = (c, w, cls = '') => `<div class="art ${cls}" style="--h:${c.h};--w:${w}px;width:${w}px" aria-hidden="true"><span class="art-name">${w >= 56 ? esc(c.name) : ''}</span></div>`;
+const idf = (pose, id) => pose === 'folded' ? `id="${id}"` : '';
+
+function nav({ back, lead, title, large, sub, trail, prog } = {}) {
+  const l = back ? `<button class="nav-btn">${I.back}<span>${back}</span></button>` : lead ? `<button class="nav-btn">${lead}</button>` : '<span></span>';
+  const t = trail ? `<button class="nav-btn">${trail}</button>` : prog ? `<span class="nav-prog">${prog}</span>` : '<span></span>';
+  return `<div class="nav"><div class="nav-row">${l}<span class="nav-mid">${title || ''}</span>${t}</div>${large ? `<h2 class="t-lt">${large}</h2>` : ''}${sub ? `<p class="t-sh muted">${sub}</p>` : ''}</div>`;
+}
+const scr = (inner, cls = '') => `<div class="scr ${cls}">${inner}</div>`;
+const body = (inner, cls = '') => `<div class="body ${cls}">${inner}</div>`;
+const foot = inner => `<div class="foot">${inner}</div>`;
+const btn = (label, kind = 'primary', extra = '') => `<button class="btn btn-${kind}" ${extra}>${label}</button>`;
+
+function countRow(c) {
+  let cells = '';
+  const cell = i => `<div class="ct-card${i === c.nth ? ' hit' : ''}"><div class="ct-edge"></div><span class="ct-n">${i}</span></div>`;
+  if (c.nth <= 7) { for (let i = 1; i <= Math.max(c.nth + 2, 7); i++) cells += cell(i); }
+  else { cells = cell(1) + cell(2) + '<span class="ct-gap">&hellip;</span>'; for (let i = c.nth - 2; i <= c.nth + 1; i++) cells += cell(i); }
+  return `<div class="count-wrap"><div class="count-ends"><span>&larr; Front of the box (name label)</span><span>Back &rarr;</span></div>
+    <div class="count" role="img" aria-label="${esc(c.sec)} divider, then cards counted from the front; card ${c.nth} is the one."><div class="ct-div"><span class="ct-tab">${esc(c.sec)}</span><div class="ct-divbar"></div></div>${cells}</div></div>`;
+}
+// The whole box as one bar. Section names are left off: the divider tab and the sentence already name the
+// section (ux-label-once), so the target's section shows by its fill alone.
+function strip(box, marks, sec) {
+  const b = BOX[box];
+  const segs = b.secs.map(([s, n]) => `<div class="strip-seg ${s === sec ? 'on' : ''}" style="--n:${n}"></div>`).join('');
+  const m = marks.map(([abs, kind]) => `<i class="strip-mark ${kind || ''}" style="--at:${((abs - 0.5) / b.total * 100).toFixed(2)}%"></i>`).join('');
+  return `<div class="strip" role="img" aria-label="Whole box ${esc(box)}, front on the left"><div class="strip-bar">${segs}${m}</div><div class="count-ends"><span>Whole box: front</span><span>back, ${b.total} cards</span></div></div>`;
+}
+function neighbours(c, w = 64) {
+  const pv = { name: c.prev[0], h: c.prev[1] }, nx = { name: c.next[0], h: c.next[1] };
+  return `<div class="nb"><figure>${art(pv, w, 'dim')}<figcaption>In front:<br>${esc(pv.name)}</figcaption></figure>
+    <figure class="this">${art(c, Math.round(w * 1.35), 'hit')}<figcaption>This card</figcaption></figure>
+    <figure>${art(nx, w, 'dim')}<figcaption>Behind:<br>${esc(nx.name)}</figcaption></figure></div>`;
+}
+const facts = c => `<div class="stack-1"><h3 class="t-t3">${esc(c.name)}</h3><p class="t-sh muted">${esc(c.set)} &middot; ${esc(c.no)} &middot; ${esc(c.print)} &middot; ${esc(c.cond)}</p></div>`;
+const orderNo = b => `<details class="why"><summary>Order number</summary><p>${ORDER_NO[b] || '—'} (on the packing slip)</p></details>`;
+const serverSaid = txt => `<details class="why"><summary>What the server said</summary><p>${esc(txt)}</p></details>`;
+const legend = items => `<div class="legend">${items.map(([k, w]) => `<span><i class="sh sh-${k}"></i>${w}</span>`).join('')}</div>`;
+function alertBox(title, text, act) {
+  return `<div class="scrim"><div class="alert" role="alertdialog" aria-label="${esc(title)}"><div class="alert-body"><p class="t-hl">${title}</p><p class="t-fn">${text}</p></div>
+    <div class="alert-btns"><button class="focus" autofocus>Cancel</button><button>${act}</button></div></div></div>`;
+}
+const routeProg = (done, cur) => { let s = ''; for (let i = 0; i < 17; i++) s += `<i class="${i < done ? 'd' : i === cur ? 'c' : ''}"></i>`; return `<div class="route-prog" role="img" aria-label="${done} of 17 cards done">${s}</div>`; };
+function shelfMap(lit, opts = {}) {
+  const rows = SHELF.map((row, r) => `<div class="shelf-row">${opts.mini ? '' : `<span class="t-c1 muted">${SHELF_NAME[r]}</span>`}<div class="shelf-boxes">${row.map(name => {
+    const L = lit[name]; const [game, num] = name.split(' ');
+    const cls = L ? (L.k === 'p' ? 'lp' : L.k === 'w' ? 'lw' : 'lr') : '';
+    const here = opts.here === name ? ' here' : '';
+    if (opts.mini) return `<span class="bx ${cls}${here}"></span>`;
+    return `<button class="bx ${cls}${here}" aria-label="${esc(name)}${L && L.n ? ', ' + L.n : ''}">${game}<b>${num}</b>${L && L.n ? `<span class="bx-n">${L.n}</span>` : ''}</button>`;
+  }).join('')}</div></div>`).join('');
+  return `<div class="shelf ${opts.mini ? 'mini' : ''}" ${opts.id || ''} ${opts.mini ? `role="img" aria-label="${esc(where(opts.here))}"` : ''}>${rows}</div>`;
+}
+const PULL_LIT = Object.fromEntries(ROUTE.map(r => [r.box, { k: 'p', n: r.cards.length }]));
+PULL_LIT['Pokémon 3'].n = 1;
+
+function findSteps(c, opts = {}) {
+  return `<section class="step"><p class="step-k">1. Open the box</p><p class="t-t1">${esc(c.box)}</p><p class="t-sh muted">${where(c.box)}</p></section>
+  <section class="step" ${opts.placeId || ''}><p class="step-k">2. Count from the front</p>${countRow(c)}
+    <p class="t-body">After the ${esc(c.sec)} divider, take the <b>${ord(c.nth)}</b> card.</p>${opts.noStrip ? '' : strip(c.box, [[c.abs]], c.sec)}</section>`;
+}
+function compareStep(c, w, k = '3. Check it is this card') {
+  return `<section class="step"><p class="step-k">${k}</p>${neighbours(c, w)}${facts(c)}</section>`;
+}
+function camera(pose, o) {
+  const thumbs = `<div class="cam-thumbs"><figure>${art(K.bulb, 36)}<span>46</span></figure><figure>${art(K.ivy, 36, 'blur')}<span>47</span></figure><figure>${art(K.cmx, 36)}<span>48</span></figure></div>`;
+  // Folded, the box name sits in the count line; a title beside "Stop for now" collides at 382 wide.
+  return `<div class="cam"><div class="cam-top"><button class="nav-btn">${o.lead}</button><span class="nav-mid">${pose === 'folded' ? '' : o.title}</span><button class="nav-btn">${o.trail}</button></div>
+    <div class="cam-view"><div class="cam-guide">${art(K.cmx, pose === 'folded' ? 120 : 150, 'tilt')}</div><p class="t-fn">${o.hint}</p></div>
+    <div class="cam-bottom"><div class="cam-count"><span class="t-lt">48</span><span class="t-sh">cards in ${o.box}</span></div>
+      ${o.thumbs ? thumbs : ''}${legend([['listed', '45 named'], ['wait', '2 wait for you'], ['reading', '1 reading']])}
+      <div class="split">${btn(I.divider + 'Add a divider', 'cam')}${btn(o.end, 'cam')}</div></div></div>`;
+}
+function candidates() {
+  return [K.cm1, K.cm2].map(c => `<button class="cand">${art(c, 40)}<span class="stack-1"><span class="t-hl">${esc(c.name)}</span><span class="t-fn muted">${esc(c.set)} &middot; ${esc(c.no)} &middot; ${esc(c.print)}</span></span><span class="t-sh">${c.price}</span></button>`).join('');
+}
+function checkHead(w) {
+  return `<div class="stack-2" style="align-items:center">${art(K.cmx, w, 'glare')}<p class="t-fn muted">Pokémon 7, card 31</p></div>`;
+}
+const checkWhy = `<p class="t-body">Glare hides the set mark. Two cards match. <b>Which one is it?</b></p>`;
+function sendSummary() {
+  return `<div class="group">
+    <div class="row"><i class="sh sh-listed"></i><span class="stack-1"><span class="t-hl">195 go up for sale</span><span class="t-fn muted">At market price, read today at 9:12</span></span><span class="t-hl">$409.85</span></div>
+    <div class="row"><i class="sh sh-held"></i><span class="stack-1"><span class="t-body">15 stay in the box</span><span class="t-fn muted">13 under $0.49, and 2 you held back</span></span><span></span></div>
+    <div class="row"><i class="sh sh-wait"></i><span class="t-body">2 wait for you</span><button class="nav-btn">Name them</button></div>
+  </div>`;
+}
+const keyRows = rows => rows.map(r => `<div class="kbd-row">${[...r].map(k => `<span>${k}</span>`).join('')}</div>`).join('');
+const kbdRows = () => keyRows(['qwertyuiop', 'asdfghjkl', 'zxcvbnm']) + '<span class="kbd-cap">System keyboard</span>';
+const kbdSplit = () => `<div class="kbd-half">${keyRows(['qwert', 'asdfg', 'zxcv'])}</div><div class="kbd-fold"></div><div class="kbd-half">${keyRows(['yuiop', 'hjkl', 'bnm'])}<span class="kbd-cap">System keyboard, split at the fold</span></div>`;
+
+/* ================= Concept A: Tabs ================= */
+function tabsA(active, pose) {
+  const t = [['pull', 'Pull', 'pull'], ['list', 'List', 'camera'], ['boxes', 'Boxes', 'boxes']];
+  return `<nav class="tabbar" ${idf(pose, 'a-tabbar')} aria-label="Sections">${t.map(([k, l, i]) => `<button class="tab" ${k === active ? 'aria-current="page"' : ''}>${I[i]}<span>${l}</span></button>`).join('')}</nav>`;
+}
+function pullListA(o = {}) {
+  const done = o.done || ['mew', 'gard'];
+  const groups = ROUTE.slice(0, o.groups || 6).map(r => {
+    const left = r.cards.filter(id => !done.includes(id)).length;
+    const rows = r.cards.map(id => { const c = K[id]; const d = done.includes(id);
+      return `<button class="row ${d ? 'dim' : ''} ${o.sel === id ? 'sel' : ''}">${art(c, 32, d ? 'dim' : '')}<span class="stack-1"><span class="t-hl">${esc(c.name)}</span><span class="t-fn muted">${esc(c.sec)}, ${ord(c.nth)} card &middot; ${buyer(c.buyer)}</span></span>${d ? `<span style="color:var(--done)">${I.check}</span>` : `<span class="chev">${I.chev}</span>`}</button>`; }).join('');
+    return `<section class="list-sec"><div class="gh"><span class="t-hl">${esc(r.box)}</span><span class="t-fn muted">${where(r.box)} &middot; ${left} left</span></div><div class="group">${rows}</div></section>`;
+  }).join('');
+  return groups;
+}
+function pullHeadA(sub) {
+  return `${nav({ large: 'Pull', sub })}`;
+}
+function findA(c, pose, opts = {}) {
+  const w = pose === 'folded' ? 56 : 64;
+  return `${findSteps(c, { placeId: idf(pose, 'a-find-place') })}${compareStep(c, w)}<p class="t-sh">For <b>${buyer(c.buyer)}</b> &middot; 1 of 2 cards in this order</p>${orderNo(c.buyer)}`;
+}
+const A = {
+  id: 'a', name: 'A. Tabs', focus: 'a-tabbar',
+  pitch: 'Three tabs: Pull for the helper, List for the seller, Boxes to find any card. The plain structure. Each sold card opens to a three-step find page: open the box, count from the divider, check by sight.',
+  states: [
+    { id: 'pull', who: 'Helper', label: 'Pull list', newPart: 'Pull tab, list by box, back to front', desc: 'First screen. Sold cards grouped by box, in shelf order. Inside a box, the back card comes first, so the places of the cards still to pull stay true. Pulled rows stay where they are.',
+      f: pose => {
+        const sub = '15 of 17 cards left, for 14 orders. Orders read 9:41.';
+        const list = `<div class="seg-ctl" role="group" aria-label="Group by"><button aria-pressed="true">By box</button><button aria-pressed="false">By order</button></div>${pullListA()}`;
+        const left = scr(pullHeadA(sub) + body(list) + tabsA('pull', pose));
+        if (pose === 'folded') return left;
+        return { l: scr(pullHeadA(sub) + body(`<div class="seg-ctl" role="group" aria-label="Group by"><button aria-pressed="true">By box</button><button aria-pressed="false">By order</button></div>${pullListA({ sel: 'pika' })}`) + tabsA('pull', pose)),
+          r: scr(nav({ title: 'Pokémon 3' }) + body(findA(K.pika, pose)) + foot(btn('Pulled and packed') + btn("I can't find it", 'plain'))) };
+      } },
+    { id: 'find', who: 'Helper', label: 'Find a card', newPart: 'find page: box, count row, neighbours', desc: 'The helper taps a card. The page says which box, which divider, and how many cards to count from the front. The card in front and the card behind confirm it by sight.',
+      f: pose => {
+        const r = scr(nav(pose === 'folded' ? { back: 'Pull', prog: '3 of 17' } : { title: 'Find the card', prog: '3 of 17' }) + body(findA(K.pika, pose)) + foot(btn('Pulled and packed') + btn("I can't find it", 'plain')));
+        if (pose === 'folded') return r;
+        return { l: scr(pullHeadA('15 of 17 cards left, for 14 orders.') + body(pullListA({ sel: 'pika' })) + tabsA('pull', pose)), r };
+      } },
+    { id: 'pulled', who: 'Helper', label: 'After the press', newPart: 'answer at the press, Undo, next card', desc: 'The answer shows where the press was. Undo is there, because a pull moves every card behind it up one place. The next card is one press away.',
+      f: pose => {
+        const ft = foot(`<div class="done-line" role="status"><span>${I.check} Pulled and packed</span><button>Undo</button></div>${btn('Next: Umbreon V, Pokémon 8 ' + I.chev, 'tint')}`);
+        const r = scr(nav(pose === 'folded' ? { back: 'Pull', prog: '3 of 17' } : { title: 'Find the card', prog: '3 of 17' }) + body(findA(K.pika, pose)) + ft);
+        if (pose === 'folded') return r;
+        return { l: scr(pullHeadA('14 of 17 cards left, for 14 orders.') + body(pullListA({ done: ['mew', 'gard', 'pika'], sel: 'pika' })) + tabsA('pull', pose)), r };
+      } },
+    { id: 'empty', who: 'Helper', label: 'Nothing to pull', newPart: 'empty Pull tab', desc: 'Every sold card is packed. One sentence, one control.',
+      f: pose => {
+        const e = scr(nav({ large: 'Pull' }) + body(`<div class="big-check">${svg(P.check, 44)}</div><p class="t-t3">All 17 cards are packed, and new orders show here when a card sells.</p>${btn('Check for orders now', 'tint')}`, 'center') + tabsA('pull', pose));
+        if (pose === 'folded') return e;
+        return { l: e, r: scr(nav({ title: 'Packed today' }) + body(`<div class="group">${['R', 'K', 'M', 'B', 'T', 'C', 'D'].map(b => `<div class="row"><span style="color:var(--done)">${I.env}</span><span class="t-body">${buyer(b)}</span><span class="t-fn muted">${buyerCards(b).length} card${buyerCards(b).length > 1 ? 's' : ''}</span></div>`).join('')}</div><p class="t-fn muted">And 7 more envelopes.</p>`)) };
+      } },
+    { id: 'error', who: 'Helper', label: 'Orders unknown', newPart: 'failed read, list kept', desc: 'The order read failed. The list from 7:02 stays, and the page says newer orders may be missing. It never shows as empty or done.',
+      f: pose => {
+        const n = `<div class="notice" role="alert"><p class="notice-k">Can't reach TCGplayer.</p><p class="t-sh">This list is from 7:02 this morning. Newer orders may be missing.</p><div class="cluster">${btn('Try again', 'tint')}</div>${serverSaid('503 Service Unavailable from the orders service at 09:41:07')}</div>`;
+        const l = scr(pullHeadA('12 cards for 10 orders, as of 7:02.') + body(n + pullListA({ done: [], groups: 3 })) + tabsA('pull', pose));
+        if (pose === 'folded') return l;
+        return { l, r: scr(nav({ title: 'Pokémon 3' }) + body(findA(K.pika, pose)) + foot(btn('Pulled and packed') + btn("I can't find it", 'plain'))) };
+      } },
+    { id: 'list', who: 'Seller', label: 'List tab', newPart: 'List tab: photograph, name, send', desc: 'The seller\'s first screen. Three things in job order: photograph a box, name the cards that wait, send a box that is ready.',
+      f: pose => {
+        const l = scr(nav({ large: 'List' }) + body(`<div class="card-panel"><p class="t-t3">Photograph a box</p><p class="t-sh muted">Pick a box. Then lay each card in the frame, in order. The phone takes each photo by itself.</p>${btn(I.camera + 'Start', 'primary')}</div>
+          <div class="group"><button class="row"><i class="sh sh-wait"></i><span class="stack-1"><span class="t-hl">4 cards wait for you</span><span class="t-fn muted">The machine could not name them for certain</span></span><span class="chev">${I.chev}</span></button>
+          <button class="row ${pose === 'unfolded' ? 'sel' : ''}"><i class="sh sh-listed"></i><span class="stack-1"><span class="t-hl">Pokémon 7 is ready to send</span><span class="t-fn muted">195 cards to list</span></span><span class="chev">${I.chev}</span></button></div>
+          <section class="list-sec"><div class="gh"><span class="t-hl">Sittings</span></div><div class="group"><div class="row"><span class="t-fn muted">Today 9:02</span><span class="t-body">Pokémon 7</span><span class="t-fn muted">212 cards</span></div><div class="row"><span class="t-fn muted">Tue 14:10</span><span class="t-body">Magic 4</span><span class="t-fn muted">188 cards</span></div></div></section>`) + tabsA('list', pose));
+        if (pose === 'folded') return l;
+        return { l, r: scr(nav({ title: 'Send Pokémon 7' }) + body(sendSummary()) + foot(btn('List 195 cards&hellip;'))) };
+      } },
+    { id: 'shoot', who: 'Seller', label: 'Photograph', newPart: 'camera sitting', desc: 'A sitting. Each card in the frame is one photo, and the count is its place. The seller does not stop for a card the machine cannot name: it waits.',
+      f: pose => {
+        const o = { lead: 'Pause', title: 'Pokémon 7', trail: '', box: 'Pokémon 7', end: 'Finish box', hint: 'Lay the next card in the frame.', thumbs: true };
+        if (pose === 'folded') return camera(pose, o);
+        return { l: camera(pose, Object.assign({}, o, { thumbs: false })), r: scr(nav({ title: 'This sitting' }) + body(`<div class="group">${[[48, K.cmx, 'reading', 'Reading…'], [47, K.ivy, 'wait', 'Photo is blurred'], [46, K.bulb, 'listed', 'Bulbasaur · 151 · 001/165']].map(([n, c, s, t]) => `<div class="row"><span class="t-fn muted">${n}</span><span class="cluster"><i class="sh sh-${s}"></i><span class="t-sh">${t}</span></span>${art(c, 28)}</div>`).join('')}</div><p class="t-fn muted">Dividers so far: Commons at 1. Add one when the next section starts.</p>`)) };
+      } },
+    { id: 'check', who: 'Seller', label: 'Name a card', newPart: 'check page, no preselected answer', desc: 'A card the machine could not name for certain. Its photo, the reason, and the cards that match. No answer is picked for the seller.',
+      f: pose => {
+        const ft = foot(`<div class="split">${btn(I.retake + 'New photo', 'tint')}${btn('Hold it back', 'tint')}</div>${btn('None of these: type the name', 'plain')}`);
+        const r = scr(nav(pose === 'folded' ? { back: 'List', title: '1 of 4' } : { title: '1 of 4' }) + body(checkHead(pose === 'folded' ? 120 : 150) + checkWhy + candidates()) + ft);
+        if (pose === 'folded') return r;
+        return { l: scr(nav({ large: 'Waiting for you' }) + body(`<div class="group">${[['Pokémon 7, card 31', 'Glare hides the set mark', K.cmx, 'glare'], ['Pokémon 7, card 47', 'Photo is blurred', K.ivy, 'blur'], ['Magic 4, card 102', 'Foil or not foil', { name: '', h: 260 }, ''], ['Lorcana 5, card 12', 'Two printings look alike', { name: '', h: 290 }, '']].map(([p, why, c, cl], i) => `<button class="row ${i === 0 ? 'sel' : ''}">${art(c, 32, cl)}<span class="stack-1"><span class="t-hl">${p}</span><span class="t-fn muted">${why}</span></span><span class="chev">${I.chev}</span></button>`).join('')}</div>`) + tabsA('list', pose)), r };
+      } },
+    { id: 'type', who: 'Seller', label: 'Type a name', newPart: 'name search with keyboard', kb: true, desc: 'None of the matches is right. The seller types; the list narrows. Keyboard open: 466 by 250 folded, 951 by 263 unfolded.',
+      f: pose => {
+        const field = `<div class="field">${I.search}<span class="typed">charm</span><i class="caret"></i></div>`;
+        const res = `<div class="group">${[['Charmander', 'Obsidian Flames · 026/197'], ['Charmander', '151 · 004/165'], ['Charmeleon', 'Obsidian Flames · 027/197']].map(([n, s]) => `<button class="row" style="min-height:48px"><span></span><span class="stack-1"><span class="t-body">${n}</span><span class="t-fn muted">${s}</span></span><span class="chev">${I.chev}</span></button>`).join('')}</div>`;
+        if (pose === 'folded') return scr(nav({ lead: 'Cancel', title: 'Card 31' }) + body(field + res, ''));
+        return { l: scr(nav({ lead: 'Cancel', title: 'Pokémon 7, card 31' }) + body(`<div class="cluster">${art(K.cmx, 72, 'glare')}<div class="stack-1" style="flex:1">${field}</div></div>`)), r: scr(nav({ title: '3 matches' }) + body(res)) };
+      } },
+    { id: 'send', who: 'Seller', label: 'Send, asked first', newPart: 'send summary and ask', desc: 'A send cannot be taken back from this app, so it asks first. The ask names the count. First focus is on Cancel.',
+      f: pose => {
+        const r = scr(nav({ back: 'List', title: 'Send Pokémon 7' }) + body(sendSummary()) + foot(btn('List 195 cards&hellip;')) + alertBox('List 195 cards on TCGplayer?', 'Each goes up at its market price. The 2 cards that wait for you are not sent. This app cannot take a listing down.', 'List 195'));
+        if (pose === 'folded') return r;
+        return { l: scr(nav({ large: 'List' }) + body(`<div class="group"><div class="row"><i class="sh sh-wait"></i><span class="t-hl">4 cards wait for you</span><span class="chev">${I.chev}</span></div><div class="row sel"><i class="sh sh-listed"></i><span class="t-hl">Pokémon 7 is ready to send</span><span class="chev">${I.chev}</span></div></div>`) + tabsA('list', pose)), r };
+      } },
+    { id: 'search', who: 'Both', label: 'Where is a card?', newPart: 'Boxes tab search', kb: true, desc: 'The Boxes tab answers where any card sits: box, divider and count. Keyboard open.',
+      f: pose => {
+        const field = `<div class="field">${I.search}<span class="typed">pika</span><i class="caret"></i></div>`;
+        const rows = [['pika', 'pull', 'Pokémon 3 · Rares, 5th card'], [K.pikasearch, 'listed', 'Pokémon 1 · Commons, 40th card'], [{ name: 'Pikachu V', h: 52 }, 'listed', 'Pokémon 9 · Holo, 2nd card']]
+          .map(([c, s, t], i) => { c = typeof c === 'string' ? K[c] : c; return `<button class="row ${i === 0 && pose === 'unfolded' ? 'sel' : ''}" style="min-height:48px"><i class="sh sh-${s}"></i><span class="stack-1"><span class="t-body">${esc(c.name)}</span><span class="t-fn muted">${t}</span></span><span class="chev">${I.chev}</span></button>`; }).join('');
+        const res = `${legend([['pull', 'Sold, to pull'], ['listed', 'Listed']])}<div class="group">${rows}</div>`;
+        if (pose === 'folded') return scr(nav({ title: 'Boxes', trail: 'Cancel' }) + body(field + res));
+        return { l: scr(nav({ title: 'Boxes', trail: 'Cancel' }) + body(field + res)), r: scr(nav({ title: 'Pikachu ex' }) + body(`<p class="t-t3">Pokémon 3</p><p class="t-body">After the Rares divider, the <b>5th</b> card.</p>${strip('Pokémon 3', [[K.pika.abs]], 'Rares')}`)) };
+      } },
+  ],
+};
+
+/* ================= Concept B: Shelf ================= */
+const segB = (sel, pose) => `<div class="seg-ctl" role="group" aria-label="Show on the shelf" ${idf(pose, 'b-mode')}><button aria-pressed="${sel === 'orders'}">Orders</button><button aria-pressed="${sel === 'listing'}">Listing</button></div>`;
+const bottomB = (sel, pose) => `<div class="foot">${segB(sel, pose)}</div>`;
+function xray(box, marks, o = {}) {
+  const b = BOX[box]; let n = 0;
+  const secs = b.secs.map(([s, cnt]) => {
+    let edges = ''; const pills = [];
+    for (let i = 1; i <= cnt; i++) { const a = n + i; const m = marks[a]; edges += `<i class="xr-e ${m ? m.k : ''} ${o.held && o.held.includes(a) ? 'h' : ''}"></i>`; if (m && m.label) pills.push(`<button class="pill ${m.k === 'w' ? 'w' : ''}">${m.k === 'w' ? esc(m.label) : `${ord(i)}: ${esc(m.label)}`}</button>`); }
+    n += cnt;
+    return `<div class="xr-sec"><div class="xr-head"><span class="t-hl">${s}</span><span class="t-fn muted">${cnt} cards</span></div><div class="xr-bar" role="img" aria-label="${s}: ${cnt} cards">${edges}</div>${pills.length ? `<div class="cluster">${pills.join('')}</div>` : ''}</div>`;
+  }).join('');
+  return `<div class="xr" ${o.id || ''}><p class="t-fn muted">Front of the box at the top left. Each line is one card.</p>${secs}</div>`;
+}
+const P3MARKS = { [K.mew.abs]: { k: 't', label: 'Mew ex' }, [K.gard.abs]: { k: 't', label: 'Gardevoir ex' }, [K.pika.abs]: { k: 't', label: 'Pikachu ex' } };
+const P3LEFT = { [K.pika.abs]: { k: 't', label: 'Pikachu ex' } };
+const shelfB = (lit, pose, o = {}) => shelfMap(lit, Object.assign({ id: idf(pose, 'b-shelf') }, o));
+const B = {
+  id: 'b', name: 'B. Shelf', focus: 'b-shelf',
+  pitch: 'The first screen is a map of the real shelf. A box with work lights up. Tap a box to see inside it: every card as one line, sections as rows, the cards to pull marked. Both people use the same map; a switch at the thumb shows orders or listing work.',
+  states: [
+    { id: 'shelf', who: 'Helper', label: 'Shelf, orders', newPart: 'shelf map with lit boxes', desc: 'First screen. Each lit box holds sold cards; the number says how many. The map is laid out like the real shelf, so the helper walks to the lit box.',
+      f: pose => {
+        const s = scr(nav({ large: 'Shelf', sub: '15 cards to pull in 6 boxes. Orders read 9:41.' }) + body(shelfB(PULL_LIT, pose) + legend([['pull', 'Has sold cards to pull']])) + bottomB('orders', pose));
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: 'Lit boxes, in walking order' }) + body(`<ol class="route">${ROUTE.map((r, i) => `<li><span class="t-fn muted">${i + 1}</span><span class="stack-1"><span class="t-hl">${r.box}</span><span class="t-fn muted">${where(r.box)}</span></span><span class="bx-n" style="position:static">${i === 0 ? 1 : r.cards.length}</span></li>`).join('')}</ol>`)) };
+      } },
+    { id: 'box', who: 'Helper', label: 'Inside a box', newPart: 'box x-ray', desc: 'Inside Pokémon 3. Each line is one card; the marked line is the sold card. The helper sees how far in it sits before they open the box.',
+      f: pose => {
+        const s = scr(nav({ back: 'Shelf', title: 'Pokémon 3', prog: '1 to pull' }) + body(xray('Pokémon 3', P3LEFT)) + foot(`<p class="t-fn muted">Tap the marked card to find it.</p>`));
+        if (pose === 'folded') return s;
+        return { l: scr(nav({ large: 'Shelf' }) + body(shelfB(PULL_LIT, pose, { here: 'Pokémon 3' })) + bottomB('orders', pose)), r: s };
+      } },
+    { id: 'find', who: 'Helper', label: 'Find, as a sheet', newPart: 'find sheet over the box', desc: 'The card opens as a sheet over the box, so the box stays in view behind it. Count row, neighbours, one press.',
+      f: pose => {
+        const sheet = `<div class="sheet" role="dialog" aria-label="Pikachu ex"><div class="grabber"></div>${nav({ lead: 'Close', title: 'Find the card' })}${body(`<section class="step"><p class="step-k">Count from the front</p>${countRow(K.pika)}<p class="t-body">After the Rares divider, take the <b>5th</b> card.</p></section>${compareStep(K.pika, 52, 'Check it is this card')}<p class="t-sh">For <b>${buyer('R')}</b></p>`)}${foot(btn('Pulled and packed'))}</div>`;
+        const under = scr(nav({ back: 'Shelf', title: 'Pokémon 3' }) + body(xray('Pokémon 3', P3LEFT)) + sheet);
+        if (pose === 'folded') return under;
+        return { l: scr(nav({ back: 'Shelf', title: 'Pokémon 3' }) + body(xray('Pokémon 3', P3LEFT))), r: scr(nav({ title: 'Find the card' }) + body(`<section class="step"><p class="step-k">Count from the front</p>${countRow(K.pika)}<p class="t-body">After the Rares divider, take the <b>5th</b> card.</p></section>${compareStep(K.pika, 60, 'Check it is this card')}<p class="t-sh">For <b>${buyer('R')}</b> &middot; 1 of 2 cards</p>`) + foot(btn('Pulled and packed'))) };
+      } },
+    { id: 'empty', who: 'Helper', label: 'Nothing to pull', newPart: 'dark shelf', desc: 'No box is lit. One sentence, one control.',
+      f: pose => {
+        const s = scr(nav({ large: 'Shelf' }) + body(`<p class="t-body">A box lights up here when one of its cards sells.</p>${btn('Check for orders now', 'tint')}${shelfB({}, pose)}`) + bottomB('orders', pose));
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: 'Today' }) + body(`<div class="big-check">${svg(P.check, 44)}</div><p class="t-t3">17 cards packed for 14 orders.</p>`, 'center')) };
+      } },
+    { id: 'error', who: 'Helper', label: 'Orders unknown', newPart: 'failed read on the shelf', desc: 'The order read failed. Boxes lit from the 7:02 read stay lit, and the page says so.',
+      f: pose => {
+        const lit = { 'Pokémon 3': { k: 'p', n: 3 }, 'Pokémon 8': { k: 'p', n: 2 }, 'Magic 1': { k: 'p', n: 4 } };
+        const n = `<div class="notice" role="alert"><p class="notice-k">Can't reach TCGplayer.</p><p class="t-sh">Lit boxes are from 7:02. Newer orders may be missing.</p><div class="cluster">${btn('Try again', 'tint')}</div>${serverSaid('503 Service Unavailable from the orders service at 09:41:07')}</div>`;
+        const s = scr(nav({ large: 'Shelf' }) + body(n + shelfB(lit, pose)) + bottomB('orders', pose));
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: 'Pokémon 3' }) + body(xray('Pokémon 3', P3MARKS))) };
+      } },
+    { id: 'listing', who: 'Seller', label: 'Shelf, listing', newPart: 'listing view of the shelf', desc: 'The same map, switched to listing work. A box with cards that wait for the seller shows their count; a box ready to send is marked.',
+      f: pose => {
+        const lit = { 'Pokémon 7': { k: 'w', n: 2 }, 'Magic 4': { k: 'w', n: 1 }, 'Lorcana 5': { k: 'w', n: 1 } };
+        const s = scr(nav({ large: 'Shelf', sub: '4 cards wait for you in 3 boxes.', trail: I.plus + 'New box' }) + body(shelfB(lit, pose, { here: pose === 'unfolded' ? 'Pokémon 7' : '' }) + legend([['wait', 'Cards wait for you']])) + bottomB('listing', pose));
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: 'Pokémon 7' }) + body(xray('Pokémon 7', { 31: { k: 'w', label: 'Card 31' }, 47: { k: 'w', label: 'Card 47' } })) + foot(btn('Photograph more cards', 'tint'))) };
+      } },
+    { id: 'shoot', who: 'Seller', label: 'Fill a box', newPart: 'camera with the box filling', desc: 'Photographing into Pokémon 7. Each photo adds one line to the box below the camera, so the seller sees the box fill in the order of the stack.',
+      f: pose => {
+        let edges = ''; for (let i = 1; i <= 48; i++) edges += `<i class="xr-e ${i === 31 || i === 47 ? 'w' : i === 48 ? 'new' : ''}"></i>`;
+        const fill = `<div class="xr-sec"><div class="xr-head"><span class="t-hl">Commons</span><span class="t-fn muted">48 so far</span></div><div class="xr-bar">${edges}</div></div>`;
+        const cam = camera(pose, { lead: 'Pause', title: 'Pokémon 7', trail: '', box: 'Pokémon 7', end: 'Finish box', hint: 'Lay the next card in the frame.', thumbs: false });
+        if (pose === 'folded') return scr(`<div style="flex:1;display:flex;min-height:0">${cam}</div><div class="foot">${fill}</div>`);
+        return { l: cam, r: scr(nav({ title: 'Pokémon 7, filling' }) + body(fill + `<p class="t-fn muted">A new divider starts a new row.</p>`)) };
+      } },
+    { id: 'check', who: 'Seller', label: 'Name a card', newPart: 'check sheet at its place in the box', desc: 'A waiting card opens over its box, at its place. Photo, reason, matches; none picked.',
+      f: pose => {
+        const inner = `${body(checkHead(pose === 'folded' ? 100 : 150) + checkWhy + candidates())}${foot(`<div class="split">${btn(I.retake + 'New photo', 'tint')}${btn('Hold it back', 'tint')}</div>`)}`;
+        if (pose === 'folded') return scr(nav({ back: 'Shelf', title: 'Pokémon 7' }) + body(xray('Pokémon 7', { 31: { k: 'w' }, 47: { k: 'w' } })) + `<div class="sheet" style="top:56px"><div class="grabber"></div>${nav({ lead: 'Close', title: 'Card 31' })}${inner}</div>`);
+        return { l: scr(nav({ back: 'Shelf', title: 'Pokémon 7' }) + body(xray('Pokémon 7', { 31: { k: 'w', label: 'Card 31' }, 47: { k: 'w', label: 'Card 47' } }))), r: scr(nav({ title: 'Card 31' }) + inner) };
+      } },
+    { id: 'send', who: 'Seller', label: 'Send a box', newPart: 'send from the box, asked first', desc: 'A send starts from its box. The ask names the count; first focus is on Cancel.',
+      f: pose => {
+        const held = []; for (let i = 0; i < 15; i++) held.push(60 + i * 9);
+        const r = scr(nav({ back: 'Shelf', title: 'Send Pokémon 7' }) + body(sendSummary()) + foot(btn('List 195 cards&hellip;')) + alertBox('List 195 cards on TCGplayer?', 'Each goes up at its market price. The 2 cards that wait for you are not sent. This app cannot take a listing down.', 'List 195'));
+        if (pose === 'folded') return r;
+        return { l: scr(nav({ back: 'Shelf', title: 'Pokémon 7' }) + body(xray('Pokémon 7', { 31: { k: 'w' }, 47: { k: 'w' } }, { held }) + legend([['wait', 'Waits for you'], ['held', 'Stays in the box']]))), r };
+      } },
+  ],
+};
+
+/* ================= Concept C: Route (bold) ================= */
+function routeList(curBox) {
+  let seen = true;
+  return `<ol class="route">${ROUTE.map(r => { const cur = r.box === curBox; const d = seen && !cur; if (cur) seen = false;
+    return `<li class="${cur ? 'cur' : d ? 'd' : ''}"><span>${d ? I.check : cur ? `<i class="sh sh-pull"></i>` : ''}</span><span class="stack-1"><span class="t-hl">${r.box}</span><span class="t-fn muted">${where(r.box)}</span></span><span class="t-sh">${r.cards.length} card${r.cards.length > 1 ? 's' : ''}</span></li>`; }).join('')}</ol>`;
+}
+// The box name is in the step itself, so the bar holds only Stop and the count (a title collides at 382 wide).
+const navC = (title, prog) => nav({ lead: I.pause + '<span>Stop for now</span>', prog });
+const C = {
+  id: 'c', name: 'C. Route (bold)', focus: 'c-step',
+  pitch: 'No tabs, no lists to browse. The phone gives one instruction at a time, like turn-by-turn directions for the shelf. The helper walks one round: each box once, cards from the back first, and each card goes straight into its envelope. The seller gets the same one-thing-at-a-time path.',
+  states: [
+    { id: 'start', who: 'Both', label: 'Start', newPart: 'start: two jobs, one press each', desc: 'First screen. The person says what they are doing now. Each choice says how much work waits.',
+      f: pose => {
+        const pull = `<button class="choice pull"><span class="ic-big">${big('env')}</span><span class="stack-1"><span class="t-t2">Packing orders</span><span class="t-sh muted">17 sold cards to find in 6 boxes, for 14 orders.</span></span><span class="chev">${I.chev}</span></button>`;
+        const list = `<button class="choice list"><span class="ic-big">${big('camera')}</span><span class="stack-1"><span class="t-t2">Listing cards</span><span class="t-sh muted">4 cards wait for you. Pokémon 7 is ready to send.</span></span><span class="chev">${I.chev}</span></button>`;
+        const find = btn(I.search + 'Where is a card?', 'plain');
+        if (pose === 'folded') return scr(body(`<p class="t-sh muted">Orders read at 9:41</p><h2 class="t-lt">What are you doing now?</h2><div class="stack-3" ${idf(pose, 'c-start')}>${pull}${list}</div>`, '') + foot(find));
+        return { l: scr(body(`<p class="t-sh muted">Orders read at 9:41</p><h2 class="t-lt">What are you doing now?</h2>${pull}`) + foot(find)), r: scr(body(`<p class="t-sh muted">&nbsp;</p><h2 class="t-lt">&nbsp;</h2>${list}`)) };
+      } },
+    { id: 'open', who: 'Helper', label: 'Open a box', newPart: 'one step: which box, where', desc: 'One step: the box to open and where it sits. The helper turns it so its name label faces them; that end is the front.',
+      f: pose => {
+        const main = `<p class="step-k">Box 1 of 6 &middot; 3 cards from this box</p><p class="t-sh">Open box</p><h2 class="t-lt">Pokémon 3</h2>${shelfMap(PULL_LIT, { mini: true, here: 'Pokémon 3' })}<p class="t-t3">${where('Pokémon 3')}</p><p class="t-body">Turn the box so its name label faces you. That end is the front.</p>`;
+        const s = scr(navC('', '1 of 17') + routeProg(0, 0) + body(main) + foot(btn('The box is open')));
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: 'This round' }) + body(routeList('Pokémon 3') + `<p class="t-fn muted">Boxes in shelf order. Inside each box, the back card comes first, so no card's count changes while you work.</p>`)) };
+      } },
+    { id: 'find', who: 'Helper', label: 'Find the card', newPart: 'one step: count and check', desc: 'One card. Count from the divider, check by the card in front and behind, one press. Nothing else is on screen.',
+      f: pose => {
+        const c = K.pika;
+        const where_ = `<section class="step" ${idf(pose, 'c-step')}><p class="step-k">Pokémon 3 &middot; card 3 of 3 from this box</p><h2 class="t-t1">After ${c.sec}, count ${c.nth}</h2>${countRow(c)}</section>`;
+        const ft = foot(btn("It's in my hand") + btn("I can't find it", 'plain'));
+        if (pose === 'folded') return scr(navC('Pokémon 3', '3 of 17') + routeProg(2, 2) + body(where_ + neighbours(c, 56) + `<p class="t-sh muted">${c.name} &middot; ${c.set} &middot; ${c.no} &middot; ${c.print}</p>`) + ft);
+        return { l: scr(navC('Pokémon 3', '3 of 17') + routeProg(2, 2) + body(where_ + strip('Pokémon 3', [[c.abs]], c.sec))), r: scr(nav({ title: 'Is it this card?' }) + body(neighbours(c, 80) + facts(c)) + ft) };
+      } },
+    { id: 'pack', who: 'Helper', label: 'Into the envelope', newPart: 'one step: which envelope', desc: 'The card goes straight into its envelope. The step says whose envelope, and whether more cards for it come later. The pull shows done at the press, with Undo.',
+      f: pose => {
+        const main = `<div class="stack-2" style="align-items:center;text-align:center"><div class="env" aria-hidden="true"></div><p class="t-sh">Put it in the envelope for</p><h2 class="t-t1">${buyer('R')}</h2><div class="dots" role="img" aria-label="1 of 2 cards"><i class="f"></i><i></i></div><p class="t-body">1 of 2 cards. The other is in Pokémon 12, later on this round. Leave the envelope open.</p></div>${orderNo('R')}`;
+        const ft = foot(`<div class="done-line" role="status"><span>${I.check} Pulled from Pokémon 3</span><button>Undo</button></div>${btn("It's in the envelope")}`);
+        const s = scr(navC('Pokémon 3', '3 of 17') + routeProg(2, 2) + body(main) + ft);
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: 'Envelopes' }) + body(`<div class="group">${['B', 'T', 'R', 'C', 'D'].map(b => { const n = buyerCards(b).length; const f = { B: 1, T: 1, R: 1, C: 0, D: 0 }[b]; return `<div class="row ${b === 'R' ? 'sel' : ''}"><span>${I.env}</span><span class="t-body">${buyer(b)}</span><span class="dots">${Array.from({ length: n }, (_, i) => `<i class="${i < f ? 'f' : ''}"></i>`).join('')}</span></div>`; }).join('')}</div><p class="t-fn muted">And 9 more. An envelope with all its dots filled is ready to seal.</p>`)) };
+      } },
+    { id: 'done', who: 'Helper', label: 'Round done', newPart: 'end of round', desc: 'The round is over. Every sold card is in its envelope.',
+      f: pose => {
+        const s = scr(body(`<div class="big-check">${svg(P.check, 44)}</div><h2 class="t-t1">Every sold card is packed.</h2><p class="t-body">17 cards in 14 envelopes. Nothing is left to pull.</p>`, 'center') + foot(btn('Back to start')));
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: 'This round' }) + body(routeList('') + `<p class="t-fn muted">All 6 boxes done.</p>`)) };
+      } },
+    { id: 'error', who: 'Helper', label: 'Orders unknown', newPart: 'start with a failed read', desc: 'The order read failed. The start screen says what is known and from when, and offers a retry.',
+      f: pose => {
+        const n = `<div class="notice" role="alert"><p class="notice-k">Can't reach TCGplayer.</p><p class="t-sh">You can pack the 12 cards known at 7:02. Newer orders may be missing.</p><div class="cluster">${btn('Try again', 'tint')}</div>${serverSaid('503 Service Unavailable from the orders service at 09:41:07')}</div>`;
+        const pull = `<button class="choice pull"><span class="ic-big">${big('env')}</span><span class="stack-1"><span class="t-t2">Packing orders</span><span class="t-sh muted">12 cards for 10 orders, as of 7:02.</span></span><span class="chev">${I.chev}</span></button>`;
+        const list = `<button class="choice list"><span class="ic-big">${big('camera')}</span><span class="stack-1"><span class="t-t2">Listing cards</span><span class="t-sh muted">4 cards wait for you.</span></span><span class="chev">${I.chev}</span></button>`;
+        if (pose === 'folded') return scr(body(`<h2 class="t-lt">What are you doing now?</h2>${n}${pull}${list}`));
+        return { l: scr(body(`<h2 class="t-lt">What are you doing now?</h2>${n}${pull}`)), r: scr(body(`<h2 class="t-lt">&nbsp;</h2>${list}`)) };
+      } },
+    { id: 'shoot', who: 'Seller', label: 'Photograph', newPart: 'camera, count only', desc: 'The seller lays cards in the frame, one after another. The count is the place. Cards the machine cannot name wait; the seller is not stopped.',
+      f: pose => {
+        const o = { lead: I.pause + 'Stop for now', title: 'Pokémon 7', trail: '', box: 'Pokémon 7', end: 'This box is done', hint: 'Lay the next card in the frame. It takes the photo by itself.', thumbs: pose === 'folded' };
+        if (pose === 'folded') return camera(pose, o);
+        return { l: camera(pose, o), r: scr(nav({ title: 'Wait for you after this box' }) + body(`<div class="cluster" style="gap:var(--space-4)"><figure class="stack-1" style="align-items:center">${art(K.cmx, 72, 'glare')}<span class="t-fn muted">Card 31</span></figure><figure class="stack-1" style="align-items:center">${art(K.ivy, 72, 'blur')}<span class="t-fn muted">Card 47</span></figure></div><p class="t-body">You name these after the box, not now. Keep laying cards.</p>`)) };
+      } },
+    { id: 'check', who: 'Seller', label: 'Name a card', newPart: 'one step: which card is it', desc: 'One waiting card at a time. Photo, reason, matches; none picked for the seller.',
+      f: pose => {
+        const ft = foot(`<div class="split">${btn(I.retake + 'New photo', 'tint')}${btn('Hold it back', 'tint')}</div>`);
+        if (pose === 'folded') return scr(nav({ lead: 'Later', title: '1 of 4 to name' }) + body(checkHead(110) + checkWhy + candidates()) + ft);
+        return { l: scr(nav({ lead: 'Later', title: '1 of 4 to name' }) + body(`<div class="stack-2" style="align-items:center">${art(K.cmx, 220, 'glare')}<p class="t-fn muted">Pokémon 7, card 31</p></div>`, 'center')), r: scr(nav({ title: '' }) + body(checkWhy + candidates()) + ft) };
+      } },
+    { id: 'send', who: 'Seller', label: 'Send', newPart: 'one step: send this box', desc: 'The last step for a box. What goes up, what stays, and what still waits.',
+      f: pose => {
+        const s = scr(nav({ back: 'Start' }) + body(`<p class="step-k">Ready to send</p><h2 class="t-t1">Pokémon 7</h2>${sendSummary()}`) + foot(btn('List 195 cards&hellip;')));
+        if (pose === 'folded') return s;
+        return { l: s, r: scr(nav({ title: '15 stay in the box' }) + body(`<div class="group">${[['Ivysaur', '$0.31'], ['Bulbasaur', '$0.22'], ['Caterpie', '$0.09']].map(([n, p]) => `<div class="row"><i class="sh sh-held"></i><span class="t-body">${n}</span><span class="t-sh muted">${p}</span></div>`).join('')}<div class="row"><i class="sh sh-held"></i><span class="t-body">Pidgey, you held back</span><span class="t-sh muted">$0.55</span></div></div><p class="t-fn muted">And 11 more. Tap one to list it anyway.</p>`)) };
+      } },
+    { id: 'confirm', who: 'Seller', label: 'Send, asked first', newPart: 'the ask before a send', desc: 'A send cannot be taken back from this app, so it asks first. The ask names the count; first focus is on Cancel.',
+      f: pose => {
+        const a = alertBox('List 195 cards on TCGplayer?', 'Each goes up at its market price. The 2 cards that wait for you are not sent. This app cannot take a listing down.', 'List 195');
+        const s = scr(nav({ back: 'Start' }) + body(`<p class="step-k">Ready to send</p><h2 class="t-t1">Pokémon 7</h2>${sendSummary()}`) + foot(btn('List 195 cards&hellip;')) + a);
+        if (pose === 'folded') return s;
+        return { l: scr(nav({ back: 'Start' }) + body(`<p class="step-k">Ready to send</p><h2 class="t-t1">Pokémon 7</h2>${sendSummary()}`)), r: scr(body(`<p class="t-fn muted">&nbsp;</p>`) + foot(btn('List 195 cards&hellip;')) + a) };
+      } },
+    { id: 'sending', who: 'Seller', label: 'Sending', newPart: 'progress with Stop', desc: 'A long send shows its progress at the press, and a Stop. Cards listed before Stop stay listed.',
+      f: pose => {
+        const prog = `<div class="stack-2" role="status"><div class="cluster" style="justify-content:space-between"><span class="t-hl">Listing&hellip; 120 of 195</span><span class="t-fn muted">Listed cards stay listed if you stop.</span></div><div class="progress"><i style="--p:61%"></i></div></div>${btn('Stop', 'stop')}`;
+        const s = scr(nav({ title: 'Pokémon 7' }) + body(`<p class="step-k">Sending</p><h2 class="t-t1">Pokémon 7</h2>${sendSummary()}`) + foot(prog));
+        if (pose === 'folded') return s;
+        return { l: scr(nav({ title: '' }) + body(`<p class="step-k">Sending</p><h2 class="t-t1">Pokémon 7</h2>${sendSummary()}`)), r: scr(body(`<p class="t-body muted">You can put the phone down. It keeps going while this page is open.</p>`, 'center') + foot(prog)) };
+      } },
+  ],
+};
+
+/* ================= Controller ================= */
+const CONCEPTS = [A, B, C];
+const S = { c: 'a', s: '', t: 'auto', hide: [] };
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  S.c = p.get('c') || S.c; S.s = p.get('s') || ''; S.t = p.get('t') || 'auto';
+  S.hide = (p.get('hide') || '').split(',').filter(Boolean);
+}
+function writeHash() {
+  const p = new URLSearchParams(); p.set('c', S.c); p.set('s', S.s); if (S.t !== 'auto') p.set('t', S.t); if (S.hide.length) p.set('hide', S.hide.join(','));
+  history.replaceState(null, '', '#' + p.toString());
+}
+function render() {
+  const visible = CONCEPTS.filter(c => !S.hide.includes(c.id));
+  let con = visible.find(c => c.id === S.c) || visible[0];
+  const root = document.documentElement;
+  if (S.t === 'light' || S.t === 'dark') root.dataset.theme = S.t; else delete root.dataset.theme;
+  document.querySelectorAll('#theme-row .chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === S.t)));
+  const cr = document.getElementById('concept-row');
+  cr.innerHTML = '<span class="ctl-k">Concept</span>' + visible.map(c => `<span class="chip-pair"><button class="chip" data-c="${c.id}" aria-pressed="${con && c.id === con.id}">${c.name}</button><button class="chip-hide" data-hide="${c.id}" aria-label="Hide concept ${c.name}" title="Hide this option">&times;</button></span>`).join('')
+    + (S.hide.length ? `<button class="chip" data-unhide="1">Show ${S.hide.length} hidden</button>` : '');
+  if (!con) { document.getElementById('state-row').innerHTML = ''; document.getElementById('caption').innerHTML = '<p>Every concept is hidden.</p>'; ['screen-folded', 'pane-left', 'pane-right'].forEach(i => document.getElementById(i).innerHTML = ''); return; }
+  S.c = con.id;
+  const st = con.states.find(s => s.id === S.s) || con.states[0];
+  S.s = st.id;
+  const groups = ['Helper', 'Seller', 'Both'].map(w => { const ss = con.states.filter(s => s.who === w); return ss.length ? `<span class="state-group"><span class="ctl-k">${w}</span>${ss.map(s => `<button class="chip" data-s="${s.id}" aria-pressed="${s.id === st.id}">${s.label}</button>`).join('')}</span>` : ''; }).join('');
+  document.getElementById('state-row').innerHTML = groups;
+  writeHash();
+  const link = location.href.split('#')[0] + '#' + new URLSearchParams({ c: con.id, s: st.id }).toString();
+  document.getElementById('caption').innerHTML = `<p class="t-hl">${con.name}</p><p class="t-sh">${con.pitch}</p><p class="t-sh"><b>${st.label}.</b> ${st.desc}</p><span class="tag-new">New: ${st.newPart}</span><p class="t-fn muted">Deep link: <a href="#c=${con.id}&amp;s=${st.id}">#c=${con.id}&amp;s=${st.id}</a> (add &amp;t=dark or &amp;t=light)</p>`;
+  const ff = document.getElementById('frame-folded'), fu = document.getElementById('frame-unfolded');
+  ff.classList.toggle('kb', !!st.kb); fu.classList.toggle('kb', !!st.kb);
+  ff.querySelector('.kbd').innerHTML = st.kb ? kbdRows() : ''; fu.querySelector('.kbd').innerHTML = st.kb ? kbdSplit() : '';
+  document.getElementById('cap-folded').textContent = st.kb ? 'iPhone Duo, folded, keyboard open: content 466 × 250.' : 'iPhone Duo, folded: frame 466 × 678, safe content 382 × 644, trailing inset 84, bottom inset 34.';
+  document.getElementById('cap-unfolded').textContent = st.kb ? 'iPhone Duo, unfolded, keyboard open: content 951 × 263. Fold strip 455.5 to 495.5 holds nothing.' : 'iPhone Duo, unfolded: 951 wide, fold strip 455.5 to 495.5 holds nothing. Height 644 is not measured.';
+  document.getElementById('screen-folded').innerHTML = st.f('folded');
+  const u = st.f('unfolded');
+  document.getElementById('pane-left').innerHTML = u.l; document.getElementById('pane-right').innerHTML = u.r;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.c) { S.c = b.dataset.c; S.s = ''; }
+  else if (b.dataset.s) S.s = b.dataset.s;
+  else if (b.dataset.t) S.t = b.dataset.t;
+  else if (b.dataset.hide) { S.hide.push(b.dataset.hide); if (S.c === b.dataset.hide) S.s = ''; }
+  else if (b.dataset.unhide) S.hide = [];
+  else return;
+  render();
+});
+window.addEventListener('hashchange', () => { readHash(); render(); });
+readHash(); render();
+</script>
+</body>
+</html>
