@@ -52,7 +52,7 @@ def tearDownModule():
 
 # Fixtures, all derived from page.html at run time. A live page holds backslash-u escapes in its mockups.
 BLOCK = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
-ALTERED = PAGE.replace("<title>", "<title>Altered ", 1)  # differs outside designData only
+ALTERED = PAGE.replace("<style>", "<style>/* altered */", 1)  # differs outside designData, the roadmap block and <title> text (shiv ruling, Oct 30 14:33 CDT)
 BS = chr(92)  # one backslash: a live page's mockups hold backslash-u-003c escapes
 STALE_BODY = '{"a": "' + BS + 'u003cp>mock' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
 MOCK_BODY = '{"a": "' + BS + 'u003cp>mockup' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
@@ -145,6 +145,23 @@ class Stale(unittest.TestCase):
         code, out = self.run_cmd(root)
         self.assertEqual(code, 0, out)
         self.assertIn("current: mocked", out)
+
+    def test_a_page_that_differs_only_in_its_title_is_current_in_both_modes(self):
+        # shiv ruling, Oct 30 14:33 CDT: the <title> text is the live page's own, so a title alone never makes a page behind.
+        # The title holds a lone quote and comment openers; every other byte is page.html's.
+        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Queue</title>", PAGE, count=1)
+        self.assertNotEqual(titled, PAGE)
+        with self.subTest("batch"):
+            root = self.repo("titled", "KKK")
+            self.fetch("KKK", titled)
+            code, out = self.run_cmd(root)
+            self.assertEqual(code, 0, out)
+            self.assertIn("current: titled", out)
+        with self.subTest("single page"):
+            page = write_text(os.path.join(self.fetched, "titled-single.html"), titled)
+            r = self.page_run(page, "--main", TEMPLATE)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(self.verdict(r)[0], "current")
 
     def live_with_both_blocks(self):
         live = with_both_blocks(PAGE)

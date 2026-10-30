@@ -53,10 +53,10 @@ NEW_BLOCK = (OPEN + '\n<script>window.ROADMAP_DATA = {"steps": {"c1": {"note": "
 OTHER_BLOCK = OPEN + '\n<script>window.ROADMAP_DATA = null; window.ROADMAP_BUILD = {"repo": "other"};</script>\n' + CLOSE + "\n"
 
 
-def live_page(block=OLD_BLOCK, decoys=True, design=DESIGN, extra=""):
+def live_page(block=OLD_BLOCK, decoys=True, design=DESIGN, extra="", title="x: Questions"):
     """A page: the roadmap block (or none) between a lone-quote text and the designData block (or none).
-    `extra` is one more line of markup, for a template that changed."""
-    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>x: Questions</title></head><body>\n"
+    `extra` is one more line of markup, for a template that changed. `title` is the page's own <title> text."""
+    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>" + title + "</title></head><body>\n"
             "<p>Don't split here</p>\n" + (extra + "\n" if extra else "") + (DECOY_STRING + "\n" if decoys else "") +
             (block + "\n" if block else "") + (design + "\n" if design else "") +
             (DECOY_TEMPLATE + "\n" if decoys else "") + "</body></html>\n")
@@ -194,6 +194,19 @@ class Carry(Folder):
         self.assertNotIn(EMPTY_BLOCK, out)
         # Nothing else of the template changed: the template with the two live blocks swapped in, and no more.
         self.assertEqual(out, live_page(block=block, design=DESIGN, extra=DECOY_SLOT + "\n" + CHANGED_LINE))
+        self.assertEqual(self.read("live.html"), live, "the live page changed")
+
+    def test_the_live_title_text_replaces_the_templates_and_a_title_in_a_script_does_not(self):
+        # shiv ruling, Oct 30 14:33 CDT: a republish keeps the live page's own title text. The title holds a lone quote,
+        # comment openers, `$1` and `\1`. The decoys are <title> strings in a script and a template literal: only the head's title moves.
+        live_title = "Don't /* // # $1 \\1 Compass Queue"
+        decoys = ("<script>\nconst S = '<title>Queue</title>';\n</script>\n"
+                  "<script>\nconst T = `\n<title>Queue</title>\n`;\n</script>")
+        template = live_page(block=EMPTY_BLOCK, design=EMPTY_DESIGN, title="Queue", extra=decoys)
+        live = live_page(block=NEW_BLOCK.strip(), design=DESIGN, title=live_title, extra=decoys.replace("Queue", "Live decoy"))
+        out = self.carried(template, live)
+        self.assertEqual(out, live_page(block=NEW_BLOCK.strip(), design=DESIGN, title=live_title, extra=decoys),
+                         "the live title and blocks, the template's own script text, and nothing else")
         self.assertEqual(self.read("live.html"), live, "the live page changed")
 
     def test_a_second_carry_gives_the_same_page(self):
