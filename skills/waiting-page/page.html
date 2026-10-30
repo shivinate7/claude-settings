@@ -319,8 +319,8 @@ body.sheet-open { overflow: hidden; }
 .tabs .tl { display: flex; gap: 4px; }
 .tabs .cnt:empty { display: none; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
-/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. */
-@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } }
+/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap; } }
 .tabs #qCount:empty { display: inline-block; }
 .svwrap { container-type: inline-size; padding-block: 18px 40px; }
 .sv { display: grid; gap: 16px; min-width: 0; }
