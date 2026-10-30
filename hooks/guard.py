@@ -117,9 +117,11 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
-  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt, trimmed, is
-                       not `/effort medium` (LANE_EFFORT). A call with no lane tag passes. An override
-                       lifts it. (agent-model-cap)
+  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
+                       not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
+                       any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
+                       string. A call with no lane tag passes. An override lifts it.
+                       `session_home_keep` skips this tool. (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-cap, simulator-boot-twin
@@ -1840,13 +1842,19 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 def lane_effort_hit(tool: str, tool_input) -> str:
-    """The prompt of a create_session call that tags a lane and is not the effort command alone, or "".
-    A call with no lane tag is not judged. A missing prompt reads as empty, which is not the command."""
+    """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
+    A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
+    tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
+    is not judged. A missing prompt is not the command."""
     tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL or not isinstance(tags, list) or LANE_TAG not in tags:
+    if tool != CREATE_SESSION_TOOL:
         return ""
-    prompt = str(tool_input.get("prompt") or "").strip()
-    return "" if prompt == "/effort " + LANE_EFFORT else prompt or "(no prompt)"
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return ""
+    prompt = tool_input.get("prompt")
+    return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
@@ -3185,8 +3193,8 @@ def session_home_record(payload, primary: str):
 def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither."""
-    if not isinstance(payload, dict) or payload.get("agent_id"):
-        return
+    if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
+        return   # create_session reaches the guard only for rule lane-effort-pin; it keeps no record
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     primary, lane = session_home_place(where)
     record = session_home_record(payload, primary) if primary else ""

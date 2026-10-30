@@ -56,7 +56,7 @@ def is_haiku_role(path: str) -> bool:
 
 
 def is_lane_record(path: str) -> bool:
-    return os.path.normpath(path).endswith(os.sep + LANE_RECORD)
+    return os.path.abspath(path).endswith(os.sep + LANE_RECORD)
 
 
 def lane_effort_problem(text: str) -> str:
