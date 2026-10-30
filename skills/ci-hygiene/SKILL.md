@@ -37,7 +37,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    5 green runs, set the cap at about 2x the slowest of the newest 30 completed runs. Decision
    `ci-job-caps` (each job's cap) holds the table, the target (a slowest run under 80% of the cap)
    and how to measure again. Keep `merge.deadlineMinutes` in `.github/stamp.json` at least the
-   largest cap plus 5. The merge tool warns at 70% of a cap. A job that ends at
+   largest cap plus 5. The merge tool's `warn` mode flags a job past 70% of its cap. A job that ends at
    its cap with no red CI step is re-capped or split. It is never left. A timeout stays red,
    labelled "re-cap or split". Give a network step, such as a browser install, its own short cap.
    When a job nears its cap, split its slowest suite by family into its own job. Give the measured
@@ -232,8 +232,8 @@ is a finding. A read that cannot run is unknown, never yes or no (rule `verifica
 5. Does every job skip on a draft, directly or through `needs:`? Read each job's `if:` and `needs:`.
 6. Does the top-level `concurrency:` group hold the PR draft state, and never cancel a default-branch
    run? Read the block. Compare it with `snippets.md`, section 4.
-7. Does every job set `timeout-minutes`? Run `grep -n "timeout-minutes" .github/workflows/*.yml`
-   and compare the count with the job list from `grep -n "^  [a-z]" .github/workflows/*.yml`.
+7. Does every job set `timeout-minutes`? Run `grep -c "runs-on:"` and `grep -c "timeout-minutes:"` on
+   each workflow file. Each job has one `runs-on:`. The two counts must match.
 8. Is every `uses:` pinned by a full 40-character SHA, except same-repo `$/` and `./` actions? Run
    `grep -n "uses:" .github/workflows/*.yml` and read each line.
 9. Does every `actions/checkout` set `persist-credentials: false`? Run
