@@ -93,7 +93,7 @@ class PlanPremises(unittest.TestCase):
 
 class LaneEffort(unittest.TestCase):
     # The check reads the record it is given as a path. A record at docs/decisions/agent-model-cap.md fails
-    # unless the lane session row's effort cell starts with the lane effort, medium (owner ruling 2026-10-30 15:11 CDT).
+    # unless the lane session row's effort cell starts with the lane effort, medium.
     def record(self, effort):
         return verdict(RECORD_RELPATH, text=LANE_RECORD % effort)
 

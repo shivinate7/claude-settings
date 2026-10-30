@@ -12958,10 +12958,10 @@ add("floor: start_session naming the full haiku id is denied", "deny", "agent-mo
 add("floor: start_session naming sonnet is allowed", "allow",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="sonnet")
 
-# ---- Lane effort pin (owner ruling 2026-10-30 15:11 CDT). A lane session runs Opus at medium effort.
-# On a cloud session the only prompt that sets it is exactly "/effort medium": text after it on a new
-# line runs no slash command. So a create_session that tags a lane must carry that prompt alone. Calls
-# without the lane tag are not judged by this rule.
+# ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
+# prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
+# command. So a create_session that tags a lane must carry that prompt alone. Calls without the
+# lane tag are not judged by this rule.
 LANE_TOOL = "mcp__claude-code-remote__create_session"
 add("lane-effort-pin: lane tag with a brief after the effort command is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\nbrief")
