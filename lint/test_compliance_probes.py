@@ -389,8 +389,8 @@ class Ios(unittest.TestCase):
             repo = self.edit(repo, self.PROJ, "targets: [TallyUITests]", "targets: [TallyTests, TallyUITests]")
         return repo
 
-    # Today every `xcodebuild ... test` on a pull request is a slow-tests gap, a unit-test bundle too. A run counts only
-    # when it covers a UI bundle (project.yml `type: bundle.ui-testing`): by its scheme's test targets, or `-only-testing:`.
+    # An `xcodebuild ... test` on a pull request is a slow test only when it covers a UI bundle (project.yml
+    # `type: bundle.ui-testing`), by its scheme's test targets or by `-only-testing:`. A run that cannot be resolved stays a gap.
     TEST = "xcodebuild test -project native/Tally.xcodeproj -scheme Tally"
 
     def test_a_unit_bundle_only_run_is_not_a_slow_test(self):
@@ -786,10 +786,68 @@ class Words(unittest.TestCase):
         self.assertIs(probes.GROUPS["words"], probes.probe_words)
 
 
+def minified_bundle(word, entries=6000, blobs=160, blob_size=125000):
+    """One line of JSON, the shape of a minified data bundle: many small entries, a few long hex blobs, and `word` as
+    the last key. Each entry is two names to check (its key and its value); the blobs make the line about 20 MB."""
+    entry = ",".join('{"cid":"%016x"}' % (i * 2654435761 % 2 ** 64) for i in range(entries))
+    blob = '"%s"' % (("0123456789abcdef" * (blob_size // 16 + 1))[:blob_size])
+    return '{"boxes":[%s],"blobs":[%s],"%s_note":1}' % (entry, ",".join([blob] * blobs), word)
+
+
+class WordsSpeed(unittest.TestCase):
+    """The words group on a repo that holds one giant single-line data file, as banchi holds three of 36 to 42 MB under
+    demo-assets/mirror/bundle/. check_glossary.code_problems checks the opt-out marker in its `hit()` for every name,
+    and scans the whole line each time, so a one-line file costs its length times its names: minutes with no output."""
+
+    BOUND = 30  # seconds, generous: the fixture takes minutes on the quadratic scan and a few seconds once it is linear
+    REL = "data/bundle.json"
+
+    def test_a_giant_single_line_file_does_not_stall_the_probe(self):
+        word = planted(one_word=True)
+        repo = Repo(self).write("src/app.py", "def main():\n    return 1\n").write(self.REL, minified_bundle(word))
+        try:
+            done = subprocess.run([sys.executable, PROBES, "words", repo.root], capture_output=True, text=True, timeout=self.BOUND)
+        except subprocess.TimeoutExpired:
+            self.fail("the words group did not finish %s (a 20 MB line, 12,000 names) in %d s" % (self.REL, self.BOUND))
+        out = done.stdout
+        reported = (word, self.REL, "1") in hits(out)
+        stopped = done.returncode == 2 and head(out).startswith("words: unknown")
+        declared = any(self.REL in line for line in out.splitlines() if not ITEM.match(line))  # a note line such as `unread:`
+        # Reading the file, stopping with an unknown, or saying it was skipped: never "in shape" with the word unread.
+        self.assertTrue(reported or stopped or declared, "the file was skipped and the group read it as clear:\n" + out)
+        if reported:
+            self.assertEqual((done.returncode, head(out)), (1, "words: out"), out)
+
+    def test_a_deadline_ends_the_probe_with_an_unknown_that_names_the_file(self):
+        # WORDS_DEADLINE: a module constant of compliance_probes, in seconds, read when probe_words runs.
+        probes = load_probes()
+        repo = Repo(self)
+        for n in range(6):
+            repo.write("src/m%d.py" % n, "def f():\n    return %d\n" % n)
+        with mock.patch.object(probes, "WORDS_DEADLINE", 1e-6, create=True):
+            code, out = in_process(repo.root, probes=probes)
+        found = re.fullmatch(r"words: unknown - stopped at (\S+), (\d+) of (\d+) read", head(out))
+        self.assertEqual(code, 2, out)
+        self.assertIsNotNone(found, out)
+        stopped, read, total = found.group(1), int(found.group(2)), int(found.group(3))
+        self.assertEqual(total, 6, out)  # M is the tracked files
+        self.assertLess(read, total, out)  # N is how many were read before the stop
+        self.assertIn(stopped, ["src/m%d.py" % n for n in range(6)], out)
+        group = probes.GROUP_LINE.match(head(out))  # a scorecard group line: score unknown, the stop is its gap
+        self.assertEqual(group.group(1, 2), ("words", "unknown"), out)
+        _, body = Scorecard.run_card(self, Repo(self), out)
+        self.assertIn("| words | unknown |", body)
+
+    def test_the_default_deadline_leaves_a_normal_repo_alone(self):
+        code, out = Repo(self).write("src/a.py", "def f():\n    return 1\n").run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertNotIn("stopped at", out)
+
+
 class Slugs(unittest.TestCase):
     """The slugs group: the rule fails a slug over 32 characters that a change ADDS against origin/main, in the child's
-    own record folders. Old long slugs are a note, never a scored row. The Git row once scored every old one as out,
-    since probes.md gave check_record_slugs.py the record files, and a file list skips git."""
+    own record folders. Old long slugs are a note, never a scored row. A file list given to check_record_slugs.py skips
+    git, so it would fail every old slug."""
 
     OLD = ["b" * 33, "c" * 33, "d" * 33, "e" * 33]  # over 32 characters, in git's sort order
 
@@ -1053,8 +1111,8 @@ def listing(folder):
 
 
 class BadRoot(unittest.TestCase):
-    """A root that is an option, or is no folder, is refused with the usage line and exit 2, for every group.
-    The scorecard group took `--help` as its root and wrote `--help/docs/health/compliance.md` under the cwd."""
+    """A root that is an option, or is no folder, is refused with the usage line and exit 2, for every group, and nothing
+    is written: the scorecard group would otherwise write `--help/docs/health/compliance.md` under the cwd."""
 
     def refused(self, group, root, folder):
         before = listing(folder)
