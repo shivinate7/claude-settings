@@ -945,7 +945,8 @@ class HookLoadsNoGuardModule(unittest.TestCase):
 # a python process whose shell exits first, so init adopts it. A holder writes a heartbeat file every
 # 0.1 s, so a case reads its liveness with no pid, ps or kill, and it ends when its stop file appears.
 TAG = "CLAUDE_CODE_SESSION_ID"
-# No "/" in this text: MSYS sh on Windows can rewrite an argument that looks like a POSIX path.
+# The holder runs from a script file, so the shell passes the native Python only paths, never code.
+HOLDER_SCRIPT = os.path.join(ROOT, "holder.py")
 HOLDER = textwrap.dedent("""\
     import os, sys, time
     beat = sys.argv[1]
