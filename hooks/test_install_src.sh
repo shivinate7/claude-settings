@@ -2977,7 +2977,7 @@ caseK3() {
 
 # ---- caseK4: an unmarked clone at the clone path is never moved, even when main has a new commit ----
 caseK4() {
-  name="caseK4: an unmarked clone of the repo at the clone path stays on its commit when main moves"
+  name="caseK4: an unmarked clone of the repo on a branch at the clone path stays on its commit when main moves"
   fx="$work/k4-fx"; h="$work/k4-home"; scratch="$work/k4-scratch"; bin="$work/k4-bin"
   co="$h/claude-settings"
   mkdir -p "$h" "$scratch"

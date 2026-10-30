@@ -318,7 +318,7 @@ cloud_git() {
 }
 
 # Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
-# person's own and is never moved. mirrorSha is the sha this script last set main to: a main that
+# person's own: this block never moves it, and the block below moves it only when clean and detached. mirrorSha is the sha this script last set main to: a main that
 # differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
 # unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
 # new tip only, never the history under it. A failed fetch keeps the clone as it was.
