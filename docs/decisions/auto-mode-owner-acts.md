@@ -29,6 +29,8 @@ The merge confirm is a permission allow rule, not an `autoMode` entry. The class
 
 ### Incidents for the two new entries
 
+Marking the integration pull request ready has no measured refusal yet: unmeasured. The ruling names it, so it stays.
+
 Both were refused as "External System Writes" on 2026-10-30:
 
 1. Closing joyous PR #54, the owner's own PR with an empty diff: `gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed`.
