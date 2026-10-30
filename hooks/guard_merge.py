@@ -480,10 +480,10 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 ROLE_TIERS = ("coordinator", "batch-runner")
 ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
-    "merge-role-proof: this session's own record does not prove the merge tier it claims. Run "
-    "get_session with no argument, alone in its own turn, then retry. If this session is not a "
-    "merge tier, hand the branch off: find the batch runner with list_sessions (tag "
-    "cs-build:batch-runner, the same cs-repo tag) and send it the branch, its head and the PR."
+    "merge-role-proof: this session's own record does not prove the merge tier it claims. "
+    "If this session is a coordinator or batch runner: run get_session (no argument) alone in its own "
+    "turn, then retry. Any other session: hand the branch, head and PR to the batch runner "
+    "(list_sessions, tag cs-build:batch-runner, same cs-repo)."
 )
 
 
@@ -555,10 +555,10 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
         if tier is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
-            from override import LANE_ENV, LANE_ENV_PREFIX, LANE_PREFIX
-            remote = os.environ.get(LANE_ENV, "")
-            if remote.startswith(LANE_ENV_PREFIX) and len(remote) > len(LANE_ENV_PREFIX) and transcript:
-                tags = _own_get_session_tags(transcript, LANE_PREFIX + remote[len(LANE_ENV_PREFIX):])
+            from override import remote_session_id
+            own_id = remote_session_id()
+            if own_id and transcript:
+                tags = _own_get_session_tags(transcript, own_id)
                 if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
                     continue
         except Exception:
