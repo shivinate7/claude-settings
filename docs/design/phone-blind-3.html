@@ -302,8 +302,7 @@ b { font-weight: 600; }
 .strip { display: flex; flex-direction: column; gap: 2px; }
 .strip-bar { position: relative; display: flex; gap: 2px; height: 16px; }
 .strip-seg { flex: var(--n) 1 0; min-width: 0; background: var(--surface-sunk); border: 1px solid var(--line); border-radius: 2px; }
-.strip-labels { display: flex; gap: 2px; font-size: 12px; line-height: 16px; color: var(--text-muted); }
-.strip-labels span { flex: var(--n) 1 0; min-width: 0; overflow: hidden; white-space: nowrap; }
+.strip-seg.on { background: var(--pull-bg); border-color: var(--pull); }
 .strip-mark { position: absolute; top: -4px; bottom: -4px; width: 4px; margin-left: -2px; background: var(--pull); border-radius: 2px; left: var(--at); }
 .strip-mark.wait { background: var(--attn); }
 
@@ -351,7 +350,9 @@ details.why summary { min-height: 44px; display: flex; align-items: center; curs
 .alert-btns .focus { outline: 3px solid var(--accent); outline-offset: -5px; border-radius: 6px; }
 
 /* Camera */
-.cam { flex: 1; display: flex; flex-direction: column; background: var(--camera); color: var(--on-camera); position: relative; min-height: 0; }
+/* The camera view is dark in both themes, so its status shapes take the dark-theme role values. */
+.cam { flex: 1; display: flex; flex-direction: column; background: var(--camera); color: var(--on-camera); position: relative; min-height: 0;
+  --attn: #f2b84b; --accent: #5cc8b4; }
 .cam-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 44px; padding: var(--space-1) var(--space-4) 0; }
 .cam-top > :last-child { justify-self: end; }
 .cam-top .nav-btn { color: var(--on-camera); }
@@ -599,12 +600,13 @@ function countRow(c) {
   return `<div class="count-wrap"><div class="count-ends"><span>&larr; Front of the box (name label)</span><span>Back &rarr;</span></div>
     <div class="count" role="img" aria-label="${esc(c.sec)} divider, then cards counted from the front; card ${c.nth} is the one."><div class="ct-div"><span class="ct-tab">${esc(c.sec)}</span><div class="ct-divbar"></div></div>${cells}</div></div>`;
 }
-function strip(box, marks) {
+// The whole box as one bar. Section names are left off: the divider tab and the sentence already name the
+// section (ux-label-once), so the target's section shows by its fill alone.
+function strip(box, marks, sec) {
   const b = BOX[box];
-  const segs = b.secs.map(([, n]) => `<div class="strip-seg" style="--n:${n}"></div>`).join('');
-  const labels = b.secs.map(([s, n]) => `<span style="--n:${n}">${s}</span>`).join('');
+  const segs = b.secs.map(([s, n]) => `<div class="strip-seg ${s === sec ? 'on' : ''}" style="--n:${n}"></div>`).join('');
   const m = marks.map(([abs, kind]) => `<i class="strip-mark ${kind || ''}" style="--at:${((abs - 0.5) / b.total * 100).toFixed(2)}%"></i>`).join('');
-  return `<div class="strip" role="img" aria-label="Whole box ${esc(box)}, front on the left"><div class="strip-labels">${labels}</div><div class="strip-bar">${segs}${m}</div><div class="count-ends"><span>Front</span><span>${b.total} cards</span></div></div>`;
+  return `<div class="strip" role="img" aria-label="Whole box ${esc(box)}, front on the left"><div class="strip-bar">${segs}${m}</div><div class="count-ends"><span>Whole box: front</span><span>back, ${b.total} cards</span></div></div>`;
 }
 function neighbours(c, w = 64) {
   const pv = { name: c.prev[0], h: c.prev[1] }, nx = { name: c.next[0], h: c.next[1] };
@@ -637,7 +639,7 @@ PULL_LIT['Pokémon 3'].n = 1;
 function findSteps(c, opts = {}) {
   return `<section class="step"><p class="step-k">1. Open the box</p><p class="t-t1">${esc(c.box)}</p><p class="t-sh muted">${where(c.box)}</p></section>
   <section class="step" ${opts.placeId || ''}><p class="step-k">2. Count from the front</p>${countRow(c)}
-    <p class="t-body">After the <b>${esc(c.sec)}</b> divider, take the <b>${ord(c.nth)}</b> card.</p>${opts.noStrip ? '' : strip(c.box, [[c.abs]])}</section>`;
+    <p class="t-body">After the ${esc(c.sec)} divider, take the <b>${ord(c.nth)}</b> card.</p>${opts.noStrip ? '' : strip(c.box, [[c.abs]], c.sec)}</section>`;
 }
 function compareStep(c, w, k = '3. Check it is this card') {
   return `<section class="step"><p class="step-k">${k}</p>${neighbours(c, w)}${facts(c)}</section>`;
@@ -704,14 +706,14 @@ const A = {
       } },
     { id: 'find', who: 'Helper', label: 'Find a card', newPart: 'find page: box, count row, neighbours', desc: 'The helper taps a card. The page says which box, which divider, and how many cards to count from the front. The card in front and the card behind confirm it by sight.',
       f: pose => {
-        const r = scr(nav(pose === 'folded' ? { back: 'Pull', prog: '3 of 17' } : { title: 'Pikachu ex', prog: '3 of 17' }) + body(findA(K.pika, pose)) + foot(btn('Pulled and packed') + btn("I can't find it", 'plain')));
+        const r = scr(nav(pose === 'folded' ? { back: 'Pull', prog: '3 of 17' } : { title: 'Find the card', prog: '3 of 17' }) + body(findA(K.pika, pose)) + foot(btn('Pulled and packed') + btn("I can't find it", 'plain')));
         if (pose === 'folded') return r;
         return { l: scr(pullHeadA('15 of 17 cards left, for 14 orders.') + body(pullListA({ sel: 'pika' })) + tabsA('pull', pose)), r };
       } },
     { id: 'pulled', who: 'Helper', label: 'After the press', newPart: 'answer at the press, Undo, next card', desc: 'The answer shows where the press was. Undo is there, because a pull moves every card behind it up one place. The next card is one press away.',
       f: pose => {
         const ft = foot(`<div class="done-line" role="status"><span>${I.check} Pulled and packed</span><button>Undo</button></div>${btn('Next: Umbreon V, Pokémon 8 ' + I.chev, 'tint')}`);
-        const r = scr(nav(pose === 'folded' ? { back: 'Pull', prog: '3 of 17' } : { title: 'Pikachu ex', prog: '3 of 17' }) + body(findA(K.pika, pose)) + ft);
+        const r = scr(nav(pose === 'folded' ? { back: 'Pull', prog: '3 of 17' } : { title: 'Find the card', prog: '3 of 17' }) + body(findA(K.pika, pose)) + ft);
         if (pose === 'folded') return r;
         return { l: scr(pullHeadA('14 of 17 cards left, for 14 orders.') + body(pullListA({ done: ['mew', 'gard', 'pika'], sel: 'pika' })) + tabsA('pull', pose)), r };
       } },
@@ -770,7 +772,7 @@ const A = {
           .map(([c, s, t], i) => { c = typeof c === 'string' ? K[c] : c; return `<button class="row ${i === 0 && pose === 'unfolded' ? 'sel' : ''}" style="min-height:48px"><i class="sh sh-${s}"></i><span class="stack-1"><span class="t-body">${esc(c.name)}</span><span class="t-fn muted">${t}</span></span><span class="chev">${I.chev}</span></button>`; }).join('');
         const res = `${legend([['pull', 'Sold, to pull'], ['listed', 'Listed']])}<div class="group">${rows}</div>`;
         if (pose === 'folded') return scr(nav({ title: 'Boxes', trail: 'Cancel' }) + body(field + res));
-        return { l: scr(nav({ title: 'Boxes', trail: 'Cancel' }) + body(field + res)), r: scr(nav({ title: 'Pikachu ex' }) + body(`<p class="t-t3">Pokémon 3</p><p class="t-body">After the <b>Rares</b> divider, the <b>5th</b> card.</p>${strip('Pokémon 3', [[K.pika.abs]])}`)) };
+        return { l: scr(nav({ title: 'Boxes', trail: 'Cancel' }) + body(field + res)), r: scr(nav({ title: 'Pikachu ex' }) + body(`<p class="t-t3">Pokémon 3</p><p class="t-body">After the Rares divider, the <b>5th</b> card.</p>${strip('Pokémon 3', [[K.pika.abs]], 'Rares')}`)) };
       } },
   ],
 };
@@ -809,10 +811,10 @@ const B = {
       } },
     { id: 'find', who: 'Helper', label: 'Find, as a sheet', newPart: 'find sheet over the box', desc: 'The card opens as a sheet over the box, so the box stays in view behind it. Count row, neighbours, one press.',
       f: pose => {
-        const sheet = `<div class="sheet" role="dialog" aria-label="Pikachu ex"><div class="grabber"></div>${nav({ lead: 'Close', title: 'Pikachu ex' })}${body(`<section class="step"><p class="step-k">Count from the front</p>${countRow(K.pika)}<p class="t-body">After the <b>Rares</b> divider, take the <b>5th</b> card.</p></section>${compareStep(K.pika, 52, 'Check it is this card')}<p class="t-sh">For <b>${buyer('R')}</b></p>`)}${foot(btn('Pulled and packed'))}</div>`;
+        const sheet = `<div class="sheet" role="dialog" aria-label="Pikachu ex"><div class="grabber"></div>${nav({ lead: 'Close', title: 'Find the card' })}${body(`<section class="step"><p class="step-k">Count from the front</p>${countRow(K.pika)}<p class="t-body">After the Rares divider, take the <b>5th</b> card.</p></section>${compareStep(K.pika, 52, 'Check it is this card')}<p class="t-sh">For <b>${buyer('R')}</b></p>`)}${foot(btn('Pulled and packed'))}</div>`;
         const under = scr(nav({ back: 'Shelf', title: 'Pokémon 3' }) + body(xray('Pokémon 3', P3LEFT)) + sheet);
         if (pose === 'folded') return under;
-        return { l: scr(nav({ back: 'Shelf', title: 'Pokémon 3' }) + body(xray('Pokémon 3', P3LEFT))), r: scr(nav({ title: 'Pikachu ex' }) + body(`<section class="step"><p class="step-k">Count from the front</p>${countRow(K.pika)}<p class="t-body">After the <b>Rares</b> divider, take the <b>5th</b> card.</p></section>${compareStep(K.pika, 60, 'Check it is this card')}<p class="t-sh">For <b>${buyer('R')}</b> &middot; 1 of 2 cards</p>`) + foot(btn('Pulled and packed'))) };
+        return { l: scr(nav({ back: 'Shelf', title: 'Pokémon 3' }) + body(xray('Pokémon 3', P3LEFT))), r: scr(nav({ title: 'Find the card' }) + body(`<section class="step"><p class="step-k">Count from the front</p>${countRow(K.pika)}<p class="t-body">After the Rares divider, take the <b>5th</b> card.</p></section>${compareStep(K.pika, 60, 'Check it is this card')}<p class="t-sh">For <b>${buyer('R')}</b> &middot; 1 of 2 cards</p>`) + foot(btn('Pulled and packed'))) };
       } },
     { id: 'empty', who: 'Helper', label: 'Nothing to pull', newPart: 'dark shelf', desc: 'No box is lit. One sentence, one control.',
       f: pose => {
@@ -889,10 +891,10 @@ const C = {
     { id: 'find', who: 'Helper', label: 'Find the card', newPart: 'one step: count and check', desc: 'One card. Count from the divider, check by the card in front and behind, one press. Nothing else is on screen.',
       f: pose => {
         const c = K.pika;
-        const where_ = `<section class="step" ${idf(pose, 'c-step')}><p class="step-k">Pokémon 3 &middot; card 3 of 3 from this box</p><h2 class="t-t1">After <b>${c.sec}</b>, count <b>${c.nth}</b></h2>${countRow(c)}</section>`;
+        const where_ = `<section class="step" ${idf(pose, 'c-step')}><p class="step-k">Pokémon 3 &middot; card 3 of 3 from this box</p><h2 class="t-t1">After ${c.sec}, count ${c.nth}</h2>${countRow(c)}</section>`;
         const ft = foot(btn("It's in my hand") + btn("I can't find it", 'plain'));
         if (pose === 'folded') return scr(navC('Pokémon 3', '3 of 17') + routeProg(2, 2) + body(where_ + neighbours(c, 56) + `<p class="t-sh muted">${c.name} &middot; ${c.set} &middot; ${c.no} &middot; ${c.print}</p>`) + ft);
-        return { l: scr(navC('Pokémon 3', '3 of 17') + routeProg(2, 2) + body(where_ + strip('Pokémon 3', [[c.abs]]))), r: scr(nav({ title: 'Is it this card?' }) + body(neighbours(c, 80) + facts(c)) + ft) };
+        return { l: scr(navC('Pokémon 3', '3 of 17') + routeProg(2, 2) + body(where_ + strip('Pokémon 3', [[c.abs]], c.sec))), r: scr(nav({ title: 'Is it this card?' }) + body(neighbours(c, 80) + facts(c)) + ft) };
       } },
     { id: 'pack', who: 'Helper', label: 'Into the envelope', newPart: 'one step: which envelope', desc: 'The card goes straight into its envelope. The step says whose envelope, and whether more cards for it come later. The pull shows done at the press, with Undo.',
       f: pose => {
