@@ -11634,8 +11634,9 @@ def pl_item(**over):
 
 
 def pl_task(steps, links=None, **over):
+    # The Why yours line keeps each case on the press-link rule; task-names-check reads it (TN_WHY).
     task = {"id": WP_DOC, "kind": "task", "status": "open", "title": "Merge home#374", "steps": steps,
-            "links": links}
+            "links": links, "context": TN_WHY}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}
 
@@ -11787,8 +11788,9 @@ CI_STEPS = ["Open plans/c152-stale-branch-deletes.md", "Run its command"]
 
 
 def ci_task(steps, **over):
+    # The Why yours line keeps each case on the command rule; task-names-check reads it (TN_WHY).
     task = {"id": CI_DOC, "kind": "task", "status": "open", "title": "Delete the stale branches",
-            "steps": steps}
+            "steps": steps, "context": TN_WHY}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}
 
@@ -11827,17 +11829,19 @@ ci("a run-the-command-in-file step with the command set is denied", "deny",
 FAMILY = "task-names-check"
 #
 # Decision task-names-its-check: a waiting-page task carries a "Why yours:" line naming the check that
-# showed no session could do the act. Item 39's exact record is lost, so this fixture is built from its
-# shape: steps to run in a repo, a cloud refusal in context, and no Why yours line. The rule judges
-# only this repo's waiting page.
+# showed no session could do the act. The fixture is a task with a cloud refusal in context and no Why
+# yours line. Its steps are plain and it carries a
+# `command`, so command-in-item passes it and only this rule judges it. The rule judges only this
+# repo's waiting page.
 
 TN_CTX = "The cloud proxy refused the branch deletes (403)."
-TN_STEPS = ["open plans/c152-stale-branch-deletes.md", "run its command"]
+TN_STEPS = ["Open Terminal", "Paste the command below and run it"]
+TN_COMMAND = "git push origin --delete old-a"
 
 
 def tn_task(**over):
     task = {"id": "stale-branch-deletes", "kind": "task", "status": "open", "title": "Delete the stale branches",
-            "context": TN_CTX, "steps": TN_STEPS}
+            "context": TN_CTX, "steps": TN_STEPS, "command": TN_COMMAND}
     task.update(over)
     return {k: v for k, v in task.items() if v is not None}
 
@@ -11849,7 +11853,7 @@ def tn(name, expected, data, action="set", **extra):
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
 
 
-tn("item 39's shape (a task with steps, no Why yours line) is denied", "deny", tn_task())
+tn("a task with steps and no Why yours line is denied", "deny", tn_task())
 tn("a Why yours line in context allows the task", "allow", tn_task(context=TN_CTX + "\n" + TN_WHY))
 tn("the Why yours line is read in any case, at a line start", "allow",
    tn_task(context=TN_CTX + "\nwhy yours: none could reach the remote"))
@@ -11863,7 +11867,7 @@ tn("an update of the status only is allowed", "allow", {"status": "closed"}, act
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 tn("a decision is not judged", "allow", tn_task(kind="decision"))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
-add("task names its check: a batch with item 39's shape among the sets is denied", "deny", "task-names-check",
+add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "stale-branch-deletes", "data": tn_task()}])
 add("task names its check: the refusal says to ask a session on the owner's computer and add the line", "deny",
