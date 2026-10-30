@@ -634,5 +634,7 @@
 - checkout-at-raw-origin: `checkout_at` reads the raw origin URL, so an alias origin such as `gh:owner/repo` with insteadOf no longer matches in a piped local install, which then fetches the tarball (install.sh checkout_at).
 - cloud-mirror-skip-not-cloud-only: the freshness skip reads only the cloudMirror marker, so a marked clone stays silent on staleness when the refresh did not run. Main's tarball copy had no check either (hooks/session_start.sh).
 - cloud-swap-old-left: a run killed between the two `mv` calls of the clone swap leaves `claude-settings.old.<pid>`, which the stale sweep (`claude-settings.clone.*` only) never removes (install.sh cloud clone).
+- open-box-no-wake-to-page: a session in an open question box with nothing running gets no wake, so its question reaches the page only once the owner answers. Decision: questions-go-to-owner
+- pick-words-anywhere-in-item: the 5-minute check reads "5 minutes" and "waiting page" anywhere in the Input Needed item, so "A: change the waiting page 5 minutes rule, B: keep it" passes with no wait offered (lint/report_guard.py names_five_minutes). Decision: decisions-reach-a-clickable-pick
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
