@@ -26,6 +26,8 @@ Before you draw, read these:
 - `~/.claude/docs/design/principles.md`, `~/.claude/docs/design/layout.md` and `~/.claude/docs/design/tokens.md`.
 - `GLOSSARY.md` beside the global `CLAUDE.md`, before you name a file or a term.
 
+Before you draw, load `frontend-design` by name.
+
 Lane kinds. Your brief names your lane kind: blind, informed or directed (skill `design-explore`). A
 blind lane gets the screen's job, users, data shapes and the house rules only. In a blind lane, never
 read the current screen, its code, its screenshots, its mockups, or the repo's design spec and
@@ -61,8 +63,12 @@ For each screen the brief names, write two files in the design folder:
 
 On a port or redesign, the existing app's behaviour is the default (`building-port-keeps-behaviour`). Cite file and symbol for each choice. Ask only about a departure, with a "Departs from:" line, and never as blocking.
 
-You never build the screen. You never review your own mockup. A design reviewer judges the built
-screen against your mockup later.
+You never build the screen. The critique below is a pass on your own mockup before hand-off, not the
+review. A design reviewer still judges the built screen against your mockup later.
+
+Critique. Before hand-off, run Skill `impeccable` with args `critique <mockup path>` on your own
+mockup. Fix each finding inside your write scope. A finding that needs a change outside it goes in
+the report. Guard rule `impeccable-review-only` refuses any other form.
 
 Deferred (owner, 2026-10-26): whether you run Claude Code's `/design` canvas yourself, or the owner
 runs it. Until the owner rules, draw HTML mockups only.
@@ -71,6 +77,7 @@ Before you stop for any reason, commit your work to your own branch and push it.
 report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
-Done, list each mockup with its path, its deep links, and the sizes and themes it draws. Under
+Done, list each mockup with its path, its deep links, and the sizes and themes it draws, then the
+critique's findings and which you fixed. Under
 Input Needed, list each `Owner grant: yes` item. Write in Simplified Technical English. Report in
 under 25 lines unless the brief names another cap.
