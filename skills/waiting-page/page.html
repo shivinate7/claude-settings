@@ -1252,16 +1252,34 @@ async function withdrawAll() {
 
 /* ---------- Painting: a card is rebuilt only when what it shows changed, and a live design preview is never detached ---------- */
 const cards = {}, heights = {};
-// patch() holds a card that turns into a receipt at its old height, so the layout right after a repaint matches the layout before it.
-// The end of render() lets every hold go in one pass. The witness is the first unheld card after a hold that is not wholly above the screen:
-// its top is measured before and after, and the scroll moves by that difference, so the reader's place stays. A witness below the screen needs no correction.
-function releaseHeld() {
-  const all = [...document.querySelectorAll("article.card")], held = all.filter((c) => c.style.minHeight);
+// Once a held receipt is wholly off screen it drops its height, and the scroll moves by what that shifted, so nothing in view moves.
+// A drop waits for the scroll to go idle: a rail jump is a smooth scroll to a fixed target, and a shift mid-flight would move it.
+let lastScroll = 0;
+addEventListener("scroll", () => { lastScroll = performance.now(); }, { passive: true });
+function releaseHeld(el) {
+  if (!el.isConnected || !el.style.minHeight) { heldWatch.unobserve(el); return; }
+  if (performance.now() - lastScroll < 150) { setTimeout(() => releaseHeld(el), 160); return; }
+  const r = el.getBoundingClientRect();
+  if (r.bottom > 0 && r.top < innerHeight) return; // back in view: the observer fires again when it leaves
+  const above = r.bottom <= 0;
+  // Everything after the receipt moves with it, so the first later card is the witness.
+  const mark = above ? [...document.querySelectorAll("article.card")].find((c) => el.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) : null, was = mark ? mark.getBoundingClientRect().top : 0;
+  el.style.minHeight = ""; heldWatch.unobserve(el);
+  if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - was);
+}
+const heldWatch = new IntersectionObserver((entries) => entries.forEach((e) => { if (!e.isIntersecting) releaseHeld(e.target); }));
+// Cards the owner just sent. The render that turns them into receipts lets their holds go at once, and the scroll moves with the layout, so nothing in the reading band jumps.
+let sentNow = [];
+function releaseSent() {
+  const ids = sentNow; sentNow = [];
+  const held = ids.map((id) => cards[id] && cards[id].el).filter((el) => el && el.isConnected && el.style.minHeight);
   if (!held.length) return;
-  const mark = all.find((c) => !c.style.minHeight && held.some((h) => h.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) && c.getBoundingClientRect().bottom > 0);
+  const band0 = document.querySelector(".hdr").getBoundingClientRect().bottom;
+  // A sent card that starts above the band is skipped: its top moves with the scroll, not with the layout. Cards before the anchor do not move.
+  const mark = [...document.querySelectorAll("article.card")].find((c) => { const r = c.getBoundingClientRect(); return r.bottom > band0 && !(held.includes(c) && r.top < band0); });
   const before = mark ? mark.getBoundingClientRect().top : 0;
-  held.forEach((c) => { c.style.minHeight = ""; });
-  if (mark && before < innerHeight) window.scrollBy(0, mark.getBoundingClientRect().top - before);
+  held.forEach((el) => { el.style.minHeight = ""; heldWatch.unobserve(el); });
+  if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - before);
 }
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
@@ -1295,12 +1313,13 @@ function patch(old, nu) {
     if (k && n && (!same || same(k, n))) keeps.push([k, n, sync]);
   }
   const wasReceipt = !!old.querySelector(":scope > .receipt"), isReceipt = !!nu.querySelector(":scope > .receipt");
-  // A card that turns into a receipt keeps its old height until the render ends (releaseHeld).
+  // A card that turns into a receipt keeps its height while it is in view, so nothing below it moves.
   if (!wasReceipt) heights[old.id] = old.getBoundingClientRect().height;
   const minH = !isReceipt ? "" : wasReceipt ? old.style.minHeight : heights[old.id] ? heights[old.id] + "px" : "";
   copyAttrs(old, nu);
   if (keeps.length) graft(old, keeps, nu); else old.replaceChildren(...nu.childNodes);
   old.style.minHeight = minH;
+  if (minH && !wasReceipt) heldWatch.observe(old);
   if (focusId) { const f = $(focusId); if (f && !f.disabled) f.focus({ preventScroll: true }); }
 }
 function cardFor(it) {
@@ -1496,6 +1515,7 @@ async function sendAll() {
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
+    sentNow = wrote.filter((w) => !w.withdrawn).map((w) => w.it.id);
     render();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
@@ -1766,7 +1786,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 function render() {
-  renderList(); renderRail(); renderBar(); renderSent(); releaseHeld();
+  renderList(); renderRail(); renderBar(); renderSent(); releaseSent();
   FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
   const nd = allDesigns().length;
   $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
