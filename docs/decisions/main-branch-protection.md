@@ -23,7 +23,7 @@ the names from the protection. GitHub's branch protection setting is the owner's
 
 Reason: agent rules alone did not stop red merges.
 
-Temporary grant (owner, 2026-10-30 15:37 CDT): "changing a repo's protection is generally mine to do, but i can and am granting you protection changes as a temporary grant (i will say when it's withdrawn untilthen you can treat it on)". The ruling above is the default, and it holds without the grant. While the grant holds, the coordinator, and the batch runner it names, may make a branch-protection write in any of the owner's repos at merge time. The write must match the gold form: one required check, `all-jobs-passed`; `strict` false; `enforce_admins` true. The grant holds until the owner withdraws it in chat. Then delete this paragraph.
+Temporary grant (owner, 2026-10-30 15:37 CDT): "changing a repo's protection is generally mine to do, but i can and am granting you protection changes as a temporary grant". The ruling above is the default, and it holds without the grant. While the grant holds, the coordinator, and the batch runner it names, may make a branch-protection write in any of the owner's repos at merge time. The write must match the gold form: one required check, `all-jobs-passed`; `strict` false; `enforce_admins` true. The grant holds until the owner withdraws it in chat. Then delete this paragraph.
 
 Kind: process
 Home: .github/stamp.json
