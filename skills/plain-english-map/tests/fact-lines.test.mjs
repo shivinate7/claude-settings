@@ -30,7 +30,7 @@
 //   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 3 after the step 6 bump.
 //   scripts/lib/map-config.mjs, validateMapConfig: the optional key `mapPaths`, a list of path prefixes. See map-paths.test.mjs.
 //
-// The fixture (tests/fixture/) gained: src/retry.py, src/worker.py, config.json, docs/map/homes.md, and fact lines in core.md.
+// The fixture (tests/fixture/) gained: src/retry.py, src/caller.py, config.json, docs/map/homes.md, and fact lines in core.md.
 // Its codeExtensions stay ["ts"]: the readers read .py and .json facts without them being code files. Adding them would change
 // the upgrade of `/api/runs.json:1` (case 7a) and the config of case 4, which are green on main.
 // Each case that edits the fixture edits a scratch copy in this run's temp folder, never the checkout.
@@ -175,12 +175,12 @@ test('F2b. a list line with no indent is no fact line, and an indented line that
 test('F2c. mapCodePaths counts no fact line as a map line, even when the cite names a tracked file', async () => {
   const { mapCodePaths } = await checkExports('mapCodePaths');
   const text = [
-    '- `src/worker.py` — Runs the worker.',
+    '- `src/caller.py` — Runs the caller.',
     '  - It reads the retry wait. — `uses src/retry.py:RETRY_WAIT_S`',
     '  - Holds the wait. — `src/retry.py: RETRY_WAIT_S = 30`',
     '',
   ].join('\n');
-  assert.deepEqual(mapCodePaths(text, /\.py$/), ['src/worker.py']);
+  assert.deepEqual(mapCodePaths(text, /\.py$/), ['src/caller.py']);
 });
 
 test('F2d. a fact prose holds a lone quote and a comment mark in text, and the cite still reads', async () => {
@@ -244,10 +244,10 @@ test('R3. the json reader returns 30 for the dotted path retry.wait_s of config.
   assert.deepEqual(r, { file: 'config.json', symbol: 'retry.wait_s', ok: true, value: 30 });
 });
 
-test('R4. the json reader fans out a [*] step: workers[*].name is the list of names in config.json', async () => {
+test('R4. the json reader fans out a [*] step: crew[*].name is the list of names in config.json', async () => {
   const { readValues } = await readersModule();
-  const [r] = readValues([{ file: 'config.json', symbol: 'workers[*].name' }], FIXTURE);
-  assert.deepEqual(r, { file: 'config.json', symbol: 'workers[*].name', ok: true, value: ['alpha', 'beta'] });
+  const [r] = readValues([{ file: 'config.json', symbol: 'crew[*].name' }], FIXTURE);
+  assert.deepEqual(r, { file: 'config.json', symbol: 'crew[*].name', ok: true, value: ['alpha', 'beta'] });
 });
 
 test('R5. a json path that is not in the file is ok: false, never a value', async () => {
@@ -351,8 +351,8 @@ test('M3. a set cite and a list cite: each item must appear in the prose, and a 
   const cases = [
     ['TEMPLATE_DIRS = {"examples", "templates"}', 'Parent files under examples and templates are never copies.', true],
     ['TEMPLATE_DIRS = {"examples", "templates"}', 'Parent files under examples are never copies.', false],
-    ['WORKERS = ["alpha", "beta"]', 'The workers are alpha and beta.', true],
-    ['WORKERS = ["alpha", "beta"]', 'The worker is alpha.', false],
+    ['NAMES = ["alpha", "beta"]', 'The names are alpha and beta.', true],
+    ['NAMES = ["alpha", "beta"]', 'The name is alpha.', false],
   ];
   for (const [body, prose, pass] of cases) {
     const dir = scratchRepo();
@@ -452,9 +452,9 @@ test('M9. several causes at once make one MAP9 line, and the causes are joined b
   needFile('scripts/map-check.mjs');
   const dir = scratchRepo();
   edit(dir, 'src/retry.py', 'RETRY_WAIT_S = 30', 'RETRY_WAIT_S = 45');
-  edit(dir, 'src/worker.py', 'import retry\n', '');
+  edit(dir, 'src/caller.py', 'import retry\n', '');
   const r = check(dir);
-  const lines = r.out.split('\n').filter((l) => /^\[(PASS|FAIL|SKIP)\] MAP9\b/.test(l));
+  const lines =r.out.split('\n').filter((l) => /^\[(PASS|FAIL|SKIP)\] MAP9\b/.test(l));
   assert.equal(lines.length, 1, `MAP9 must print one line\n${out1500(r)}`);
   assert.match(lines[0], /^\[FAIL\] MAP9/, 'the one line must say FAIL');
   assert.match(lines[0], /; /, `the causes must be joined by "; "\n${lines[0]}`);
@@ -463,23 +463,23 @@ test('M9. several causes at once make one MAP9 line, and the causes are joined b
 
 // ---- Step 5: relations and homes ----
 
-test('U2. cause 4: worker.py no longer imports retry.py. MAP9 fails and names the map line, the two files and the broken import', () => {
+test('U2. cause 4: caller.py no longer imports retry.py. MAP9 fails and names the map line, the two files and the broken import', () => {
   needFile('scripts/map-check.mjs');
   const dir = scratchRepo();
-  edit(dir, 'src/worker.py', 'import retry\n', '');
+  edit(dir, 'src/caller.py', 'import retry\n', '');
   const r = check(dir);
   assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
-  const at = `${CORE}:${lineOf(dir, CORE, 'The worker reads the retry wait')}`;
+  const at = `${CORE}:${lineOf(dir, CORE, 'The caller reads the retry wait')}`;
   const line = mapLine(r.out);
   assert.ok(line.includes(at), `MAP9 must name the map line ${at}\n${line}`);
-  assert.ok(line.includes('src/worker.py') && line.includes('src/retry.py'), `MAP9 must name both files\n${line}`);
+  assert.ok(line.includes('src/caller.py') && line.includes('src/retry.py'), `MAP9 must name both files\n${line}`);
   assert.match(line, /no longer imports/, 'MAP9 must say the import is gone');
 });
 
-test('U3. cause 4: worker.py still imports retry.py but never uses RETRY_WAIT_S. MAP9 fails and says so', () => {
+test('U3. cause 4: caller.py still imports retry.py but never uses RETRY_WAIT_S. MAP9 fails and says so', () => {
   needFile('scripts/map-check.mjs');
   const dir = scratchRepo();
-  edit(dir, 'src/worker.py', 'return retry.RETRY_WAIT_S', 'return 0');
+  edit(dir, 'src/caller.py', 'return retry.RETRY_WAIT_S', 'return 0');
   const r = check(dir);
   assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
   assert.match(mapLine(r.out), /never uses RETRY_WAIT_S/, 'MAP9 must say the file never uses the symbol');
