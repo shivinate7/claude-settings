@@ -3316,6 +3316,7 @@ move_install() {
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
 
 # The count comes from the rules file, which holds the role rules as well as the confirm rules, so a tier added to the file needs no edit here.
+# A file with no rules fails: an empty file would otherwise pass as 0 = 0.
 caseM1() {
   name="caseM1: a clean, detached checkout on an old main commit moves to main and gets the merge allow rules"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
@@ -3325,6 +3326,8 @@ caseM1() {
     bad "$name" "install.sh exited $rc: $(install_problems)"
   elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
     bad "$name" "the checkout is not detached at main [$want]: $(git -C "$co" rev-parse HEAD) $(install_problems)"
+  elif [ "$(want_allow | wc -l | tr -d ' ')" -le 0 ]; then
+    bad "$name" "the rules file in the checkout has no allow rules, so the count proves nothing"
   elif [ "$(merge_rule_count)" != "$(want_allow | wc -l | tr -d ' ')" ]; then
     bad "$name" "settings.json has $(merge_rule_count) merge allow rules, not the $(want_allow | wc -l | tr -d ' ') in the rules file"
   elif [ "$(git -C "$co" rev-parse --is-shallow-repository)" != false ]; then
