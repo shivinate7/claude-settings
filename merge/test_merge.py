@@ -9276,7 +9276,14 @@ CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
 # The one shim form, plain and with trailing arguments. Bare `merge` is not on a cloud session's PATH, and `bin/merge` would allow any
 # repo's own bin/merge. No rule runs merge/merge.py by path: that runs the working copy's file, which on an old lane branch has no role check.
 CLOUD_ALLOW_SHIMS = ("~/.claude/bin/merge",)
-CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
+CLOUD_ALLOW_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS for tier in sorted(merge.MERGE_ROLES))  # exact: one per tier, no `*`
+CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *")) + CLOUD_ALLOW_ROLE_RULES
+CONFIRM_SHAPE = re.compile(r"Bash\(~/\.claude/bin/merge \* --confirm( \*)?\)")
+
+def narrow_shape(rule):
+    """True for a `merge --confirm` shape (one `*` for the PR, then at most one `*` for trailing arguments)
+    or one exact role rule. Anything else is broad."""
+    return CONFIRM_SHAPE.fullmatch(rule) is not None or rule in CLOUD_ALLOW_ROLE_RULES
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
 SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
@@ -9347,14 +9354,15 @@ class ShellScan(unittest.TestCase):
         self.assertNotIn(self.NAME, head + local)
 
 class CloudAllow(unittest.TestCase):
-    """merge/cloud_allow.json holds the `merge --confirm` allow rules that only a cloud session's settings.json gets (install.sh's cloud branch).
-    A local settings.json is a link to the repo's settings.json and gets none."""
+    """merge/cloud_allow.json holds the `merge --confirm` allow rules and the exact `merge --role <tier>` rules that only a cloud session's
+    settings.json gets (install.sh's cloud branch). A role rule names one tier of MERGE_ROLES and takes no `*`. A local settings.json is a
+    link to the repo's settings.json and gets none."""
 
     def allow(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             return json.load(f)["permissions"]["allow"]
 
-    def test_the_rules_file_is_exactly_the_two_confirm_rules_of_the_home_shim(self):
+    def test_the_rules_file_is_exactly_the_confirm_and_role_rules_of_the_home_shim(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"permissions"})
@@ -9379,13 +9387,28 @@ class CloudAllow(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertNotIn(rule[len("Bash("):].split(" ", 1)[0], ("merge", "bin/merge"))
 
-    def test_every_rule_names_confirm_and_none_is_broad(self):
-        narrow = re.compile(r"Bash\(~/\.claude/bin/merge \* --confirm( \*)?\)")
+    def test_every_rule_is_a_narrow_confirm_shape_or_an_exact_role_rule(self):
         for rule in self.allow():
             with self.subTest(rule=rule):
                 self.assertNotEqual(rule, "Bash(*)")
-                # the shim, one `*` for the PR, --confirm, then at most one `*` for trailing arguments
-                self.assertTrue(narrow.fullmatch(rule), f"{rule} is not one of the narrow shapes")
+                self.assertTrue(narrow_shape(rule), f"{rule} is not one of the narrow shapes")
+
+    def test_each_merge_role_has_its_exact_rule_in_the_file(self):
+        for rule in CLOUD_ALLOW_ROLE_RULES:
+            with self.subTest(rule=rule):
+                self.assertIn(rule, self.allow())
+
+    def test_no_rule_allows_role_with_a_star(self):
+        for rule in self.allow():
+            if "--role" in rule:
+                with self.subTest(rule=rule):
+                    self.assertNotIn("*", rule)
+
+    def test_a_role_rule_with_a_star_fails_the_shape_check(self):
+        for rule in ("Bash(~/.claude/bin/merge --role *)", "Bash(~/.claude/bin/merge --role batch-runner *)",
+                     "Bash(~/.claude/bin/merge --role * --confirm)"):
+            with self.subTest(rule=rule):
+                self.assertFalse(narrow_shape(rule))
 
     def test_install_sh_names_the_rules_file_in_its_cloud_branch(self):
         with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
