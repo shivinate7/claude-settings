@@ -16,11 +16,13 @@ a turn end in these cases:
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
     never count for these two kinds (rule building-memory-is-short-term). When the cwd is in no git
     repo, or the layout cannot be read, these homes pass unchecked and a systemMessage says so;
-  - an answer item (`[answer] -> page:<n>`, checked in every block that holds one, burst or not) has a
-    home that is not `page:<digits>`, or the session's transcript shows no send after the owner's
-    message: send_message or SendMessage naming n as a whole token, or an ArtifactData write whose
-    input has key n equal to the item number under collection `items` (Answers, lint/_transcript.py
-    reads the transcript). A missing or unreadable transcript passes, with a systemMessage;
+  - an open answer item (`[answer] -> page:<n>`, checked in every block that holds one, burst or not;
+    a `[closed]` one is never checked) has a home that is not `page:<digits>`, or the session's
+    transcript shows no send after the owner's message: send_message or SendMessage naming n as a whole
+    token, or an ArtifactData set, update or batch whose input has key n equal to the item number under
+    collection `items` (Answers; lint/_transcript.py reads the transcript). The k-th block with text T
+    anchors to the k-th owner record with text T, line ends made the same. A missing or unreadable
+    transcript, or one with no owner record for the block, passes with a systemMessage;
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
@@ -50,6 +52,7 @@ JOT = re.compile(r"\[(ruling|task|question|note|standing|answer)\]\s+->\s+\S")
 ANSWER_HOME = re.compile(r"page:(\d+)")
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
+WRITE_VERBS = ("set", "update", "batch")
 HEADER = re.compile(r"### \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
@@ -203,11 +206,11 @@ class Homes:
 
 class Answers:
     """Checks that each answer item's page number was sent to the page writer after the owner's
-    message. The transcript loads once, on the first answer item. `skip` holds the reason the check
-    stood down, once, for the systemMessage line."""
+    message. The transcript loads once, on the first open answer item. `skip` holds the reasons the
+    check stood down, for the systemMessage line."""
 
     def __init__(self, path):
-        self.path, self.records, self.skip = path, None, None
+        self.path, self.records, self.skip = path, None, []
 
     def _load(self):
         if self.records is None:
@@ -217,20 +220,29 @@ class Answers:
                     raise OSError("no transcript_path in the payload")
                 self.records = _transcript.read_transcript(self.path)
             except (OSError, ValueError) as e:
-                self.skip = "the transcript cannot be read: %s" % (" ".join(str(e).split()) or type(e).__name__)
+                self.skip.append("the transcript cannot be read: %s" % (" ".join(str(e).split())
+                                                                       or type(e).__name__))
         return not self.skip
 
-    def sent(self, text, n):
-        """True when a send naming item n follows an owner record whose text is `text`."""
+    def sent(self, text, k, n, stamp):
+        """True when a send naming item n follows the owner record that anchors the k-th block with
+        this text. True too when the check stands down: no transcript, or no such owner record."""
         if not self._load():
             return True
-        text = (text or "").strip()
-        for i, rec in enumerate(self.records):
-            if _transcript.is_last_human(rec) and _record_text(rec) == text:
-                if any(_proves(use, n) for r in self.records[i + 1:] if r.get("type") == "assistant"
-                       for use in _transcript.tool_uses(r)):
-                    return True
-        return False
+        anchors = [i for i, rec in enumerate(self.records)
+                   if rec.get("type") == "user" and _record_text(rec) == text]
+        if len(anchors) < k:
+            self.skip.append("the transcript has no owner record %d for the message at %s" % (k, stamp))
+            return True
+        if not _transcript.is_last_human(self.records[anchors[k - 1]]):
+            return False  # the text is there, but only as a peer's words: no owner anchor, no proof
+        return any(_proves(use, n) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
+                   for use in _transcript.tool_uses(r))
+
+
+def norm(text):
+    """A message text with CRLF and CR line ends made LF, ends trimmed."""
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
 def _record_text(rec):
@@ -239,7 +251,7 @@ def _record_text(rec):
         content = "\n".join(b.get("text", "") for b in content
                             if isinstance(b, dict) and b.get("type") == "text"
                             and isinstance(b.get("text"), str))
-    return content.strip() if isinstance(content, str) else None
+    return norm(content) if isinstance(content, str) else None
 
 
 def _proves(use, n):
@@ -259,8 +271,16 @@ def _in_items(d):
             or any(isinstance(d.get(k), str) and d[k].startswith("items/") for k in ("doc_id", "path")))
 
 
+def _is_write(d):
+    """False for a dict whose action or op is a verb other than set, update, batch."""
+    verb = d.get("action", d.get("op"))
+    return not isinstance(verb, str) or verb in WRITE_VERBS
+
+
 def _has_n(node, n):
     if isinstance(node, dict):
+        if not _is_write(node):
+            return False
         v = node.get("n")
         if (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
                 isinstance(v, str) and v.isdigit() and int(v) == int(n)):
@@ -270,18 +290,20 @@ def _has_n(node, n):
 
 
 def _writes_n(node, n):
-    """True when a dict that names the items collection holds key n == n at any depth below it."""
+    """True when a write dict that names the items collection holds key n == n at any depth below it."""
     if isinstance(node, dict):
+        if not _is_write(node):
+            return False
         return (_in_items(node) and _has_n(node, n)) or any(_writes_n(c, n) for c in node.values())
     return isinstance(node, list) and any(_writes_n(c, n) for c in node)
 
 
-def answer_problem(item_id, rest, text, answers):
+def answer_problem(item_id, rest, text, k, stamp, answers):
     """None when the answer item's home is page:<n> and the send is proved, or the check stood down."""
     m = ANSWER_HOME.fullmatch(home_word(rest))
     if m is None:
         return "%s [answer] has a malformed answer home: it needs `page:<digits>`" % item_id
-    if answers is None or answers.sent(text, m.group(1)):
+    if answers is None or answers.sent(text, k, m.group(1), stamp):
         return None
     return ("%s [answer] page:%s: the transcript shows no send of this answer to the page writer after the"
             " owner's message; send it to the page writer (send_message naming %s, or an ArtifactData"
@@ -289,8 +311,10 @@ def answer_problem(item_id, rest, text, answers):
 
 
 def problems(blocks, handoff, homes=None, burst=(), answers=None):
-    out = []
+    out, seen = [], {}
     for n, b in enumerate(blocks):
+        text = norm(b["text"])
+        seen[text] = seen.get(text, 0) + 1
         if not b["items"] and n in burst:
             out.append("the message at %s (%s) has no items" % (b["stamp"], (b["text"] or "").split("\n")[0][:40]))
         for ln in b["items"]:
@@ -301,7 +325,7 @@ def problems(blocks, handoff, homes=None, burst=(), answers=None):
                 out.append("%s needs `[kind] -> home`, kind one of ruling, task, question, note, standing,"
                            " answer" % it[0])
             elif it[1].startswith("[answer]"):
-                found = answer_problem(it[0], it[1], b["text"], answers)
+                found = None if it[3] else answer_problem(it[0], it[1], text, seen[text], b["stamp"], answers)
                 if found:
                     out.append(found)
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
@@ -345,7 +369,7 @@ def main():
             homes, answers = Homes(hook.get("cwd")), Answers(hook.get("transcript_path"))
             reasons = problems(blocks, handoff, homes, burst, answers)
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + (
-                [FAIL_OPEN_ANSWERS % answers.skip] if answers.skip else [])
+                [FAIL_OPEN_ANSWERS % "; ".join(answers.skip)] if answers.skip else [])
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
