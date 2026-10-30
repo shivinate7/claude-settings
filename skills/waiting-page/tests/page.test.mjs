@@ -293,6 +293,8 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       mk("first", 1, { context: LONG, holds: "A lane waits.", options: [opt("a", "Red", withDesigns ? "s1" : undefined), opt("b", "Blue with a long label that cannot fit on one line of the ready note at 390 wide", withDesigns ? "s2" : undefined)] }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
+      // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
+      mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
     ];
     const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
     await noAnchor(page);
@@ -315,15 +317,24 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
     sent = true;
-    // A receipt holds its height only while in view (owner report 1, Oct 28 13:19 CDT, c193), so after Send only what is on screen is compared.
-    const onScreen = () => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.id, c.getBoundingClientRect()]).filter(([, r]) => r.bottom > 0 && r.top < innerHeight).map(([id, r]) => [id, Math.round(r.top), Math.round(r.height)]));
-    const seen = await onScreen();
-    await send(page);
-    await page.locator("#sent .stamp").waitFor();
-    await page.evaluate(() => new Promise((r) => setTimeout(r, 600)));
-    const after = (await onScreen()).slice(0, seen.length); // scroll lands on whole pixels, so a fraction of one is allowed
-    assert.deepEqual(after.map((r) => r[0]), seen.map((r) => r[0]), "the cards on screen changed on Send");
-    seen.forEach((r, i) => { assert.ok(Math.abs(after[i][1] - r[1]) <= 1 && Math.abs(after[i][2] - r[2]) <= 1, "what was on screen moved on Send: " + JSON.stringify([r, after[i]])); });
+    // A Send shrinks each receipt at once (shiv, 15:06 CDT Oct 30, receipt-tightens-at-once). The anchor is the first card whose bottom is below the band's
+    // top, skipping a sent card whose top is above it. The anchor keeps its top, and a card that stays keeps its height.
+    await placeRel(page, items[3], "top", 40);
+    const sentItems = [items[0], items[1], items[2], items[4]];
+    assert.equal(await anchorOf(page, sentItems), "item-" + items[3].id, "fixture: the anchor is not the witness card");
+    const rd = await sendAndRead(page, sentItems);
+    const w = "item-" + items[3].id;
+    assert.ok(rd.pre[w].top > rd.band.top && rd.pre[w].top < rd.band.bottom, "the witness is off the band before Send");
+    const seen = Object.values(rd.pre).filter((c) => c.bottom > rd.band.top && c.top < rd.band.bottom);
+    for (const [when, post] of reads(rd)) {
+      assert.equal(post[w].receipt, false, "the witness became a receipt on Send");
+      assert.ok(Math.abs(post[w].top - rd.pre[w].top) <= 1, `${when}: the witness moved on Send: ${rd.pre[w].top} to ${post[w].top}`);
+      for (const b of seen) {
+        const a = post[b.id];
+        if (a.receipt && !b.receipt) assert.ok(a.h < b.h - 1, `${when}: a receipt kept its height on Send: ${b.id} ${b.h} to ${a.h}`);
+        else if (!a.receipt) assert.ok(Math.abs(a.h - b.h) <= 1, `${when}: a card that stays changed height on Send: ${b.id} ${b.h} to ${a.h}`);
+      }
+    }
   });
 }
 
@@ -2264,27 +2275,193 @@ const SIZES = [2200, 1280, 390];
 const noAnchor = (page) => page.addStyleTag({ content: "*, html { overflow-anchor: none !important; }" });
 const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { context: LONG }));
 
+// The send cases (shiv, 15:06 CDT Oct 30, receipt-tightens-at-once). The visible band runs from the header's bottom edge to the top of the bar.
+// On a Send, the anchor is the first card whose bottom is below the band's top, skipping a sent card whose top is above it. The anchor keeps its top,
+// and the cards below it rise by what the sent cards drop.
+const LEADS = [1, 2, 3].map((n) => mk("lead-" + n, n, { context: LONG }));
+const HOLDS = [1, 2, 3].map((n) => mk("hold-" + n, n, { context: LONG, holds: "A lane waits.", added: `2026-10-0${n}T00:00:00Z` }));
+const frameWait = (page, n) => page.evaluate((k) => new Promise((resolve) => { const step = (i) => (i ? requestAnimationFrame(() => step(i - 1)) : resolve()); step(k); }), n);
+// Scrolls so the card's top or bottom edge sits `offset` px below the band's top edge. A negative offset puts it above the band.
+const placeRel = (page, it, edge, offset) => page.evaluate(([id, e, o]) => {
+  const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
+  const r = document.getElementById("item-" + id).getBoundingClientRect();
+  window.scrollTo({ top: scrollY + r[e] - (bt + o), behavior: "instant" });
+}, [it.id, edge, offset]);
+// The page can reflow after its first frames, and scroll anchoring follows a reflow, so the card is placed again once the frames settle.
+const settleAt = async (page, it, edge, offset) => { await frameWait(page, 3); await placeRel(page, it, edge, offset); await frameWait(page, 3); await placeRel(page, it, edge, offset); };
+const cardMap = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("article.card")].map((c) => { const r = c.getBoundingClientRect(); return [c.id, { id: c.id, top: r.top, bottom: r.bottom, h: r.height, receipt: !!c.querySelector(":scope > .receipt") }]; })));
+const bandOf = (page) => page.evaluate(() => ({ top: document.querySelector(".hdr").getBoundingClientRect().bottom, bottom: document.getElementById("bar").getBoundingClientRect().top }));
+// The anchor the rule picks for these sent cards, read before Send.
+const anchorOf = (page, sent) => page.evaluate((ids) => {
+  const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
+  for (const c of document.querySelectorAll("article.card")) {
+    const r = c.getBoundingClientRect();
+    if (r.bottom <= bt) continue;
+    if (ids.includes(c.id) && r.top < bt) continue;
+    return c.id;
+  }
+  return null;
+}, sent.map((it) => "item-" + it.id));
+// Scroll anchoring stays off unless the case asks for it.
+const openSend = async (t, { items, width, height, scheme, anchored }) => {
+  const page = await open(t, { items, scheme, viewport: { width, height } });
+  if (page && !anchored) await noAnchor(page);
+  return page;
+};
+// Sends the cards, then reads the page as each receipt appears, once the Sent panel renders, and after two frames.
+async function sendAndRead(page, sent) {
+  const pre = await cardMap(page), band = await bandOf(page);
+  await send(page);
+  for (const it of sent) await card(page, it).locator(".receipt").waitFor();
+  const atOnce = await cardMap(page);
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  return { pre, band, atOnce, settled: await cardMap(page) };
+}
+const reads = (rd) => [["at once", rd.atOnce], ["after two frames", rd.settled]];
+// The sent card drops its height, the anchor keeps its top, and the card below rises by the drop.
+function checkRise(pre, post, when, sentIt, anchorIt, belowIt) {
+  const S = "item-" + sentIt.id, A = "item-" + anchorIt.id, B = "item-" + belowIt.id;
+  const drop = pre[S].h - post[S].h;
+  assert.ok(drop >= 100, `${when}: the receipt kept its open height of ${pre[S].h}px; it is ${post[S].h}px`);
+  assert.ok(Math.abs(post[A].top - pre[A].top) <= 1, `${when}: the anchor moved on Send: ${pre[A].top} to ${post[A].top}`);
+  assert.ok(Math.abs(post[B].top - (pre[B].top - drop)) <= 1, `${when}: the card below did not rise by the drop of ${drop}px: ${pre[B].top} to ${post[B].top}`);
+}
+
+// A card sent with the card above it partly on screen: that card keeps its top, and the cards below rise.
+async function sendBelowPartial(t, { width, scheme, anchored }) {
+  // At 390 wide the sent card is taller than the phone's screen, so the viewport is taller to keep the card below on screen.
+  const above = mk("above", 4), sent = mk("sent", 5), below = mk("below", 6);
+  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, above, "bottom", 30);
+  assert.equal(await anchorOf(page, [sent]), "item-above", "fixture: the card above is not the anchor");
+  const rd = await sendAndRead(page, [sent]);
+  for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, above, below);
+}
+
+// A card sent as the topmost card on screen, its top inside the band: its top stays, and the card below rises.
+async function sendTopOfBand(t, { scheme }) {
+  const sent = mk("sent", 4, { context: LONG }), below = mk("below", 5);
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 20);
+  assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the topmost card on screen");
+  const rd = await sendAndRead(page, [sent]);
+  for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, sent, below);
+}
+
+// Two cards sent together: the first is wholly above the band, the second starts inside it. The second keeps its top, and the card below rises by the second's drop.
+async function sendTwoOneAbove(t, { width, scheme }) {
+  const wholly = mk("wholly-above", 4, { context: LONG }), visible = mk("visible", 5, { context: LONG }), below = mk("below", 6);
+  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, wholly, "a");
+  await choose(page, visible, "b");
+  await settleAt(page, wholly, "bottom", -4);
+  assert.equal(await anchorOf(page, [wholly, visible]), "item-visible", "fixture: the second card is not the anchor");
+  const rd = await sendAndRead(page, [wholly, visible]);
+  const V = "item-visible", W = "item-wholly-above", B = "item-below";
+  for (const [when, post] of reads(rd)) {
+    const drop = rd.pre[V].h - post[V].h;
+    assert.ok(rd.pre[W].h - post[W].h >= 100, `${when}: the card wholly above the band kept its open height: it is ${post[W].h}px`);
+    assert.ok(drop >= 100, `${when}: the visible receipt kept its open height of ${rd.pre[V].h}px; it is ${post[V].h}px`);
+    assert.ok(Math.abs(post[V].top - rd.pre[V].top) <= 1, `${when}: the visible card moved on Send: ${rd.pre[V].top} to ${post[V].top}`);
+    assert.ok(Math.abs(post[B].top - (rd.pre[B].top - drop)) <= 1, `${when}: the card below did not rise by ${drop}px: ${rd.pre[B].top} to ${post[B].top}`);
+  }
+}
+
+// A tall card at 390 wide, its top above the band and its bottom inside it: the card below keeps its top, and the receipt lands just above it.
+async function sendTallOverBand(t, { scheme }) {
+  const tall = mk("tall", 4, { context: LONG }), below = mk("below", 5);
+  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, tall, "a");
+  await settleAt(page, tall, "bottom", 60);
+  assert.equal(await anchorOf(page, [tall]), "item-below", "fixture: the card below is not the anchor");
+  const rd = await sendAndRead(page, [tall]);
+  const T = "item-tall", N = "item-below";
+  const gap = rd.pre[N].top - rd.pre[T].bottom;
+  for (const [when, post] of reads(rd)) {
+    assert.ok(rd.pre[T].h - post[T].h >= 100, `${when}: the receipt kept its open height of ${rd.pre[T].h}px; it is ${post[T].h}px`);
+    assert.ok(Math.abs(post[N].top - rd.pre[N].top) <= 1, `${when}: the card below moved on Send: ${rd.pre[N].top} to ${post[N].top}`);
+    assert.ok(Math.abs(post[T].bottom - (post[N].top - gap)) <= 1, `${when}: the receipt does not land just above the card below: ${post[T].bottom} against ${post[N].top - gap}`);
+  }
+}
+
+// A card sent with the card below it starting under the bar: the sent card keeps its top, and the card below rises.
+async function sendOverUnderBar(t, { scheme }) {
+  const sent = mk("sent", 4, { context: LONG }), below = mk("under-bar", 5);
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the anchor");
+  const rd = await sendAndRead(page, [sent]);
+  assert.ok(rd.pre["item-under-bar"].top >= rd.band.bottom - 1, `fixture: the card below starts above the bar: ${rd.pre["item-under-bar"].top} against ${rd.band.bottom}`);
+  for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, sent, below);
+}
+
+// An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
+async function answerWithoutSend(t, { width, scheme }) {
+  const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
+  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  await settleAt(page, inView, "top", 40);
+  const pre = await cardMap(page);
+  const I = "item-in-view", B = "item-below";
+  // The answer comes from the database, as another session's save would, so the page sends nothing of its own.
+  await page.evaluate(async (id) => { const db = await window.claude.use("db"); await db.collection("answers").doc(id).set({ item: id, n: 4, at: "2026-10-30T14:00:00Z", choice: "a", note: "" }); }, inView.id);
+  await card(page, inView).locator(".receipt").waitFor();
+  assert.equal(await page.evaluate(() => window.__log.filter((l) => l[0] === "set").length), 1, "the page wrote an answer of its own");
+  const atOnce = await cardMap(page);
+  assert.ok(atOnce[I].h >= pre[I].h - 1, `an answer without a Send dropped its height at once: ${pre[I].h}px to ${atOnce[I].h}px`);
+  await frameWait(page, 2);
+  await page.waitForTimeout(600);
+  const held = await cardMap(page);
+  assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
+  assert.ok(Math.abs(held[B].top - pre[B].top) <= 1, `an answer without a Send moved the card below: ${pre[B].top} to ${held[B].top}`);
+  // The card wholly off the screen drops its height, and the card below, still on screen, keeps its top.
+  await page.evaluate((id) => { const b = document.getElementById(id).getBoundingClientRect().bottom; window.scrollBy(0, b + 4); }, I);
+  const scrolled = await cardMap(page);
+  assert.ok(scrolled[B].bottom > 0 && scrolled[B].top < 800,`fixture: the card below is off the screen after the scroll at ${scrolled[B].top}`);
+  await page.waitForFunction(([id, h]) => document.getElementById(id).getBoundingClientRect().height < h - 100, [I, pre[I].h]);
+  const dropped = await cardMap(page);
+  assert.ok(Math.abs(dropped[B].top - scrolled[B].top) <= 1, `the card below moved when the held card dropped: ${scrolled[B].top} to ${dropped[B].top}`);
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`a card sent with the card above it partly on screen keeps that card's top, and the cards below rise, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sendBelowPartial(t, { width, scheme, anchored: false });
+  });
+  test(`a card sent with the card above it partly on screen keeps that card's top with scroll anchoring on, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sendBelowPartial(t, { width, scheme, anchored: true });
+  });
+}
+
 for (const scheme of ["light", "dark"]) {
-  test(`an answered card keeps its height only while in view, then shrinks with nothing on screen moving, ${scheme} scheme`, async (t) => {
-    const target = mk("target", 2, { context: LONG });
-    const items = [mk("above", 1, { context: LONG }), target, ...FILLER];
-    const page = await open(t, { items, scheme, viewport: { width: 1280, height: 700 } }); if (!page) return;
-    await noAnchor(page);
-    const c = card(page, target);
-    const full = (await c.boundingBox()).height;
-    await choose(page, target, "a");
-    await send(page);
-    await c.locator(".receipt").waitFor();
-    assert.ok((await c.boundingBox()).height >= full - 1, "the receipt gave up its height while still in view");
-    // Scroll the receipt out of view above the screen, with a card on screen as the witness.
-    const witness = card(page, FILLER[3]);
-    await witness.scrollIntoViewIfNeeded();
-    await page.evaluate(() => window.scrollBy(0, 300));
-    const top = () => witness.evaluate((e) => Math.round(e.getBoundingClientRect().top));
-    const at = await top();
-    await page.waitForFunction(() => document.getElementById("item-target").getBoundingClientRect().bottom < 0);
-    await page.waitForFunction(([id, h]) => document.getElementById(id).getBoundingClientRect().height < h - 100, ["item-target", full]);
-    assert.ok(Math.abs((await top()) - at) <= 1, "what was on screen moved when the receipt shrank");
+  test(`a card sent as the topmost card on screen keeps its top, and the card below rises, ${scheme} scheme`, async (t) => {
+    await sendTopOfBand(t, { scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`two cards sent together, one wholly above the band: the other keeps its top, and the card below rises, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sendTwoOneAbove(t, { width, scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) {
+  test(`a tall card at 390 wide sent over the band's top edge: the card below keeps its top, and the receipt lands just above it, ${scheme} scheme`, async (t) => {
+    await sendTallOverBand(t, { scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) {
+  test(`a card sent with the card below under the bar: the sent card keeps its top, and the card below rises, ${scheme} scheme`, async (t) => {
+    await sendOverUnderBar(t, { scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`an answer that arrives without a Send keeps its height while in view, and drops once wholly off the screen, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await answerWithoutSend(t, { width, scheme });
   });
 }
 
@@ -2327,7 +2504,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
   });
 }
 
-test("a rail jump after Send still lands on its card when held receipts drop mid-scroll", async (t) => {
+test("a rail jump after Send lands on its card", async (t) => {
   const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
   const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
   await noAnchor(page);
@@ -2336,8 +2513,10 @@ test("a rail jump after Send still lands on its card when held receipts drop mid
   await page.locator("#item-q0 .receipt").waitFor();
   await page.click("#c-q9");
   await page.waitForTimeout(2500);
+  // The card lands inside the band, just under the header's bottom edge.
+  const band = await bandOf(page);
   const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
-  assert.ok(top >= 0 && top <= 120, "the jump missed its card; it sits at " + top);
+  assert.ok(top >= band.top - 1 && top <= band.top + 120, `the jump missed its card; it sits at ${top}, band top ${band.top}`);
 });
 
 test("a receipt wholly below the screen drops its height without moving the page", async (t) => {
