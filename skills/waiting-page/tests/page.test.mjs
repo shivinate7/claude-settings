@@ -3798,13 +3798,14 @@ for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken r
   assert.deepEqual(m.out, [], "an element runs past its card's right edge");
 });
 
-// The list of fields an item may carry is the page's own, in one JSON block, so a writer and a check can read it without running the page.
-const FIELDS_BLOCK = /<script type="application\/json" id="itemFields">([\s\S]*?)<\/script>/;
-
-test("page.html carries its known item fields as a JSON list that holds reply, lastAnswer and lane and every field a fixture item has", () => {
-  const m = html.match(FIELDS_BLOCK);
-  assert.ok(m, 'page.html has no <script type="application/json" id="itemFields">');
-  const list = JSON.parse(m[1]);
+// The list of fields an item may carry is the page's own, in one JSON block, so a writer and a guard read it and the page warns by it.
+// The block is read from the loaded page, as a browser parses it.
+test("page.html carries one itemFields JSON block whose list holds reply, lastAnswer and lane and every field a fixture item has", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  const blocks = await page.evaluate(() => [...document.querySelectorAll("script#itemFields")].map((e) => ({ type: e.getAttribute("type"), text: e.textContent })));
+  assert.equal(blocks.length, 1, 'page.html has no single <script type="application/json" id="itemFields">');
+  assert.equal(blocks[0].type, "application/json");
+  const list = JSON.parse(blocks[0].text);
   assert.ok(Array.isArray(list) && list.every((f) => typeof f === "string"), "itemFields is not a list of strings");
   assert.equal(new Set(list).size, list.length, "itemFields repeats a field");
   for (const f of ["reply", "lastAnswer", "lane"]) assert.ok(list.includes(f), `itemFields lacks ${f}`);
