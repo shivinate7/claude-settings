@@ -2781,9 +2781,10 @@ STAKE_REASON = ("A decision is the owner's only when he can judge it. Add a line
 
 def owner_judge_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision has no Your stake line. A stood pick
-    and a port (its Departs from line is the stake) pass. An update is judged only when it carries both
-    kind decision and context."""
-    if not isinstance(data, dict) or data.get("stands") is True or data.get("port") is True:
+    a port (its Departs from line is the stake) and a closed item (it asks the owner nothing) pass. An
+    update is judged only when it carries both kind decision and context."""
+    if not isinstance(data, dict) or data.get("stands") is True or data.get("port") is True \
+            or data.get("status") == "closed":
         return ""
     if op == "set":
         judged = data.get("kind") in (None, "decision")

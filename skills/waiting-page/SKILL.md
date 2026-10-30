@@ -68,7 +68,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries a line in `context` that starts "Your stake: <kind> <text>". The kind is one of `goal`, `money`,
     `risk`, `rule` or `cannot undo`. The text says what the pick costs the owner. The writer refuses a decision with no
-    such line (guard rule `owner-judge`). A decision with `stands: true` or `port: true` needs none. An update that
+    such line (guard rule `owner-judge`). Example: `Your stake: risk — a wrong pick could let a broken merge reach main.`
+    A decision with `stands: true`, `port: true` or `status: "closed"` needs none. An update that
     carries `kind: decision` and `context` carries the line again: the guard cannot see the stored field.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`
     (a number, or text such as `3 min`). The item shows `command` in a closed "Show the command" disclosure with a Copy
