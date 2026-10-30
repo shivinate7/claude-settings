@@ -14,6 +14,15 @@ All data is sample data. Open each HTML file from disk.
   error, keyboard, order.
 - `png/shelf-option.png` is the one picture to compare with v2's `png/c2-option.png`.
 
+## Corner radii (page item 94)
+
+- `radius/png/shelf-r20-full-folded-light.png`, option a: the dock at 20 pt and the List button at 14 pt.
+- `radius/png/shelf-r8-full-folded-light.png`, option b: both at 8 pt, the value in tokens.md.
+- The two pictures differ only at the dock and List button corners and their dashed outlines. Each
+  HTML file in `radius/` is the Shelf with one CSS rule changed.
+- In the main Shelf file, state full shows 6 pt corners, because the `.ann` rule comes later and wins.
+  The pictures above put their rule after `.ann`.
+
 ## Blind control
 
 - `blind/phone-blind-3.html` and its notes. A blind lane drawn from the job alone, by the designer file

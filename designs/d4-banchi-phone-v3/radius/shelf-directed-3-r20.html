@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shelf, directed 3</title>
+<style>
+/* ---------- Tokens: house step and radius (tokens.md); colour values are this lane's own ---------- */
+:root {
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-8: 32px;
+  --radius: 8px;
+  --radius-tray: 4px;
+  /* Dynamic Type, iOS Large (default), from Apple's typography page */
+  --t-large: 700 34px/41px var(--font-display);
+  --t-title1: 700 28px/34px var(--font-display);
+  --t-title2: 700 22px/28px var(--font-display);
+  --t-title3: 600 20px/25px var(--font-display);
+  --t-headline: 600 17px/22px var(--font);
+  --t-body: 400 17px/22px var(--font);
+  --t-callout: 400 16px/21px var(--font);
+  --t-subhead: 400 15px/20px var(--font);
+  --t-footnote: 400 13px/18px var(--font);
+  --t-caption1: 400 12px/16px var(--font);
+  --t-caption2: 400 11px/13px var(--font);
+  --font: -apple-system, "SF Pro Text", Inter, system-ui, sans-serif;
+  --font-display: -apple-system, "SF Pro Display", "Inter Display", Inter, system-ui, sans-serif;
+
+  --surface: #EEF1F6;
+  --surface-raised: #FFFFFF;
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-edge: rgba(20, 26, 51, 0.10);
+  --text: #141A33;
+  --text-2: #4D5675;
+  --line: #D5DAE5;
+  --tray-floor: #DCE1EB;
+  --tray-rim: #7D869C;
+  --tray-cut: #EEF1F6;
+  --live: #3343B5;
+  --sold: #B35F00;
+  --sold-glow: rgba(255, 163, 26, 0.55);
+  --on-sold: #FFFFFF;
+  --notlive: #737B93;
+  --check: #141A33;
+  --divider: #5F6880;
+  --on-divider: #FFFFFF;
+  --accent: #3343B5;
+  --on-accent: #FFFFFF;
+  --accent-soft: #E1E5F8;
+  --danger-surface: #FBE8EA;
+  --danger-text: #9A1B2A;
+  --badge: #D42A37;
+  --on-badge: #FFFFFF;
+  --edge: #7D869C;
+  --live-dim: #66709E;
+  --sold-dim: #9A6A35;
+  --check-dim: #6B7180;
+  --notlive-dim: #6B7180;
+  --foil-bg: #E6E0FF;
+  --foil-sheen: linear-gradient(100deg, #F1D9FF, #D6E8FF 45%, #FFF1CC);
+  --on-foil: #2A1E4A;
+  --key: #FFFFFF;
+  --key-2: #ADB4C4;
+  --keyboard: #D3D8E1;
+  --ann-new: #7A3CC4;
+  --ann-today: #626A80;
+  --canvas: #E2E5EC;
+  --bezel: #C6CCD8;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #0F1220;
+  --surface-raised: #191E31;
+  --glass: rgba(29, 35, 57, 0.80);
+  --glass-edge: rgba(237, 240, 248, 0.10);
+  --text: #EDF0F8;
+  --text-2: #A5ADC6;
+  --line: #2A3150;
+  --tray-floor: #070A14;
+  --tray-rim: #5D6585;
+  --tray-cut: #0F1220;
+  --live: #8E9BFF;
+  --sold: #FFB02E;
+  --sold-glow: rgba(255, 176, 46, 0.6);
+  --on-sold: #1B1205;
+  --notlive: #6A7291;
+  --check: #EDF0F8;
+  --divider: #7882A3;
+  --on-divider: #0F1220;
+  --accent: #8E9BFF;
+  --on-accent: #0F1220;
+  --accent-soft: #232A4D;
+  --danger-surface: #3A1820;
+  --danger-text: #FFB8C0;
+  --badge: #FF6B75;
+  --on-badge: #2A0A0E;
+  --edge: #717A99;
+  --live-dim: #626A94;
+  --sold-dim: #9C7B45;
+  --check-dim: #8C93AB;
+  --notlive-dim: #5F6680;
+  --foil-bg: #2E2546;
+  --foil-sheen: linear-gradient(100deg, #3A2A5C, #23365A 45%, #3D3420);
+  --on-foil: #F1DDFF;
+  --key: #5B6070;
+  --key-2: #3B3F4C;
+  --keyboard: #262A35;
+  --ann-new: #C9A2FF;
+  --ann-today: #9AA1B8;
+  --canvas: #07080D;
+  --bezel: #2A2F40;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #0F1220; --surface-raised: #191E31; --glass: rgba(29, 35, 57, 0.80); --glass-edge: rgba(237, 240, 248, 0.10);
+    --text: #EDF0F8; --text-2: #A5ADC6; --line: #2A3150; --tray-floor: #070A14; --tray-rim: #5D6585; --tray-cut: #0F1220;
+    --live: #8E9BFF; --sold: #FFB02E; --sold-glow: rgba(255, 176, 46, 0.6); --on-sold: #1B1205; --notlive: #6A7291; --check: #EDF0F8;
+    --divider: #7882A3; --on-divider: #0F1220; --accent: #8E9BFF; --on-accent: #0F1220; --accent-soft: #232A4D; --danger-surface: #3A1820;
+    --danger-text: #FFB8C0; --badge: #FF6B75; --on-badge: #2A0A0E; --edge: #717A99; --live-dim: #626A94; --sold-dim: #9C7B45;
+    --check-dim: #8C93AB; --notlive-dim: #5F6680; --foil-bg: #2E2546; --foil-sheen: linear-gradient(100deg, #3A2A5C, #23365A 45%, #3D3420);
+    --on-foil: #F1DDFF; --key: #5B6070; --key-2: #3B3F4C; --keyboard: #262A35;
+    --ann-new: #C9A2FF; --ann-today: #9AA1B8; --canvas: #07080D; --bezel: #2A2F40; color-scheme: dark;
+  }
+}
+
+/* ---------- Page chrome (not app) ---------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--canvas); color: var(--text); font: var(--t-body); -webkit-font-smoothing: antialiased; }
+.page { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); }
+.sample { background: var(--text); color: var(--surface); font: 600 15px/20px var(--font); padding: var(--space-2) var(--space-4); border-radius: var(--radius); }
+.head { display: flex; flex-direction: column; gap: var(--space-2); max-width: 72rem; }
+.head h1 { margin: 0; font: var(--t-title2); }
+.head p { margin: 0; font: var(--t-subhead); color: var(--text-2); max-width: 64rem; }
+.controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.controls a, .controls button { font: 500 13px/18px var(--font); color: var(--text); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-1) var(--space-3); text-decoration: none; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; }
+.controls a[aria-current="true"], .controls button[aria-pressed="true"] { background: var(--text); color: var(--surface); border-color: var(--text); }
+.controls .sep { width: 1px; height: 24px; background: var(--line); }
+.state-title { margin: 0; font: var(--t-headline); }
+.stage { display: flex; flex-wrap: wrap; gap: var(--space-8); align-items: flex-start; }
+figure { margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+figcaption { font: var(--t-caption1); color: var(--text-2); }
+body[data-pose="folded"] figure[data-pose="unfolded"], body[data-pose="unfolded"] figure[data-pose="folded"] { display: none; }
+
+/* ---------- Device frames: 1 CSS px = 1 pt ---------- */
+.device { position: relative; overflow: hidden; background: var(--surface); border-radius: 28px; box-shadow: 0 0 0 1px var(--bezel); font: var(--t-body); }
+.device.folded { width: 466px; height: 678px; }
+.device.unfolded { width: 951px; height: 644px; }
+.safe { position: absolute; top: 0; left: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.folded .safe { width: 382px; height: 644px; }
+.inset-trailing { position: absolute; top: 0; left: 382px; width: 84px; height: 678px; background: repeating-linear-gradient(135deg, transparent 0 7px, var(--line) 7px 8px); }
+.home-ind { position: absolute; left: 124px; bottom: 9px; width: 134px; height: 5px; border-radius: 3px; background: var(--text); opacity: .85; }
+.pane { position: absolute; top: 0; height: 644px; overflow: hidden; padding-top: env(safe-area-inset-top, 0px); }
+.pane.left { left: 0; width: 455.5px; }
+.pane.right { left: 495.5px; width: 455.5px; background: var(--surface-raised); }
+.fold { position: absolute; top: 0; left: 455.5px; width: 40px; height: 644px; background: repeating-linear-gradient(135deg, transparent 0 7px, var(--line) 7px 8px); border-inline: 1px solid var(--line); }
+.kb-open .folded .safe { width: 466px; height: 250px; }
+.kb-open .folded .inset-trailing { display: none; }
+.kb-open .pane { height: 263px; }
+
+/* ---------- App: shared parts ---------- */
+.screen { position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.navbar { height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-2); gap: var(--space-2); }
+.navbar .title { font: var(--t-headline); position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; }
+.navbar .title:has(.subtitle) { display: flex; flex-direction: column; align-items: center; }
+.navbar .subtitle { font: var(--t-footnote); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.navbar .slot-l, .navbar .slot-r { display: flex; align-items: center; min-width: 44px; }
+.navbar .slot-r { margin-inline-start: auto; }
+.navbtn { min-height: 44px; min-width: 44px; padding: 0 var(--space-2); display: inline-flex; align-items: center; gap: var(--space-1); border: 0; background: none; color: var(--accent); font: var(--t-body); cursor: pointer; }
+.navbtn svg { width: 22px; height: 22px; }
+.navbtn[aria-disabled="true"] { color: var(--text-2); }
+.offwrap { position: relative; display: inline-flex; }
+.why { position: absolute; top: 44px; right: var(--space-2); font: var(--t-footnote); color: var(--text-2); white-space: nowrap; }
+.largetitle { font: var(--t-large); margin: 0; padding: 0 var(--space-4); letter-spacing: 0.2px; }
+.sub { font: var(--t-subhead); color: var(--text-2); padding: 0 var(--space-4); margin: 0; font-variant-numeric: tabular-nums; }
+.head-stack { display: flex; flex-direction: column; gap: var(--space-1); flex: none; }
+
+/* Legend: each state word shows once per screen */
+.legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); padding: 0 var(--space-4); font: var(--t-caption1); color: var(--text-2); flex: none; }
+.legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+.g { display: inline-block; position: relative; width: 12px; height: 12px; }
+.g.live { background: var(--live); border-radius: 2px; width: 8px; }
+.g.draft { width: 8px; border-radius: 2px; box-shadow: inset 0 0 0 1.5px var(--live); background: repeating-linear-gradient(135deg, var(--live) 0 1.5px, transparent 1.5px 4px); }
+.g.sold { width: 4px; height: 14px; margin-top: -4px; background: var(--sold); border-radius: 2px 2px 0 0; box-shadow: 0 0 6px var(--sold-glow); }
+.g.check { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid var(--check); }
+.g.off { width: 4px; height: 6px; transform: translateY(3px); background: var(--notlive); border-radius: 1px; }
+.g.gapg { width: 4px; height: 12px; background: var(--tray-floor); box-shadow: inset 0 0 0 1px var(--edge); }
+
+/* The shelf: one row per box */
+.shelf { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; position: relative;
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 48px), transparent); }
+.shelf-head { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-4); flex: none; }
+.ruler-row { display: grid; grid-template-columns: 28px 1fr; gap: var(--space-2); padding: 0 var(--space-4); align-items: end; height: 18px; flex: none; }
+.ruler-row .col { font: var(--t-caption2); color: var(--text-2); }
+.ruler { position: relative; height: 18px; border-bottom: 1px solid var(--line); }
+.ruler span { position: absolute; bottom: 4px; font: var(--t-caption2); color: var(--text-2); font-variant-numeric: tabular-nums; transform: translateX(-50%); }
+.ruler span:first-child { transform: none; }
+.ruler span:last-child { transform: translateX(-100%); }
+.ruler i { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--text-2); }
+.hide-ruler .ruler-row { visibility: hidden; }
+.rows { display: flex; flex-direction: column; padding: var(--space-1) 0 240px; }
+.row { display: grid; grid-template-columns: 28px 1fr; gap: var(--space-2); align-items: center; min-height: 44px; padding: 0 var(--space-4); position: relative; border: 0; background: none; color: inherit; text-align: start; width: 100%; font: inherit; cursor: pointer; }
+.row .name { font: 600 15px/20px var(--font); color: var(--text-2); font-variant-numeric: tabular-nums; text-align: end; }
+.row.on .name { color: var(--text); }
+.row.sel { background: var(--accent-soft); }
+.row.sel .name { color: var(--text); }
+/* Dimmed = last read. Each cue swaps to its dim token (3:1 or more on the tray floor), never opacity */
+.dim { --live: var(--live-dim); --sold: var(--sold-dim); --sold-glow: transparent; --check: var(--check-dim); --notlive: var(--notlive-dim); }
+.shelf .row, .shelf-head .ruler-row { grid-template-columns: 28px 1fr 72px; }
+.cnt { font: var(--t-footnote); color: var(--text-2); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.cnt .skel { display: inline-block; width: 48px; height: 8px; }
+/* A box with free slots is the one to act on; its count reads first among 25 full boxes */
+.cnt.part { color: var(--text); font-weight: 600; }
+
+/* A box drawn as a tray seen from above */
+.tray { position: relative; height: 20px; background: var(--tray-floor); border-radius: var(--radius-tray); box-shadow: inset 0 0 0 1px var(--tray-rim), inset 0 2px 3px rgba(0,0,0,.12); }
+.tray.big { height: 30px; }
+.tray::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius-tray); pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0, transparent calc(20% - 1.5px), var(--tray-cut) calc(20% - 1.5px), var(--tray-cut) 20%); }
+.run { position: absolute; top: 2px; bottom: 2px; }
+.run.live { background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.16) 0 1px, transparent 1px 2.5px),
+    linear-gradient(180deg, color-mix(in srgb, var(--live) 70%, white) 0, var(--live) 3px, var(--live) calc(100% - 2px), color-mix(in srgb, var(--live) 80%, black) 100%); }
+.run.draft { background: repeating-linear-gradient(135deg, var(--live) 0 1.5px, transparent 1.5px 4.5px); box-shadow: inset 0 1.5px 0 var(--live), inset 0 -1.5px 0 var(--live); }
+.run.loading { background: color-mix(in srgb, var(--text-2) 16%, transparent); }
+.stand { position: absolute; top: -10px; bottom: 2px; width: 4px; margin-left: -2px; background: var(--sold); border-radius: 2px 2px 0 0; box-shadow: 0 0 8px 2px var(--sold-glow); z-index: 2; }
+.tray.big .stand { top: -10px; width: 4px; }
+.flat .stand { top: 2px; }
+.stub { position: absolute; bottom: 2px; height: 6px; width: 3px; margin-left: -1px; background: var(--notlive); z-index: 2; box-shadow: 0 -10px 0 0 var(--tray-floor); }
+.mark { position: absolute; bottom: -8px; width: 0; height: 0; margin-left: -4px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid var(--check); z-index: 2; }
+.tab { position: absolute; top: -4px; height: 5px; width: 7px; background: var(--tray-rim); border-radius: 3px 3px 0 0; z-index: 1; }
+.tray.big .tab { background: var(--divider); top: -17px; height: 18px; width: auto; padding: 0 var(--space-1); border-radius: 4px 4px 0 0; font: 600 11px/18px var(--font); color: var(--on-divider); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hide-dividers .tab { display: none; }
+.hide-stand .stand { top: 2px; box-shadow: none; }
+.nextslot { position: absolute; top: -4px; bottom: -4px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--text); z-index: 3; box-shadow: 0 0 0 2px var(--surface-raised); }
+.pin { position: absolute; top: -24px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; background: var(--sold); color: var(--on-sold); font: 700 12px/22px var(--font); text-align: center; z-index: 3; box-shadow: 0 0 0 2px var(--surface-raised); }
+.pin::after { content: ""; position: absolute; left: 10px; top: 22px; width: 2px; height: 4px; background: var(--sold); }
+/* A search match: the pin is ink, so the slot keeps its true state underneath */
+.pin.find { background: var(--text); color: var(--surface); }
+.pin.find::after { background: var(--text); }
+.findslot { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--text); z-index: 2; }
+/* A pulled card leaves a gap; its pin turns grey */
+.pin.done { background: var(--line); color: var(--text-2); box-shadow: 0 0 0 2px var(--surface-raised), inset 0 0 0 1px var(--edge); }
+.pin.done::after { background: var(--edge); }
+.gap { position: absolute; top: 2px; bottom: 2px; width: 6px; margin-left: -3px; background: var(--tray-floor); box-shadow: inset 0 0 0 1px var(--edge); z-index: 2; }
+
+/* Place: the box, then the slot. One home for every place on every screen */
+.trayline { display: grid; grid-template-columns: 64px 1fr; gap: var(--space-2); align-items: center; }
+.tl { display: flex; flex-direction: column; font-variant-numeric: tabular-nums; }
+.tl b { font: 600 15px/20px var(--font); }
+.tl small { font: var(--t-caption2); color: var(--text-2); }
+.place { display: inline-flex; flex-direction: column; font-variant-numeric: tabular-nums; }
+.place .pb { font: 600 13px/18px var(--font); color: var(--text-2); }
+.place .ps { font: var(--t-title2); color: var(--text); }
+.place.lg .pb { font: var(--t-headline); }
+.place.lg .ps { font: var(--t-large); }
+
+/* Floating dock and tab bar (glass, as iOS draws them) */
+.glass { background: var(--glass); backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); box-shadow: 0 0 0 1px var(--glass-edge), 0 8px 24px rgba(10, 14, 30, .14); }
+.bottom { position: absolute; left: var(--space-2); right: var(--space-2); bottom: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); z-index: 5; }
+.tabbar { height: 56px; border-radius: 28px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 0 var(--space-2); }
+.tabbar a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1); font: 600 11px/13px var(--font); color: var(--text-2); text-decoration: none; position: relative; min-height: 44px; }
+.tabbar a svg { width: 24px; height: 24px; }
+.tabbar a[aria-current="page"] { color: var(--accent); }
+.tabbar .badge { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; height: 18px; border-radius: 9px; background: var(--badge); color: var(--on-badge); font: 600 11px/18px var(--font); text-align: center; padding: 0 var(--space-1); }
+.dock { border-radius: 20px; padding: var(--space-3) var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); }
+.dock-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.btn.compact { width: auto; min-height: 50px; padding: 0 var(--space-5); flex: none; }
+.dock .btn-line { text-align: start; }
+.dock-top { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); }
+.lead { font: var(--t-footnote); color: var(--text-2); }
+.pour .addr.unknown { color: var(--text-2); }
+.pour { display: flex; flex-direction: column; gap: 0; }
+.pour .addr { font: var(--t-title2); font-variant-numeric: tabular-nums; }
+.pour .addr b { font-weight: 800; }
+.btn { min-height: 50px; border-radius: 14px; border: 0; background: var(--accent); color: var(--on-accent); font: var(--t-headline); width: 100%; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.btn[aria-disabled="true"] { background: var(--line); color: var(--text-2); }
+.btn.quiet { background: var(--accent-soft); color: var(--accent); }
+.btn-line { font: var(--t-footnote); color: var(--text-2); text-align: center; margin: 0; }
+.count { font: var(--t-footnote); color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+/* Lists */
+.list { display: flex; flex-direction: column; }
+.item { display: grid; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); min-height: 60px; border-bottom: 1px solid var(--line); }
+.item .nm { font: var(--t-headline); }
+.item .meta { display: flex; gap: var(--space-2); font: var(--t-footnote); color: var(--text-2); font-variant-numeric: tabular-nums; align-items: center; flex-wrap: wrap; }
+.cond { font: 600 11px/16px var(--font); padding: 0 var(--space-1); border-radius: 4px; box-shadow: inset 0 0 0 1px var(--line); color: var(--text); }
+.foil { font: 600 11px/16px var(--font); padding: 0 var(--space-1); border-radius: 4px; color: var(--on-foil); background-color: var(--foil-bg); background-image: var(--foil-sheen); }
+.price { font: var(--t-body); font-variant-numeric: tabular-nums; text-align: end; }
+.slotnum { font: 600 15px/20px var(--font); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.tick { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--edge); background: none; display: grid; place-items: center; color: var(--on-accent); cursor: pointer; }
+.tick.done { background: var(--accent); border-color: var(--accent); }
+.tick svg { width: 20px; height: 20px; }
+.numdot { width: 24px; height: 24px; border-radius: 50%; background: var(--sold); color: var(--on-sold); font: 700 13px/24px var(--font); text-align: center; }
+.numdot.done { background: var(--line); color: var(--text-2); }
+.numdot.find { background: var(--text); color: var(--surface); }
+.mini { width: 72px; }
+.mini .tray { height: 12px; }
+.mini .tray::after { opacity: 0; }
+.mini .run { top: 1px; bottom: 1px; }
+.minimark { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; border-radius: 1px; z-index: 2; box-shadow: 0 0 0 1.5px var(--surface-raised); }
+.minimark.live { background: var(--live); }
+.minimark.draft { background: var(--surface-raised); box-shadow: inset 0 0 0 1.5px var(--live), 0 0 0 1.5px var(--surface-raised); width: 5px; margin-left: -2px; }
+.minimark.sold { background: var(--sold); top: -6px; }
+.hide-mini .mini { display: none; }
+
+/* Notices */
+.notice { margin: 0 var(--space-4); padding: var(--space-3) var(--space-4); border-radius: 14px; background: var(--danger-surface); display: flex; flex-direction: column; gap: var(--space-2); }
+.notice p { margin: 0; font: var(--t-subhead); color: var(--text); }
+.notice b { color: var(--danger-text); }
+.notice .btn { min-height: 44px; }
+.disclose { display: flex; align-items: center; justify-content: space-between; min-height: 44px; font: var(--t-subhead); color: var(--accent); border: 0; background: none; padding: 0; cursor: pointer; }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-4); padding: 0 var(--space-6) 120px; text-align: center; }
+.empty p { margin: 0; font: var(--t-body); color: var(--text-2); max-width: 26ch; }
+.empty .tray { width: 220px; height: 28px; box-shadow: inset 0 0 0 1.5px var(--tray-rim); background: transparent; }
+.empty .tray::after { opacity: .0; }
+.empty .tab { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tray-rim); top: -9px; height: 10px; width: 16px; }
+.empty .btn { width: auto; padding: 0 var(--space-6); }
+.placeholder { flex: 1; display: grid; place-items: center; font: var(--t-subhead); color: var(--text-2); }
+.skel { background: var(--line); border-radius: 6px; opacity: .7; }
+@media (prefers-reduced-motion: no-preference) {
+  .run.loading { animation: read 1.4s ease-in-out infinite alternate; }
+  @keyframes read { from { opacity: .5; } to { opacity: 1; } }
+}
+.shot .run.loading { animation: none; }
+
+/* Keyboard (drawn by the system, not the app) */
+.keyboard { position: absolute; left: 0; right: 0; bottom: 0; background: var(--keyboard); padding: var(--space-2) 3px var(--space-2); display: flex; flex-direction: column; gap: 11px; }
+.folded .keyboard { top: 250px; padding-bottom: 60px; }
+/* Unfolded: two halves, one per pane; the fold strip between them holds no key */
+.unfolded .keyboard { top: 263px; padding: 0; background: transparent; }
+.kb-half { position: absolute; top: 0; bottom: 0; width: 455.5px; background: var(--keyboard); padding: var(--space-2) 3px; display: flex; flex-direction: column; gap: 11px; }
+.kb-half.l { left: 0; }
+.kb-half.r { left: 495.5px; }
+.kb-half .krow.in-l { padding-left: 44px; }
+.kb-half .krow.in-r { padding-right: 44px; }
+.krow { display: flex; gap: 6px; justify-content: center; }
+.k { flex: 1 1 0; max-width: 43px; height: 46px; border-radius: 6px; background: var(--key); box-shadow: 0 1px 0 rgba(0,0,0,.3); display: grid; place-items: center; font: 400 22px/1 var(--font); color: var(--text); }
+.unfolded .k { max-width: 86px; }
+.k.fn { background: var(--key-2); font-size: 15px; max-width: 64px; flex-basis: 64px; }
+.unfolded .k.fn { max-width: 120px; }
+.k.space { max-width: none; flex: 5; font-size: 15px; }
+.k.go { background: var(--accent); color: var(--on-accent); font-size: 15px; max-width: 92px; flex-basis: 92px; }
+.unfolded .k.go { max-width: 160px; }
+.field { display: flex; align-items: center; gap: var(--space-2); height: 44px; border-radius: 22px; padding: 0 var(--space-2) 0 var(--space-3); background: var(--surface-raised); box-shadow: 0 0 0 1px var(--edge); }
+.field svg { width: 18px; height: 18px; color: var(--text-2); flex: none; }
+.field .txt { flex: 1; font: var(--t-body); }
+.field .txt::after { content: ""; display: inline-block; width: 2px; height: 20px; background: var(--accent); vertical-align: -4px; margin-left: 1px; }
+.field .clear { width: 44px; height: 44px; display: grid; place-items: center; color: var(--text-2); border: 0; background: none; }
+.flabel { font: var(--t-footnote); color: var(--text-2); padding: 0 var(--space-4); }
+
+/* Annotations: page chrome, hidden with l=0 */
+.ann { position: relative; outline: 1.5px dashed var(--ann-new); outline-offset: 2px; border-radius: 6px; }
+.ann.today { outline-color: var(--ann-today); }
+.ann::before { content: attr(data-ann); position: absolute; right: 4px; top: -15px; z-index: 20; font: 600 11px/14px var(--font); color: var(--ann-new); background: var(--surface); padding: 0 4px; border: 1px dashed var(--ann-new); border-radius: 4px; white-space: nowrap; pointer-events: none; }
+.ann.today::before { color: var(--ann-today); border-color: var(--ann-today); }
+.ann.ann-in::before { top: 2px; right: auto; left: 4px; }
+.ann.ann-in-r::before { top: 2px; right: 4px; }
+.ann.ann-below::before { top: auto; bottom: -11px; }
+.ann.ann-left::before { right: auto; left: 4px; }
+.no-ann .ann { outline: none; }
+.no-ann .ann::before { display: none; }
+/* Owner page item 94, option b: the pour dock and every List button at the house radius. Placed after .ann so its 6px does not win. */
+#pour.dock { border-radius: 20px; } .btn.list-btn { border-radius: 14px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="sample" role="note">Sample. No figure on this page is real: every box, card, price, order and buyer is made up.</div>
+  <header class="head">
+    <h1>Shelf, v3 (shelf-directed-3)</h1>
+    <p><strong>Lane kind: directed.</strong> Direction: Shelf. The place comes first. The first screen shows the boxes as they sit on the table: each box is a bar of slots, and each card is a sliver in its listing state. A stack pours into the next free slots. A sale lights its slivers. Tabs: Shelf, Orders, Search. First screen: Shelf.</p>
+    <p>Dashed grey "Today:" marks a part that v2's C2 Shelf has. Dashed violet "New:" marks a part that v3 adds. Deep link: <code>#s=&lt;state&gt;&amp;t=&lt;light|dark&gt;&amp;p=&lt;folded|unfolded&gt;</code>; <code>h=</code> hides options, <code>l=0</code> hides the labels.</p>
+    <nav class="controls" id="nav-states" aria-label="States"></nav>
+    <div class="controls" id="nav-view" aria-label="View"></div>
+    <div class="controls" id="nav-hide" aria-label="Hide an option"></div>
+  </header>
+  <h2 class="state-title" id="state-title"></h2>
+  <section class="stage" id="shelf-v3">
+    <figure data-pose="folded">
+      <div class="device folded" data-device="iphone-duo-folded" id="dev-folded">
+        <div class="safe" id="folded-safe"></div>
+        <div class="inset-trailing" aria-hidden="true"></div>
+        <div class="home-ind" aria-hidden="true"></div>
+        <div id="folded-kb"></div>
+      </div>
+      <figcaption id="cap-folded">iPhone Duo, folded. Safe content 382 × 644 pt. Hatched: trailing inset 84 pt. Bottom inset 34 pt.</figcaption>
+    </figure>
+    <figure data-pose="unfolded">
+      <div class="device unfolded" data-device="iphone-duo-unfolded" id="dev-unfolded">
+        <div class="pane left" id="un-left"></div>
+        <div class="fold" aria-hidden="true"></div>
+        <div class="pane right" id="un-right"></div>
+        <div id="un-kb"></div>
+      </div>
+      <figcaption id="cap-unfolded">iPhone Duo, unfolded. 951 pt wide. Hatched: fold strip 455.5 to 495.5 pt, no text or control on it. Height 644 pt is not measured.</figcaption>
+    </figure>
+  </section>
+</div>
+
+<script>
+(function () {
+'use strict';
+const CAP = 250;
+const STATES = [
+  ['empty', 'Empty: no box yet'],
+  ['loading', 'Loading: reading your shelf'],
+  ['full', 'Full: stack 14 pours into Box 4 and Box 5'],
+  ['error', 'Error: the shelf could not be read'],
+  ['keyboard', 'Keyboard: where is a card?'],
+  ['order', 'Order: a sale lights its slots'],
+];
+const OPTIONS = [
+  ['dividers', 'dividers that stand up'],
+  ['stand', 'a sold card that stands up'],
+  ['ruler', 'the slot ruler'],
+  ['mini', 'the small box in each result'],
+];
+
+/* ---------- Sample data ---------- */
+const FILL = [250,250,250,250,140,250,250,238,250,250,222,250,250,250,191,250,250,250,250,233,250,250,250,250,250,176,250,250,98,0];
+const SOLD = { 1:[12], 2:[140,201], 3:[47], 6:[3], 9:[77], 12:[33], 16:[150] };
+const CHECK = { 4:[223], 5:[47,112] };
+const OFF = { 2:[66], 8:[190] };
+function dividers(n, fill) {
+  if (!fill) return [];
+  const step = [83, 71, 96, 62, 88, 77][n % 6];
+  const out = [1];
+  for (let s = 1 + step; s < fill; s += step) out.push(s);
+  return out;
+}
+const BOXES = FILL.map((f, i) => {
+  const n = i + 1;
+  const b = { n, fill: f, runs: [], sold: SOLD[n] || [], check: CHECK[n] || [], off: OFF[n] || [], div: dividers(n, f), stacks: {} };
+  if (n === 4) { b.runs = [[1, 204, 'live'], [205, 250, 'draft']]; b.div = [1, 96, 205]; b.stacks = { 1: '11', 96: '12', 205: '14' }; }
+  else if (n === 5) { b.runs = [[1, 140, 'draft']]; b.div = [1]; b.stacks = { 1: '14' }; }
+  else if (f) b.runs = [[1, f, 'live']];
+  return b;
+});
+const TOTAL = BOXES.reduce((a, b) => a + b.fill, 0);
+const STACK = [
+  [137, 'Quiet Lantern', 'AX1 103', 'NM', '', 'Japanese', '0.80'],
+  [138, 'Glass Fox', 'AX1 088', 'LP', '', '', '1.20'],
+  [139, 'Hollow Crown', 'AX1 140', 'NM', 'Foil', '', '12.50'],
+  [140, 'Ember Warden', 'AX1 012', 'NM', 'Foil', '', '4.10'],
+];
+const ORDER = [
+  { box: 1, slot: 12, name: 'Glass Fox', set: 'AX1 088', cond: 'LP', foil: '', done: true },
+  { box: 3, slot: 47, name: 'Marsh Strider', set: 'AX1 151', cond: 'NM', foil: '', done: false },
+  { box: 6, slot: 3, name: 'Ember Warden', set: 'AX1 012', cond: 'NM', foil: 'Foil', done: false },
+];
+const FOUND = [
+  { box: 1, slot: 203, name: 'Hollow Crown', set: 'AX1 140', cond: 'LP', foil: '', lang: '', state: 'live' },
+  { box: 5, slot: 139, name: 'Hollow Crown', set: 'AX1 140', cond: 'NM', foil: 'Foil', lang: '', state: 'draft' },
+  { box: 9, slot: 77, name: 'Hollow Crown', set: 'AX1 140', cond: 'NM', foil: '', lang: 'Japanese', state: 'sold' },
+];
+
+/* ---------- Drawing helpers ---------- */
+const pos = s => ((s - 0.5) / CAP * 100).toFixed(3) + '%';
+const left = s => ((s - 1) / CAP * 100).toFixed(3) + '%';
+const wid = n => (n / CAP * 100).toFixed(3) + '%';
+const ICON = {
+  shelf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/><path d="M7 4v-1.5M15 10v-1.5M11 16v-1.5"/></svg>',
+  orders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>',
+  scan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><rect x="8.5" y="7" width="7" height="10" rx="1.2"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>',
+  chev: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+  clear: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm3.5 12.1-1.4 1.4L12 13.4l-2.1 2.1-1.4-1.4 2.1-2.1-2.1-2.1 1.4-1.4 2.1 2.1 2.1-2.1 1.4 1.4-2.1 2.1Z"/></svg>',
+};
+
+function trayLabel(b) {
+  const live = b.runs.filter(r => r[2] === 'live').reduce((a, r) => a + r[1] - r[0] + 1, 0);
+  const draft = b.runs.filter(r => r[2] === 'draft').reduce((a, r) => a + r[1] - r[0] + 1, 0);
+  const parts = [`Box ${b.n}`, `${b.fill} of ${CAP} slots full`];
+  if (draft) parts.push(`${draft} draft`);
+  if (b.sold.length) parts.push(`${b.sold.length} sold, to pull`);
+  if (b.check.length) parts.push(`${b.check.length} to check`);
+  if (b.off.length) parts.push(`${b.off.length} not live`);
+  return parts.join(', ');
+}
+function tray(b, o) {
+  o = o || {};
+  const from = o.from || 1, to = o.to || CAP, span = to - from + 1;
+  const L = s => ((s - from) / span * 100).toFixed(3) + '%';
+  const P = s => ((s - from + 0.5) / span * 100).toFixed(3) + '%';
+  const W = n => (n / span * 100).toFixed(3) + '%';
+  let h = '';
+  if (o.loading) h += `<div class="run loading" style="left:0;width:100%"></div>`;
+  else for (const [a, z, k] of b.runs) {
+    const s = Math.max(a, from), e = Math.min(z, to);
+    if (e >= s) h += `<div class="run ${k}" style="left:${L(s)};width:${W(e - s + 1)}"></div>`;
+  }
+  if (!o.loading) {
+    for (const s of b.div) if (s >= from && s <= to) h += `<div class="tab" style="left:${L(s)}">${o.big && b.stacks[s] ? 'Stack ' + b.stacks[s] : ''}</div>`;
+    for (const s of b.off) if (s >= from && s <= to) h += `<div class="stub" style="left:${P(s)}"></div>`;
+    // A pin is [number, kind]: 'sold' stands up amber, 'done' leaves a gap, 'find' marks the slot in ink and keeps its state.
+    const pinned = s => o.pins && o.pins[s] && o.pins[s][1] !== 'find';
+    for (const s of b.sold) if (s >= from && s <= to && !pinned(s)) h += `<div class="stand" style="left:${P(s)}"></div>`;
+    for (const s of b.check) if (s >= from && s <= to) h += `<div class="mark" style="left:${P(s)}"></div>`;
+    if (o.next && o.next >= from && o.next <= to) h += `<div class="nextslot" style="left:${P(o.next)}" title="Next free slot"></div>`;
+    if (o.pins) for (const s in o.pins) {
+      const [n, kind] = o.pins[s];
+      const under = kind === 'sold' ? 'stand' : kind === 'done' ? 'gap' : 'findslot';
+      h += `<div class="${under}" style="left:${P(+s)}"></div><div class="pin${kind === 'sold' ? '' : ' ' + kind}" style="left:${P(+s)}">${n}</div>`;
+    }
+  }
+  const lab = o.loading ? `Box ${b.n}, reading` : trayLabel(b);
+  return `<div class="tray${o.big ? ' big' : ''}" role="img" aria-label="${lab}">${h}</div>`;
+}
+function ruler(from, to, marks) {
+  const span = to - from + 1;
+  const L = s => ((s - from + 0.5) / span * 100).toFixed(3) + '%';
+  let h = '';
+  for (const m of marks) h += `<span style="left:${L(m)}">${m}</span>`;
+  for (let s = from; s <= to; s++) if (s % 10 === 0) h += `<i style="left:${L(s)};height:${s % 50 === 0 ? 5 : 3}px"></i>`;
+  return `<div class="ruler" aria-hidden="true">${h}</div>`;
+}
+const LEGEND = { live: '<i class="g live"></i>Live', draft: '<i class="g draft"></i>Draft', sold: '<i class="g sold"></i>Sold, to pull', check: '<i class="g check"></i>Check', off: '<i class="g off"></i>Not live' };
+// The legend names only the states its screen draws (ux-label-once).
+const legend = (ann, keys) => `<div class="legend${ann ? ' ann' : ''}"${ann ? ` data-ann="${ann}"` : ''}>${(keys || Object.keys(LEGEND)).map(k => `<span>${LEGEND[k]}</span>`).join('')}</div>`;
+const meta = c => `<span>${c.set}</span><span class="cond">${c.cond}</span>${c.foil ? `<span class="foil">${c.foil}</span>` : ''}${c.lang ? `<span>${c.lang}</span>` : ''}`;
+const place = (box, slot, cls) => `<span class="place ${cls || ''}"><span class="pb">Box ${box}</span><span class="ps">Slot ${slot}</span></span>`;
+function tabbar(cur) {
+  const t = (k, label, extra) => `<a href="#" ${cur === k ? 'aria-current="page"' : ''}>${ICON[k]}<span>${label}</span>${extra || ''}</a>`;
+  return `<nav class="tabbar glass ann today" data-ann="Today: three tabs" aria-label="Sections">${t('shelf', 'Shelf')}${t('orders', 'Orders', '<span class="badge" aria-label="2 orders to pull">2</span>')}${t('search', 'Search')}</nav>`;
+}
+function navbar(o) {
+  return `<div class="navbar"><div class="slot-l">${o.back ? `<button class="navbtn">${ICON.back}${o.back}</button>` : ''}</div>${o.title ? `<div class="title">${o.title}${o.subtitle ? `<span class="subtitle">${o.subtitle}</span>` : ''}</div>` : ''}<div class="slot-r">${o.right || ''}</div></div>`;
+}
+// One reason for every control that waits on the shelf read: Scan and List, in every pane.
+const WAIT = 'Waits for your shelf.';
+const scanBtn = (off) => off
+  ? `<span class="offwrap"><button class="navbtn" aria-disabled="true" aria-describedby="scan-why">${ICON.scan}Scan</button><span class="why" id="scan-why">${WAIT}</span></span>`
+  : `<button class="navbtn">${ICON.scan}Scan</button>`;
+const addBox = () => `<button class="navbtn ann today ann-below" data-ann="Today: Add a box">Add a box</button>`;
+const cnt = (b, loading) => loading ? `<span class="cnt" aria-hidden="true"><i class="skel"></i></span>` : `<span class="cnt${b.fill < CAP ? ' part' : ''}">${b.fill} of ${CAP}</span>`;
+
+function shelfRows(o) {
+  o = o || {};
+  let h = '';
+  for (const b of BOXES) {
+    const on = b.n === 4 || b.n === 5;
+    const cls = ['row', o.sel && o.sel.includes(b.n) ? 'sel' : '', on ? 'on' : ''].join(' ');
+    h += `<button class="${cls}"><span class="name">${b.n}</span>${o.loading ? tray(b, { loading: true }) : tray(b)}${cnt(b, o.loading)}</button>`;
+  }
+  return h;
+}
+function shelfBlock(o) {
+  o = o || {};
+  const rulerHtml = `<div class="ruler-row ann ann-left" data-ann="New: slot ruler, once"><span class="col">Box</span>${ruler(1, CAP, [1, 50, 100, 150, 200, 250])}<span></span></div>`;
+  return `<div class="shelf-head">${o.noLegend ? '' : legend(o.legendAnn)}${rulerHtml}</div><div class="shelf" id="${o.id || ''}"><div class="rows">${shelfRows(o)}</div></div>`;
+}
+function annotateRow(container, n, text, cls) {
+  const rows = container.querySelectorAll('.shelf .row');
+  const r = rows[n - 1];
+  if (r) { r.classList.add('ann'); if (cls) r.classList.add(cls); r.dataset.ann = text; }
+}
+
+/* ---------- Screens ---------- */
+function headShelf(sub, o) {
+  o = o || {};
+  const right = (o.add ? addBox() : '') + scanBtn(o.scanOff);
+  return `${navbar({ right })}<div class="head-stack"><h1 class="largetitle">Shelf</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div>`;
+}
+const subFull = `30 boxes, ${TOTAL.toLocaleString('en-US')} cards`;
+
+// The pour dock, folded. Loading and error keep the same dock and say why List waits.
+function pourDock(mode) {
+  const addr = mode === 'loading' ? '<span class="addr unknown">Reading…</span>'
+    : mode === 'error' ? '<span class="addr unknown">Not known</span>'
+    : '<span class="addr">Box 5, slot 141</span>';
+  const btn = mode
+    ? `<button class="btn compact list-btn" aria-disabled="true" aria-describedby="dock-why">List 186 cards</button>`
+    : `<button class="btn compact list-btn ann today ann-below" data-ann="Today: List with its line">List 186 cards</button>`;
+  const line = mode ? `<p class="btn-line" id="dock-why">${WAIT}${mode === 'error' ? ' Try again above.' : ''}</p>` : '<p class="btn-line">List puts the 186 read cards on TCGplayer.</p>';
+  return `<div class="dock glass${mode ? '' : ' ann'}"${mode ? '' : ' data-ann="New: the stack pours across boxes"'} id="pour">
+    <div class="dock-row"><div class="pour"><span class="lead">Stack 14, next card goes in</span>${addr}</div>${btn}</div>${line}</div>`;
+}
+
+const S = {};
+S.empty = {
+  folded: () => `<div class="screen">${headShelf('')}<div class="empty"><div class="tray" role="img" aria-label="An empty box"><div class="tab" style="left:12%"></div><div class="tab" style="left:55%"></div></div><p>Your boxes show here after you add one.</p><button class="btn">Add a box</button></div><div class="bottom">${tabbar('shelf')}</div></div>`,
+  left: () => S.empty.folded(),
+  right: () => `<div class="screen" style="background:var(--surface)"><p class="placeholder" style="margin:0">A box's slots and stacks show here.</p></div>`,
+};
+// Loading draws no state shapes, so it has no legend: no tray shows a state until the read ends.
+const loadingShelf = (dock) => `<div class="screen">${headShelf('Reading your shelf…', { scanOff: true })}${shelfBlock({ loading: true, noLegend: true })}<div class="bottom">${dock ? pourDock('loading') : ''}${tabbar('shelf')}</div></div>`;
+S.loading = {
+  folded: () => loadingShelf(true),
+  left: () => loadingShelf(false),
+  right: () => `<div class="screen">${navbar({ title: 'Stack 14' })}<div style="display:flex;flex-direction:column;gap:16px;padding:16px">
+     <div class="skel" style="height:32px"></div><div class="skel" style="height:32px"></div><div class="skel" style="height:56px;width:60%"></div>
+     <div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div></div>
+     <div class="bottom" style="left:16px;right:16px;bottom:16px"><button class="btn list-btn" aria-disabled="true" aria-describedby="list-why">List 186 cards</button><p class="btn-line" id="list-why">${WAIT}</p></div></div>`,
+};
+S.full = {
+  folded: () => `<div class="screen">${headShelf(subFull, { add: true })}${shelfBlock({ id: 'shelf', legendAnn: 'New: five shapes, named once' })}<div class="bottom">${pourDock()}${tabbar('shelf')}</div></div>`,
+  left: () => `<div class="screen">${headShelf(subFull, { add: true })}${shelfBlock({ id: 'shelf', sel: [4, 5], legendAnn: 'New: five shapes, named once' })}<div class="bottom">${tabbar('shelf')}</div></div>`,
+  right: () => stackPane(false),
+};
+function stackPane(stale) {
+  const b4 = BOXES[3], b5 = BOXES[4];
+  const rows = STACK.map(c => `<div class="item" style="grid-template-columns:36px 1fr auto"><span class="slotnum">${c[0]}</span><div><div class="nm">${c[1]}</div><div class="meta">${meta({ set: c[2], cond: c[3], foil: c[4], lang: c[5] })}</div></div><span class="price">$${c[6]}</span></div>`).join('');
+  return `<div class="screen">${navbar({ title: 'Stack 14' })}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="padding:12px 16px 0" class="${stale ? 'dim' : ''}">
+        <div class="ann" data-ann="New: dividers stand up, named" style="display:flex;flex-direction:column;gap:24px;padding-top:20px">
+          <div class="trayline"><span class="tl"><b>Box 4</b><small>151 to 250</small></span>${tray(b4, { big: true, from: 151, to: 250 })}</div>
+          <div class="trayline"><span class="tl"><b>Box 5</b><small>1 to 100</small></span>${tray(b5, { big: true, from: 1, to: 100 })}</div>
+          <div class="trayline"><span class="tl"><b></b><small>101 to 200</small></span>${tray({ ...b5, div: [] }, { big: true, from: 101, to: 200, next: stale ? 0 : 141 })}</div>
+        </div>
+      </div>
+      <div class="list" style="border-top:1px solid var(--line)">${rows}</div>
+    </div>
+    <div class="bottom" style="left:16px;right:16px;bottom:16px">
+      ${stale
+        ? `<button class="btn list-btn" aria-disabled="true" aria-describedby="list-why2">List 186 cards</button><p class="btn-line" id="list-why2">${WAIT} Try again on the left.</p>`
+        : `<div class="dock-top" style="padding:0 4px 4px"><div class="pour"><span class="lead">Next card goes in</span><span class="addr">Box 5, slot 141</span></div><span class="count">186 read</span></div><button class="btn list-btn ann today ann-below" data-ann="Today: List with its line">List 186 cards</button><p class="btn-line">Puts stack 14 on TCGplayer.</p>`}
+    </div></div>`;
+}
+function errorNotice() {
+  return `<div class="notice ann" data-ann="Today: last read, never empty" role="alert"><p><b>Could not read your shelf.</b> The boxes below are from your last read, at 7:40 PM.</p><button class="btn">Try again</button><button class="disclose" aria-expanded="false">What the server said ${ICON.chev}</button></div>`;
+}
+// The dim wrapper holds the legend too, so its shapes match the dimmed trays.
+// Scan waits here as in loading: a scanned card goes in the next free slot, and the slot is not known.
+const errorShelf = (dock) => `<div class="screen">${headShelf('', { scanOff: true })}<div style="display:flex;flex-direction:column;gap:12px;flex:1;min-height:0">${errorNotice()}<div class="dim" style="display:flex;flex-direction:column;flex:1;min-height:0">${shelfBlock({})}</div></div><div class="bottom">${dock ? pourDock('error') : ''}${tabbar('shelf')}</div></div>`;
+S.error = {
+  folded: () => errorShelf(true),
+  left: () => errorShelf(false),
+  right: () => stackPane(true),
+};
+function resultRows(withMini, numbered) {
+  return FOUND.map((c, i) => `<div class="item" style="grid-template-columns:${numbered ? '24px ' : ''}1fr auto auto;min-height:52px;padding:4px 16px">
+    ${numbered ? `<span class="numdot find" aria-hidden="true">${i + 1}</span>` : ''}
+    <div><div class="nm">${c.name}</div><div class="meta">${meta(c)}<span class="vh">${c.state}</span></div></div>
+    ${withMini ? `<div class="mini" aria-hidden="true"><div class="tray">${BOXES[c.box - 1].runs.map(r => `<div class="run ${r[2]}" style="left:${left(r[0])};width:${wid(r[1] - r[0] + 1)}"></div>`).join('')}<div class="minimark ${c.state}" style="left:${pos(c.slot)}"></div></div></div>` : ''}
+    <span class="place" style="min-width:64px;text-align:end"><span class="pb">Box ${c.box}</span><span class="ps">Slot ${c.slot}</span></span></div>`).join('');
+}
+const field = () => `<div class="field ann" data-ann="Today: field stays above the keys" role="search">${ICON.search}<span class="txt">hollow c</span><button class="clear" aria-label="Clear">${ICON.clear}</button></div>`;
+S.keyboard = {
+  folded: () => `<div class="screen" style="background:var(--surface-raised)"><div class="list ann ann-in-r" data-ann="New: a small box per result" style="flex:1;justify-content:flex-end;gap:8px">${legend('', ['live', 'draft', 'sold'])}<div class="list">${resultRows(true)}</div></div><div style="padding:4px 12px">${field()}</div></div>`,
+  left: () => {
+    // Pins are ink; the slot under each keeps its true state (Box 1 live, Box 5 draft, Box 9 sold).
+    const pins = { 1: { 203: [1, 'find'] }, 5: { 139: [2, 'find'] }, 9: { 77: [3, 'find'] } };
+    const rows = [1, 5, 9].map(n => `<div class="row" style="min-height:64px;align-items:end;padding-bottom:12px"><span class="name">${n}</span>${tray(BOXES[n - 1], { pins: pins[n] })}</div>`).join('');
+    // The pane is named for its tab (Search); the count is a line under the title, inside the bar.
+    return `<div class="screen">${navbar({ title: 'Search', subtitle: '3 matches on the shelf' })}${legend('', ['live', 'draft', 'sold', 'check'])}<div style="display:flex;flex-direction:column;padding-top:8px">${rows}</div></div>`;
+  },
+  right: () => `<div class="screen" style="background:var(--surface-raised)"><div class="list" style="flex:1;justify-content:flex-end">${resultRows(true, true)}</div><div style="padding:4px 12px">${field()}</div></div>`,
+};
+function pullRows() {
+  return ORDER.map((c, i) => `<div class="item" style="grid-template-columns:24px 76px 1fr 44px">
+    <span class="numdot${c.done ? ' done' : ''}">${i + 1}</span>${place(c.box, c.slot)}
+    <div><div class="nm">${c.name}</div><div class="meta">${meta(c)}</div></div>
+    <button class="tick${c.done ? ' done' : ''}" aria-label="${c.done ? 'Pulled' : 'Mark pulled'}: ${c.name}" aria-pressed="${c.done}">${c.done ? ICON.check : ''}</button></div>`).join('');
+}
+function pullShelf() {
+  // Pin 1 is pulled: its slot shows as a gap and its pin is grey. Pins 2 and 3 still stand up.
+  const pins = {};
+  ORDER.forEach((c, i) => { pins[c.box] = { [c.slot]: [i + 1, c.done ? 'done' : 'sold'] }; });
+  return ORDER.map(c => c.box).map(n => `<div class="row" style="min-height:52px;align-items:end;padding-bottom:12px"><span class="name">${n}</span>${tray(BOXES[n - 1], { pins: pins[n] })}</div>`).join('');
+}
+const pullLegend = () => `<div class="legend"><span><i class="g sold"></i>Sold, to pull</span><span><i class="g gapg"></i>Pulled</span></div>`;
+const shipDock = (inset) => `<div class="bottom" ${inset ? 'style="left:16px;right:16px;bottom:16px"' : ''}><div class="${inset ? '' : 'dock glass'}" style="display:flex;flex-direction:column;gap:8px"><button class="btn">Mark shipped</button><p class="btn-line">2 cards left to pull. You can undo Mark shipped.</p></div>${inset ? '' : tabbar('orders')}</div>`;
+const orderBody = (id) => `<p class="sub" style="padding-bottom:4px">Sample Buyer A, 3 cards, in walk order</p>
+     <div class="ann ann-in-r" data-ann="New: the sale stands up in its box" id="${id}" style="display:flex;flex-direction:column;gap:4px;padding-top:12px">${pullLegend()}<div style="display:flex;flex-direction:column">${pullShelf()}</div></div>
+     <div class="list" style="border-top:1px solid var(--line)">${pullRows()}</div>`;
+S.order = {
+  folded: () => `<div class="screen">${navbar({ back: 'Orders', title: 'Order 1042' })}${orderBody('pull')}${shipDock(false)}</div>`,
+  left: () => `<div class="screen">${navbar({})}<div style="display:flex;flex-direction:column;gap:12px"><div class="head-stack"><h1 class="largetitle">Orders</h1><p class="sub">2 to pull today</p></div>
+     <div class="list" style="border-top:1px solid var(--line)">
+       <div class="item row sel" style="grid-template-columns:1fr auto;display:grid"><div><div class="nm">Order 1042</div><div class="meta"><span>Sample Buyer A</span></div></div><span class="count">3 cards</span></div>
+       <div class="item" style="grid-template-columns:1fr auto"><div><div class="nm">Order 1043</div><div class="meta"><span>Sample Buyer B</span></div></div><span class="count">2 cards</span></div>
+       <div class="item" style="grid-template-columns:1fr auto"><div><div class="nm">Order 1039</div><div class="meta"><span>Sample Buyer C</span></div></div><span class="count">Shipped</span></div>
+     </div></div><div class="bottom">${tabbar('orders')}</div></div>`,
+  right: () => `<div class="screen">${navbar({ title: 'Order 1042' })}${orderBody('pull')}${shipDock(true)}</div>`,
+};
+
+function keyboard(wide) {
+  const keys = (ks) => ks.split(' ').map(k => `<span class="k">${k}</span>`).join('');
+  const r = (ks, cls) => `<div class="krow${cls ? ' ' + cls : ''}">${keys(ks)}</div>`;
+  // Unfolded: the keys split at the fold, as two halves; no key sits on the strip.
+  if (wide) return `<div class="keyboard" aria-hidden="true">`
+    + `<div class="kb-half l">${r('q w e r t')}${r('a s d f g', 'in-l')}<div class="krow"><span class="k fn">⇧</span>${keys('z x c v')}</div><div class="krow"><span class="k fn">123</span><span class="k space">space</span></div></div>`
+    + `<div class="kb-half r">${r('y u i o p')}${r('h j k l', 'in-r')}<div class="krow">${keys('b n m')}<span class="k fn">⌫</span></div><div class="krow"><span class="k space"></span><span class="k go">search</span></div></div>`
+    + `</div>`;
+  return `<div class="keyboard" aria-hidden="true">${r('q w e r t y u i o p')}${r('a s d f g h j k l')}<div class="krow"><span class="k fn">⇧</span>${'z x c v b n m'.split(' ').map(k => `<span class="k">${k}</span>`).join('')}<span class="k fn">⌫</span></div><div class="krow"><span class="k fn">123</span><span class="k space">space</span><span class="k go">search</span></div></div>`;
+}
+
+/* ---------- Router: #s=<state>&t=<light|dark>&p=<folded|unfolded>&h=<options>&l=0 ---------- */
+function readHash() {
+  const q = new URLSearchParams(location.hash.slice(1));
+  return { s: q.get('s') || 'full', t: q.get('t') || '', p: q.get('p') || '', h: (q.get('h') || '').split(',').filter(Boolean), l: q.get('l') !== '0' };
+}
+function link(o) {
+  const q = new URLSearchParams();
+  q.set('s', o.s); if (o.t) q.set('t', o.t); if (o.p) q.set('p', o.p); if (o.h.length) q.set('h', o.h.join(',')); if (!o.l) q.set('l', '0');
+  return '#' + q.toString().replace(/%2C/g, ',');
+}
+function render() {
+  const o = readHash();
+  const st = S[o.s] ? o.s : 'full';
+  const root = document.documentElement;
+  if (o.t === 'light' || o.t === 'dark') root.dataset.theme = o.t; else delete root.dataset.theme;
+  document.body.dataset.pose = o.p || '';
+  document.body.className = [st === 'keyboard' ? 'kb-open' : '', o.l ? '' : 'no-ann', ...o.h.map(x => 'hide-' + x)].join(' ');
+  document.getElementById('state-title').textContent = STATES.find(x => x[0] === st)[1];
+  document.getElementById('folded-safe').innerHTML = S[st].folded();
+  document.getElementById('un-left').innerHTML = S[st].left();
+  document.getElementById('un-right').innerHTML = S[st].right();
+  document.getElementById('folded-kb').innerHTML = st === 'keyboard' ? keyboard(false) : '';
+  document.getElementById('un-kb').innerHTML = st === 'keyboard' ? keyboard(true) : '';
+  document.getElementById('cap-folded').textContent = st === 'keyboard'
+    ? 'iPhone Duo, folded, keyboard open. Content 466 × 250 pt. The keyboard fills the rest of the frame (not measured).'
+    : 'iPhone Duo, folded. Safe content 382 × 644 pt. Hatched: trailing inset 84 pt. Bottom inset 34 pt.';
+  document.getElementById('cap-unfolded').textContent = st === 'keyboard'
+    ? 'iPhone Duo, unfolded, keyboard open. Content 951 × 263 pt. The keyboard is drawn in two halves, with no key on the fold strip. Where the system keyboard meets the fold is not measured.'
+    : 'iPhone Duo, unfolded. 951 pt wide. Hatched: fold strip 455.5 to 495.5 pt, with no text or control on it. Height 644 pt is not measured.';
+  // Row annotations on the shelf
+  if (st === 'full') {
+    for (const id of ['folded-safe', 'un-left']) {
+      const c = document.getElementById(id);
+      annotateRow(c, 3, 'Today: a bar of slots and its count', 'today');
+      annotateRow(c, 2, 'New: a sold card stands up');
+      annotateRow(c, 4, 'New: dividers stand up');
+    }
+  }
+  if (st === 'error') for (const id of ['folded-safe', 'un-left']) annotateRow(document.getElementById(id), 3, 'Today: dimmed, names keep contrast', 'today');
+  // A row the shelf clips at its bottom edge is hidden; the rows above it fade out (no hard cut).
+  document.querySelectorAll('.shelf').forEach(sh => {
+    const bot = sh.getBoundingClientRect().bottom;
+    sh.querySelectorAll('.row').forEach(r => { if (r.getBoundingClientRect().bottom > bot + 0.5) r.style.visibility = 'hidden'; });
+  });
+  // Both poses draw the same screen, so the unfolded copy gets a "-u" suffix on each id it holds.
+  for (const pane of ['un-left', 'un-right']) {
+    const el = document.getElementById(pane);
+    el.querySelectorAll('[id]').forEach(n => { n.id += '-u'; });
+    el.querySelectorAll('[aria-describedby]').forEach(n => { n.setAttribute('aria-describedby', n.getAttribute('aria-describedby') + '-u'); });
+  }
+  // Controls
+  document.getElementById('nav-states').innerHTML = STATES.map(([k]) => `<a href="${link({ ...o, s: k })}" ${k === st ? 'aria-current="true"' : ''}>${k}</a>`).join('');
+  document.getElementById('nav-view').innerHTML =
+    ['', 'light', 'dark'].map(t => `<a href="${link({ ...o, t })}" ${o.t === t ? 'aria-current="true"' : ''}>${t ? 'Theme: ' + t : 'Theme: system'}</a>`).join('') +
+    '<span class="sep"></span>' +
+    ['', 'folded', 'unfolded'].map(p => `<a href="${link({ ...o, p })}" ${o.p === p ? 'aria-current="true"' : ''}>${p ? 'Pose: ' + p : 'Both poses'}</a>`).join('') +
+    '<span class="sep"></span>' + `<a href="${link({ ...o, l: !o.l })}" ${o.l ? 'aria-current="true"' : ''}>Labels ${o.l ? 'on' : 'off'}</a>`;
+  document.getElementById('nav-hide').innerHTML = OPTIONS.map(([k, label]) => {
+    const hid = o.h.includes(k);
+    const h = hid ? o.h.filter(x => x !== k) : [...o.h, k];
+    return `<a href="${link({ ...o, h })}" ${hid ? 'aria-current="true"' : ''}>${hid ? 'Show' : 'Hide'} ${label}</a>`;
+  }).join('');
+}
+window.addEventListener('hashchange', render);
+render();
+})();
+</script>
+</body>
+</html>
