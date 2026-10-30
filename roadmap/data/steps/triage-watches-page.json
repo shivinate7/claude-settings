@@ -1,9 +1,9 @@
 {
   "title": "A new triage watches the waiting page as its first act",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "done",
   "order": 103.33745,
   "why": "Measured Oct 30 12:32 and 12:34 CDT (shiv's two test saves on item 9): a Save posts a comment sent to Claude, and it woke only the sessions that watch the page, from any device. The watch belongs to the session; it ends when triage rotates. The waiting-page skill makes a session watch only when it adds an item, so a new triage that inherits items and adds none hears no Save until it next publishes the page.",
-  "note": "Ruling, Oct 30 12:35 CDT (shiv, chat): yes, file it. Fix: in skills/waiting-page/SKILL.md (the watch rule near the item-adding rule) and the triage rotation steps, a session that takes over the page writer role or inherits open items runs ArtifactComments watch on the page URL first, and the handoff names that watch. Done check: a test or check that fails when a triage handoff with open items names no page watch. Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of c95 (triage 12, Oct 30): a gap every rotation hits.",
-  "updatedAt": "2026-10-30T17:36:00Z"
+  "note": "Ruling, Oct 30 12:35 CDT (shiv, chat): yes, file it. Fix: in skills/waiting-page/SKILL.md (the watch rule near the item-adding rule) and the triage rotation steps, a session that takes over the page writer role or inherits open items runs ArtifactComments watch on the page URL first, and the handoff names that watch. Done check: a test or check that fails when a triage handoff with open items names no page watch. Needs no answer. Port: yes, the skill installs everywhere. Placed ahead of c95 (triage 12, Oct 30): a gap every rotation hits. Done: batch 32 (#859, main 3ee623bc), Oct 30.",
+  "updatedAt": "2026-10-30T19:10:00Z"
 }
