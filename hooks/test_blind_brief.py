@@ -28,6 +28,7 @@ Override the module under test with the env var BLIND_BRIEF_UNDER_TEST.
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -475,6 +476,38 @@ class Devices(unittest.TestCase):
                 self.assertIn("layout.py devices", text)
                 for name in names:
                     self.assertNotIn(name, text.lower())
+
+
+class DesignerSteps(unittest.TestCase):
+    """The designer loads a design skill before it draws and critiques its own mockup before it reports.
+
+    A plain text check of agents/designer.md. Each step is bound to a line anchor, so a step moved
+    after the work it must precede fails. The critique counts only when `impeccable` and `critique`
+    stand in one sentence, so the word `critique` in an unrelated sentence never satisfies it.
+    """
+    DRAW = "For each screen the brief names"
+    REPORT = "Report once"
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(HERE, "..", "agents", "designer.md"), encoding="utf-8") as h:
+            cls.lines = h.read().splitlines()
+
+    def before(self, anchor):
+        starts = [i for i, line in enumerate(self.lines) if line.startswith(anchor)]
+        self.assertTrue(starts, "agents/designer.md has no line starting %r" % anchor)
+        return self.lines[:starts[0]]
+
+    def test_loads_frontend_design_by_name_before_it_draws(self):
+        self.assertTrue(any("frontend-design" in line for line in self.before(self.DRAW)),
+                        "no mention of `frontend-design` before the line starting %r" % self.DRAW)
+
+    def test_critiques_its_own_mockup_with_impeccable_before_it_reports(self):
+        # A blank line or a list item ends a unit; a wrapped line does not.
+        units = re.split(r"\n\s*\n|\n(?=\s*[-*] )", "\n".join(self.before(self.REPORT)))
+        sentences = [s for u in units for s in re.split(r"(?<=[.!?])\s+", " ".join(u.split()))]
+        self.assertTrue(any(re.search(r"\bimpeccable\b", s) and re.search(r"\bcritique\b", s) for s in sentences),
+                        "no sentence names both `impeccable` and `critique` before the line starting %r" % self.REPORT)
 
 
 class Hook(unittest.TestCase):
