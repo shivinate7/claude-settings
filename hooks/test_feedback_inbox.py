@@ -96,8 +96,9 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     assistant record must hold a tool_use block that is one of:
       (a) named `mcp__claude-code-remote__send_message` or `SendMessage`, with input.message holding
           n as a whole token (digits not next to a letter, digit or `-`);
-      (b) named with a prefix of `ArtifactData` or `mcp__ArtifactData`, whose input names `items/<n>`
-          as a whole token, or has collection `items` and doc_id n.
+      (b) named with a prefix of `ArtifactData` or `mcp__ArtifactData`, whose input, at any depth
+          (each op of a batch counts), has a key n equal to the item number, as an int or a string of
+          digits, and has collection `items`, or a doc_id or path that starts with `items/`.
     Without that proof the block blocks. Its reason names the item id and page:<n>, and says to send
     the answer to the page writer. A home that is not page:<digits> blocks as a malformed answer
     home. An absent, missing or unreadable transcript never blocks: stdout carries a systemMessage
@@ -900,12 +901,15 @@ def case_answer_sendmessage_proof_passes():
     expect_silent("answer: a SendMessage naming 98 after the owner record passes", p)
 
 
-def case_answer_artifactdata_items_proof_passes():
+def case_answer_artifactdata_n_proof_passes():
     for label, name, tool_input in (
-            ("doc_id 98 in collection items", "ArtifactData",
-             {"action": "update", "collection": "items", "doc_id": "98", "data": {"status": "closed"}}),
-            ("items/98 in the input", "mcp__ArtifactData",
-             {"batch": [{"op": "update", "path": "items/98"}]})):
+            ("doc_id items/disk-cleanup, data n 98", "ArtifactData",
+             {"action": "update", "doc_id": "items/disk-cleanup", "data": {"n": 98}}),
+            ("collection items, data n \"98\"", "ArtifactData",
+             {"action": "update", "collection": "items", "doc_id": "disk-cleanup",
+              "data": {"n": "98"}}),
+            ("batch op, data n 98", "mcp__ArtifactData",
+             {"batch": [{"op": "update", "doc_id": "items/disk-cleanup", "data": {"n": 98}}]})):
         p = answer_run(new_cfg(), "answer-artifact", [("98: a", (ANSWER_ITEM,))],
                        [owner_rec("98: a"), used_rec(name, tool_input)])
         expect_silent("answer: %s, %s, passes" % (name, label), p)
@@ -928,13 +932,22 @@ def case_answer_send_before_the_owner_record_blocks():
 def case_answer_send_naming_other_numbers_blocks():
     for label, records in (
             ("send_message naming 980", [owner_rec("98: a"), send_rec("980: a")]),
-            ("send_message naming 198", [owner_rec("98: a"), send_rec("198: a")]),
-            ("ArtifactData naming items/980", [owner_rec("98: a"), used_rec(
-                "ArtifactData", {"collection": "items", "doc_id": "980"})]),
-            ("ArtifactData naming items/198", [owner_rec("98: a"), used_rec(
-                "ArtifactData", {"collection": "items", "doc_id": "198"})])):
+            ("send_message naming 198", [owner_rec("98: a"), send_rec("198: a")])):
         p = answer_run(new_cfg(), "answer-other", [("98: a", (ANSWER_ITEM,))], records)
         expect_send_missing("answer: %s does not prove item 98" % label, p, "fb-0958-7", "98")
+
+
+def case_answer_artifactdata_n_other_numbers_blocks():
+    for label, tool_input in (
+            ("data n 980 on items/disk-cleanup", {"action": "update", "doc_id": "items/disk-cleanup",
+                                                 "data": {"n": 980}}),
+            ("data n 198 in a batch op", {"batch": [{"op": "update", "doc_id": "items/disk-cleanup",
+                                                    "data": {"n": 198}}]}),
+            ("collection items and doc_id 98, no n key", {"collection": "items", "doc_id": "98"})):
+        p = answer_run(new_cfg(), "answer-artifact-other", [("98: a", (ANSWER_ITEM,))],
+                       [owner_rec("98: a"), used_rec("ArtifactData", tool_input)])
+        expect_send_missing("answer: ArtifactData, %s, does not prove item 98" % label, p,
+                            "fb-0958-7", "98")
 
 
 def case_answer_peer_record_is_not_the_owner():
@@ -1276,10 +1289,11 @@ CASES = (
     case_guard_unreadable_layout_fails_open_with_one_line,
     case_answer_send_message_proof_passes,
     case_answer_sendmessage_proof_passes,
-    case_answer_artifactdata_items_proof_passes,
+    case_answer_artifactdata_n_proof_passes,
     case_answer_without_a_send_blocks,
     case_answer_send_before_the_owner_record_blocks,
     case_answer_send_naming_other_numbers_blocks,
+    case_answer_artifactdata_n_other_numbers_blocks,
     case_answer_peer_record_is_not_the_owner,
     case_answer_lone_short_message_is_checked,
     case_answer_bad_home_blocks,
