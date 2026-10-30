@@ -153,6 +153,17 @@ override lifted. It reads the local ref `origin/roadmap` in the call's cwd and n
 it fetches `origin/roadmap`; until then the ask stays. Kind of risk: likely. Landed 2026-10-29. Incident:
 the Opus reviewer spawn of step c202, ask-in-chat-first, waited about 2 hours on the ask.
 
+**Measured.** (measured 2026-10-30, 5 lanes) Tokens per agent run, in thousands (k), from the lane reports. The models are the models the lane reports name. They are not checked against the table above. The lane reports name sonnet for each agent unless the line names a model.
+
+- `small-fixes`: builder 84k; reviewer round 1 84k (4 findings); reviewer round 2 82k (0 findings).
+- `wp-fit-w-one-home`: test-author 113k; builder 90k; reviewer round 1 105k (0 blocking, 3 notes).
+- `triage-watches-page`: test-author 140k (2 rounds); builder 108k; reviewer round 1 108k (9 findings); reviewer round 2 94k (3 low notes).
+- `handoff-no-copied-lists`: test-author 83k, 84k, 100k, 80k; builder 82k, 75k, 82k, and try 3 on opus 74k; reviewer round 1 106k (5 findings), round 2 103k (4 findings), round 3 89k (PASS, 3 notes).
+- `arbiter-ruling-page-item`: designer opus 182k; test-author 100k, 134k; builder 155k, 100k; reviewer round 1 146k (6 findings), round 2 115k (2 low notes); design reviewer opus 176k (PASS 18/18).
+- Side points. Step c204 (the waiting page's scrolling option picture): designers opus 175k and 187k; design reviewers opus 173k and sonnet 95k. A design reviewer run in another repo: opus 123k (1 blocker, 3 notes).
+
+One step-down data point: the c204 design reviewer on sonnet, one step down from the table's opus, cost 95k against 173k on opus. It is the only step-down data point. The two runs are not the same task, and quality is unmeasured. For every other role, no lane ran one step down (a lower model per role). So cost and quality against one step down are unmeasured. The table names haiku for test-author, reviewer round 1 and record-writer. The lane reports name sonnet for the test-author and reviewer round 1 runs, and the numbers above hold no record-writer run. So the haiku rows are unmeasured too. Findings counts are not a quality measure. The ruling stands: keep today's table (owner, 17:50, waiting item 59, pick a).
+
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `agent-model-cap`.
 
