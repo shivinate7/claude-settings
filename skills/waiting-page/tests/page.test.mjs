@@ -2404,6 +2404,29 @@ test("an unranked multi item keeps its ticks in option order: C then A equals my
   assert.match(s[0].text, /(?<!\d)61 a\+c(?![+\w])/, "the notice does not read a+c: " + s[0].text);
 });
 
+// An unranked multi pick out of option order must not keep Take my pick: an unranked pick is saved and compared in option order;
+// a ranked pick keeps the order it was ticked or picked in.
+test("a multi item whose pick is out of option order: option-order ticks hide Take my pick, Take my pick saves option order, and a ranked pick keeps its order", async (t) => {
+  const uHand = multi("po-u-hand", 81, { pick: ["c", "a"] }), uTake = multi("po-u-take", 82, { pick: ["c", "a"] });
+  const rHand = ranked("po-r-hand", 83), rTake = ranked("po-r-take", 84);
+  const page = await open(t, { items: [uHand, uTake, rHand, rTake] }); if (!page) return;
+  await needBoxes(page, uHand, 3); await needBoxes(page, uTake, 3); await needBoxes(page, rHand, 4); await needBoxes(page, rTake, 4);
+  for (const k of ["c", "a", "d"]) await tick(page, rHand, k);
+  assert.equal(await takeShown(page, rHand), false, "a ranked item ticked in its pick order: Take my pick is not hidden");
+  await tick(page, uHand, "a"); await tick(page, uHand, "c");
+  const uShown = await takeShown(page, uHand);
+  await takePick(page, uTake); await takePick(page, rTake);
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 4);
+  const a = await answers(page);
+  assert.deepEqual([a[rTake.id].choice, a[rHand.id].choice], [["c", "a", "d"], ["c", "a", "d"]], "a ranked pick is not saved in its pick order");
+  assert.deepEqual(
+    { shown: uShown, take: a[uTake.id].choice, hand: a[uHand.id].choice },
+    { shown: false, take: ["a", "c"], hand: ["a", "c"] },
+    "an unranked pick out of option order: Take my pick must hide once the ticks are A and C, and must save option order"
+  );
+});
+
 const LONGER = [opt("a", "Open items older than a week, listed oldest first"), opt("b", "Picks that stood since the last digest went out"), opt("c", "Answers that failed to save and need a second chance"), opt("d", "A fourth title that is long enough to wrap")];
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
   test(`no card moves when a box is ticked or Up and Down are pressed, at ${viewport.width} wide`, async (t) => {

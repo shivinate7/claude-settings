@@ -37,7 +37,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - the CI waits,
   - the merge tool runs,
   - archiving finished lanes.
-  The coordinator holds only lane state and talks with the owner.
+  The coordinator holds only lane state and talks with the owner. The batch runner runs the merge tool under the coordinator's merge grant (the Merge grant bullet). It holds no grant of its own.
 - **Arbiter** (owner, 2026-10-29 14:55 CDT, waiting item 72, a question on the waiting page, pick b). The arbiter is a separate role. It holds a repo's ruling voice. Batch checks go to the batch runner, not to it. The coordinator starts it, only on demand (see "On demand" below). The coordinator holds only lane state and talks with the owner.
   - q_max's decision D-748 on browser checks: batch checks go to the batch runner. The ruling voice goes to the arbiter.
   - On demand (owner, 2026-10-29 16:42 CDT, waiting item 81, pick a): the arbiter does not start with triage and the batch runner. It starts later, when the owner tells the coordinator "spawn arbiter". It is for long runs the owner does not want to sit through.
@@ -46,6 +46,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Home (lane default, not an owner ruling; rule `output-answer-has-a-home`, an answer has a home): an arbiter's ruling lands where an owner's would, in its question's record in that repo.
   - Which repos (same item): not every repo gets an arbiter, only a repo that asks. Today that is q_max.
   - Kind (same item): the arbiter is a standing session and an orchestrator, and runs Opus. It is rotated before it goes stale, like triage.
+- **Merge grant** (owner, 2026-10-29 16:47 CDT). The coordinator holds a standing merge grant in claude-settings and in the owner's other repos, until the owner withdraws it in chat. It never asks the owner to merge. The grant covers the merge act only and lifts no check: green CI, no merge during a batch CI run, fresh review and the net-value hold still apply. Record `standing-merge-grant` (the coordinator's standing merge grant) holds the words, the repos and the limits.
 - **Wrong tier.** When the owner names the wrong tier, or brings work that belongs to another tier, the session says so in one line (owner, 15:12).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
   - "... and want it so that u push back on me somehow being like by the way, im coordinator ..."
@@ -60,6 +61,14 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Triage asks nothing that a past ruling answers. The coordinator does the act, or finds who can.
 - **Opus grants live on the roadmap step** (owner, 2026-10-29 13:44 CDT, pick a): "Grants living in roadmap actually does make a lot of sense -- i lean towards that route."
   - Triage writes each Opus grant on the step it covers, with the owner's words and time. A lane's guard reads the grant of its own step. Lane opus-grant-on-step builds this; decision agent-model-cap gets the lift when it lands.
+- **Merge role** (owner, 2026-10-29 16:54 CDT): the merge tool's confirm runs with no owner step per session, and no other session gains a way to merge.
+  - Problem (16:39 CDT): the auto-mode classifier refused the batch runner's merge tool confirm. That session never saw the owner's merge grant.
+  - Cloud settings only: `install.sh` adds `merge/cloud_allow.json` to the cloud settings. Its two narrow allow rules cover the confirm through `~/.claude/bin/merge` only, so the classifier does not judge it. No rule names bare `merge`: it is not on a cloud PATH. No rule names `bin/merge`: that form matches any repo's own script in the working directory. A narrow allow rule stays in effect in auto mode, and PreToolUse hooks still run (Claude Code docs, permission-modes and auto-mode-config pages, read 2026-10-29). No rule names `merge/merge.py`: that form runs the checkout's own copy, and an old lane branch's copy has no role check.
+  - The merge tool refuses a cloud confirm unless `~/.claude/state/merge-role.json` names `coordinator` or `batch-runner` for this session's id. The refusal hands the PR number and head to the batch runner. A missing, unreadable or foreign file fails closed.
+  - A coordinator or batch runner records its role with `~/.claude/bin/merge --role <tier>`, read from its own `cs-build:<tier>` tag, at session start and again after each resume. The tier line in `hooks/session_start.sh` says so. Any other tier is refused, and the refusal lists no tier.
+  - Local sessions: unchanged. No allow rule and no role check apply, so the classifier or a permission prompt judges each confirm, as before.
+  - Not covered: raw `gh pr merge` and the GitHub MCP merge tool. `hooks/guard_merge.py` judges both on CI only, as before.
+  - Cost: one small file read per cloud confirm, one file write per role record, inside processes already running. No new process, timer or log. Checks: `merge/test_merge.py` (MergeRoleCheck, CloudAllow) and `hooks/test_session_start.py`.
 
 ## How it works
 
