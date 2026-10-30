@@ -934,32 +934,45 @@ def case_prompt_lists_working_premises():
           "body: %r" % body[:200])
 
 
+LIST_HOME_WANTS = (
+    ("the word 'list'", r"\blists?\b"),
+    ("'copy' or 'copies'", r"\b(?:copy|copies)\b"),
+    ("a negation: 'never', 'not' or \"don't\"", r"\b(?:never|not|don['’]t)\b"),
+    ("a home: 'page', 'roadmap' or 'git ref'", r"\b(?:pages?|roadmaps?|git refs?)\b"),
+)
+
+
+def list_home_missing(step_text):
+    """The wants the closest window of step_text lacks; empty when one window holds all four.
+
+    A window is one sentence or bullet, or that unit plus the sentence right after it. All
+    four wants must sit in one window, so words spread over the step (a "never" far from any
+    list) cannot satisfy it.
+    """
+    # A bullet marker after a sentence end splits twice, which leaves an empty unit: drop it,
+    # or it would sit between two neighbours and break their window.
+    units = [squash(u) for u in re.split(r"(?<=[.!?])\s+|^\s*[-*]\s+", step_text, flags=re.M)]
+    units = [u for u in units if u]
+    windows = units + [a + " " + b for a, b in zip(units, units[1:])]
+    best = [label for label, _ in LIST_HOME_WANTS]
+    for window in windows:
+        miss = [label for label, rx in LIST_HOME_WANTS if not re.search(rx, window)]
+        if len(miss) < len(best):
+            best = miss
+    return best
+
+
 def case_prompt_names_list_home_not_copy():
-    # A triage handoff kept listing closed page items 82 and 86 after compaction, because it
-    # held a copy of the list. Step 4 must tell the session to name where a list lives.
+    # Step 4 must say to name where a list lives and never to copy it: a copy goes stale.
     with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
         text = f.read()
     step4 = step_body(text, 4) or ""
     check("prompt: step 4 still exists (list-home check)", bool(step4.strip()), "no '## 4.' step")
-    # One sentence or bullet must hold all four wants, so words spread over the step
-    # (such as "Never make a dated copy" far from any list) cannot satisfy it.
-    wants = (
-        ("the word 'list'", ("list",)),
-        ("'copy' or 'copies'", ("copy", "copies")),
-        ("'never'", ("never",)),
-        ("a home: one of 'page', 'roadmap', 'git ref'", ("page", "roadmap", "git ref")),
-    )
-    units = [squash(u) for u in re.split(r"(?<=[.!?])\s+|^\s*[-*]\s+", step4, flags=re.M)]
-    best_missing = [label for label, _ in wants]
-    for unit in units:
-        miss = [label for label, words in wants if not any(w in unit for w in words)]
-        if len(miss) < len(best_missing):
-            best_missing = miss
-    check("prompt: one sentence or bullet of step 4 says to name where a list lives (a page, "
-          "a roadmap ref or a git ref) and never to copy the list",
-          not best_missing,
-          "no single sentence or bullet of step 4 holds all four; the closest lacks: %s"
-          % "; ".join(best_missing))
+    missing = list_home_missing(step4)
+    check("prompt: a sentence or bullet of step 4, with the sentence after it, says to name "
+          "where a list lives (a page, a roadmap ref or a git ref) and never to copy the list",
+          not missing,
+          "no window of step 4 holds all four; the closest lacks: %s" % "; ".join(missing))
 
 
 def write_compaction(c):
