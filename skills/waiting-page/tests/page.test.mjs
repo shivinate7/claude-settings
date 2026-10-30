@@ -1872,7 +1872,7 @@ test("a mockup frame is laid out at the width FIT_W holds", async (t) => {
 });
 
 // ---------------------------------------------------------------- each option's picture shows its own difference
-const ALERT =(page, it) => card(page, it).locator("p.broken[role=alert]");
+const ALERT = (page, it) => card(page, it).locator("p.broken[role=alert]");
 const lateRow = (state) => `<body style="margin:0"><div id="late-row">${state}</div><div id="other">x</div></body>`;
 const looks = (id, n, designs, over = {}) => mk(id, n, { look: true, pick: "a", options: WIDE.map(([k, l]) => ({ key: k, label: l, how: "h", gain: "g", lose: "l", design: "o-" + k })), designs, ...over });
 
