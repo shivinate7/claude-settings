@@ -163,6 +163,10 @@ SHOOT_STEPS = "step|state|click|wait"
 SHOOT_REACH_BAD = (
     [("steps is %s" % label, {"steps": value}, {}, SHOOT_STEPS) for label, value in (
         ("an object", {"click": "#a"}), ("a string", "click #a"), ("a number", 5), ("an empty list", []),
+        ("null", None), ("an empty string", ""), ("the number 0", 0),
+        ("a click selector that is empty", [{"click": ""}]),
+        ("a click selector that is blank", [{"click": " "}]),
+        ("a state that is null", [{"wait": "#a", "state": None}]),
         ("a step with neither click nor wait", [{}]),
         ("a step with both click and wait", [{"click": "#a", "wait": "#b"}]),
         ("a step with only a state", [{"state": "hidden"}]),

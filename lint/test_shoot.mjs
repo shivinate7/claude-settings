@@ -65,6 +65,15 @@ Object.assign(PAGES, {
       addEventListener("message", (e) => { const c = document.getElementById("child"); c.textContent = "child " + e.data; c.setAttribute("data-reported", ""); });
       document.getElementById("f").src = "http://localhost:" + location.port + "/frame-child.html";</script>`,
   "/frame-child.html": `<!doctype html><script>let v = null; try { v = localStorage.getItem("k"); } catch {} parent.postMessage("k=" + (v === null ? "unset" : v), "*");</script>`,
+  // State that a click writes (localStorage and a cookie), and the pages that write it on load and read it back.
+  "/state-set.html": `<!doctype html><style>${LOOK}</style><button id="save" style="font:inherit">Save</button><main id="app"></main>
+    <script>document.getElementById("save").onclick = () => { localStorage.setItem("k", "clicked"); document.cookie = "c=clicked; path=/";
+      document.getElementById("app").innerHTML = "<p id='saved'>Saved</p>"; };</script>`,
+  "/state-write.html": `<!doctype html><style>${LOOK}</style><p>Writer</p>
+    <script>localStorage.setItem("k", "loaded"); document.cookie = "c=loaded; path=/";</script>`,
+  "/state-read.html": `<!doctype html><style>${LOOK}</style><p id="out"></p>
+    <script>const c = document.cookie.split("; ").find((x) => x.startsWith("c=")); const v = localStorage.getItem("k");
+      document.getElementById("out").textContent = "k=" + (v === null ? "unset" : v) + " c=" + (c ? c.slice(2) : "unset");</script>`,
   // Seed and steps together: the click reveals a view built from the seeded value.
   "/account.html": `<!doctype html><style>${LOOK}</style><p id="seed"></p><button id="reveal" style="font:inherit">Reveal</button><main id="app"></main>
     <script>const v = localStorage.getItem("session"); document.getElementById("seed").textContent = "session=" + (v === null ? "unset" : v);
@@ -397,6 +406,22 @@ test("localStorage: a seed is there before the page's scripts run, and never rea
   }
 });
 
+// Any route with steps or localStorage runs in its own browser context, so what a click writes
+// (localStorage, a cookie) never reaches a later route, and a route with steps starts with nothing.
+test("steps: what a click writes to localStorage or a cookie never reaches the next route", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await run({ routes: [{ name: "setter", path: "/state-set.html", steps: [{ click: "#save" }, { wait: "#saved" }] }, { name: "reader", path: "/state-read.html" }], ...ONE });
+  assert.equal(r.code, 0, r.out);
+  assert.match(html(r, "reader-820-light"), /k=unset c=unset/, "state written by a click leaked into the route after it");
+});
+
+test("steps: a route with steps starts with no localStorage or cookie from an earlier route", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await run({ routes: [{ name: "writer", path: "/state-write.html" }, { name: "reader", path: "/state-read.html", steps: [{ wait: "#out" }] }], ...ONE });
+  assert.equal(r.code, 0, r.out);
+  assert.match(html(r, "reader-820-light"), /k=unset c=unset/, "state from an earlier route reached a route with steps");
+});
+
 test("localStorage: a value with quotes, a backslash, a script end tag, a newline and a template literal arrives byte for byte", async (t) => {
   if (!(await chromium(t))) return;
   const value = "it's \"quoted\" \\ back</script><b>\n`${1 + 1}` é   end";
@@ -481,6 +506,12 @@ const STEPS_BAD = [
   ["steps is a string", "click #a"],
   ["steps is a number", 5],
   ["steps is an empty list", []],
+  ["steps is null", null],
+  ["steps is an empty string", ""],
+  ["steps is the number 0", 0],
+  ["a click selector that is empty", [{ click: "" }]],
+  ["a click selector that is blank", [{ click: " " }]],
+  ["a state that is null", [{ wait: "#a", state: null }]],
   ["a step with neither click nor wait", [{}]],
   ["a step with both click and wait", [{ click: "#a", wait: "#b" }]],
   ["a step with only a state", [{ state: "hidden" }]],
