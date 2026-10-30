@@ -100,9 +100,11 @@ they use. Interface the generator must meet. One home: the same generator, no se
   paragraph under the H1, else the H1 text. A list item is a block; its marker is dropped. Other
   text stays as written, so a decision whose paragraph opens with bold text (the real
   one-shared-record-stamp does) keeps it. Debt: the What. Plan: the first line, its
-  leading # dropped. Frontmatter (A17-A22): a record that opens with `---` on line 1, key lines and a
+  leading # dropped. Frontmatter (A17-A24): a record that opens with `---` on line 1, key lines and a
   closing `---` gives its `title:` as the gist, quotes dropped, when it has no ruling, question or
-  H1 to read. Frontmatter with no title gives way to the H1. A `---` block below line 1 is prose.
+  H1 to read. A title reads as a skill's `description` does: an escaped or doubled quote, a trailing
+  comment and a `>` block scalar. Frontmatter with no title gives way to the H1. A `---` block below
+  line 1 is prose, and so is a block that never closes.
   Not pinned: a title against a ruling, a question or an H1 in the same record.
 - No overruled history. A marker is Superseded, Overruled, Previously, "was:", "no longer in force"
   or "Old ruling", in any case. The other five fail only where they open a block: the text of a
@@ -1104,11 +1106,20 @@ class RecordsPage(Tree):
                          tail="\n# The H1 text\n\nThe first paragraph under the H1. A second sentence.\n\nKind: process\n")
         self.assertEqual(self.gist_of("decisions/fm-no-title.md", text), "The first paragraph under the H1.")
 
+    def assert_no_gist(self, records):
+        """Each record {rel: text}, which holds no H1, ruling or question, lands in problems with no gist."""
+        code, out, err = generator(self.tree(with_records(records)))
+        said = out + err
+        for rel in records:
+            with self.subTest(rel):
+                self.assertEqual(code, 1, said)
+                self.assertIn("%s: no text to make a gist from" % rel, said)
+
     def test_a21_a_dashed_block_below_line_1_is_no_frontmatter(self):
-        # Green pin: a `---` block after other text is prose. It names a title, and the gist must not take it.
-        text = ("# Real title\n\nThe first paragraph. It ends here.\n\n---\ntitle: A later block\n---\n\n"
-                "More text.\n\nKind: process\n")
-        self.assertEqual(self.gist_of("decisions/fm-late.md", text), "The first paragraph.")
+        # A `---` block after other text is prose, and its title is no gist. The second record has a key line before
+        # any `---`: the one shape that a missing line-1 guard would still read as a title.
+        self.assert_no_gist({"decisions/fm-late.md": "Some prose.\n\n---\ntitle: x\n---\n",
+                             "decisions/fm-key-first.md": "Some prose.\ntitle: x\n\n---\n"})
 
     def test_a22_a_title_with_comment_openers_and_a_lone_quote_stays_whole(self):
         # Scanner case (building-scanner-respects-strings): `//`, `/*` and `#` in a quoted title are text, and the
@@ -1116,6 +1127,28 @@ class RecordsPage(Tree):
         title = "Don't write // or /* or # in a title"
         text = fm_record('id: D-2\nslug: fm-openers\ntitle: "%s"' % title)
         self.assertEqual(self.gist_of("decisions/fm-openers.md", text), title)
+
+    def test_a23_a_title_reads_as_the_shared_frontmatter_reader_reads_it(self):
+        # frontmatter_description reads these same quote, comment and block-scalar forms in a skill's frontmatter.
+        cases = [
+            ("an escaped quote", 'title: "A pending market add reads \\"SLC New Market: Salt Lake City.\\""',
+             'A pending market add reads "SLC New Market: Salt Lake City."'),
+            ("a folded block scalar ends at the next key", "title: >\n  An indented title line", "An indented title line"),
+            ("a trailing comment after a quoted title", 'title: "Foo" # note', "Foo"),
+            ("a doubled single quote", "title: 'It''s'", "It's"),
+        ]
+        extra = {"decisions/fm-shared-%d.md" % i: fm_record("id: D-%d\n%s\ndate: 2026-10-03" % (i, keys))
+                 for i, (_name, keys, _gist) in enumerate(cases)}
+        got = {r["slug"]: r["gist"] for r in self.rows(extra)}
+        for i, (name, _keys, gist) in enumerate(cases):
+            with self.subTest(name):
+                self.assertEqual(got.get("fm-shared-%d" % i), gist)
+
+    def test_a24_a_block_that_closes_or_never_closes_gives_no_title(self):
+        # The closing `---` ends the block, so a later `title:` line is body text. An unterminated block is no
+        # frontmatter, as frontmatter_description reads it.
+        self.assert_no_gist({"decisions/fm-closed.md": fm_record("id: 1", tail="\ntitle: body\n"),
+                             "decisions/fm-open.md": "---\nid: D-3\ntitle: Never closed\n\nSome prose.\n"})
 
 
 class RecordsStale(Tree):
