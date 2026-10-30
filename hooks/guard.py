@@ -2659,24 +2659,26 @@ PRESS_REF = re.compile(_REF, re.I)
 _FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
          r"|\b(?:plans|docs|notes)/[\w./-]+")
 COMMAND_FILE = re.compile(_FILE, re.I)
-# "the command in/from <file>" and "its command" (after a file step) point at a file. "run the
-# command" and the like count only with no `command` on the item; "the command below" never does.
+# "the command in/from <file>", "its command" and "run the command" and the like, with a file
+# named, point at a file, with or without a `command` on the item; "the command below" never does.
 COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
                              + _FILE + ")", re.I)
 COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
 COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b(?!\s+below)"
                           r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
 # A task's `command` is {powershell, mac}, each a non-empty string, so the owner's own shell gets a
-# block that runs in it. PowerShell 5.1 has none of the bash operators below: a line holding one
-# fails there.
+# block that runs in it. PowerShell 5.1 has none of the bash syntax below: the operators, the
+# /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
 COMMAND_SHELLS = ("powershell", "mac")
-PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<")
-# A shell line in a step's backtick span or fence: it chains with an operator, or its first word is a
-# program the owner would run or a Verb-Noun cmdlet. Any other backticked word (`main`) or a file name
-# is not a shell line.
+PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
+# A shell line in a step's backtick span or fence: it chains with an operator, it runs a path that
+# starts ./ or ../, its first word is a Verb-Noun cmdlet, or its first word is a program the owner
+# would run with an argument after it. A program alone (`git`) names the tool in prose, and any other
+# backticked word (`main`) or a file name is not a shell line.
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
-                            "ls", "cat", "echo", "export", "sudo"))
+                            "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
+                            "gcloud", "bq", "winget"))
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
 SHELL_OPERATOR = re.compile(r"&&|<<<|[|;]")
 
@@ -2778,14 +2780,17 @@ def _shell_line(span) -> bool:
         words = line.split()
         if SHELL_OPERATOR.search(line):
             return True
-        if words and (words[0] in SHELL_PROGRAMS or SHELL_CMDLET.fullmatch(words[0])):
+        if not words:
+            continue
+        if words[0].startswith(("./", "../")) or SHELL_CMDLET.fullmatch(words[0]) \
+                or (len(words) >= 2 and words[0] in SHELL_PROGRAMS):
             return True
     return False
 
 
 def command_in_item_hit(data) -> str:
     """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
-    holds a bash operator, when its steps, joined, send the owner to a file for a command, or when a
+    holds bash syntax, when its steps, joined, send the owner to a file for a command, or when a
     step holds a shell line in backticks. A `command` on the item does not excuse a file step: the
     step still points at the file. An update with no `command` key leaves the stored one alone."""
     if not isinstance(data, dict) or data.get("kind", "task") != "task":
@@ -2802,7 +2807,7 @@ def command_in_item_hit(data) -> str:
     joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
-            or (has_file and not has_command and COMMAND_VERB.search(joined)):
+            or (has_file and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
     if any(_shell_line(span) for text in texts for span in _code_spans(text)):
         return "step holds a shell line"
