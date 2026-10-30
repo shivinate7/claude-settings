@@ -63,7 +63,11 @@ AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
 LOG_WAIT_SECONDS = 30  # one log() call waits at most this long for the lock and the replace together
 LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock or the replace
-LOG_DONE_BY = 58  # seconds after the hook started by which the done row stops waiting; the hook's own limit is 60
+LOG_DONE_BY = 55  # seconds after the hook started by which the done row stops waiting; the hook's own limit is 60,
+# and its timer starts before `started` (shell, interpreter start, stdin read), so 5 s stay spare
+# The lock errors that mean another run holds the lock, by the Windows C runtime's errno numbers:
+# `_locking` sets EACCES (13) for a held range and EDEADLOCK (36) when its own retries give up.
+WIN_LOCK_HELD = (13, 36)
 
 
 class LogWaitTimeout(OSError):
@@ -77,8 +81,9 @@ def log_path() -> str:
 @contextlib.contextmanager
 def _log_lock(path: str, deadline: float):
     """Hold an exclusive lock on `<log>.lock` so parallel hook runs take turns. `fcntl.flock` on
-    POSIX, `msvcrt.locking` on Windows, both non-blocking and tried every LOG_RETRY_SECONDS until
-    DEADLINE (a `time.monotonic` time), then LogWaitTimeout. The body never runs without the lock.
+    POSIX, `msvcrt.locking` on Windows, both non-blocking. While another run holds the lock, it
+    tries every LOG_RETRY_SECONDS until DEADLINE (a `time.monotonic` time), then LogWaitTimeout.
+    Any other lock error raises at once. The body never runs without the lock.
     (`msvcrt.LK_LOCK` gives up after about 10 s on its own, so it is not used.)"""
     with open(path + ".lock", "a+") as handle:
         win = sys.platform.startswith("win")
@@ -94,7 +99,12 @@ def _log_lock(path: str, deadline: float):
                 else:
                     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except OSError:  # held by another run
+            except OSError as exc:
+                # Only contention waits. Any other error (ENOLCK, EOPNOTSUPP on a network dir) raises
+                # at once: waiting cannot fix it.
+                held = exc.errno in WIN_LOCK_HELD if win else isinstance(exc, BlockingIOError)
+                if not held:
+                    raise
                 if time.monotonic() >= deadline:
                     raise LogWaitTimeout("payload log lock not taken before the deadline")
                 time.sleep(LOG_RETRY_SECONDS)
