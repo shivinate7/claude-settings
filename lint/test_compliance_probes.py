@@ -838,6 +838,23 @@ class WordsSpeed(unittest.TestCase):
         _, body = Scorecard.run_card(self, Repo(self), out)
         self.assertIn("| words | unknown |", body)
 
+    def test_a_deadline_also_stops_the_probe_inside_one_giant_file(self):
+        # Banchi's chunks hold about 100 times the names per byte of the fixture above, so a probe that fixes the line scan and
+        # checks its deadline only between files still runs minutes inside one file. The stop must come from inside it.
+        repo = Repo(self).write("src/app.py", "def main():\n    return 1\n").write(self.REL, minified_bundle(planted(one_word=True)))
+        script = ("import importlib.util, sys\n"
+                  "spec = importlib.util.spec_from_file_location('probes_in_child', %r)\n"
+                  "probes = importlib.util.module_from_spec(spec)\n"
+                  "spec.loader.exec_module(probes)\n"
+                  "probes.WORDS_DEADLINE = 0.5\n"
+                  "sys.exit(probes.main(['words', %r]))\n") % (PROBES, repo.root)
+        try:
+            done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=20)
+        except subprocess.TimeoutExpired:
+            self.fail("a deadline of 0.5 s did not stop the words group inside %s within 20 s" % self.REL)
+        self.assertEqual(done.returncode, 2, done.stdout)
+        self.assertRegex(head(done.stdout), r"^words: unknown - stopped at %s, \d+ of 2 read$" % re.escape(self.REL))
+
     def test_the_default_deadline_leaves_a_normal_repo_alone(self):
         code, out = Repo(self).write("src/a.py", "def f():\n    return 1\n").run("words")
         self.assertEqual((code, head(out)), (0, "words: in shape"), out)
