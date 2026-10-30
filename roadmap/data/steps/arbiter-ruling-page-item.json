@@ -1,9 +1,9 @@
 {
   "title": "Each arbiter ruling shows on the waiting page, with an Overturn choice",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33745,
   "why": "shiv, Oct 30 12:44 CDT (waiting item 86, pick a): he kept the power to overrule the arbiter (item 81 a), and can only use it on rulings he sees. #808 writes an arbiter ruling into its question's record only.",
-  "note": "Fix: when the arbiter rules, it also writes a closed waiting-page item in that repo: the question, the ruling, its record, and one Overturn choice. An Overturn save reopens the question for shiv. Done check: an arbiter ruling in a test repo adds one closed item; pressing Overturn reopens it. Needs no answer. Port: yes, every repo with a waiting page.",
-  "updatedAt": "2026-10-30T18:05:00Z"
+  "note": "Fix: when the arbiter rules, it also writes a closed waiting-page item in that repo: the question, the ruling, its record, and one Overturn choice. An Overturn save reopens the question for shiv. Done check: an arbiter ruling in a test repo adds one closed item; pressing Overturn reopens it. Needs no answer. Port: yes, every repo with a waiting page. Lane arbiter-ruling-page-item kept every arbiter ruling on the page for now (coordinator's undoable pick, Oct 30; notes line wp-rulings-never-leave).",
+  "updatedAt": "2026-10-30T19:00:00Z"
 }
