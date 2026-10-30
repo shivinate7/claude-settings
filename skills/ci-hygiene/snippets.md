@@ -169,11 +169,11 @@ that reads the pin. It exits 3 when the pin lags:
 bin/ste-changed origin/main
 ```
 
-Move the pin in a lane of its own (decision `action-pins-follow-sessions`). Other pins keep
-full-SHA pinning. Which bot, if any, bumps them is set per repo.
+Move the pin in a lane of its own (decision `action-pins-follow-sessions`, pins follow the session's
+tools). Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 
 This repo's `.github/dependabot.yml` ignores every version update for `github-actions`, so only a
-security fix opens a PR (decision `dependabot-security-only`):
+security fix opens a PR (decision `dependabot-security-only`, Dependabot runs security updates only):
 
 ```yaml
 version: 2
