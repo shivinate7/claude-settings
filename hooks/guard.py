@@ -2806,6 +2806,83 @@ def stake_str_replace_hit(entry) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ an option's key is its position's letter
+#
+# docs/decisions/option-keys-are-letters.md, rule `option-letter-keys`, built against a named incident
+# (incident in the record): the page shows an option by its position, so an option keyed a that sat second
+# showed as B and the owner's answer was misread. The page's letter for index i is
+# String.fromCharCode(65 + i % 26) (skills/waiting-page/page.html, symbol letterOf); the key is that letter
+# in lowercase. The page reads the key "none" (symbol NONE, same file) as "none of these".
+OPTION_NONE_KEY = "none"
+# An option named in item text by a letter-and-digit key, as in "option e2": the word, then the key.
+KEY_NAMED = re.compile(r"\b(?:options?|picks?|keys?)\s+[\"'`\u201c\u2018]?[a-z]\d+\b", re.I)
+LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
+                      "options a, b, c in the order shown, each once, never none, and name an option in the "
+                      "item's text by that letter (option A, pick b), never by any other key.")
+
+
+def _letter_of(index: int) -> str:
+    """The lowercase form of the page's letterOf for position `index`."""
+    return chr(97 + index % 26)
+
+
+def _item_text_fields(data):
+    """The item's own text: title, context, why, each option's fields and each step."""
+    out = [data.get(k) for k in ("title", "context", "why")]
+    for o in data.get("options") if isinstance(data.get("options"), list) else []:
+        out.append(_flat_text(o))
+    for st in data.get("steps") if isinstance(data.get("steps"), list) else []:
+        out.append(_flat_text(st))
+    return [t for t in out if isinstance(t, str)]
+
+
+def option_letter_hit(op: str, data) -> str:
+    """The matched text when this write of a waiting-page decision keys an option by anything but its
+    position's letter, or names an option in its text by a letter-and-digit key. A task and a note pass;
+    an update that carries no `options` has no keys to judge."""
+    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
+        return ""
+    options = data.get("options")
+    if isinstance(options, list):
+        seen = set()
+        for i, o in enumerate(options):
+            key = o.get("key") if isinstance(o, dict) else None
+            if not isinstance(key, str):
+                return "option with no string key"
+            if key == OPTION_NONE_KEY:
+                return "option keyed none"
+            if key in seen:
+                return "option key that repeats"
+            seen.add(key)
+            if key != _letter_of(i):
+                return "option key that is not its position's letter"
+    for text in _item_text_fields(data):
+        m = KEY_NAMED.search(text)
+        if m:
+            return "item text names an option by a key: " + m.group(0)
+    return ""
+
+
+# ------------------------------------------------------------------ a reworked item is not answered on the page
+#
+# docs/decisions/rework-leaves-page.md, rule `rework-off-page`, built against a named incident (incident in
+# the record): an item whose options were being reworked stayed open, so the owner could answer options about
+# to change. A str_replace on context carries no status and is not judged.
+REWORKED = re.compile(r"\bbeing\s+reworked\b", re.I)
+REWORK_REASON = ("An open item is for the owner to answer now, so it never says its options are being "
+                 "reworked. Close the item with a home that names the rework, and add a fresh item when the "
+                 "options are ready.")
+
+
+def rework_off_page_hit(data) -> str:
+    """The matched text when this write puts "being reworked" in `context` with no status closed."""
+    if not isinstance(data, dict) or data.get("status") == "closed":
+        return ""
+    if REWORKED.search(str(data.get("context") or "")):
+        return "context says the item is being reworked"
+    return ""
+
+
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
@@ -2846,6 +2923,12 @@ def data_tool_hit(tool_input, cwd=""):
         hit = owner_judge_hit(op, data)
         if hit:
             return "owner-judge", hit
+        hit = option_letter_hit(op, data)
+        if hit:
+            return "option-letter-keys", hit
+        hit = rework_off_page_hit(data)
+        if hit:
+            return "rework-off-page", hit
     return "", ""
 
 
@@ -3397,6 +3480,10 @@ def judge(payload) -> None:
             refuse(tool, "deny", "task-names-check", TASK_REASON, matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", STAKE_REASON, matched)
+        if rule == "option-letter-keys":
+            refuse(tool, "deny", "option-letter-keys", LETTER_KEYS_REASON, matched)
+        if rule == "rework-off-page":
+            refuse(tool, "deny", "rework-off-page", REWORK_REASON, matched)
         return
 
     if tool in SHELL_TOOLS:
