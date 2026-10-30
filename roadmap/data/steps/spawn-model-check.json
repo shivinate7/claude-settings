@@ -1,0 +1,9 @@
+{
+  "title": "An agent spawn above its role's model is refused",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33751,
+  "why": "shiv, Oct 30 16:14 CDT (via coordinator): pick a on the setup gaps.",
+  "note": "Lane session_013NEJL1GGH2a1vi4dsMq9mB. Guards the model-per-role table in decision agent-model-cap. Done check: a spawn that asks for a model above its role's cap is refused unless shiv's grant names it.",
+  "updatedAt": "2026-10-30T21:32:00Z"
+}
