@@ -181,7 +181,33 @@ def shoot_config(root):
         return None, "%s: sizes is not a list of widths" % SHOOT_CONFIG
     if not isinstance(themes, list) or not themes or not all(t in ("light", "dark") for t in themes):
         return None, "%s: themes holds light and dark only" % SHOOT_CONFIG
+    if "ignoreHTTPSErrors" in data and not isinstance(data["ignoreHTTPSErrors"], bool):
+        return None, "%s: ignoreHTTPSErrors is true or false" % SHOOT_CONFIG
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        if "steps" in route and not shoot_steps_ok(route["steps"]):
+            return None, "%s: steps is a non-empty list; each step is {click: css} or {wait: css, state: visible or hidden}" % SHOOT_CONFIG
+        stored = route.get("localStorage", {})
+        if not isinstance(stored, dict) or not all(isinstance(v, str) for v in stored.values()):
+            return None, "%s: localStorage is an object of strings" % SHOOT_CONFIG
     return data, ""
+
+
+def shoot_steps_ok(steps):
+    """True for a non-empty list of {click: css} and {wait: css, state?: visible|hidden} steps."""
+    def selector(v):
+        return isinstance(v, str) and v.strip() != ""
+
+    def step_ok(step):
+        if not isinstance(step, dict):
+            return False
+        if "click" in step:
+            return list(step) == ["click"] and selector(step["click"])
+        if "wait" in step:
+            return set(step) <= {"wait", "state"} and selector(step["wait"]) and step.get("state", "visible") in ("visible", "hidden")
+        return False
+    return isinstance(steps, list) and bool(steps) and all(step_ok(s) for s in steps)
 
 
 def own_screenshot_command(root, files):

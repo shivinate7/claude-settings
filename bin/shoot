@@ -6,7 +6,16 @@
 //   baseUrl (required; a path in it is kept: base http://h/app and route /a shoot http://h/app/a),
 //   routes (required: "/path" strings or {name, path}; two routes with the same file name are a config error), sizes (widths, default 1440, 820, 390),
 //   themes (light and dark, the default; set through prefers-color-scheme), height (default 900),
-//   fullPage (default true), timeoutMs (per route, default 15000), simulator (an iOS simulator UDID, optional).
+//   fullPage (default true), timeoutMs (per route and per step, default 15000), simulator (an iOS simulator UDID, optional),
+//   ignoreHTTPSErrors (boolean, default false; true shoots an app with a self-signed certificate).
+// Route keys beyond name and path, both optional (a bad value is a config error):
+//   steps: a non-empty list, run in order after the page loads and its status passes, before the screenshot.
+//     Each step is {click: css} or {wait: css, state: "visible" | "hidden"} (state defaults to visible).
+//     A step that errors or times out fails the shot. A hidden wait passes at once when nothing matches the
+//     selector, so it alone proves nothing: pair it with a wait for real content.
+//   localStorage: {key: "value"}, strings only. Set before the page's own scripts run, in the top frame only.
+//     A route with it gets its own browser context, closed after the shot, so its seed never reaches another route.
+// Other keys, on the config or on a route, are ignored.
 // A shot fails on a navigation error, a timeout, an HTTP status of 400 or more, or a blank image (one colour only).
 // The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
 // Playwright: the installed package only. This tool never runs `playwright install`.
@@ -46,6 +55,11 @@ function readConfig(file) {
     if (names.has(n)) die(`config ${file}: routes ${names.get(n)} and ${r.path} both write ${n}-*.png`);
     names.set(n, r.path);
   }
+  for (const r of routes) {
+    if (r.steps !== undefined) checkSteps(file, r);
+    if (r.localStorage !== undefined) checkStorage(file, r);
+  }
+  if (c.ignoreHTTPSErrors !== undefined && typeof c.ignoreHTTPSErrors !== "boolean") die(`config ${file}: ignoreHTTPSErrors is true or false`);
   const sizes = c.sizes ?? [1440, 820, 390];
   if (!Array.isArray(sizes) || !sizes.length || sizes.some((w) => !Number.isInteger(w) || w < 1)) die(`config ${file}: sizes is a list of widths`);
   const themes = c.themes ?? ["light", "dark"];
@@ -53,8 +67,39 @@ function readConfig(file) {
   return {
     baseUrl: c.baseUrl, routes, sizes, themes,
     height: c.height ?? 900, fullPage: c.fullPage ?? true, timeoutMs: c.timeoutMs ?? 15000,
-    simulator: c.simulator || null,
+    simulator: c.simulator || null, ignoreHTTPSErrors: c.ignoreHTTPSErrors ?? false,
   };
+}
+
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const isSelector = (v) => typeof v === "string" && v.trim() !== "";
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+function checkSteps(file, r) {
+  const where = `config ${file}: route ${r.path}: steps`;
+  if (!Array.isArray(r.steps) || !r.steps.length) die(`${where} is a non-empty list`);
+  const form = `${where}: each step is {click: css} or {wait: css, state: "visible" or "hidden"}`;
+  for (const s of r.steps) {
+    if (!isObject(s)) die(form);
+    const keys = Object.keys(s);
+    if (has(s, "click")) { if (keys.length !== 1 || !isSelector(s.click)) die(form); }
+    else if (has(s, "wait")) {
+      if (keys.some((k) => k !== "wait" && k !== "state") || !isSelector(s.wait)) die(form);
+      if (has(s, "state") && s.state !== "visible" && s.state !== "hidden") die(form);
+    } else die(form);
+  }
+}
+
+function checkStorage(file, r) {
+  if (!isObject(r.localStorage) || Object.values(r.localStorage).some((v) => typeof v !== "string")) {
+    die(`config ${file}: route ${r.path}: localStorage is an object of strings`);
+  }
+}
+
+// Runs in the page. The top frame only: a cross-origin frame (an embed) keeps its own, empty storage.
+function seedStorage(entries) {
+  if (window !== window.top) return;
+  try { for (const [k, v] of entries) localStorage.setItem(k, v); } catch { /* storage blocked: the shot shows it */ }
 }
 
 // The installed package, from the global paths first, then the current repo's node_modules.
@@ -129,16 +174,24 @@ async function main() {
   try {
     for (const theme of cfg.themes) {
       for (const width of cfg.sizes) {
-        const ctx = await browser.newContext({ viewport: { width, height: cfg.height }, colorScheme: theme });
+        const opts = { viewport: { width, height: cfg.height }, colorScheme: theme, ignoreHTTPSErrors: cfg.ignoreHTTPSErrors };
+        const ctx = await browser.newContext(opts);
         try {
           for (const r of cfg.routes) {
             shots++;
             const name = `${slug(r.name || r.path)}-${width}-${theme}`;
             const url = join(cfg.baseUrl, r.path);
-            const page = await ctx.newPage();
+            // Storage is per context, so a seeded route gets its own: its seed cannot reach the next route.
+            const own = r.localStorage !== undefined ? await browser.newContext(opts) : null;
+            const page = await (own || ctx).newPage();
             try {
+              if (own) await page.addInitScript(seedStorage, Object.entries(r.localStorage));
               const res = await page.goto(url, { waitUntil: "load", timeout: cfg.timeoutMs });
               if (res && res.status() >= 400) { fails.push(`${name}: HTTP ${res.status()} at ${url}`); continue; }
+              for (const s of r.steps || []) {
+                if (s.click !== undefined) await page.click(s.click, { timeout: cfg.timeoutMs });
+                else await page.waitForSelector(s.wait, { state: s.state || "visible", timeout: cfg.timeoutMs });
+              }
               const png = await page.screenshot({ path: path.join(out, name + ".png"), fullPage: cfg.fullPage, timeout: cfg.timeoutMs });
               if (isBlank(png)) fails.push(`${name}: blank image (one colour) at ${url}`);
               // Mark each element the browser does not show, so the probe skips it (a phone nav on a wide screen).
@@ -149,6 +202,7 @@ async function main() {
               fails.push(`${name}: ${String(e.message).split("\n")[0]}`);
             } finally {
               await page.close().catch(() => {});
+              if (own) await own.close().catch(() => {});
             }
           }
         } finally {
