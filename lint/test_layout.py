@@ -7,6 +7,9 @@ Readers: each one finds the records of a fixture repo laid out under docs/ (a ro
 an extras file), and of a repo still at its legacy root folders. Extras: a repo's extras file adds
 its own kind. Constant check: a mutant that puts a record path literal back in one reader, or
 moves the guard's literal, is red; a kind name, a docstring and a comment are not.
+Identity: check_layout.py reads the readers of claude-settings itself, so it gives no verdict
+elsewhere. A child repo's tree, an installed copy and a stray folder get one refusal line that points
+to `compliance_probes.py layout <root>`; a worktree, a subfolder and a symlinked path of a checkout pass.
 
 LAYOUT_LINT_UNDER_TEST names the lint folder under test (default: the folder of this file), so the
 same cases run against another checkout to show them red there.
@@ -24,7 +27,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
 REPO = os.path.dirname(LINT)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run; its sweep is proved in test_find_copies.py)
 LONG = "a" * 33 + ".md"  # a slug over 32 characters
 EXTRAS = ".claude/layout-extras.json"
 
@@ -37,6 +43,10 @@ def load(name, path):
     return module
 
 
+def tearDownModule():
+    tracked_tree.rm_tree(RUN_FOLDER)  # test-temp-standard: teardown removes the run folder
+
+
 def run(cmd, cwd):
     env = dict(os.environ)
     env.pop("CI", None)
@@ -46,9 +56,24 @@ def run(cmd, cwd):
     return r.returncode, r.stdout + r.stderr
 
 
+def assert_refused(test, rc, out):
+    """The one refusal: non-zero, one line, no crash text, the child-repo check named, and the line says
+    why. The run folder sits under a `claude-settings-test-temp` root, so that path is cut before the
+    name is looked for."""
+    test.assertNotEqual(rc, 0, out)
+    test.assertEqual(len(out.splitlines()), 1, out)
+    test.assertIn("compliance_probes.py layout", out)
+    for crash in ("Traceback", "FileNotFoundError"):
+        test.assertNotIn(crash, out)
+    said = out
+    for root in (_test_temp.TEMP_ROOT, os.path.realpath(_test_temp.TEMP_ROOT)):
+        said = said.replace(root, "")
+    test.assertIn("claude-settings", said)
+
+
 class Tree(unittest.TestCase):
     def setUp(self):
-        self.tree = tempfile.mkdtemp(prefix="layout_")
+        self.tree = tempfile.mkdtemp(prefix="layout_", dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, self.tree)
 
     def put(self, rel, text="# Record\n"):
@@ -506,7 +531,7 @@ class ConstantCheck(Tree):
         tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
         os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
         shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
-        for name in ("layout.py", "layout.json"):  # the files under test, from LINT
+        for name in ("layout.py", "layout.json", "check_layout.py"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
 
     def check(self):
@@ -532,6 +557,37 @@ class ConstantCheck(Tree):
     def test_the_repo_agrees(self):
         rc, out = self.check()
         self.assertEqual((rc, out), (0, ""))
+
+    def bare(self, cwd, script=None):
+        """The tree's own check_layout.py with no --root: its root is the tree it sits in."""
+        return run([script or os.path.join(self.tree, "lint", "check_layout.py")], cwd)
+
+    def elsewhere(self, name):
+        """A new folder in the run folder, beside the tree and outside it."""
+        folder = os.path.join(RUN_FOLDER, name)
+        os.makedirs(folder)
+        self.addCleanup(tracked_tree.rm_tree, folder)
+        return folder
+
+    def test_a_sibling_folder_that_shares_the_checkouts_name_is_outside_it(self):
+        sibling = self.elsewhere(os.path.basename(self.tree) + "-old")  # a prefix match would take it for the checkout
+        self.assertEqual(self.bare(self.tree), (0, ""))  # the tree is a claude-settings one, so the sibling alone is refused
+        assert_refused(self, *self.bare(sibling))
+
+    def test_a_subfolder_of_the_checkout_is_inside_it(self):
+        self.assertEqual(self.bare(os.path.join(self.tree, "lint")), (0, ""))
+
+    def test_root_given_runs_from_any_folder(self):
+        self.assertEqual(run([os.path.join(LINT, "check_layout.py"), "--root", self.tree], self.elsewhere("any-folder")), (0, ""))
+
+    def test_a_checkout_run_through_a_symlink_is_inside_itself(self):
+        link = os.path.join(self.elsewhere("link-holder"), "checkout")
+        try:
+            os.symlink(self.tree, link, target_is_directory=True)
+        except (OSError, NotImplementedError) as err:
+            self.skipTest("no symlinks here: %s" % err)
+        # the script path keeps the link, the folder the process runs in is the resolved one
+        self.assertEqual(self.bare(link, os.path.join(link, "lint", "check_layout.py")), (0, ""))
 
     def test_a_record_path_literal_in_any_reader_is_red(self):
         for rel in ("lint/check_record_slugs.py", "lint/check_ruling_kind.py", "lint/check_skill_model_rows.py",
@@ -606,6 +662,56 @@ class ConstantCheck(Tree):
         self.edit("actions/stamp/examples/frontmatter-prefixed-cite.stamp.json",
                   '"folder": "docs/questions"', '"folder": "questions"')
         self.assert_red("outside docs/")
+
+
+def drop_worktree(path):
+    subprocess.run(["git", "-C", REPO, "worktree", "remove", "--force", path], capture_output=True)
+    tracked_tree.rm_tree(path)
+    subprocess.run(["git", "-C", REPO, "worktree", "prune"], capture_output=True)
+
+
+class Identity(Tree):
+    """check_layout.py checks claude-settings itself. Outside one it gives no verdict, never a crash and never a pass
+    (incident: the installed copy died on actions/, and a checkout's copy run in a child repo printed nothing and exited 0)."""
+
+    def copy(self, source, rel):
+        target = os.path.join(self.tree, *rel.split("/"))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copyfile(source, target)
+
+    def not_claude_settings(self, installed=False):
+        """A tree with the layout, the guard and the layout reader, and no actions/: a child repo, or ~/.claude with `installed`."""
+        for name in ("layout.py", "layout.json"):
+            self.copy(os.path.join(LINT, name), "lint/" + name)
+        self.copy(os.path.join(REPO, "hooks", "guard.py"), "hooks/guard.py")
+        if installed:
+            self.copy(os.path.join(LINT, "check_layout.py"), "lint/check_layout.py")
+
+    def test_a_child_repo_given_as_root_is_refused(self):
+        self.not_claude_settings()
+        assert_refused(self, *run([os.path.join(LINT, "check_layout.py"), "--root", self.tree], self.tree))
+
+    def test_an_installed_copy_is_refused(self):
+        self.not_claude_settings(installed=True)
+        assert_refused(self, *run([os.path.join(self.tree, "lint", "check_layout.py")], self.tree))
+
+    def test_no_root_in_a_repo_outside_the_checkout_is_refused(self):
+        child = os.path.join(self.tree, "child")
+        os.makedirs(child)
+        subprocess.run(["git", "init", "-q", child], check=True, capture_output=True)
+        real = os.path.realpath
+        self.assertNotEqual(os.path.commonpath([real(child), real(REPO)]), real(REPO), "the temp folder is inside the checkout")
+        assert_refused(self, *run([os.path.join(LINT, "check_layout.py")], child))
+
+    def test_a_worktree_of_claude_settings_is_one(self):
+        worktree = os.path.join(self.tree, "worktree")
+        subprocess.run(["git", "-C", REPO, "worktree", "add", "-q", "--detach", worktree, "HEAD"], check=True, capture_output=True)
+        self.addCleanup(drop_worktree, worktree)
+        for name in ("check_layout.py", "layout.py", "layout.json"):  # the files under test, from LINT, over the committed ones
+            shutil.copyfile(os.path.join(LINT, name), os.path.join(worktree, "lint", name))
+        script = os.path.join(worktree, "lint", "check_layout.py")
+        self.assertEqual(run([script], worktree), (0, ""))
+        self.assertEqual(run([script], os.path.join(worktree, "lint")), (0, ""))
 
 
 if __name__ == "__main__":
