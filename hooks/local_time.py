@@ -28,7 +28,8 @@ clock; tests set it.
 `get` of collection `answers`: the routing session's re-read of `answers/<id>`, just before it routes
 the answer, so an undone or withdrawn answer is never saved. A `list`, `query`, write or other tool
 saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
-line that loads as a JSON object with a dict `data` is a document. Each document whose `data.note` is
+line that loads as a JSON object with a dict `data` is a document. Only one-line JSON documents in
+text are read: a dict-shaped or pretty-printed document saves nothing. Each document whose `data.note` is
 a string, non-empty after strip and not `accepted pick`, becomes one inbox block, stamped with the
 answer's `data.at` in Central (the clock when `at` does not parse), with the text
 `Waiting page note, item <n> (<item>): <note>`. The label joins the note's first line, so it adds no
@@ -176,7 +177,7 @@ def _documents(response):
     """The (doc_id, data) of each document in a get's text: a line that loads as a JSON object with a
     dict `data`. Banner lines are not documents."""
     for text in _strings(response):
-        for ln in text.splitlines():
+        for ln in text.split("\n"):  # not splitlines(): U+2028 and U+0085 inside a note must not split it
             ln = ln.strip()
             if not ln.startswith("{"):
                 continue
@@ -226,8 +227,8 @@ def page_note(raw):
         return
     keys_path = page_notes_path(hook.get("session_id"))
     try:
-        with open(keys_path, encoding="utf-8", errors="replace") as f:
-            seen = set(f.read().splitlines())
+        with open(keys_path, "rb") as f:  # bytes, split on "\n" only: a key may hold U+2028 or "\r"
+            seen = set(f.read().decode("utf-8", "replace").split("\n"))
     except OSError:
         seen = set()
     failures = []
