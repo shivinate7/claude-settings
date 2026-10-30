@@ -94,21 +94,45 @@ EOF
   chmod +x "$1/bin/curl"
 }
 
-# run_setup <case> <name> [VAR=value ...]: runs the script in an empty environment from the case's
-# cwd, with output in <case>/out-<name>.txt. Sets rc to its exit code and secs to its wall time.
-# Output goes to a file, so a child left running cannot hold a pipe open.
-run_setup() {
+# run_script <case> <name> <script> [VAR=value ...]: runs a script in an empty environment from the
+# case's cwd, with output in <case>/out-<name>.txt. Sets rc to its exit code and secs to its wall
+# time. Output goes to a file, so a child left running cannot hold a pipe open.
+run_script() {
   rs_c=$1
   rs_n=$2
-  rs_extra=${3:-}
+  rs_s=$3
+  rs_extra=${4:-}
   rs_t0=$(date +%s)
   ( cd "$rs_c/cwd" && env -i PATH="$rs_c/bin:$BASE_PATH" HOME="$rs_c/home" \
       CLAUDE_CONFIG_DIR="$rs_c/cfg" TMPDIR="$rs_c/tmp" GIT_CEILING_DIRECTORIES="$rs_c/cwd" \
       CLAUDE_SETTINGS_SEARCH_ROOTS="$rs_c/roots" CLAUDE_SETTINGS_RAW="$DEAD_RAW" \
       HTTPS_PROXY="$DEAD_PROXY" https_proxy="$DEAD_PROXY" $rs_extra \
-      timeout 90 bash "$SETUP_SH" < /dev/null > "$rs_c/out-$rs_n.txt" 2>&1 )
+      timeout 90 bash "$rs_s" < /dev/null > "$rs_c/out-$rs_n.txt" 2>&1 )
   rc=$?
   secs=$(( $(date +%s) - rs_t0 ))
+}
+
+# run_setup <case> <name> [VAR=value ...]: run_script on the script under test.
+run_setup() { run_script "$1" "$2" "$SETUP_SH" "${3:-}"; }
+
+# Print the paste block under "### Cloud sessions" in README.md, from its `f=$(mktemp)` line to its
+# `exit 0` line, into $1. Fails when the block is missing.
+extract_paste_block() {
+  awk '
+    /^### Cloud sessions/ { insec = 1; next }
+    insec && /^(## |### )/ { insec = 0 }
+    insec && /^```bash$/ { infence = 1; next }
+    infence && /^```$/ { exit }
+    infence && /^f=\$\(mktemp\)$/ { on = 1 }
+    on { print }
+    on && /^exit 0$/ { exit }
+  ' "$REPO_ROOT/README.md" > "$1"
+  [ -s "$1" ]
+}
+
+# Replace the checkout's install.sh with a script that exits with $2.
+exiting_install() {
+  printf '#!/bin/sh\nexit %s\n' "$2" > "$1/roots/claude-settings/install.sh"
 }
 
 # The verdict lines of a run's output, and the first of them.
@@ -208,10 +232,18 @@ caseC() {
 caseC2() {
   name="c2: install run past CLAUDE_SETTINGS_SETUP_CAP: stopped, returns within 30 s, exit 0, verdict says timed out"
   c=$(new_case caseC2)
-  printf '#!/bin/sh\nexec sleep 300\n' > "$c/served.sh"
+  # The served install starts a child and waits on it. The child's pid goes to a file, so the check
+  # below can tell this case's child from any other sleep on the machine.
+  cat > "$c/served.sh" <<EOF
+#!/bin/sh
+sleep 300 &
+echo \$! > "$c/child.pid"
+wait
+EOF
   fake_curl "$c" serve "$c/served.sh"
   run_setup "$c" c2 "CLAUDE_SETTINGS_SETUP_CAP=2"
   v=$(verdict_text "$c/out-c2.txt")
+  child=$(cat "$c/child.pid" 2>/dev/null)
   if [ "$rc" -ne 0 ]; then
     bad "$name" "exit $rc: $(brief "$c/out-c2.txt")"
   elif [ "$secs" -gt 30 ]; then
@@ -222,6 +254,11 @@ caseC2() {
     bad "$name" "verdict does not say timed out: $v"
   elif [ -e "$c/cfg/agents/builder.md" ]; then
     bad "$name" "agents/builder.md landed from a run that was stopped"
+  elif [ -z "$child" ]; then
+    bad "$name" "the served install never started its child"
+  elif kill -0 "$child" 2>/dev/null; then
+    kill "$child" 2>/dev/null
+    bad "$name" "the child sleep 300 (pid $child) survived the run"
   else
     ok "$name"
   fi
@@ -313,6 +350,158 @@ caseH() {
   fi
 }
 
+# ---- i: builder.md seeded, install.sh exits 1: the verdict names exit 1, never installed --------
+caseI() {
+  name="i: builder.md seeded, install.sh exits 1: verdict names exit 1, never says installed"
+  c=$(new_case caseI)
+  add_checkout "$c"
+  exiting_install "$c" 1
+  mkdir -p "$c/cfg/agents"
+  printf 'seeded\n' > "$c/cfg/agents/builder.md"
+  fake_curl "$c" fail
+  run_setup "$c" i
+  v=$(verdict_text "$c/out-i.txt")
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc: $(brief "$c/out-i.txt")"
+  elif [ "$(verdict_count "$c/out-i.txt")" != 1 ]; then
+    bad "$name" "expected one verdict line, got $(verdict_count "$c/out-i.txt")"
+  elif says_installed "$v"; then
+    bad "$name" "verdict says installed although install.sh exited 1: $v"
+  elif ! printf '%s\n' "$v" | grep -Eq 'exit[^0-9]*1([^0-9]|$)'; then
+    bad "$name" "verdict does not name exit 1: $v"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- ii: install.sh exits 0 and lands no builder.md: not installed, the verdict names builder.md -
+caseII() {
+  name="ii: install.sh exits 0 with no builder.md: verdict is not installed and names builder.md missing"
+  c=$(new_case caseII)
+  add_checkout "$c"
+  exiting_install "$c" 0
+  fake_curl "$c" fail
+  run_setup "$c" ii
+  v=$(verdict_text "$c/out-ii.txt")
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc: $(brief "$c/out-ii.txt")"
+  elif [ "$(verdict_count "$c/out-ii.txt")" != 1 ]; then
+    bad "$name" "expected one verdict line, got $(verdict_count "$c/out-ii.txt")"
+  elif [ -e "$c/cfg/agents/builder.md" ]; then
+    bad "$name" "agents/builder.md landed, so the case did not test a missing file"
+  elif says_installed "$v"; then
+    bad "$name" "verdict says installed with no builder.md: $v"
+  elif ! printf '%s\n' "$v" | grep -q 'builder.md'; then
+    bad "$name" "verdict does not name builder.md: $v"
+  elif ! printf '%s\n' "$v" | grep -q 'missing'; then
+    bad "$name" "verdict does not say builder.md is missing: $v"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- iii: a temp dir holding CLAUDE.md and settings.json is not install.sh's source ------------
+# The decoy sits in TMPDIR. A temp copy that shares that dir would take it as the source.
+caseIII() {
+  name="iii: a TMPDIR that holds CLAUDE.md and settings.json is not install.sh's source"
+  c=$(new_case caseIII)
+  add_checkout "$c"
+  printf '# decoy temp source\n' > "$c/tmp/CLAUDE.md"
+  printf '{}\n' > "$c/tmp/settings.json"
+  fake_curl "$c" fail
+  run_setup "$c" iii
+  v=$(verdict_text "$c/out-iii.txt")
+  pointer=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$c/cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  want=$(cd "$c/roots/claude-settings" && pwd -P)
+  got=""
+  [ -n "$pointer" ] && got=$(cd "$pointer" 2>/dev/null && pwd -P)
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc: $(brief "$c/out-iii.txt")"
+  elif [ "$(verdict_count "$c/out-iii.txt")" != 1 ]; then
+    bad "$name" "expected one verdict line, got $(verdict_count "$c/out-iii.txt")"
+  elif [ "$got" != "$want" ]; then
+    bad "$name" "install.sh took [${pointer:-none}] as its source, not the checkout: $v"
+  elif [ ! -f "$c/cfg/agents/builder.md" ]; then
+    bad "$name" "agents/builder.md did not land from the checkout"
+  elif ! says_installed "$v"; then
+    bad "$name" "verdict does not say installed: $v"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- iv: the README paste block, run with curl failing -----------------------------------------
+caseIVa() {
+  name="iv-a: the README paste block with a checkout of the GitHub origin installs"
+  c=$(new_case caseIVa)
+  add_checkout "$c"
+  fake_curl "$c" fail
+  if ! extract_paste_block "$c/paste.sh"; then
+    bad "$name" "README.md has no paste block under Cloud sessions"
+    return 0
+  fi
+  run_script "$c" iv-a "$c/paste.sh"
+  v=$(verdict_text "$c/out-iv-a.txt")
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "block exit $rc: $(brief "$c/out-iv-a.txt")"
+  elif [ "$(verdict_count "$c/out-iv-a.txt")" != 1 ]; then
+    bad "$name" "expected one verdict line, got $(verdict_count "$c/out-iv-a.txt")"
+  elif [ ! -f "$c/cfg/agents/builder.md" ]; then
+    bad "$name" "agents/builder.md did not land: $(brief "$c/out-iv-a.txt")"
+  elif ! says_installed "$v"; then
+    bad "$name" "verdict does not say installed: $v"
+  else
+    ok "$name"
+  fi
+}
+
+caseIVb() {
+  name="iv-b: a dir with cloud-setup.sh and another origin is skipped; the block prints one no-source line, exit 0"
+  c=$(new_case caseIVb)
+  mkdir -p "$c/roots/other"
+  cp "$MASTER/cloud-setup.sh" "$c/roots/other/cloud-setup.sh"
+  git -C "$c/roots/other" init -q -b main
+  git -C "$c/roots/other" remote add origin https://github.com/someone/else.git
+  if ! extract_paste_block "$c/paste.sh"; then
+    bad "$name" "README.md has no paste block under Cloud sessions"
+    return 0
+  fi
+  fake_curl "$c" fail
+  run_script "$c" iv-b "$c/paste.sh"
+  n=$(grep -c 'no source' "$c/out-iv-b.txt")
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "block exit $rc: $(brief "$c/out-iv-b.txt")"
+  elif [ "$n" != 1 ]; then
+    bad "$name" "expected one no-source line, got $n: $(brief "$c/out-iv-b.txt")"
+  elif [ -e "$c/cfg/agents/builder.md" ]; then
+    bad "$name" "agents/builder.md landed from a dir with another origin"
+  else
+    ok "$name"
+  fi
+}
+
+caseIVc() {
+  name="iv-c: no search root at all: the block prints one no-source line, exit 0"
+  c=$(new_case caseIVc)
+  rm -rf "$c/roots"
+  if ! extract_paste_block "$c/paste.sh"; then
+    bad "$name" "README.md has no paste block under Cloud sessions"
+    return 0
+  fi
+  fake_curl "$c" fail
+  run_script "$c" iv-c "$c/paste.sh"
+  n=$(grep -c 'no source' "$c/out-iv-c.txt")
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "block exit $rc: $(brief "$c/out-iv-c.txt")"
+  elif [ "$n" != 1 ]; then
+    bad "$name" "expected one no-source line, got $n: $(brief "$c/out-iv-c.txt")"
+  elif [ -e "$c/cfg/agents/builder.md" ]; then
+    bad "$name" "agents/builder.md landed with no root"
+  else
+    ok "$name"
+  fi
+}
+
 # ---- sweep: the first request of a run removes an old run folder and keeps a new one -----------
 # The probe runs in its own process, as a first request does, on a root under this run's folder.
 cat > "$RUN/sweep_probe.py" <<'PY'
@@ -375,6 +564,12 @@ run caseC2
 run caseD
 run caseE
 run caseH
+run caseI
+run caseII
+run caseIII
+run caseIVa
+run caseIVb
+run caseIVc
 run caseSweep
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
