@@ -1,0 +1,9 @@
+{
+  "title": "Every owner question names what it changes from main",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33756,
+  "why": "shiv, Oct 30 17:24 CDT remark (via coordinator 2). Incident: lane spawn-model-check's three 'departures' restated decision agent-model-cap and were relayed to shiv.",
+  "note": "Lane session_013NEJL3WphPXiQ7BQX1Gs5g, started 17:25 CDT. Widens rule port-question in question_form.py so every owner question names what it changes from main. Done check: a question that names no change from main is refused.",
+  "updatedAt": "2026-10-30T22:26:00Z"
+}
