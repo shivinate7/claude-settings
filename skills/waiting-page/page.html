@@ -143,7 +143,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 
 /* Options side by side; each card's rows line up so lose sits beside lose. */
 .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
-.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; scroll-margin-top: 64px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
 @supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
 .opt:hover { border-color: var(--faint); }
 .opt input { position: absolute; opacity: 0; pointer-events: none; }
@@ -234,7 +234,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ready.multi, .readyfit { white-space: normal; overflow: visible; }
 .readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
 .ready.on::before, .readyfit::before { content: "\2713  "; }
-/* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
+/* The row under the body: None of these on a decision, Mark done on a task. */
 .alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
@@ -247,6 +247,8 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .note.need label { color: var(--due); font-weight: 600; }
 .note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
 .note.need textarea { border-color: var(--due); }
+/* A blocked card's note box dims like its other disabled controls; the label stays readable. */
+.note textarea:disabled { opacity: .45; cursor: default; }
 ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 /* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
@@ -1140,11 +1142,6 @@ function cmdBlock(it) {
   } }, h("span", { class: "go" }, "Copy"), h("span", { class: "ok", "aria-hidden": "true" }, "Copied"));
   box.append(h("div", { class: "cmd-head" }, say, copy), more);
   return box;
-}
-// Block "nearest" honours the scroll margins, so it would move an option already whole between the header and the bar.
-function showOpt(o) {
-  const r = o.getBoundingClientRect();
-  if (r.top < document.querySelector(".hdr").getBoundingClientRect().bottom || r.bottom > $("bar").getBoundingClientRect().top) o.scrollIntoView({ block: "nearest" });
 }
 // A ruling card: the title, the option the arbiter ruled, why, where it is recorded, and one Overturn toggle. A press changes only the draft, until Send.
 function buildRuling(it) {
