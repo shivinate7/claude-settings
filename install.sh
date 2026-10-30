@@ -318,7 +318,7 @@ cloud_git() {
 }
 
 # Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
-# person's own and is never moved. mirrorSha is the sha this script last set main to: a main that
+# person's own: this block never moves it, and the block below moves it only when clean and detached. mirrorSha is the sha this script last set main to: a main that
 # differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
 # unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
 # new tip only, never the history under it. A failed fetch keeps the clone as it was.
@@ -333,6 +333,27 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$(git -C "$SRC" config --get claude-s
     log "refreshed the clone $SRC to $REF"
   else
     log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
+  fi
+fi
+
+# Cloud, a session's own checkout (no marker): a cloud session starts it detached at its creation commit, so its
+# hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
+# holds moves to origin/$REF, so nothing is lost. A branch, a dirty tree or a commit main lacks stays as it is.
+# The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
+if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] \
+   && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+  if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
+  elif [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
+    log "WARN: the checkout $SRC has uncommitted changes; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
+  elif ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF"; then
+    log "WARN: could not fetch $REF into $SRC; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
+  elif ! git -C "$SRC" merge-base --is-ancestor HEAD "refs/remotes/origin/$REF"; then
+    log "WARN: the checkout $SRC is at $(git -C "$SRC" rev-parse --short HEAD), a commit $REF does not hold; left as is"
+  elif git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; then
+    log "moved the checkout $SRC to $REF at $(git -C "$SRC" rev-parse --short HEAD)"
+  else
+    log "WARN: could not move the checkout $SRC to $REF; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
   fi
 fi
 
@@ -709,13 +730,25 @@ if [ "$CLOUD" = 1 ]; then
   HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
+    # Read from the source checkout, never from main: launch.py's fallback and --dev run the checkout's own merge.py, and
+    # the file landed in the same commit as that merge.py's role gate. A checkout without the file gets no rules.
     ALLOW_FILE="$SRC/merge/cloud_allow.json"
     [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
-    jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
+    SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
+    if jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
       '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
        | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
-      "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"
-    log "wrote $TARGET_JSON (repo settings + cloud refresh hook + merge/cloud_allow.json rules)"
+      "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"; then
+      n=$(jq -s '[.[0].permissions.allow[]?] | length' "$ALLOW_FILE" 2>/dev/null)
+      if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
+        log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n merge --confirm allow rules from $SRC at $SRC_SHA)"
+      else
+        log "WARNING: wrote $TARGET_JSON with no merge --confirm allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/main, then resume the session."
+      fi
+    else
+      rm -f "$TARGET_JSON.tmp"
+      log "WARNING: could not write $TARGET_JSON from $SRC/settings.json and merge/cloud_allow.json; any file from an earlier run stays"
+    fi
   else
     cp "$SRC/settings.json" "$TARGET_JSON"
     log "wrote $TARGET_JSON (jq missing, no refresh hook and no merge/cloud_allow.json rules added)"
