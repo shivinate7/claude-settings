@@ -7900,10 +7900,9 @@ sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 
 
 # =========================================================================== 5e. the merge role record
 #
-# Rule merge-role-proof, owner ruling fb-1541-1 (2026-10-30 15:41 CDT): the real coordinator and batch
-# runner run `merge --role <tier>` with no prompt, and a lane's mistaken `--role` is refused. The refusal
-# steers the lane to hand off. The guard reads this session's own get_session record from the payload's
-# transcript_path, and takes the tier from that record's tags.
+# Rule merge-role-proof, decision session-tiers. This section proves that a session may record only the
+# tier its own get_session record carries, read from the payload's transcript_path. A lane's `--role`
+# is refused, and the refusal steers it to hand off.
 #
 # The env var names the lane as cse_<x> and the record names it as session_<x> (hooks/override.py,
 # LANE_ENV_PREFIX and LANE_PREFIX). So the cases set the env in its own form. A literal equal test
