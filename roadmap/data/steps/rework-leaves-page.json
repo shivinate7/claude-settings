@@ -1,0 +1,9 @@
+{
+  "title": "An item being reworked leaves the waiting page",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33748,
+  "why": "shiv, Oct 30 15:40 CDT: 'Item 97 is being reowrked? if so, why am i able to answer?' Read on main page.html: every item not closed shows with live options; the page has no hold state.",
+  "note": "Fix: the waiting-page skill's writer rule says an item whose options are being reworked is closed off the page, with its home naming the rework, and comes back as a new item when the options are ready. No page code change. Done check: the skill text says so, and its item check refuses an open item whose context says 'being reworked'. Needs no answer.",
+  "updatedAt": "2026-10-30T20:42:00Z"
+}
