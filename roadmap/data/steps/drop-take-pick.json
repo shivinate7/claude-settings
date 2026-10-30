@@ -1,0 +1,9 @@
+{
+  "title": "The waiting page drops the Take my pick button",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.337415,
+  "why": "shiv, Oct 30 15:01 CDT (waiting-page comment on item 95's Take my pick): 'dont offer this button since u already have that magic blurb insert thing on lines these shouldnt exist right?' The sparkle on the starred option already marks the pick, and a tap on that option picks it.",
+  "note": "Fix: page.html drops the takepick button and its gone logic. The live page hides it now by a shortcut in the triage base file. Done check: no b-take- element on any card; a tap on the starred option still shows 'Ready to send'. Needs no answer. Placed ahead of note-always-open (Triage 12, Oct 30): shiv asked in a page comment; it is one button.",
+  "updatedAt": "2026-10-30T20:05:00Z"
+}
