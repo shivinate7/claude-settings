@@ -452,6 +452,53 @@ class Ios(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.grade(self.step(self.both(), command), "slow tests"), "pass")
 
+    def test_a_quoted_command_is_read_inside_its_quotes(self):
+        # A YAML-quoted `run:` value and a `bash -c "..."` argument hold a command: it is read as if it were unquoted.
+        quoted = ('"xcodebuild test -scheme TallyUITests"', "'xcodebuild test -scheme TallyUITests'",
+                  'bash -c "xcodebuild test -scheme TallyUITests"', "sh -c 'xcodebuild test -scheme TallyUITests'",
+                  'bash -c "cd native && xcodebuild test -scheme TallyUITests"',
+                  '''bash -c "xcodebuild test -scheme TallyUITests -destination 'platform=iOS Simulator,name=iPhone 17'"''')
+        for command in quoted:
+            with self.subTest(command=command):
+                self.red(self.step(self.gold(), command), "slow tests: gap - " + self.FLOW)
+        for command in ('"xcodebuild test -scheme Tally -only-testing:TallyTests"', 'bash -c "xcodebuild test -scheme Tally -only-testing:TallyTests"'):
+            with self.subTest(command=command):  # the quotes narrow nothing and widen nothing: a unit-only run stays a pass
+                self.assertEqual(self.grade(self.step(self.both(), command), "slow tests"), "pass")
+
+    def test_a_lone_apostrophe_in_text_swallows_no_command(self):
+        for command in ("echo it's; xcodebuild test -scheme TallyUITests; echo 'ok'", "|\n          echo it's\n          xcodebuild test -scheme TallyUITests"):
+            with self.subTest(command=command):
+                self.red(self.step(self.gold(), command), "slow tests: gap - " + self.FLOW)
+
+    def test_a_quoted_compile_is_an_app_compile_and_a_quoted_info_call_is_not(self):
+        for command in ('"xcodebuild build -scheme Tally"', "'xcodebuild build -scheme Tally'", 'bash -c "xcodebuild build -scheme Tally"',
+                        "sh -c 'xcodebuild build -project native/Tally.xcodeproj -scheme Tally'",
+                        "echo it's; xcodebuild build -scheme Tally; echo 'ok'"):
+            with self.subTest(command=command):
+                repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + command)
+                self.assertEqual(self.grade(repo, "ci checks"), "pass")
+        for command in ('"xcodebuild -showsdks"', 'bash -c "xcodebuild -showsdks"', "echo it's; xcodebuild -list; echo 'ok'"):
+            with self.subTest(command=command):
+                repo = self.edit(self.gold(), self.FLOW, "run: make app-build", "run: " + command)
+                self.red(repo, "ci checks: gap - no workflow compiles the app")
+
+    def nested_type(self, repo, target):
+        """`repo` with the sources of `target` written as a path entry that carries its own `type: folder`."""
+        return self.edit(repo, self.PROJ, "sources: [%s]" % target, "sources:\n      - path: %s\n        type: folder" % target)
+
+    def test_a_type_nested_under_a_target_is_not_the_targets_type(self):
+        # The UI target's own `type: bundle.ui-testing` stands, whatever `type:` its sources hold below it.
+        for command in ("xcodebuild test -scheme TallyUITests", "xcodebuild test -scheme Tally -only-testing:TallyUITests",
+                        "xcodebuild test -scheme Tally"):  # the scheme `Tally` lists TallyUITests
+            with self.subTest(command=command):
+                self.red(self.step(self.nested_type(self.gold(), "TallyUITests"), command), "slow tests: gap - " + self.FLOW)
+        # An app target's own type is `application`, so its scheme is no bundle's: with no scheme written, `-scheme Tally` stays unresolved.
+        bare = self.step(self.gold(), "xcodebuild test -scheme Tally")
+        bare = bare.write(self.PROJ, self.text(bare, self.PROJ).split("schemes:")[0])
+        self.red(bare, "slow tests: gap - " + self.FLOW)
+        nested = self.nested_type(bare, "Tally")
+        self.red(nested, "slow tests: gap - " + self.FLOW)
+
     def test_an_info_only_xcodebuild_is_not_an_app_compile(self):
         for flags in ("-showsdks", "-list -project native/Tally.xcodeproj", "-showBuildSettings -scheme Tally", "-help", "-version"):
             with self.subTest(flags=flags):
