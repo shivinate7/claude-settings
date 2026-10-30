@@ -11891,9 +11891,17 @@ ci("a step with a backticked word that is not a command is allowed", "allow", ci
 ci("an update with no command key and plain steps is allowed", "allow",
    {"steps": ["Read the summary on the page."]}, action="update")
 
-# A command on the item does not excuse a step that sends the owner to a file (decision act-in-place).
-ci("a file step and a run-the-command step with a command on the item are denied", "deny",
+# A command on the item excuses the loose verb match, as on main (decision act-in-place).
+ci("a file step and a run-the-command step with a command on the item are allowed", "allow",
    ci_task(["Open plans/c152.md", "Run the command"], command=CMD_BOTH_SHELLS))
+ci("a backticked file to read and a paste-in-PowerShell step with a command on the item are allowed", "allow",
+   ci_task(["Open `plans/x.md` to read the plan", "Paste the command in PowerShell and run it"],
+           command=CMD_BOTH_SHELLS))
+ci("a paste-from-the-box step and a result-file step with a command on the item are allowed", "allow",
+   ci_task(["Paste the command from the box below", "Check the result in `out.log`"], command=CMD_BOTH_SHELLS))
+ci("a backticked ./ doc path to open is allowed", "allow", ci_task(["Open `./docs/a.md`"]))
+ci("a backticked ./ source path with a line number to edit is allowed", "allow",
+   ci_task(["Edit `./hooks/guard.py` line 3"]))
 # A PowerShell string holds PowerShell only: a 2>/dev/null redirect or an export statement is bash.
 ci("a powershell line with a 2>/dev/null redirect is denied", "deny",
    ci_task(CI_TERMINAL, command={"powershell": "git push origin --delete a 2>/dev/null",
@@ -11903,7 +11911,8 @@ ci("a powershell line that starts with export is denied", "deny",
                                  "mac": CMD_BOTH_SHELLS["mac"]}))
 # A known program with an argument in backticks is a shell line. A known program alone is prose.
 BACKTICK_RUNS = ["Run `make test`", "Run `pytest -q`", "Run `docker compose up`", "Run `mkdir out`",
-                 "Run `gcloud auth login`", "Run `bq ls`", "Run `winget install Tool.Id`", "Run `./cleanup.sh`"]
+                 "Run `gcloud auth login`", "Run `bq ls`", "Run `winget install Tool.Id`", "Run `./cleanup.sh`",
+                 "Run `./build --release`"]
 for step in BACKTICK_RUNS:
     ci("a step with a backticked command and an argument is denied: " + step, "deny", ci_task([step]))
 BACKTICK_PROSE = ["Check `git` is installed", "Confirm `node` is 20 or later", "Read the `npm` section"]
