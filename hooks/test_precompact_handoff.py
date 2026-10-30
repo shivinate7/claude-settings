@@ -934,6 +934,30 @@ def case_prompt_lists_working_premises():
           "body: %r" % body[:200])
 
 
+def case_prompt_names_list_home_not_copy():
+    # A triage handoff kept listing closed page items 82 and 86 after compaction, because it
+    # held a copy of the list. Step 4 must tell the session to name where a list lives.
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+    step4 = step_body(text, 4) or ""
+    low = squash(step4)
+    check("prompt: step 4 still exists (list-home check)", bool(step4.strip()), "no '## 4.' step")
+    homes = [h for h in ("page", "roadmap", "git ref") if h in low]
+    has_copy = "copy" in low or "copies" in low
+    missing = []
+    if "list" not in low:
+        missing.append("the word 'list'")
+    if not has_copy:
+        missing.append("'copy' or 'copies'")
+    if "never" not in low:
+        missing.append("'never'")
+    if not homes:
+        missing.append("a home: one of 'page', 'roadmap', 'git ref'")
+    check("prompt: step 4 says to name where a list lives (a page, a roadmap ref or a git "
+          "ref) and never to copy the list",
+          not missing, "step 4 is missing: %s" % "; ".join(missing))
+
+
 def write_compaction(c):
     tp = os.path.join(c.root, "transcript.jsonl")
     write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
@@ -1249,6 +1273,7 @@ def main() -> int:
     case_handoffs_dir_is_made()
     case_handoffs_dir_keeps_other_sessions()
     case_prompt_lists_working_premises()
+    case_prompt_names_list_home_not_copy()
     case_reorient_lists_weak_premises()
     case_reorient_premise_lines_survive_odd_text()
     case_reorient_flags_missing_premises()
