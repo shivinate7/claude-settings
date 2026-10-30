@@ -715,3 +715,4 @@
 - blind-lane-on-redraw: the blind-brief hook refuses a directed designer with no `Blind lanes:` line, also on a redraw of a concept the owner picked. The lane must add a blind lane or quote the owner (lane d4-designer-critique). Decision: none.
 - scratchpad-shared-across-lanes: designer lanes of one session share its scratchpad, so a blind lane saw the directed lane's contrast script with its colours. It did not use them (lane d4-designer-critique). Decision: none.
 - impeccable-launcher-refused: guard `impeccable-review-only` refuses the impeccable launcher and detector. So the designer's critique runs in one context with no detector (lane d4-designer-critique). Decision: design-skills.
+- wp-field-list-arbiter-unpinned: no test pins `arbiter` or `ruled` in the itemFields block (hooks/test_guard.py IF_REQUIRED, page.test.mjs field check), and the ruling card never warns on an unknown field. Decision: item-field-rendered.
