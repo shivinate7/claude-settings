@@ -365,11 +365,10 @@ MAKE_UI = re.compile(r"\bmake\s+(\S+\s+)*(ui-test|native-check)\b|\bsim-test\b")
 INFO_FLAGS = {"-version", "-showsdks", "-list", "-showBuildSettings", "-help"}  # xcodebuild prints and builds nothing
 TEST_ACTIONS = {"test", "test-without-building"}
 UI_BUNDLE = "bundle.ui-testing"
-# A word, or a mark that opens or ends a command: `$(`, `(`, `)`, a backtick, `&&`, `||`, `;`, `|`, `&`. Quotes are cut before the
-# read: a quoted `run:` value and a `bash -c "..."` argument hold commands, and an apostrophe in text (`it's`) has no partner to
-# pair with and hide one.
-SHELL_TOKEN = re.compile(r"(?:[^\s;&|()`$]|\$(?!\())+|\$\(|&&|\|\||[;|&()`]")
-COMMAND_MARKS = {"&&", "||", ";", "|", "&", "$(", "(", ")", "`"}
+# A mark that opens or ends a command. Quote marks are read as nothing: a quoted `run:` value and a `bash -c "..."` argument hold
+# commands, so `;`, `|`, `&` and a backtick are marks inside quotes too. A parenthesis in quotes is text, as in a simulator name
+# (`iPad Pro (12.9-inch)`), unless it closes a `$(` opened in the same quote.
+COMMAND_MARKS = {";", "|", "&", "$(", "(", ")", "`"}
 XCODEBUILD_TEST = r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])"
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
 XCODEBUILD_TEST_RE = re.compile(XCODEBUILD_TEST)
@@ -397,14 +396,46 @@ def make_recipes(text):
     return out
 
 
+def shell_words(line):
+    """The words of one line, with COMMAND_MARKS as words of their own. A quote opens after a non-letter, as in `uncommented`:
+    a quote after a letter is an apostrophe in text."""
+    words, word, quote, opened = [], [], None, []  # `opened`: the quote state at each open `$(`
+    i = 0
+    while i < len(line):
+        ch, mark = line[i], None
+        if ch in "\"'":
+            if quote == ch:
+                quote = None
+            elif quote is None and not (i and line[i - 1].isalnum()):
+                quote = ch
+            i += 1
+            continue
+        if line.startswith("$(", i):
+            mark, opened = "$(", opened + [quote]
+            i += 1
+        elif ch == ")" and (quote is None or (opened and opened[-1] == quote)):
+            mark, opened = ")", opened[:-1]
+        elif ch == "(" and quote is None or ch in ";|&`":
+            mark = ch
+        if mark:
+            words += ["".join(word), mark] if word else [mark]
+            word = []
+        elif ch.isspace():
+            words += ["".join(word)] if word else []
+            word = []
+        else:
+            word.append(ch)
+        i += 1
+    return words + ["".join(word)] * bool(word)
+
+
 def xcodebuild_runs(text):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
-    ends at a COMMAND_MARKS mark or the line end. Quote marks are read as nothing."""
+    ends at a COMMAND_MARKS mark or the line end."""
     runs = []
     for line in text.splitlines():
-        words = SHELL_TOKEN.findall(re.sub(r"[\"']", "", line))
         group = []
-        for word in words + [";"]:
+        for word in shell_words(line) + [";"]:
             if word in COMMAND_MARKS:
                 names = [w.rsplit("/", 1)[-1] for w in group]
                 if "xcodebuild" in names:
