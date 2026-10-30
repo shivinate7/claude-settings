@@ -1,9 +1,9 @@
 {
   "title": "A handoff points at a list's home instead of copying the list",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33746,
   "why": "shiv, Oct 30 12:55 CDT: Triage 12's handoff carried a hand-copied list of open waiting-page items; after a compaction it still named two closed items (82, 86). Its check-in prompt carried the same copy. Any copy of state that has a home (waiting page, roadmap, git) goes stale at the next change. hooks/precompact_handoff_prompt.md has no line against it (read Oct 30).",
-  "note": "Fix: one line in hooks/precompact_handoff_prompt.md and the send_later / check-in guidance: a handoff or scheduled prompt names where a list lives and how to read it (page collection, roadmap query, git ref), never the list itself. Numbers like a last-seen commit stay, as they mark where to resume. Done check: the precompact prompt carries the line; a handoff written after it names the page query, not item numbers. Needs no answer. Port: yes, every repo.",
-  "updatedAt": "2026-10-30T19:08:00Z"
+  "note": "Fix: one line in hooks/precompact_handoff_prompt.md and the send_later / check-in guidance: a handoff or scheduled prompt names where a list lives and how to read it (page collection, roadmap query, git ref), never the list itself. Numbers like a last-seen commit stay, as they mark where to resume. Done check: the precompact prompt carries the line; a handoff written after it names the page query, not item numbers. Needs no answer. Port: yes, every repo. Landed on main in batch 34, #869 (Oct 30).",
+  "updatedAt": "2026-10-30T20:20:00Z"
 }
