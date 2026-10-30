@@ -365,9 +365,11 @@ MAKE_UI = re.compile(r"\bmake\s+(\S+\s+)*(ui-test|native-check)\b|\bsim-test\b")
 INFO_FLAGS = {"-version", "-showsdks", "-list", "-showBuildSettings", "-help"}  # xcodebuild prints and builds nothing
 TEST_ACTIONS = {"test", "test-without-building"}
 UI_BUNDLE = "bundle.ui-testing"
-# A word, or an operator that ends a command. Quotes are cut before the read: a quoted `run:` value and a `bash -c "..."`
-# argument hold commands, and an apostrophe in text (`it's`) has no partner to pair with and hide one.
-SHELL_TOKEN = re.compile(r"[^\s;&|]+|&&|\|\||[;|&]")
+# A word, or a mark that opens or ends a command: `$(`, `(`, `)`, a backtick, `&&`, `||`, `;`, `|`, `&`. Quotes are cut before the
+# read: a quoted `run:` value and a `bash -c "..."` argument hold commands, and an apostrophe in text (`it's`) has no partner to
+# pair with and hide one.
+SHELL_TOKEN = re.compile(r"(?:[^\s;&|()`$]|\$(?!\())+|\$\(|&&|\|\||[;|&()`]")
+COMMAND_MARKS = {"&&", "||", ";", "|", "&", "$(", "(", ")", "`"}
 XCODEBUILD_TEST = r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])"
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
 XCODEBUILD_TEST_RE = re.compile(XCODEBUILD_TEST)
@@ -397,13 +399,13 @@ def make_recipes(text):
 
 def xcodebuild_runs(text):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
-    ends at `&&`, `||`, `;`, `|`, `&` or the line end. Quote marks are read as nothing."""
+    ends at a COMMAND_MARKS mark or the line end. Quote marks are read as nothing."""
     runs = []
     for line in text.splitlines():
         words = SHELL_TOKEN.findall(re.sub(r"[\"']", "", line))
         group = []
         for word in words + [";"]:
-            if word in ("&&", "||", ";", "|", "&"):
+            if word in COMMAND_MARKS:
                 names = [w.rsplit("/", 1)[-1] for w in group]
                 if "xcodebuild" in names:
                     runs.append(group[names.index("xcodebuild") + 1:])
