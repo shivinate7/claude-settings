@@ -63,14 +63,14 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
 11. Card pictures for questions 1 and 2 (waiting-page items 83 and 84).
    - Cause of the black pictures: each design had no `state` and no `focus`. So each card drew the whole harness, and the top of the harness is its dark toolbar. Also, in the card's sandboxed frame, `history.replaceState` throws, and the harness stopped before it drew a state. The harness now catches that error.
    - Each `pic-` state draws one figure, 300 wide, on its own paper colour: #ffffff in light, #191e26 in dark. The figure holds the Sample banner. Its `data-state` and `id` are in the static markup, so the page's check finds them with no script.
-   - The page item carries these four designs, all with slug `c204-scroll`. Each size is the focus box, measured in headless Chromium.
+   - The page items carry these four designs. Each size is the focus box, measured in headless Chromium.
 
-   | Option | `state` | `focus` | `size` |
-   |---|---|---|---|
-   | 1A | `pic-1a` | `#pic-1a` | {w: 300, h: 441} |
-   | 1B | `pic-1b` | `#pic-1b` | {w: 300, h: 441} |
-   | 5A | `pic-5a` | `#pic-5a` | {w: 300, h: 473} |
-   | 5B | `pic-5b` | `#pic-5b` | {w: 300, h: 473} |
+   | Option | slug | `state` | `focus` | `size` |
+   |---|---|---|---|---|
+   | 1A | `c204-1a` | `pic-1a` | `#pic-1a` | {w: 300, h: 441} |
+   | 1B | `c204-1b` | `pic-1b` | `#pic-1b` | {w: 300, h: 441} |
+   | 5A | `c204-5a` | `pic-5a` | `#pic-5a` | {w: 300, h: 473} |
+   | 5B | `c204-5b` | `pic-5b` | `#pic-5b` | {w: 300, h: 473} |
 
-   - If the page item keeps the slugs `c204-1a`, `c204-1b`, `c204-5a` and `c204-5b`, each of them holds this same mockup. Then each design adds the `state` and `focus` above.
+   - Replace the HTML of each of the four slugs in the page's `designData` with this file. The live HTML has no `pic-` element, so a `state` alone makes the page block the option ("names a state its mockup does not draw"). One shared slug also works, with an `option` key on each design.
    - Measured on a copy of the card: page.html's own `withState` and `fitScript`, a sandboxed srcdoc frame 390 wide, and fitFrame's scale with maxH 480. Columns 289, 230 and 198, light and dark. No picture scrolls. At 198 each picture draws 198 × 288 (1A, 1B) or 198 × 309 (5A, 5B), and its 17px text reads at 11px.
