@@ -636,3 +636,5 @@
 - cloud-swap-old-left: a run killed between the two `mv` calls of the clone swap leaves `claude-settings.old.<pid>`, which the stale sweep (`claude-settings.clone.*` only) never removes (install.sh cloud clone).
 - step-grant-revoke-stale: a grant that triage removes on origin/roadmap still lifts the Opus spawn ask in a lane that has not fetched since (hooks/override.py _take_step). Decision: agent-model-cap
 - step-grant-one-bad-entry: one malformed entry in a step's `grants` blocks every grant on that step, a fail-safe false ask (hooks/override.py _take_step). Decision: agent-model-cap
+- ste-changed-no-checkout-msg: when the installed hooks lack guard_pointer.py, ste-changed swallows the ImportError and says no checkout was found, blaming the pointer, not the missing module (bin/ste-changed find_root). Decision: action-pins-follow-sessions
+- ste-changed-root-order-untested: the install cases in actions/ste-lint/test_action.py cannot tell own-checkout-first from pointer-first, since both checkouts hold the same history; they also add a third test-temp sweep proof. Decision: action-pins-follow-sessions
