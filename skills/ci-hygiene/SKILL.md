@@ -45,6 +45,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 7. **Pin and audit actions.** Pin each third-party action by full commit SHA. Put its version in a
    comment. Set `persist-credentials: false` on each checkout. Run an audit tool in CI, and run the
    same command locally. See `snippets.md`, section 7, for the zizmor command.
+   Pin the audit tool's version too. Read its changelog before a bump (rule
+   `verification-newest-that-passes`, take the newest version that passes). zizmor 1.30.1 added the
+   `self-repository` audit, which fails a local workflow call written `uses: ./.github/workflows/x.yml`.
+   A floating zizmor version turned a q_max PR red on 2026-10-30.
    Pins of claude-settings' `ste-lint` action follow the session's tools (decision
    `action-pins-follow-sessions`). `bin/ste-changed` reads that pin. It prints drift and exits 3. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
@@ -248,4 +252,5 @@ is a finding. A read that cannot run is unknown, never yes or no (rule
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
 15. Does an audit step run in CI and locally, with a pinned version? Run
-    `grep -n "zizmor" .github/workflows/*.yml`. Read the version pin.
+    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. No
+    version is a no.
