@@ -20,7 +20,7 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
 chat `Gain:` and `Lose:` in the option's description. Only a line at a line start counts.
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
-`port-question`, `uniform-pick`, `press-link`, `command-in-item`, `task-names-check` (page items), then
+`item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`, `task-names-check` (page items), then
 the form. A missing Goal, Problem or Based on line, a Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`.
@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+from html.parser import HTMLParser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -416,12 +417,15 @@ def form_str_replace_hit(entry):
 
 def item_hit(op, entry):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
+    data = _write_data(entry)
+    hit = item_field_hit(op, entry, data)
+    if hit:
+        return "item-field-rendered", hit
     if op == "str_replace":
         hit = task_str_replace_hit(entry)
         if hit:
             return "task-names-check", hit
         return form_str_replace_hit(entry)
-    data = _write_data(entry)
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
@@ -438,6 +442,70 @@ def item_hit(op, entry):
     if hit:
         return "task-names-check", hit
     return decision_form_hit(op, data)
+
+
+# ------------------------------------------------------------------ an item field the page renders
+#
+# docs/decisions/item-field-rendered.md, rule `item-field-rendered`, built against a named incident
+# (incident in the record): 37 live items carried `reply` and the page drew none. A write of a waiting
+# item names only top-level fields that the page's own block lists, <script type="application/json"
+# id="itemFields">. That block is the one list: this code reads it and holds no copy.
+ITEM_FIELDS_SEAM = "GUARD_ITEM_FIELDS_PAGE"
+ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html")
+ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
+                     "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
+                     "that block, or leave it out of the write. An update may remove a stored field "
+                     "with {\"__delete__\": true}.")
+
+
+def _item_fields(path):
+    """The list in the page's itemFields block, found with an HTML parser (script text is data, so a
+    string or a template literal holds no block). None when the file, the block or the list does not read,
+    and when the list is empty: a block that names no field is not a list to judge by."""
+    class Block(HTMLParser):
+        text, done = None, False
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script" and self.text is None and dict(attrs).get("id") == "itemFields":
+                self.text = []
+
+        def handle_data(self, data):
+            if self.text is not None and not self.done:
+                self.text.append(data)
+
+        def handle_endtag(self, tag):
+            if tag == "script" and self.text is not None:
+                self.done = True
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            block = Block()
+            block.feed(f.read())
+            block.close()
+        fields = json.loads("".join(block.text or []))
+    except Exception:
+        return None
+    return fields if isinstance(fields, list) and fields and all(isinstance(x, str) for x in fields) else None
+
+
+def item_field_hit(op, entry, data) -> str:
+    """The matched text when this write of a waiting item names a top-level field outside the page's
+    itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
+    field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
+    fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
+    if fields is None:
+        return ""
+    if op == "str_replace":
+        field = entry.get("field")
+        top = field.split(".", 1)[0] if isinstance(field, str) else ""
+        return "str_replace on " + top if top and top not in fields else ""
+    if not isinstance(data, dict):
+        return ""
+    for key, value in data.items():
+        if key in fields or (op == "update" and isinstance(value, dict) and value.get("__delete__") is True):
+            continue
+        return "field " + str(key)
+    return ""
 
 
 # ------------------------------------------------------------------ the chat question box
@@ -485,7 +553,7 @@ def _chat_question_hit(question, options):
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "task-names-check": TASK_REASON,
-                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON}
+                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
                      % ", ".join(OWNER_STAKES))
