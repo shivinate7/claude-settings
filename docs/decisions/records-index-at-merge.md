@@ -7,8 +7,8 @@ debt with a one-line gist. Only the merge tool rebuilds the page. A branch never
 
 The tool rebuilds the page on the integration branch before the branch goes ready. `merge <pr> --confirm`
 on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip. It
-commits the page alone, pushes it, marks the PR ready, and stops. When it cannot mark the PR ready (a cloud
-session's `gh` gets 403 on GraphQL), it says so, and the batch runner marks it ready. So the branch is final
+commits the page alone, pushes it, and stops with one line: mark the PR ready, then run `--confirm` again.
+The tool sends no GraphQL (a cloud session's `gh` gets 403 on it), so the batch runner marks it ready. So the branch is final
 at ready, and the ready run is the merge run. The step claims no record numbers and takes no merge lock.
 The same two allow rules cover both steps, so no new rule is needed.
 

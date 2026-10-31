@@ -22,7 +22,7 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
-  records page, pushes it and marks the PR ready, so the branch is final at ready (claude-settings
+  records page and pushes it. The batch runner then marks the PR ready, so the branch is final at ready (claude-settings
   record `records-index-at-merge`). Then it runs `--confirm` again to merge.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
   runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
