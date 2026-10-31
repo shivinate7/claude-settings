@@ -8115,7 +8115,7 @@ TRUST_TOOLS = {
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
 
 
-def trust_deny(name, tool, transcript, carries=(), env=ROLE_ENV):
+def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV):
     """A trust-card call the guard refuses. The reason names its rule, and never either tool."""
     add("trust-card-in-build: " + name, "deny", rule=TRUST_RULE, tool=tool, cwd=NOGIT, lacks=TRUST_NAMED,
         carries=carries, transcript=transcript, env=env, **TRUST_TOOLS[tool])
@@ -8129,8 +8129,8 @@ def trust_allow(name, tool, transcript):
 
 for _trust_tool in TRUST_TOOLS:
     _trust_word = _trust_tool.rsplit("__", 1)[1]
-    trust_deny(_trust_word + " in a coordinator session is refused", _trust_tool, role_path("coordinator"))
-    trust_deny(_trust_word + " in a lane session is refused", _trust_tool, role_path("lane"))
+    trust_refuse(_trust_word + " in a coordinator session is refused", _trust_tool, role_path("coordinator"))
+    trust_refuse(_trust_word + " in a lane session is refused", _trust_tool, role_path("lane"))
     trust_allow(_trust_word + " in a session whose record has no cs-build tag allows", _trust_tool,
                 role_path("untagged"))
     # No own record to read is a refusal, and the reason steers to get_session alone, then a retry.
@@ -8139,7 +8139,7 @@ for _trust_tool in TRUST_TOOLS:
         ("a get_session result that is not JSON", "not-json"),
         ("only a record of another session, with no tags", "other-untagged"),
     ):
-        trust_deny(_trust_word + " with " + _trust_why + " is refused", _trust_tool, role_path(_trust_file),
+        trust_refuse(_trust_word + " with " + _trust_why + " is refused", _trust_tool, role_path(_trust_file),
                    carries=("get_session", "alone", ("retry", "Retry")))
     # A transcript or env id the guard cannot use is a refusal too, never a crash that lets the call through.
     # No remedy text is pinned: get_session cannot help when there is no transcript to read.
@@ -8148,20 +8148,20 @@ for _trust_tool in TRUST_TOOLS:
         ("a transcript_path that cannot be read", role_path("unreadable")),
         ("a payload with no transcript_path", None),
     ):
-        trust_deny(_trust_word + " with " + _trust_why + " is refused", _trust_tool, _trust_file)
-    trust_deny(_trust_word + " with no session id in the env is refused, whatever the record holds",
+        trust_refuse(_trust_word + " with " + _trust_why + " is refused", _trust_tool, _trust_file)
+    trust_refuse(_trust_word + " with no session id in the env is refused, whatever the record holds",
                _trust_tool, role_path("untagged"), env=None)
     # The own-id filter: a newer foreign cs-build:lane record is not this session's tag.
     trust_allow(_trust_word + " beside a newer record of another session that is tagged allows", _trust_tool,
                 role_path("foreign-lane-newest"))
     # A set_session_tags call after the newest own read makes that read stale: the tags may have changed.
-    trust_deny(_trust_word + " after an untagged read and then a set_session_tags call is refused",
+    trust_refuse(_trust_word + " after an untagged read and then a set_session_tags call is refused",
                _trust_tool, role_path("untagged-then-tags"), carries=("get_session",))
     trust_allow(_trust_word + " after a set_session_tags call and then a newer untagged read allows",
                 _trust_tool, role_path("tags-then-untagged"))
-    trust_deny(_trust_word + " after a set_session_tags call and then a newer coordinator read is refused",
+    trust_refuse(_trust_word + " after a set_session_tags call and then a newer coordinator read is refused",
                _trust_tool, role_path("tags-then-coordinator"))
-    trust_deny(_trust_word + " after an untagged read and then a newer lane read is refused",
+    trust_refuse(_trust_word + " after an untagged read and then a newer lane read is refused",
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
