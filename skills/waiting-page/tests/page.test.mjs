@@ -295,6 +295,8 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       mk("first", 1, { context: LONG, holds: "A lane waits.", options: [opt("a", "Red", withDesigns ? "s1" : undefined), opt("b", "Blue with a long label that cannot fit on one line of the ready note at 390 wide", withDesigns ? "s2" : undefined)] }), mk("second", 2, { context: LONG, stands: true }),
       { ...TASK, id: "a-task", n: 3 }, mk("third", 4, { context: LONG, by: "2030-01-01T00:00:00Z" }),
       mk("fourth", 5, { context: LONG, options: [...DECISION.options, { key: "c", label: "Green", how: "h", gain: "g", lose: "l" }] }),
+      // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
+      mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
     ];
     const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
     await noAnchor(page);
@@ -317,15 +319,24 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     await choose(page, items[4], "c"); await same("a pick after Take my pick");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
     sent = true;
-    // A receipt holds its height only while in view (owner report 1, Oct 28 13:19 CDT, c193), so after Send only what is on screen is compared.
-    const onScreen = () => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.id, c.getBoundingClientRect()]).filter(([, r]) => r.bottom > 0 && r.top < innerHeight).map(([id, r]) => [id, Math.round(r.top), Math.round(r.height)]));
-    const seen = await onScreen();
-    await send(page);
-    await page.locator("#sent .stamp").waitFor();
-    await page.evaluate(() => new Promise((r) => setTimeout(r, 600)));
-    const after = (await onScreen()).slice(0, seen.length); // scroll lands on whole pixels, so a fraction of one is allowed
-    assert.deepEqual(after.map((r) => r[0]), seen.map((r) => r[0]), "the cards on screen changed on Send");
-    seen.forEach((r, i) => { assert.ok(Math.abs(after[i][1] - r[1]) <= 1 && Math.abs(after[i][2] - r[2]) <= 1, "what was on screen moved on Send: " + JSON.stringify([r, after[i]])); });
+    // A Send shrinks each receipt at once (shiv, 15:06 CDT Oct 30, receipt-tightens-at-once). The anchor is the first card whose bottom is below the band's
+    // top, skipping a sent card whose top is above it. The anchor keeps its top, and a card that stays keeps its height.
+    await placeRel(page, items[3], "top", 40);
+    const sentItems = [items[0], items[1], items[2], items[4]];
+    assert.equal(await anchorOf(page, sentItems), "item-" + items[3].id, "fixture: the anchor is not the witness card");
+    const rd = await sendAndRead(page, sentItems);
+    const w = "item-" + items[3].id;
+    assert.ok(rd.pre[w].top > rd.band.top && rd.pre[w].top < rd.band.bottom, "the witness is off the band before Send");
+    const seen = Object.values(rd.pre).filter((c) => c.bottom > rd.band.top && c.top < rd.band.bottom);
+    for (const [when, post] of reads(rd)) {
+      assert.equal(post[w].receipt, false, "the witness became a receipt on Send");
+      assert.ok(Math.abs(post[w].top - rd.pre[w].top) <= 1, `${when}: the witness moved on Send: ${rd.pre[w].top} to ${post[w].top}`);
+      for (const b of seen) {
+        const a = post[b.id];
+        if (a.receipt && !b.receipt) assert.ok(a.h < b.h - 1, `${when}: a receipt kept its height on Send: ${b.id} ${b.h} to ${a.h}`);
+        else if (!a.receipt) assert.ok(Math.abs(a.h - b.h) <= 1, `${when}: a card that stays changed height on Send: ${b.id} ${b.h} to ${a.h}`);
+      }
+    }
   });
 }
 
@@ -463,7 +474,8 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    assert.equal(await page.title(), "Agent Q: Questions"); // one-page notes, choice 6: the title names the open tab
+    // The title is "<repo> Queue" on Questions (shiv ruling, Oct 30 14:33 CDT).
+    assert.equal(await page.title(), "Agent Q Queue");
   });
 }
 
@@ -776,6 +788,102 @@ test("a focus box taller than the card scrolls inside the focus box and opens at
   assert.ok(Math.abs(m.fTop + 300 * sc - m.top) <= 2, "the focus does not start at the top of the box");
 });
 
+// Owner ruling, waiting-page item 84 pick b (2026-10-30 14:45 CDT), c204 option 5B: a scrolling picture draws min(221.8, column - 2 - gutter) wide.
+// 221.8 is 480 x 390 / 844, the width a 390 x 844 phone picture gets. A picture that does not scroll keeps today's scale.
+const SCROLL_W = (480 * 390) / 844;
+// The column is the .opic that holds the box, less its padding.
+const column = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
+  const o = w.parentElement, cs = getComputedStyle(o);
+  return o.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+});
+// Waits until the frame keeps one width for two frames, so a measure reads the last fit and not a first pass.
+const settleFit = (page, id) => page.waitForFunction((sel) => new Promise((done) => {
+  const f = document.querySelector(sel).querySelector("iframe"), a = f.getBoundingClientRect().width;
+  requestAnimationFrame(() => requestAnimationFrame(() => done(Math.abs(f.getBoundingClientRect().width - a) < 0.01)));
+}), boxSel(id), { polling: 50 });
+
+for (const width of [390, 1440]) {
+  test(`a tall picture in a 480px box draws min(221.8, column - 2 - gutter) wide and fills its box, with no sideways scroll, at ${width} wide`, async (t) => {
+    const it = picItem("scroll-width", 57);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width, height: 900 } }); if (!page) return;
+    await frameSettled(page, 2400);
+    await settleFit(page, it.id);
+    const m = await measure(page, it.id), cw = await column(page, it.id);
+    const want = Math.min(SCROLL_W, cw - 2 - m.g);
+    assert.ok(Math.abs(m.fw - want) <= 1, `the picture is ${m.fw} wide, not min(${SCROLL_W.toFixed(1)}, ${cw} - 2 - ${m.g}) = ${want.toFixed(1)}`);
+    assert.ok(Math.abs(m.h - 480) <= 1, `the box is ${m.h} high, not 480`);
+    assert.ok(m.w <= cw + 1, `the box is ${m.w} wide in a ${cw} wide column`);
+    assert.ok(Math.abs(m.fw - m.cw) <= 1, `the picture is ${m.fw} wide in a ${m.cw} wide box: it does not fill the box`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+  });
+
+  test(`a mockup that fits whole keeps today's scale, with no scroll and no cue, at ${width} wide`, async (t) => {
+    const it = picItem("fits-whole", 58);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1550) }, viewport: { width, height: 900 } }); if (!page) return;
+    await frameSettled(page, 1550);
+    await settleFit(page, it.id);
+    const m = await measure(page, it.id);
+    const want = (480 * 390) / 1550; // the mockup is scaled to the box's 480px, so it is 120.8px wide
+    assert.ok(Math.abs(m.fw - want) <= 1, `the picture is ${m.fw} wide, not ${want.toFixed(1)}`);
+    assert.ok(Math.abs(m.h - 480) <= 1, `the box is ${m.h} high, not 480`);
+    assert.ok(!/scroll/.test(m.cls), "a picture that fits whole scrolls");
+    assert.notEqual((await cueState(page, it.id)).disp, "flex", "the cue is drawn on a picture that fits whole");
+  });
+
+  test(`a tall focus box that scrolls draws min(221.8, column - 2 - gutter) wide, at ${width} wide`, async (t) => {
+    const it = picItem("focus-width", 59, { focus: "#panel" });
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": FOCUS_TALL }, viewport: { width, height: 900 } }); if (!page) return;
+    await frameSettled(page, 2600);
+    await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+    await settleFit(page, it.id);
+    const m = await measure(page, it.id), cw = await column(page, it.id);
+    const want = Math.min(SCROLL_W, cw - 2 - m.g);
+    assert.ok(/scroll/.test(m.cls), "the focus box does not scroll");
+    assert.ok(Math.abs(m.fw - want) <= 1, `the focus picture is ${m.fw} wide, not min(${SCROLL_W.toFixed(1)}, ${cw} - 2 - ${m.g}) = ${want.toFixed(1)}`);
+  });
+}
+
+// Owner ruling (waiting-page item 84 pick b, option 5B), round 2: at 1065 wide the option column binds, so a scrolling picture is column less 2 less the gutter.
+// The column is read from its rect, not clientWidth, which rounds up. The budget is floor(rect width) less 2 and the gutter (docs/design/c204-sizes.md item 7).
+// The box sits inside the column's edges to 0.01px, and its sizer and picture fit the budget.
+const strictBox = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
+  const r = w.parentElement.getBoundingClientRect(), wr = w.getBoundingClientRect();
+  return {
+    wrapL: wr.left, wrapR: wr.right, colL: r.left, colR: r.right, colRectW: r.width,
+    sizerW: w.querySelector(".dsizer").getBoundingClientRect().width,
+    fw: w.querySelector("iframe").getBoundingClientRect().width,
+    g: w.offsetWidth - w.clientWidth - 2,
+    cls: w.className,
+  };
+});
+
+test("a tall picture that scrolls at 1065 wide stays inside its column: the box, the sizer and the picture fit the column less 2 and the gutter", async (t) => {
+  const it = picItem("scroll-col", 60);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1065, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await settleFit(page, it.id);
+  const s = await strictBox(page, it.id), budget = Math.floor(s.colRectW) - 2 - s.g;
+  assert.ok(/scroll/.test(s.cls), "the picture does not scroll");
+  assert.ok(s.wrapL >= s.colL - 0.01, `the box starts at ${s.wrapL}, left of its column at ${s.colL}`);
+  assert.ok(s.wrapR <= s.colR + 0.01, `the box ends at ${s.wrapR}, past its column's right edge ${s.colR}`);
+  assert.ok(s.sizerW <= budget + 0.01, `the sizer is ${s.sizerW} wide, over floor(${s.colRectW}) less 2 and the gutter ${s.g} = ${budget}`);
+  assert.ok(Math.abs(s.fw - budget) <= 1, `the picture is ${s.fw} wide, not ${budget}`);
+});
+
+test("a picture that differs from its siblings and scrolls at 1065 wide stays inside its column, its 3px border in the gutter", async (t) => {
+  const it = picItem("dif-col", 61, { differs: ["picture"] });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1065, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await settleFit(page, it.id);
+  assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif") && getComputedStyle(w).borderLeftWidth === "3px"), "the picture is not a differing picture with a 3px left border");
+  const s = await strictBox(page, it.id), budget = Math.floor(s.colRectW) - 2 - s.g;
+  assert.ok(/scroll/.test(s.cls), "the differing picture does not scroll");
+  assert.ok(s.wrapL >= s.colL - 0.01, `the box starts at ${s.wrapL}, left of its column at ${s.colL}`);
+  assert.ok(s.wrapR <= s.colR + 0.01, `the box ends at ${s.wrapR}, past its column's right edge ${s.colR}`);
+  assert.ok(s.sizerW <= budget + 0.01, `the sizer is ${s.sizerW} wide, over floor(${s.colRectW}) less 2 and the gutter ${s.g} = ${budget}`);
+  assert.ok(Math.abs(s.fw - budget) <= 1, `the picture is ${s.fw} wide, not ${budget}`);
+});
+
 test("a resize or a repaint keeps the owner's scroll, the same box, and the scroll hint in the picture's name", async (t) => {
   const it = picItem("once", 36);
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1440, height: 900 } }); if (!page) return;
@@ -977,13 +1085,16 @@ test("a mockup 1px over the fitted height gives a box of at most 480 and no cue,
   assert.notEqual((await cueState(page, it.id)).disp, "flex", "the cue shows on a picture 1px over the fit");
 });
 
-test("a picture that differs from its siblings keeps its 3px border inside a 134px box, and still scrolls, at 1280 wide", async (t) => {
+test("a picture that differs from its siblings keeps its 3px border inside its box, and still scrolls, at 1280 wide", async (t) => {
   const it = picItem("dif", 5, { differs: ["picture"] });
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
   await frameSettled(page, 2400);
+  await settleFit(page, it.id);
   const m = await measure(page, it.id);
   assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif")), "the picture is not marked as differing");
-  assert.ok(Math.abs(m.w - 134) <= 1, `the box is ${m.w} wide, not 134`);
+  // Owner ruling, waiting-page item 84 pick b (2026-10-30 14:45 CDT), c204 option 5B: the box is the scroll width plus its frame, within the column.
+  const cw = await column(page, it.id), want = Math.min(SCROLL_W + 2 + m.g, cw);
+  assert.ok(Math.abs(m.w - want) <= 1, `the box is ${m.w} wide, not ${want.toFixed(1)}`);
   assert.ok(m.sh - m.ch > 100 && Math.abs(m.fw - m.cw) <= 1, "the differing picture does not scroll at the content width");
 });
 
@@ -2266,27 +2377,193 @@ const SIZES = [2200, 1280, 390];
 const noAnchor = (page) => page.addStyleTag({ content: "*, html { overflow-anchor: none !important; }" });
 const FILLER = Array.from({ length: 6 }, (_, i) => mk("fill-" + i, 10 + i, { context: LONG }));
 
+// The send cases (shiv, 15:06 CDT Oct 30, receipt-tightens-at-once). The visible band runs from the header's bottom edge to the top of the bar.
+// On a Send, the anchor is the first card whose bottom is below the band's top, skipping a sent card whose top is above it. The anchor keeps its top,
+// and the cards below it rise by what the sent cards drop.
+const LEADS = [1, 2, 3].map((n) => mk("lead-" + n, n, { context: LONG }));
+const HOLDS = [1, 2, 3].map((n) => mk("hold-" + n, n, { context: LONG, holds: "A lane waits.", added: `2026-10-0${n}T00:00:00Z` }));
+const frameWait = (page, n) => page.evaluate((k) => new Promise((resolve) => { const step = (i) => (i ? requestAnimationFrame(() => step(i - 1)) : resolve()); step(k); }), n);
+// Scrolls so the card's top or bottom edge sits `offset` px below the band's top edge. A negative offset puts it above the band.
+const placeRel = (page, it, edge, offset) => page.evaluate(([id, e, o]) => {
+  const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
+  const r = document.getElementById("item-" + id).getBoundingClientRect();
+  window.scrollTo({ top: scrollY + r[e] - (bt + o), behavior: "instant" });
+}, [it.id, edge, offset]);
+// The page can reflow after its first frames, and scroll anchoring follows a reflow, so the card is placed again once the frames settle.
+const settleAt = async (page, it, edge, offset) => { await frameWait(page, 3); await placeRel(page, it, edge, offset); await frameWait(page, 3); await placeRel(page, it, edge, offset); };
+const cardMap = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("article.card")].map((c) => { const r = c.getBoundingClientRect(); return [c.id, { id: c.id, top: r.top, bottom: r.bottom, h: r.height, receipt: !!c.querySelector(":scope > .receipt") }]; })));
+const bandOf = (page) => page.evaluate(() => ({ top: document.querySelector(".hdr").getBoundingClientRect().bottom, bottom: document.getElementById("bar").getBoundingClientRect().top }));
+// The anchor the rule picks for these sent cards, read before Send.
+const anchorOf = (page, sent) => page.evaluate((ids) => {
+  const bt = document.querySelector(".hdr").getBoundingClientRect().bottom;
+  for (const c of document.querySelectorAll("article.card")) {
+    const r = c.getBoundingClientRect();
+    if (r.bottom <= bt) continue;
+    if (ids.includes(c.id) && r.top < bt) continue;
+    return c.id;
+  }
+  return null;
+}, sent.map((it) => "item-" + it.id));
+// Scroll anchoring stays off unless the case asks for it.
+const openSend = async (t, { items, width, height, scheme, anchored }) => {
+  const page = await open(t, { items, scheme, viewport: { width, height } });
+  if (page && !anchored) await noAnchor(page);
+  return page;
+};
+// Sends the cards, then reads the page as each receipt appears, once the Sent panel renders, and after two frames.
+async function sendAndRead(page, sent) {
+  const pre = await cardMap(page), band = await bandOf(page);
+  await send(page);
+  for (const it of sent) await card(page, it).locator(".receipt").waitFor();
+  const atOnce = await cardMap(page);
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  return { pre, band, atOnce, settled: await cardMap(page) };
+}
+const reads = (rd) => [["at once", rd.atOnce], ["after two frames", rd.settled]];
+// The sent card drops its height, the anchor keeps its top, and the card below rises by the drop.
+function checkRise(pre, post, when, sentIt, anchorIt, belowIt) {
+  const S = "item-" + sentIt.id, A = "item-" + anchorIt.id, B = "item-" + belowIt.id;
+  const drop = pre[S].h - post[S].h;
+  assert.ok(drop >= 100, `${when}: the receipt kept its open height of ${pre[S].h}px; it is ${post[S].h}px`);
+  assert.ok(Math.abs(post[A].top - pre[A].top) <= 1, `${when}: the anchor moved on Send: ${pre[A].top} to ${post[A].top}`);
+  assert.ok(Math.abs(post[B].top - (pre[B].top - drop)) <= 1, `${when}: the card below did not rise by the drop of ${drop}px: ${pre[B].top} to ${post[B].top}`);
+}
+
+// A card sent with the card above it partly on screen: that card keeps its top, and the cards below rise.
+async function sendBelowPartial(t, { width, scheme, anchored }) {
+  // At 390 wide the sent card is taller than the phone's screen, so the viewport is taller to keep the card below on screen.
+  const above = mk("above", 4), sent = mk("sent", 5), below = mk("below", 6);
+  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, above, "bottom", 30);
+  assert.equal(await anchorOf(page, [sent]), "item-above", "fixture: the card above is not the anchor");
+  const rd = await sendAndRead(page, [sent]);
+  for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, above, below);
+}
+
+// A card sent as the topmost card on screen, its top inside the band: its top stays, and the card below rises.
+async function sendTopOfBand(t, { scheme }) {
+  const sent = mk("sent", 4, { context: LONG }), below = mk("below", 5);
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 20);
+  assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the topmost card on screen");
+  const rd = await sendAndRead(page, [sent]);
+  for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, sent, below);
+}
+
+// Two cards sent together: the first is wholly above the band, the second starts inside it. The second keeps its top, and the card below rises by the second's drop.
+async function sendTwoOneAbove(t, { width, scheme }) {
+  const wholly = mk("wholly-above", 4, { context: LONG }), visible = mk("visible", 5, { context: LONG }), below = mk("below", 6);
+  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, wholly, "a");
+  await choose(page, visible, "b");
+  await settleAt(page, wholly, "bottom", -4);
+  assert.equal(await anchorOf(page, [wholly, visible]), "item-visible", "fixture: the second card is not the anchor");
+  const rd = await sendAndRead(page, [wholly, visible]);
+  const V = "item-visible", W = "item-wholly-above", B = "item-below";
+  for (const [when, post] of reads(rd)) {
+    const drop = rd.pre[V].h - post[V].h;
+    assert.ok(rd.pre[W].h - post[W].h >= 100, `${when}: the card wholly above the band kept its open height: it is ${post[W].h}px`);
+    assert.ok(drop >= 100, `${when}: the visible receipt kept its open height of ${rd.pre[V].h}px; it is ${post[V].h}px`);
+    assert.ok(Math.abs(post[V].top - rd.pre[V].top) <= 1, `${when}: the visible card moved on Send: ${rd.pre[V].top} to ${post[V].top}`);
+    assert.ok(Math.abs(post[B].top - (rd.pre[B].top - drop)) <= 1, `${when}: the card below did not rise by ${drop}px: ${rd.pre[B].top} to ${post[B].top}`);
+  }
+}
+
+// A tall card at 390 wide, its top above the band and its bottom inside it: the card below keeps its top, and the receipt lands just above it.
+async function sendTallOverBand(t, { scheme }) {
+  const tall = mk("tall", 4, { context: LONG }), below = mk("below", 5);
+  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, tall, "a");
+  await settleAt(page, tall, "bottom", 60);
+  assert.equal(await anchorOf(page, [tall]), "item-below", "fixture: the card below is not the anchor");
+  const rd = await sendAndRead(page, [tall]);
+  const T = "item-tall", N = "item-below";
+  const gap = rd.pre[N].top - rd.pre[T].bottom;
+  for (const [when, post] of reads(rd)) {
+    assert.ok(rd.pre[T].h - post[T].h >= 100, `${when}: the receipt kept its open height of ${rd.pre[T].h}px; it is ${post[T].h}px`);
+    assert.ok(Math.abs(post[N].top - rd.pre[N].top) <= 1, `${when}: the card below moved on Send: ${rd.pre[N].top} to ${post[N].top}`);
+    assert.ok(Math.abs(post[T].bottom - (post[N].top - gap)) <= 1, `${when}: the receipt does not land just above the card below: ${post[T].bottom} against ${post[N].top - gap}`);
+  }
+}
+
+// A card sent with the card below it starting under the bar: the sent card keeps its top, and the card below rises.
+async function sendOverUnderBar(t, { scheme }) {
+  const sent = mk("sent", 4, { context: LONG }), below = mk("under-bar", 5);
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the anchor");
+  const rd = await sendAndRead(page, [sent]);
+  assert.ok(rd.pre["item-under-bar"].top >= rd.band.bottom - 1, `fixture: the card below starts above the bar: ${rd.pre["item-under-bar"].top} against ${rd.band.bottom}`);
+  for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, sent, below);
+}
+
+// An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
+async function answerWithoutSend(t, { width, scheme }) {
+  const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
+  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  await settleAt(page, inView, "top", 40);
+  const pre = await cardMap(page);
+  const I = "item-in-view", B = "item-below";
+  // The answer comes from the database, as another session's save would, so the page sends nothing of its own.
+  await page.evaluate(async (id) => { const db = await window.claude.use("db"); await db.collection("answers").doc(id).set({ item: id, n: 4, at: "2026-10-30T14:00:00Z", choice: "a", note: "" }); }, inView.id);
+  await card(page, inView).locator(".receipt").waitFor();
+  assert.equal(await page.evaluate(() => window.__log.filter((l) => l[0] === "set").length), 1, "the page wrote an answer of its own");
+  const atOnce = await cardMap(page);
+  assert.ok(atOnce[I].h >= pre[I].h - 1, `an answer without a Send dropped its height at once: ${pre[I].h}px to ${atOnce[I].h}px`);
+  await frameWait(page, 2);
+  await page.waitForTimeout(600);
+  const held = await cardMap(page);
+  assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
+  assert.ok(Math.abs(held[B].top - pre[B].top) <= 1, `an answer without a Send moved the card below: ${pre[B].top} to ${held[B].top}`);
+  // The card wholly off the screen drops its height, and the card below, still on screen, keeps its top.
+  await page.evaluate((id) => { const b = document.getElementById(id).getBoundingClientRect().bottom; window.scrollBy(0, b + 4); }, I);
+  const scrolled = await cardMap(page);
+  assert.ok(scrolled[B].bottom > 0 && scrolled[B].top < 800,`fixture: the card below is off the screen after the scroll at ${scrolled[B].top}`);
+  await page.waitForFunction(([id, h]) => document.getElementById(id).getBoundingClientRect().height < h - 100, [I, pre[I].h]);
+  const dropped = await cardMap(page);
+  assert.ok(Math.abs(dropped[B].top - scrolled[B].top) <= 1, `the card below moved when the held card dropped: ${scrolled[B].top} to ${dropped[B].top}`);
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`a card sent with the card above it partly on screen keeps that card's top, and the cards below rise, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sendBelowPartial(t, { width, scheme, anchored: false });
+  });
+  test(`a card sent with the card above it partly on screen keeps that card's top with scroll anchoring on, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sendBelowPartial(t, { width, scheme, anchored: true });
+  });
+}
+
 for (const scheme of ["light", "dark"]) {
-  test(`an answered card keeps its height only while in view, then shrinks with nothing on screen moving, ${scheme} scheme`, async (t) => {
-    const target = mk("target", 2, { context: LONG });
-    const items = [mk("above", 1, { context: LONG }), target, ...FILLER];
-    const page = await open(t, { items, scheme, viewport: { width: 1280, height: 700 } }); if (!page) return;
-    await noAnchor(page);
-    const c = card(page, target);
-    const full = (await c.boundingBox()).height;
-    await choose(page, target, "a");
-    await send(page);
-    await c.locator(".receipt").waitFor();
-    assert.ok((await c.boundingBox()).height >= full - 1, "the receipt gave up its height while still in view");
-    // Scroll the receipt out of view above the screen, with a card on screen as the witness.
-    const witness = card(page, FILLER[3]);
-    await witness.scrollIntoViewIfNeeded();
-    await page.evaluate(() => window.scrollBy(0, 300));
-    const top = () => witness.evaluate((e) => Math.round(e.getBoundingClientRect().top));
-    const at = await top();
-    await page.waitForFunction(() => document.getElementById("item-target").getBoundingClientRect().bottom < 0);
-    await page.waitForFunction(([id, h]) => document.getElementById(id).getBoundingClientRect().height < h - 100, ["item-target", full]);
-    assert.ok(Math.abs((await top()) - at) <= 1, "what was on screen moved when the receipt shrank");
+  test(`a card sent as the topmost card on screen keeps its top, and the card below rises, ${scheme} scheme`, async (t) => {
+    await sendTopOfBand(t, { scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`two cards sent together, one wholly above the band: the other keeps its top, and the card below rises, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await sendTwoOneAbove(t, { width, scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) {
+  test(`a tall card at 390 wide sent over the band's top edge: the card below keeps its top, and the receipt lands just above it, ${scheme} scheme`, async (t) => {
+    await sendTallOverBand(t, { scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) {
+  test(`a card sent with the card below under the bar: the sent card keeps its top, and the card below rises, ${scheme} scheme`, async (t) => {
+    await sendOverUnderBar(t, { scheme });
+  });
+}
+
+for (const scheme of ["light", "dark"]) for (const width of [1280, 390]) {
+  test(`an answer that arrives without a Send keeps its height while in view, and drops once wholly off the screen, at ${width} wide, ${scheme} scheme`, async (t) => {
+    await answerWithoutSend(t, { width, scheme });
   });
 }
 
@@ -2329,7 +2606,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
   });
 }
 
-test("a rail jump after Send still lands on its card when held receipts drop mid-scroll", async (t) => {
+test("a rail jump after Send lands on its card", async (t) => {
   const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
   const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
   await noAnchor(page);
@@ -2338,8 +2615,10 @@ test("a rail jump after Send still lands on its card when held receipts drop mid
   await page.locator("#item-q0 .receipt").waitFor();
   await page.click("#c-q9");
   await page.waitForTimeout(2500);
+  // The card lands inside the band, just under the header's bottom edge.
+  const band = await bandOf(page);
   const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
-  assert.ok(top >= 0 && top <= 120, "the jump missed its card; it sits at " + top);
+  assert.ok(top >= band.top - 1 && top <= band.top + 120, `the jump missed its card; it sits at ${top}, band top ${band.top}`);
 });
 
 test("a receipt wholly below the screen drops its height without moving the page", async (t) => {
@@ -2876,13 +3155,30 @@ test("a note typed on an item survives a press of Status and back, because Statu
   assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
 });
 
-test("the document title names the open tab: <repo>: Questions, then <repo>: Status", async (t) => {
+// The title is "<repo> Queue" on Questions and "<repo> Queue · Status" (a middle dot, a space each side) on Status
+// (shiv ruling, Oct 30 14:33 CDT).
+test("the document title names the repo and the open tab: <repo> Queue, then <repo> Queue · Status", async (t) => {
   const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
-  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
   await openStatus(page);
-  assert.equal(await titleOf(page, "Compass: Status"), "Compass: Status");
+  assert.equal(await titleOf(page, "Compass Queue · Status"), "Compass Queue · Status");
   await page.click("#tabQ");
-  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+  assert.equal(await titleOf(page, "Compass Queue"), "Compass Queue");
+});
+
+// With no identity name the title is the page name alone, "Queue" (shiv ruling, Oct 30 14:33 CDT).
+test("with no identity name the document title is Queue, then Queue · Status", async (t) => {
+  const page = await open(t); if (!page) return;
+  assert.equal(await titleOf(page, "Queue"), "Queue");
+  await openStatus(page);
+  assert.equal(await titleOf(page, "Queue · Status"), "Queue · Status");
+});
+
+// The static <title> in page.html is the page name, "Queue"; setTitle adds the repo name at run time (shiv ruling, Oct 30 14:33 CDT).
+test("page.html's static title is Queue", () => {
+  const staticTitle = html.match(/<title>([^<]*)<\/title>/);
+  assert.ok(staticTitle, "page.html has no static <title>");
+  assert.equal(staticTitle[1], "Queue");
 });
 
 // ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)
@@ -3621,6 +3917,334 @@ for (const width of [390, 1280]) test(`a press on the empty part of a ranked opt
   assert.ok(x < lb.x || x > lb.x + lb.width, `${r.id}: the press point is over the link`);
   await page.mouse.click(x, y);
   assert.deepEqual(await ticked(page, r), ["a"], `${r.id}: a press on the empty part of the links row did not tick the option, at ${width} wide`);
+});
+
+// ---------------------------------------------------------------- lane page-shows-last-answer: the last answer, the reply and the lane
+// Spec: docs/design/last-answer-notes.md (picks 1A, 2A, 3A, and the copy in its section 4). Three item fields drive it:
+// `lastAnswer` ({choice?, done?, note?, at}), `reply` (a string) and `lane` (a lane branch slug). Each case sets them on an item
+// and reads the card, by visible text and by where the part sits. The panel is found by its aria-label (notes, section 4).
+const LA_AT = "2026-10-29T19:05:00Z"; // 14:05 CDT
+const LA_NAMES = ["Your last answer and the reply", "Your last answer", "The reply"];
+const LA_LONG = "A long reply that runs past three lines on a phone. ".repeat(8).trim(); // 415 characters
+const laPanel = (page, it) => card(page, it).locator(LA_NAMES.map((n) => `[aria-label="${n}"]`).join(", "));
+const flat = (s) => s.replace(/\s+/g, " ").trim();
+// The panel's text, flattened. Every case needs exactly one panel, so a page that draws none fails on this line at once.
+const laText = async (page, it) => {
+  assert.equal(await laPanel(page, it).count(), 1, `${it.id}: no single panel labelled "${LA_NAMES.join('", "')}"`);
+  return flat(await laPanel(page, it).innerText());
+};
+const laBox = (loc) => loc.evaluate((e) => { const r = e.getBoundingClientRect(); return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left + scrollX, right: r.right + scrollX, h: r.height }; });
+const laSaved = (it, choice = "a") => ({ [it.id]: { item: it.id, n: it.n, at: "2026-10-26T01:00:00Z", choice, note: "" } });
+const laReply = (page, it) => card(page, it).getByText(/^Reply: /);
+// How many lines of text the reply shows now: its box height over the height of one line in the same element.
+const laReplyLines = (page, it) => laReply(page, it).evaluate((e) => {
+  const probe = e.cloneNode(false); probe.removeAttribute("id"); probe.textContent = "x";
+  e.parentNode.insertBefore(probe, e); const one = probe.getBoundingClientRect().height; probe.remove();
+  return e.getBoundingClientRect().height / one;
+});
+
+test("a decision's last answer shows its letter and label, then its note, with the time in US Central 24-hour", async (t) => {
+  const it = mk("la-one", 1, { lastAnswer: { choice: "b", note: "Only if it is cheap.", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(p, /You chose B: Blue\./);
+  assert.match(p, /Note: Only if it is cheap\./);
+  assert.ok(p.indexOf("Your last answer") < p.indexOf("You chose B") && p.indexOf("You chose B") < p.indexOf("Note:"), "head, answer, note are not in that order: " + p);
+  assert.doesNotMatch(p, /\b[AP]M\b|UTC|19:05/, "the time is not US Central 24-hour: " + p);
+  assert.equal(await laPanel(page, it).getAttribute("aria-label"), "Your last answer");
+  assert.doesNotMatch(p, /Reply:/);
+});
+
+test("the last answer's time names the zone and keeps midnight as 00, in summer and in winter", async (t) => {
+  const cdt = mk("la-cdt", 1, { lastAnswer: { choice: "a", at: "2026-10-29T05:30:00Z" } });
+  const cst = mk("la-cst", 2, { lastAnswer: { choice: "a", at: "2026-12-05T06:30:00Z" } });
+  const page = await open(t, { items: [cdt, cst] }); if (!page) return;
+  assert.match(await laText(page, cdt), /Your last answer, Oct 29, 00:30 CDT/);
+  assert.match(await laText(page, cst), /Your last answer, Dec 5, 00:30 CST/);
+});
+
+test("a last answer whose time does not parse shows 'Your last answer' with no time and no stray comma", async (t) => {
+  const it = mk("la-badat", 1, { lastAnswer: { choice: "a", at: "not a time" } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /^Your last answer(?!,)/, "the head is not 'Your last answer' alone: " + p);
+  assert.doesNotMatch(p, /Invalid|NaN|undefined/);
+  assert.match(p, /You chose A: Red\./);
+});
+
+test("the note 'accepted pick' is not shown in the last answer, as the receipt hides it", async (t) => {
+  const it = mk("la-accepted", 1, { lastAnswer: { choice: "a", note: "accepted pick", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /You chose A: Red\./);
+  assert.doesNotMatch(p, /accepted pick|Note:/, "the pick's own note shows: " + p);
+});
+
+test("a last answer with no choice on a decision shows its head and note and no answer line", async (t) => {
+  const it = mk("la-noans", 1, { lastAnswer: { note: "Why not green?", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(p, /Note: Why not green\?/);
+  assert.doesNotMatch(p, /You chose|None of these|[Mm]arked done/, "an answer line shows with no choice: " + p);
+});
+
+test("a last answer of none reads 'None of these.' with its note", async (t) => {
+  const it = mk("la-none", 1, { lastAnswer: { choice: "none", note: "Neither. Keep the old rail.", at: LA_AT } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await laText(page, it);
+  assert.match(p, /None of these\./);
+  assert.match(p, /Note: Neither\. Keep the old rail\./);
+  assert.doesNotMatch(p, /You chose/);
+});
+
+test("a last answer that is a list shows each pick by letter and label, and a ranked list shows a numbered list in order", async (t) => {
+  const m = multi("la-multi", 1, { lastAnswer: { choice: ["a", "c"], at: LA_AT } });
+  const r = ranked("la-ranked", 2, { lastAnswer: { choice: ["c", "a"], at: LA_AT } });
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  const items = (it) => laPanel(page, it).locator("li").allTextContents().then((l) => l.map((s) => flat(s).replace(/ /g, "")));
+  assert.match(await laText(page, m), /You chose:/);
+  assert.deepEqual(await items(m), ["ARed", "CGreen"]);
+  assert.equal(await laPanel(page, m).locator("ol").count(), 0, "an unranked list is numbered");
+  assert.match(await laText(page, r), /You chose, in order:/);
+  assert.deepEqual(await items(r), ["CGreen", "ARed"]);
+  assert.equal(await laPanel(page, r).locator("ol").count(), 1, "a ranked list is not a numbered list");
+});
+
+test("a last answer that names a key no longer in options never shows the key, for one key and for a list", async (t) => {
+  const one = mk("la-gone", 1, { lastAnswer: { choice: "pinned", at: LA_AT } });
+  const list = multi("la-gone-list", 2, { lastAnswer: { choice: ["a", "pinned"], at: LA_AT } });
+  const page = await open(t, { items: [one, list] }); if (!page) return;
+  const p = await laText(page, one), q = await laText(page, list);
+  assert.match(p, /You chose an option that is no longer listed\./);
+  assert.doesNotMatch(p, /pinned|You chose [A-Z]:/, "the raw key or a letter shows: " + p);
+  assert.match(q, /You chose options that are no longer listed\./);
+  assert.doesNotMatch(q, /pinned|Red/, "the raw key shows, or the one valid pick is listed: " + q);
+  assert.equal(await laPanel(page, list).locator("li").count(), 0, "a list that holds a lost key is still drawn as picks");
+});
+
+test("a task's last answer reads 'Marked done.' when done is true and 'Not marked done.' otherwise", async (t) => {
+  const done = { ...TASK, id: "la-done", n: 3, lastAnswer: { done: true, at: LA_AT } };
+  const not = { ...TASK, id: "la-notdone", n: 4, lastAnswer: { note: "It asks for an Apple ID. Which one?", at: LA_AT } };
+  const page = await open(t, { items: [done, not] }); if (!page) return;
+  const d = await laText(page, done), n = await laText(page, not);
+  assert.match(d, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(d, /(^| )Marked done\./);
+  assert.doesNotMatch(d, /Not marked done|You chose/);
+  assert.match(n, /Not marked done\./);
+  assert.match(n, /Note: It asks for an Apple ID\. Which one\?/);
+  assert.doesNotMatch(n, /(^| )Marked done\./);
+});
+
+test("the reply shows as 'Reply: <text>', alone or after the last answer, and the panel is named for what it holds", async (t) => {
+  const both = mk("rp-both", 1, { lastAnswer: { choice: "a", at: LA_AT }, reply: "I added option C. Pick again." });
+  const last = mk("rp-last", 2, { lastAnswer: { choice: "a", at: LA_AT } });
+  const only = mk("rp-only", 3, { reply: "Your comment asked where the motion values live." });
+  const page = await open(t, { items: [both, last, only] }); if (!page) return;
+  const b = await laText(page, both);
+  assert.match(b, /Reply: I added option C\. Pick again\./);
+  assert.ok(b.indexOf("Your last answer") < b.indexOf("Reply:"), "the reply is not after the last answer: " + b);
+  assert.equal(await laPanel(page, both).getAttribute("aria-label"), "Your last answer and the reply");
+  assert.equal(await laPanel(page, last).getAttribute("aria-label"), "Your last answer");
+  assert.doesNotMatch(await laText(page, last), /Reply:/);
+  const o = await laText(page, only);
+  assert.equal(await laPanel(page, only).getAttribute("aria-label"), "The reply");
+  assert.match(o, /Reply: Your comment asked where the motion values live\./);
+  assert.doesNotMatch(o, /Your last answer/);
+});
+
+test("a reply over 220 characters folds to three lines with More of the reply, and Less folds it again", async (t) => {
+  const it = mk("rp-long", 1, { reply: LA_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const more = card(page, it).getByRole("button", { name: "More of the reply", exact: true });
+  await need(more, "no More of the reply button on a long reply");
+  const folded = await laReplyLines(page, it);
+  assert.ok(folded > 2.9 && folded < 3.1, `a folded reply shows ${folded} lines, not 3`);
+  assert.equal(await more.getAttribute("aria-expanded"), "false");
+  await more.click();
+  const less = card(page, it).getByRole("button", { name: "Less", exact: true });
+  await need(less, "More of the reply did not become Less");
+  assert.equal(await less.getAttribute("aria-expanded"), "true");
+  const unfolded = await laReplyLines(page, it);
+  assert.ok(unfolded > 3.5, `an opened reply shows ${unfolded} lines, not all of it`);
+  assert.ok(flat(await card(page, it).textContent()).includes(LA_LONG), "the opened reply is cut");
+  await less.click();
+  assert.ok((await laReplyLines(page, it)) < 3.1, "Less did not fold the reply");
+  await need(card(page, it).getByRole("button", { name: "More of the reply", exact: true }), "Less did not become More of the reply");
+});
+
+test("a reply of 220 characters has no More of the reply button, and one of 221 has it", async (t) => {
+  const word = "ab ".repeat(100);
+  const at220 = mk("rp-220", 1, { reply: word.slice(0, 220) }), at221 = mk("rp-221", 2, { reply: word.slice(0, 221) });
+  const page = await open(t, { items: [at220, at221] }); if (!page) return;
+  assert.equal(await laPanel(page, at220).count(), 1, "a reply of 220 characters draws no panel");
+  assert.equal(await card(page, at220).getByRole("button", { name: "More of the reply" }).count(), 0, "a reply of 220 characters is folded");
+  assert.equal(await card(page, at221).getByRole("button", { name: "More of the reply", exact: true }).count(), 1, "a reply of 221 characters is not folded");
+});
+
+test("an opened reply stays open while the owner picks an option, and does not open the context", async (t) => {
+  const it = mk("rp-keep", 1, { context: LONG, reply: LA_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(card(page, it).getByRole("button", { name: "More of the reply", exact: true }), "no More of the reply button");
+  await card(page, it).getByRole("button", { name: "More of the reply", exact: true }).click();
+  assert.match(await page.locator(`#ctx-${it.id}`).getAttribute("class"), /clamp/, "More of the reply opened the context");
+  await need(card(page, it).getByRole("button", { name: "More context", exact: true }), "More of the reply changed the context's button");
+  await choose(page, it, "b"); // a pick repaints the card
+  await need(card(page, it).getByRole("button", { name: "Less", exact: true }), "the reply folded when the card repainted");
+  assert.ok((await laReplyLines(page, it)) > 3.5, "the reply folded when the card repainted");
+  assert.match(await page.locator(`#ctx-${it.id}`).getAttribute("class"), /clamp/);
+});
+
+// Enter on the reply's button keeps keyboard focus on it through the repaint that the press causes.
+test("Enter on More of the reply keeps focus on that button, which then reads Less", async (t) => {
+  const it = mk("rp-focus", 1, { reply: LA_LONG });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const more = card(page, it).getByRole("button", { name: "More of the reply", exact: true });
+  await need(more, "no More of the reply button on a long reply");
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  await need(card(page, it).getByRole("button", { name: "Less", exact: true }), "More of the reply did not become Less");
+  const at = await page.evaluate(() => ({ tag: document.activeElement.tagName, text: document.activeElement.textContent.trim(), controls: document.activeElement.getAttribute("aria-controls") }));
+  assert.deepEqual(at, { tag: "BUTTON", text: "Less", controls: "rp-" + it.id }, "focus did not stay on the reply's button after Enter");
+});
+
+test("a lane shows 'waits on lane <slug>' as one text run in the top row, after the wait, and adds no row", async (t) => {
+  const on = mk("ln-on", 1, { lane: "ci-done-comment" }), off = mk("ln-off", 2);
+  const page = await open(t, { items: [on, off] }); if (!page) return;
+  const top = card(page, on).locator(".top");
+  await need(top.getByText("waits on lane ci-done-comment", { exact: true }), "the top row has no single text run 'waits on lane ci-done-comment'");
+  assert.match((await top.innerText()).replace(/\s+/g, " "), /waited .* waits on lane ci-done-comment$/, "the lane does not follow the wait in the top row");
+  assert.equal(await card(page, on).getByText(/waits on lane/i).count(), 1, "the lane shows more than once on the card");
+  assert.equal(await laPanel(page, on).count(), 0, "a lane alone draws a last-answer panel");
+  assert.equal(await card(page, off).getByText(/waits on lane/i).count(), 0);
+  assert.ok(Math.abs((await laBox(card(page, on))).h - (await laBox(card(page, off))).h) <= 1, "the lane added height to the card");
+});
+
+test("on an open card the panel sits after the stake lines, before the context, and stays put while an option is picked", async (t) => {
+  const it = mk("pl-1a", 1, { holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it);
+  await laText(page, it);
+  const title = await laBox(c.locator(".title")), holds = await laBox(c.locator(".stake.holds")), due = await laBox(c.locator(".stake.due"));
+  const th = await laBox(laPanel(page, it)), ctx = await laBox(c.getByText("Which colour?", { exact: true })), opts = await laBox(c.locator(".opts"));
+  assert.ok(title.bottom <= holds.top + 1 && holds.bottom <= due.top + 1, "the stake lines are not first under the title");
+  assert.ok(th.top >= due.bottom - 1, `the panel starts at ${th.top}, above the last stake line's end at ${due.bottom}`);
+  assert.ok(th.bottom <= ctx.top + 1, `the panel ends at ${th.bottom}, below the context's start at ${ctx.top}`);
+  assert.ok(ctx.bottom <= opts.top + 1, "the context is not above the options");
+  const before = await laText(page, it), rel = th.top - (await laBox(c)).top;
+  await choose(page, it, "b"); // an unsent pick: nothing in the panel changes
+  assert.equal(await laText(page, it), before, "picking an option changed the panel");
+  assert.ok(Math.abs((await laBox(laPanel(page, it))).top - (await laBox(c)).top - rel) <= 1, "picking an option moved the panel");
+});
+
+test("a card with a saved answer keeps its receipt where it lands today, draws the thread below it, and shows the lane in the top row", async (t) => {
+  const it = mk("rc-thread", 7, { lane: "ci-done-comment", lastAnswer: { choice: "b", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const plain = mk("rc-plain", 8);
+  const page = await open(t, { items: [it, plain], answers: { ...laSaved(it, "a"), ...laSaved(plain, "a") } }); if (!page) return;
+  const c = card(page, it), rc = c.locator(".receipt:has(.changebtn)");
+  await need(rc, "the saved answer's receipt (with its Change button) is gone");
+  assert.match(await c.getAttribute("class"), /answered/);
+  assert.match(flat(await rc.innerText()), /You chose A: Red\./);
+  assert.doesNotMatch(flat(await rc.innerText()), /Blue|Reply:|Your last answer/, "the thread is inside the receipt");
+  const p = await laText(page, it);
+  assert.match(p, /Your last answer, Oct 29, 14:05 CDT/);
+  assert.match(p, /You chose B: Blue\./);
+  assert.match(p, /Reply: I added option C\. Pick again\./);
+  const r = await laBox(rc), th = await laBox(laPanel(page, it));
+  assert.ok(th.top >= r.bottom - 1, `the thread starts at ${th.top}, above the receipt's end at ${r.bottom}`);
+  const rp = await laBox(card(page, plain).locator(".receipt:has(.changebtn)")), at = (e, b) => b.top - e.top;
+  assert.ok(Math.abs(at(await laBox(c), r) - at(await laBox(card(page, plain)), rp)) <= 1, "the thread moved the receipt from where it lands today");
+  assert.match((await c.locator(".top").innerText()).replace(/\s+/g, " "), /Answered, filing pending .*waits on lane ci-done-comment$/, "the lane is not in the top row after the Answered pill");
+  assert.equal(await laPanel(page, plain).count(), 0, "a saved card with no thread fields drew a panel");
+  assert.deepEqual(await card(page, plain).evaluate((e) => [...e.children].map((k) => k.tagName + "." + k.className)), ["DIV.top", "H3.title", "DIV.receipt"], "a saved card with no thread fields is not drawn as today");
+});
+
+test("pressing Change on a saved card with a thread opens the card with one panel, between the title and the context", async (t) => {
+  const it = mk("rc-change", 7, { lastAnswer: { choice: "b", at: LA_AT }, reply: "I added option C. Pick again." });
+  const page = await open(t, { items: [it], answers: laSaved(it, "a") }); if (!page) return;
+  const c = card(page, it);
+  await laText(page, it);
+  await c.getByRole("button", { name: "Change", exact: true }).click();
+  await need(c.locator(".opts"), "Change did not open the card");
+  assert.doesNotMatch(await c.getAttribute("class"), /answered/);
+  await laText(page, it); // still exactly one panel
+  const title = await laBox(c.locator(".title")), th = await laBox(laPanel(page, it)), ctx = await laBox(c.getByText("Which colour?", { exact: true }));
+  assert.ok(th.top >= title.bottom - 1 && th.bottom <= ctx.top + 1, "the panel is not between the title and the context");
+});
+
+test("a card with none of lastAnswer, reply and lane draws as today, and so does one whose three fields are empty", async (t) => {
+  const plainD = mk("as-d", 1), plainT = { ...TASK, id: "as-t", n: 2 };
+  const emptyD = mk("em-d", 3, { reply: "", lane: "", lastAnswer: null }), emptyT = { ...TASK, id: "em-t", n: 4, reply: "", lane: "", lastAnswer: null };
+  const page = await open(t, { items: [plainD, plainT, emptyD, emptyT] }); if (!page) return;
+  const shape = (it) => card(page, it).evaluate((c) => ({ kids: [...c.children].map((e) => e.tagName + "." + e.className), top: c.querySelector(".top").innerText.replace(/No\. \d+/, "").replace(/\s+/g, " ").trim() }));
+  // The children of a plain open card, read from page.html at 2b66f6a3: a build that adds a wrapper or a row to a card with nothing to show fails here.
+  const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.opts", "P.ready", "DIV.alts", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "P.dest"] };
+  for (const [plain, empty] of [[plainD, emptyD], [plainT, emptyT]]) {
+    assert.equal(await laPanel(page, plain).count() + await laPanel(page, empty).count(), 0, `${plain.id}: a panel is drawn with nothing to show`);
+    assert.doesNotMatch(await card(page, plain).innerText() + await card(page, empty).innerText(), /Your last answer|Reply:|waits on lane/i);
+    assert.deepEqual((await shape(plain)).kids, TODAY[plain.kind], `${plain.id}: a card with no thread fields is not drawn as today`);
+    assert.deepEqual(await shape(empty), await shape(plain), `${empty.id}: empty fields change the card`);
+  }
+});
+
+for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken reply stay inside their card at 390 wide, open and saved, ${scheme} scheme`, async (t) => {
+  const url = "https://example.test/" + "very-long-path-segment-".repeat(6);
+  const fields = { lane: "a-very-long-lane-branch-slug-".repeat(4), lastAnswer: { choice: "b", note: url, at: LA_AT }, reply: url };
+  const open1 = mk("ov-open", 1, fields), saved1 = mk("ov-saved", 2, fields);
+  const page = await open(t, { items: [open1, saved1], answers: laSaved(saved1), scheme, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await laText(page, open1); await laText(page, saved1);
+  const m = await page.evaluate(() => ({
+    sw: document.documentElement.scrollWidth, iw: innerWidth,
+    out: [...document.querySelectorAll("article.card")].flatMap((c) => [...c.querySelectorAll(".top *, [aria-label^='Your last answer'] *, [aria-label='The reply'] *, [aria-label^='Your last answer'], [aria-label='The reply']")].filter((e) => e.getBoundingClientRect().right > c.getBoundingClientRect().right + 0.5).map((e) => c.id + " " + e.tagName + "." + e.className)),
+  }));
+  assert.ok(m.sw <= m.iw, `the page scrolls sideways: ${m.sw} over ${m.iw}`);
+  assert.deepEqual(m.out, [], "an element runs past its card's right edge");
+});
+
+// The list of fields an item may carry is the page's own, in one JSON block, so a writer and a guard read it and the page warns by it.
+// The block is read from the loaded page, as a browser parses it.
+test("page.html carries one itemFields JSON block whose list holds reply, lastAnswer and lane and every field a fixture item has", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  const blocks = await page.evaluate(() => [...document.querySelectorAll("script#itemFields")].map((e) => ({ type: e.getAttribute("type"), text: e.textContent })));
+  assert.equal(blocks.length, 1, 'page.html has no single <script type="application/json" id="itemFields">');
+  assert.equal(blocks[0].type, "application/json");
+  const list = JSON.parse(blocks[0].text);
+  assert.ok(Array.isArray(list) && list.every((f) => typeof f === "string"), "itemFields is not a list of strings");
+  assert.equal(new Set(list).size, list.length, "itemFields repeats a field");
+  for (const f of ["reply", "lastAnswer", "lane"]) assert.ok(list.includes(f), `itemFields lacks ${f}`);
+  for (const f of [...Object.keys(DECISION), ...Object.keys(TASK)]) assert.ok(list.includes(f), `itemFields lacks ${f}, a field the page reads today`);
+});
+
+// Rule ux-machine-text-hidden: the warning is one plain sentence, and the field names and the word itemFields sit in a closed disclosure.
+test("an item with a field the page does not list shows one plain warning, and its field names sit in a closed disclosure", async (t) => {
+  const odd = mk("odd-field", 1, { zzflavour: "mint", zzspin: 3 });
+  const page = await open(t, { items: [odd] }); if (!page) return;
+  await need(card(page, odd), "the item with an unknown field is not drawn");
+  const warn = card(page, odd).locator('[role="status"]:visible');
+  await need(warn, "the unknown-field warning is not one visible status line");
+  const shown = flat(await warn.innerText());
+  assert.doesNotMatch(shown, /zzflavour|zzspin|itemFields/, `the visible warning names a field: ${shown}`);
+  assert.equal((shown.match(/[.!?](\s|$)/g) || []).length, 1, `the visible warning is not one sentence: ${shown}`);
+  const box = card(page, odd).locator("details").filter({ hasText: "zzflavour" });
+  await need(box, "the field names are not in a closed disclosure");
+  assert.equal(await box.evaluate((d) => d.open), false, "the disclosure starts open");
+  const NAMES = ["zzflavour", "zzspin", "itemFields"];
+  for (const name of NAMES) {
+    assert.ok((await box.getByText(name).count()) >= 1, `the disclosure does not hold ${name}`);
+    assert.equal(await box.getByText(name).first().isVisible(), false, `${name} shows before the disclosure is opened`);
+  }
+  await box.locator("summary").click();
+  assert.equal(await box.evaluate((d) => d.open), true, "the disclosure did not open");
+  for (const name of NAMES) assert.equal(await box.getByText(name).first().isVisible(), true, `${name} is not shown once the disclosure is open`);
+});
+
+test("items with only listed fields show no unknown-field warning, new fields included", async (t) => {
+  const fine = mk("fine-fields", 1, { reply: "Pick again.", lane: "some-lane", lastAnswer: { choice: "a", note: "n", at: LA_AT } });
+  const page = await open(t, { items: [fine, DECISION, TASK] }); if (!page) return;
+  assert.doesNotMatch(await page.locator("body").innerText(), /lastAnswer/, "a listed field was reported as unknown");
+  assert.equal(await page.locator(".status.broken, [role=alert]").count(), 0, "a sound item shows a warning");
 });
 
 // An arbiter ruling (decision session-tiers, Arbiter, "On the page"): the writer files it as a closed item with arbiter: true,
