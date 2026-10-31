@@ -1906,7 +1906,7 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
-MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches"}
+MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "standingGrant"}
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
@@ -2027,6 +2027,7 @@ def load_config(root, base, path):
     rc, am = m.get("requiredChecks", "protection"), m.get("afterMerge", [])
     for ok, k in ((m.get("method", "merge") in ("merge", "squash", "rebase"), "method"),
                   (isinstance(m.get("deleteBranch", True), bool), "deleteBranch"),
+                  (isinstance(m.get("standingGrant", True), bool), "standingGrant"),
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
@@ -2469,6 +2470,8 @@ def main(argv, host=None, lock=None):
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
         refuse_bad_pr(info, draft_ok=True)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
         cfg = load_config(root, info["base"], a.config)
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
+            raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR.")
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
