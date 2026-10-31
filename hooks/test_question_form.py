@@ -635,20 +635,22 @@ def case_departs_out_of_scope_passes():
     page("an update of the status only passes", "update", entry_of({"status": "closed"}), None)
 
 
-def case_departs_str_replace():
-    def replace(name, old, new, want):
-        page("a str_replace " + name, "str_replace",
-             {"collection": "items", "doc_id": DOC, "field": "context", "old_str": old, "new_str": new}, want)
+def context_replace(name, old, new, want):
+    """One str_replace on a page item's `context`, judged by item_hit and by the guard."""
+    page("a str_replace " + name, "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": old, "new_str": new}, want)
 
-    replace("that drops the Departs from line from context is refused", DEPARTS, "", DEPARTS_REFUSAL)
-    replace("that drops the line and keeps the form is refused", form_text(), form_text(departs=None),
-            DEPARTS_REFUSAL)
-    replace("that swaps the line for another valid line is allowed", DEPARTS,
-            "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job", None)
-    replace("whose old_str holds no Departs from line is allowed", "The lane merge-role-allow would do it.",
-            "The lane would do it.", None)
-    replace("that keeps the line and changes the prose is allowed", form_text(), form_text() + "\nChanged prose.",
-            None)
+
+def case_departs_str_replace():
+    context_replace("that drops the Departs from line from context is refused", DEPARTS, "", DEPARTS_REFUSAL)
+    context_replace("that drops the line and keeps the form is refused", form_text(), form_text(departs=None),
+                    DEPARTS_REFUSAL)
+    context_replace("that swaps the line for another valid line is allowed", DEPARTS,
+                    "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job", None)
+    context_replace("whose old_str holds no Departs from line is allowed", "The lane merge-role-allow would do it.",
+                    "The lane would do it.", None)
+    context_replace("that keeps the line and changes the prose is allowed", form_text(),
+                    form_text() + "\nChanged prose.", None)
 
 
 def case_departs_ids_and_order():
@@ -678,6 +680,83 @@ def case_departs_reasons():
             named = [word for word in PAGE_ONLY if word in text] if surface == "chat" else []
             check("question departs: the %s reason names its line and no field the chat box lacks" % surface,
                   not named, named)
+
+
+# A no-change word refuses only when it opens the change side or is the whole side. A word later in a
+# change names what the change does: "keeps its timeout" and "stays on the list" are changes.
+OPENS_CHANGE_SIDE = [
+    "Departs from: main — stays the existing ask",
+    "Departs from: x.py:f — keeps today's behaviour",
+    "Departs from: x — already does this",
+    "Departs from: x — none",
+    "Departs from: x — same as main",
+    "Departs from: x — as before",
+    "Departs from: x — no difference",
+    "Departs from: x — identical to main",
+]
+LATER_IN_CHANGE_SIDE = [
+    "Departs from: x.py:f — adds a retry; the old call keeps its timeout",
+    "Departs from: x — moves the list; it already loads from cache",
+    "Departs from: x — the phone app stays on the list when offline",
+]
+# The template copied verbatim, with an angle-bracket placeholder on either side. Each is refused.
+PLACEHOLDERS = [
+    "Departs from: <what on main> — <what changes>",
+    "Departs from: x — <what changes>",
+    "Departs from: <what on main> — adds y",
+]
+# Line forms that a Departs from line may take: a bullet, a bold label, a star bullet, a double hyphen
+# as the separator, and an em dash with no spaces. Each passes.
+LINE_FORMS = [
+    "- Departs from: x — adds y",
+    "**Departs from:** x — adds y",
+    "* Departs from: x — adds y",
+    "Departs from: x -- adds y",
+    "Departs from: x—adds y",
+]
+
+
+def case_departs_no_change_word_opens_the_side():
+    for body in OPENS_CHANGE_SIDE:
+        dp_chat("a change side that opens with a no-change word is refused: %r" % body, body, DEPARTS_REFUSAL)
+        dp_page("a page change side that opens with a no-change word is refused: %r" % body, body, DEPARTS_REFUSAL)
+    for body in LATER_IN_CHANGE_SIDE:
+        dp_chat("a no-change word later in the change side passes: %r" % body, body, None)
+        dp_page("a page no-change word later in the change side passes: %r" % body, body, None)
+
+
+def case_departs_placeholders_are_refused():
+    for body in PLACEHOLDERS:
+        dp_chat("a template placeholder %r is refused as question-departs" % body, body, DEPARTS_REFUSAL)
+        dp_page("a page template placeholder %r is refused as question-departs" % body, body, DEPARTS_REFUSAL)
+
+
+def case_departs_line_forms_pass():
+    for body in LINE_FORMS:
+        dp_chat("a line form %r passes" % body, body, None)
+        dp_page("a page line form %r passes" % body, body, None)
+    # CRLF line endings: the same form lines, joined with CR LF. The line's \r is no part of either side.
+    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS) if line)
+    box = chat_box()
+    box["questions"][0]["question"] = crlf
+    chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
+    page("a decision with CRLF line endings and a valid Departs from line passes", "set",
+         entry_of(dict(ITEM92, context=crlf)), None)
+
+
+def case_departs_str_replace_forms():
+    context_replace("that swaps a bold Departs from line for one whose change opens with keeps is refused",
+                    "**Departs from:** x — adds X", "**Departs from:** x — keeps X", DEPARTS_REFUSAL)
+    context_replace("that swaps a plain Departs from line for one whose change opens with keeps is refused",
+                    "Departs from: x — adds X", "Departs from: x — keeps X", DEPARTS_REFUSAL)
+    context_replace("that swaps a plain Departs from line for a valid one with keeps later in the change is allowed",
+                    "Departs from: x — adds X", "Departs from: x — adds X; the old call keeps its timeout", None)
+    # The edit holds only the change side. Neither string carries the label, so the guard sees no Departs
+    # from line in the edit and judges the new change side alone.
+    context_replace("that swaps the change side ' — adds X' for ' — keeps X' is refused",
+                    " — adds X", " — keeps X", DEPARTS_REFUSAL)
+    context_replace("that swaps the change side ' — adds X' for ' — moves X' is allowed", " — adds X", " — moves X",
+                    None)
 
 
 # ------------------------------------------------------------------ call_judge
@@ -726,6 +805,8 @@ def main():
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
+                 case_departs_no_change_word_opens_the_side, case_departs_placeholders_are_refused,
+                 case_departs_line_forms_pass, case_departs_str_replace_forms,
                  case_call_judge):
         try:
             case()

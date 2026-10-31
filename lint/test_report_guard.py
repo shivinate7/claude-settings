@@ -92,10 +92,25 @@ def write_transcript(records, tmpdir, name="transcript.jsonl"):
     return path
 
 
-def run_guard(guard, hook, raw_stdin=None, env=None):
+# A guard run with the modules named in `block` set to None in sys.modules, so `import <name>` raises
+# ImportError in that process. The guard's folder leads sys.path, as it does when run as a script.
+BLOCK_IMPORTS_CODE = (
+    "import json, os, runpy, sys\n"
+    "sys.path.insert(0, os.path.dirname(sys.argv[1]))\n"
+    "for name in json.loads(sys.argv[2]):\n"
+    "    sys.modules[name] = None\n"
+    "sys.argv = sys.argv[1:2]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
+
+
+def run_guard(guard, hook, raw_stdin=None, env=None, block=()):
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
+    argv = [sys.executable, guard]
+    if block:
+        argv = [sys.executable, "-c", BLOCK_IMPORTS_CODE, guard, json.dumps(list(block))]
     run = subprocess.run(
-        [sys.executable, guard],
+        argv,
         input=stdin_text,
         capture_output=True,
         text=True,
@@ -1092,7 +1107,7 @@ class PickGuardTests(unittest.TestCase):
         with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as f:
             json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
 
-    def verdict(self, reply, calls=(), landed=False, repo=None):
+    def verdict(self, reply, calls=(), landed=False, repo=None, block=()):
         records = [human("decide")]
         if landed:
             records.append(tool_use_msg("Bash", {"command": "git commit -m x"}))
@@ -1104,7 +1119,7 @@ class PickGuardTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                 "cwd": repo or self.repo}
-        run = run_guard(REPORT_GUARD, hook)
+        run = run_guard(REPORT_GUARD, hook, block=block)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -1374,6 +1389,29 @@ class PickGuardTests(unittest.TestCase):
         with open(REPORT_GUARD, encoding="utf-8") as f:
             source = f.read()
         self.assertRegex(source, r"(?m)^\s*(?:import question_form|from question_form import)")
+
+    def test_dp_import_failure_keeps_the_pick_refusal(self):
+        # Catches: question_form cannot import, so the Departs from check raises. On the unlanded turn the
+        # pick refusal and that check share one try, so the error drops the pick refusal too. The Departs
+        # from check fails open: no Departs-from reason prints, and the pick refusal still does.
+        for label, reply in (("valid line", self.PICK), ("no line", self.PICK_BARE)):
+            for landed in (False, True):
+                with self.subTest(line=label, landed=landed):
+                    out = self.verdict(reply, landed=landed, block=("question_form",))
+                    self.assertIsNotNone(out, "the pick passed with question_form unable to import")
+                    self.assertEqual(out["decision"], "block")
+                    self.assertIn("Pick guard", out["reason"])
+                    self.assertNotIn("Departs-from guard", out["reason"])
+
+    def test_dp_green_line_forms_in_input_needed_pass(self):
+        # Catches: a Departs from line written as a bullet or a bold label refused as missing. A bold label
+        # reads as a new report label, which ends the Input Needed item at that line.
+        text = "lint/report_guard.py pick check — it also needs a Departs from line"
+        for line in ("> - Departs from: " + text, "> **Departs from:** " + text, "> * Departs from: " + text):
+            for landed in (False, True):
+                with self.subTest(line=line, landed=landed):
+                    reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
+                    self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
 
 
 class ConfigReportTests(unittest.TestCase):
