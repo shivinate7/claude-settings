@@ -7,6 +7,8 @@ None of them may read PASS. The last class plans the real checks job: every step
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 Run: python3 lint/test_ci_job.py
 """
+import functools
+import json
 import os
 import re
 import shutil
@@ -590,15 +592,34 @@ class LintTools(Job):
         self.assertIn("New check", lines[0])
 
 
+@functools.lru_cache(maxsize=None)
+def pipx_runs_pinned_ruff():
+    """True when pipx can run code_check's pinned ruff. The probe is `pipx run ruff==<pin> --version`, the pin read from
+    standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
+    if not shutil.which("pipx"):
+        return False
+    with open(os.path.join(CHECKOUT, "actions", "code-check", "standard.json"), encoding="utf-8") as f:
+        pin = json.load(f)["tools"]["ruff"]
+    try:
+        return subprocess.run(["pipx", "run", "ruff==" + pin, "--version"], capture_output=True,
+                              timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 class CodeCheckFromCopiedInstall(Job):
     """A cloud install copies bin/ci-job into ~/.claude/bin, with no symlink and no actions/ beside it. Its
-    code-check step must still reach code_check.py, from the checkout the global rules file names, or read unknown."""
+    code-check step must still reach code_check.py, from the checkout the global rules file names, or read unknown.
+    In the repo under test, with no actions/code-check, the step must FAIL and never borrow that other checkout."""
 
     # The branch builder and the git helper are LintTools' (one home): this class calls them, it does not copy them.
     git = LintTools.git
     lane = LintTools.lane
     CODE = step("Code check", uses="./actions/code-check")
     LINT = ("--lint", "--base", "origin/main")
+    # The in-repo run's tree: what ci-job imports, plus the root ruff.toml that sets ruff's rules. No actions/ and no
+    # shell files, so code_check's run over the tree stays small.
+    IN_REPO = ("bin/ci-job", "bin/verdict", "hooks/*.py", "lint/workflow_steps.py", "ruff.toml")
 
     def install(self, claude_md_checkout):
         """A copied install: ci-job and verdict as plain files, hooks/ and lint/ beside them, and a global rules file
@@ -615,13 +636,15 @@ class CodeCheckFromCopiedInstall(Job):
         return os.path.join(cfg, "bin", "ci-job"), cfg
 
     def test_the_code_check_step_reaches_code_check_py(self):
+        if not pipx_runs_pinned_ruff():
+            self.skipTest("pipx cannot run code_check's pinned ruff here: no pipx, or offline with no cached copy")
         self.lane({"a.py": 'print("fine")\n'})
         ci_job, cfg = self.install(CHECKOUT)
         rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
         with open(self.log, encoding="utf-8") as f:
             log = f.read()
-        self.assertRegex(log, r"(?m)^code-check: (PASS|FAIL)", out + log)  # code_check.py ran and printed its verdict
-        self.assertIn(self.verdicts(lines), (["PASS"], ["unknown"]), out)  # a clean diff is never a FAIL
+        self.assertRegex(log, r"(?m)^code-check: PASS$", out + log)  # code_check.py ran and passed the clean diff
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
 
     def test_a_checkout_with_no_code_check_reads_unknown_not_fail(self):
         self.lane({"a.py": 'print("fine")\n'})
@@ -631,6 +654,23 @@ class CodeCheckFromCopiedInstall(Job):
         rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("code_check.py", lines[0], out)
+
+    def test_an_in_repo_run_with_no_code_check_fails_and_never_borrows_a_pointer_copy(self):
+        tar = self.root + ".tar"
+        subprocess.run(["git", "archive", "--format=tar", "-o", tar, "HEAD", "--", *self.IN_REPO], cwd=CHECKOUT,
+                       check=True, env=ENV)
+        shutil.unpack_archive(tar, self.root)  # the repo under test: ci-job's own checkout, with no actions/ in it
+        self.lane({"a.py": 'print("fine")\n'})
+        cfg = tempfile.mkdtemp(prefix="cfg-", dir=RUN_FOLDER)
+        with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("@%s/CLAUDE.md\n" % CHECKOUT)  # a checkout that does have actions/code-check
+        rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=os.path.join(self.root, "bin", "ci-job"),
+                                      env={"CLAUDE_CONFIG_DIR": cfg})
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out + log)
+        self.assertNotRegex(log, r"(?m)^code-check: ", out + log)  # the pointer copy's code_check never ran
+        self.assertIn("code_check.py", log, out + log)  # main's reason: the in-repo file is not there
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
