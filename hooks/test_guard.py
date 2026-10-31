@@ -9109,6 +9109,21 @@ sh("frozen dup: a relative redirect inside the live pin stays frozen", "echo x >
    "frozen-path", cwd=LIVE_PIN)
 sh("frozen dup: a redirect onto a frozen file from a plain folder stays frozen",
    "echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A DUP WRITTEN BEFORE A PATH. `2>&1 PATH` is one redirect and one argument: the `2>` is joined to
+# `&1`, so the path after them is an argument, not the target of a `2>`. Each ALLOW reads the path
+# or closes a descriptor. Each DENY still writes the path, through cp or tee.
+sh("frozen dup: cat 2>&1 before a frozen settings file is allowed", "cat 2>&1 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: grep 2>&1 before a frozen hook is allowed", "grep x 2>&1 " + CFG_HOOK,
+   "allow", cwd=NOGIT)
+sh("frozen dup: echo >&2 before a frozen settings file is allowed", "echo x >&2 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: ls >&- before a frozen settings file is allowed", "ls >&- " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
+   "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
+   "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
