@@ -198,7 +198,7 @@ class SigningOptOut(unittest.TestCase):
     def test_shell_twin_sourced_commit_does_not_sign(self):
         env, log = signing_env(self.case)
         repo = self.new_repo(env)
-        script = 'set -e; source "$1"; git commit -q --allow-empty -m shell'
+        script = 'set -e; source "$1"; git commit -q --allow-empty -m shell; git tag -a v1 -m shell'
         r = subprocess.run(["bash", "-c", script, "bash", TWIN_SH], cwd=repo, env=env,
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, "sourcing lint/_test_git.sh failed:\n" + r.stderr)
@@ -212,7 +212,8 @@ class SigningOptOut(unittest.TestCase):
                 "const { pathToFileURL } = await import('node:url');\n"
                 "await import(pathToFileURL(%s).href);\n"
                 "execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'js'], { cwd: %s, stdio: 'inherit' });\n"
-                % (json.dumps(TWIN_MJS), json.dumps(repo)))
+                "execFileSync('git', ['tag', '-a', 'v1', '-m', 'js'], { cwd: %s, stdio: 'inherit' });\n"
+                % (json.dumps(TWIN_MJS), json.dumps(repo), json.dumps(repo)))
         r = subprocess.run([shutil.which("node"), "--input-type=module", "-e", code], cwd=repo, env=env,
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, "importing lint/_test_git.mjs failed:\n" + r.stderr)
