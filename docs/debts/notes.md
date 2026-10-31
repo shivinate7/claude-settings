@@ -726,3 +726,10 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- role-model-late-round-line: in guard rule agent-role-model, any line that starts `Round 2 of 3` or `Round 3 of 3` lets a reviewer run Sonnet, even inside a round 1 brief that quotes a later round. Decision: agent-model-cap.
+- role-model-env-any-value: a spawn with no model passes when `CLAUDE_CODE_SUBAGENT_MODEL` holds any value, opus too. An env write already asks. Decision: agent-model-cap.
+- role-model-qualifier-copies: `ROLE_ABOVE_ROW_ROLES` and `ROLE_REVIEWER_FREE_ROUNDS` in hooks/guard.py copy the meaning of the audit-Explore and reviewer round 2-3 table rows; they are not read from the table. Decision: agent-model-cap.
+- role-model-unranked-reviewer-clause: in guard rule agent-role-model, the `named < top` clause on the reviewer round 2-3 exemption has no test and no mutant; step-up already denies the plain spelling. Decision: agent-model-cap.
+- role-model-unranked-opus-row: an unranked model such as `fable` on Plan, designer or design-reviewer passes with no ask, as on main; the record and tests do not say so. Decision: agent-model-cap.
+- role-model-spelling-other-rules: only the row check folds role case and space; the haiku floor, the step-up and the Opus ask still match the role exactly. Decision: agent-model-cap.
+- role-model-unranked-branch-no-mutant: the unranked-model branch of guard rule agent-role-model has no mutant in hooks/mutate_guard.py; the suite still catches its removal (3 red cases). Decision: agent-model-cap.
