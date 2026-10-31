@@ -34,13 +34,15 @@ guard rule, so the watcher does the waiting and the session is told once.
   calls this session's, and exits 2 at once for any other pid. A pid is this session's in three cases. It
   descends from the session root. Or its walk reaches init with this session's tag on the pid or an
   ancestor below init. Or it has PPID 1 and a descendant holds the tag. The last covers the STALL report's first pid, the
-  untagged stub. The descendant scan skips the helper's own chain and stops at depth 8 or 512 pids. Exit
+  untagged stub. It also owns a foreign PPID-1 process with a descendant this session started; the harm
+  is a wait, never a signal. Unmeasured: a stub adopted by a subreaper (PPID above 1, such as
+  `systemd --user`) reads foreign, so the helper exits 2 on it. The descendant scan skips the helper's own chain and stops at depth 8 or 512 pids. Exit
   0 when the pid ends, 124 at the timeout (default 540 s), 3 when a liveness read fails (unknown, never
   read as ended). A foreground Bash call stops at 120 s by default, so the STALL report says to run a long
   wait with `run_in_background`. It prints a `still waiting` line every 120 s, so a background wait draws
   no STALL. It cannot read the job's exit code: the job is not its child. Start-time check against pid
-  reuse. Not on Windows. Cost: one process per wait, no file written. At start, the ownership walk runs a
-  few short `ps` reads and at most one process-table read. While it waits, four `/proc` reads a second
+  reuse. Not on Windows. Cost: one process per wait, no file written. At start, the ownership walk runs up to
+  three short `ps` reads per ancestor level and at most one process-table read (unmeasured count). While it waits, four `/proc` reads a second
   on Linux, one `ps` a second elsewhere. Unmeasured: no test pins the cost.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
