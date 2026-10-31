@@ -18,7 +18,8 @@ Advisory, fail-open: any error prints one stderr line and exits 0.
 This hook is also the owner feedback inbox's capture (decision owner-feedback-inbox). Every
 UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md, with its
 Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
-capture. A notice (a prompt that starts with a shared_names.MACHINE_TAGS tag) is never saved.
+capture. A notice or an agent hand-back (a prompt that starts with a shared_names.MACHINE_TAGS
+entry) is never saved.
 `--agent` never reads stdin and never saves. The Stop guard that reads the inbox, and decides which
 messages need items, is feedback_guard.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
 clock; tests set it.
