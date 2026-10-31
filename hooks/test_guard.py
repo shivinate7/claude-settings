@@ -7972,6 +7972,10 @@ ROLE_LINES = {
     "newest-wins": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS),
     "pending-newest": role_call("g1", RUNNER_TAGS) + [role_use("g2", GET_SESSION)],
     "foreign-newest": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
+    # trust-card-in-build shapes: an own record with no cs-build tag, and foreign records beside or in place of it.
+    "untagged": role_call("g1", ["cs-repo:o/r"]),
+    "other-untagged": role_call("g1", ["cs-repo:o/r"], session=ROLE_OTHER),
+    "foreign-lane-newest": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
 }
 
 
@@ -8080,6 +8084,56 @@ role_deny("a lone quote inside a string does not hide the real call",
           'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 role_deny("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+
+# =========================================================================== 5f. the trust card in a cs-build session
+#
+# Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a
+# cs-build: tag may not call the two tools that open the owner's trust card. The incident: on 2026-10-30,
+# 16:19-17:06 CDT, a coordinator opened the trusted-device card, and the card blocked every message into
+# that session. The tags are read as merge-role-proof reads them (same transcript fixtures, same env
+# id), and the read fails closed: no own record is a refusal.
+TRUST_RULE = "trust-card-in-build"
+TRUST_TOOLS = {
+    "mcp__claude-code-remote__confirm_repository_trust": {"content_digest": "0" * 64},
+    "mcp__claude-code-remote__request_computer_folder": {
+        "environment_id": "env_X", "computer_name": "box", "folder": "repo"},
+}
+# The remedy steers to get_session. It never tells the session to call either tool.
+TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
+
+
+def trust_deny(name, tool, transcript, carries=()):
+    """A trust-card call the guard refuses. The reason names its rule, and never either tool."""
+    add("trust-card-in-build: " + name, "deny", rule=TRUST_RULE, tool=tool, cwd=NOGIT, lacks=TRUST_NAMED,
+        carries=carries, transcript=transcript, env=ROLE_ENV, **TRUST_TOOLS[tool])
+
+
+def trust_allow(name, tool, transcript):
+    """A call the guard lets through silently."""
+    add("trust-card-in-build: " + name, "allow", tool=tool, cwd=NOGIT, silent=True, transcript=transcript,
+        env=ROLE_ENV, **TRUST_TOOLS.get(tool, {}))
+
+
+for _trust_tool in TRUST_TOOLS:
+    _trust_word = _trust_tool.rsplit("__", 1)[1]
+    trust_deny(_trust_word + " in a coordinator session is refused", _trust_tool, role_path("coordinator"))
+    trust_deny(_trust_word + " in a lane session is refused", _trust_tool, role_path("lane"))
+    trust_allow(_trust_word + " in a session whose record has no cs-build tag allows", _trust_tool,
+                role_path("untagged"))
+    # No own record to read is a refusal, and the reason steers to get_session alone, then a retry.
+    for _trust_why, _trust_file in (
+        ("no get_session record", "no-record"),
+        ("a get_session result that is not JSON", "not-json"),
+        ("only a record of another session, with no tags", "other-untagged"),
+    ):
+        trust_deny(_trust_word + " with " + _trust_why + " is refused", _trust_tool, role_path(_trust_file),
+                   carries=("get_session", "alone", ("retry", "Retry")))
+    # The own-id filter: a newer foreign cs-build:lane record is not this session's tag.
+    trust_allow(_trust_word + " beside a newer record of another session that is tagged allows", _trust_tool,
+                role_path("foreign-lane-newest"))
+trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
+            role_path("lane"))
 
 
 # =========================================================================== 5d. cite by id
