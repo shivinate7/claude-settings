@@ -144,8 +144,9 @@ is `unknown`, never `in shape`.
 
 `$PY $P/lint/compliance_probes.py supersede .` finds child text that departs from a shared rule and names
 no known exemption. A claude-settings rule wins over such text. The fix goes in the child: rewrite the
-text, or name the exemption. The probe reads the child's tracked `CLAUDE.md` files (any folder), the root
-`AGENTS.md` and `.claude/**/*.md`, a paragraph at a time: consecutive lines are joined, and a fenced code
+text, or name the exemption.
+The probe reads the child's tracked `CLAUDE.md` files (any folder), the root
+`AGENTS.md` and `.claude/**/*.md`, a paragraph at a time. Consecutive lines are joined. A fenced code
 block is never read. A file reached twice, by a symlink, is read once. It reads Markdown only, and never
 edits or pushes to the child.
 
@@ -154,8 +155,8 @@ in the parent clone. A root whose own rule files hold the same anchors is a clau
 
 Departure wording, in one sentence, in any case:
 
-- a cue (override, overrides, overridden, "instead of", "unlike", "do not apply", "does not apply", "don't
-  apply") beside a shared rule: global, shared or parent, then a rule noun (rule, ruling, instruction,
+- a cue (override, overrides, overridden, "instead of", "unlike", "do not apply", "does not apply", and the
+  contracted forms) beside a shared rule: global, shared or parent, then a rule noun (rule, ruling, instruction,
   `CLAUDE.md`) within three words; or `claude-settings` alone.
 - "never inherited" or "not inherited" beside a rule word: rule, ruling, designation, tier,
   `claude-settings`, `CLAUDE.md`.
