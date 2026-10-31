@@ -1233,9 +1233,19 @@ class Supersede(unittest.TestCase):
         self.assertNotIn(anchor, live_anchors())
         return anchor
 
-    def child(self, *lines, rel="CLAUDE.md"):
-        """A child repo whose `rel` holds `lines`, so line n of the file is `lines[n - 1]`."""
-        return Repo(self).write(rel, "\n".join(lines) + "\n")
+    def child(self, *paragraphs, rel="CLAUDE.md"):
+        """A child repo whose `rel` holds `paragraphs`, a blank line between each. The group reads a paragraph as one
+        unit, so a case that wants two units gives two arguments. `starts` gives the line each one begins at."""
+        return Repo(self).write(rel, "\n\n".join(paragraphs) + "\n")
+
+    @staticmethod
+    def starts(*paragraphs):
+        """The first line number of each paragraph in the file `child` writes."""
+        first, line = [], 1
+        for text in paragraphs:
+            first.append(line)
+            line += text.count("\n") + 2
+        return first
 
     def test_a_departure_with_no_exemption_is_red(self):
         code, out = self.child(self.DEPARTS).run("supersede")
@@ -1267,21 +1277,22 @@ class Supersede(unittest.TestCase):
         self.assertIn("  unknown exemption rule:?: CLAUDE.md:1: " + line, out.splitlines())
         self.assertNotIn("known exemption, passes", out)
 
-    def test_a_bare_rule_mention_or_an_exemption_on_another_line_still_departs(self):
+    def test_a_bare_rule_mention_or_an_exemption_in_another_paragraph_still_departs(self):
         live = self.anchor()
-        repo = self.child("%s See rule:%s." % (self.DEPARTS, live),         # a bare mention, no "known exemption"
-                          "%s Exemption: rule:%s" % (self.DEPARTS, live),   # "exemption" is not "known exemption"
-                          self.DEPARTS,                                     # its exemption sits on the next line
-                          "Known exemption: rule:%s" % live)
-        code, out = repo.run("supersede")
+        paragraphs = ("%s See rule:%s." % (self.DEPARTS, live),         # a bare mention, no "known exemption"
+                      "%s Exemption: rule:%s" % (self.DEPARTS, live),   # "exemption" is not "known exemption"
+                      self.DEPARTS,                                     # its exemption sits in the next paragraph
+                      "Known exemption: rule:%s" % live)
+        first = self.starts(*paragraphs)
+        code, out = self.child(*paragraphs).run("supersede")
         self.assertEqual(code, 1, out)
         self.assertTrue(head(out).startswith("supersede: out - "), out)
         self.assertNotIn("known exemption, passes", out)
-        for number in (1, 2, 3):
+        for number in first[:3]:
             self.assertEqual(out.count("  departs, no exemption: CLAUDE.md:%d: " % number), 1, out)
-        # The line that holds only the exemption departs from nothing, and its rule is live: no flag of either kind.
+        # The paragraph that holds only the exemption departs from nothing, and its rule is live: no flag of either kind.
         flags = [i for i in out.splitlines()[1:] if i.startswith(("  departs", "  unknown exemption"))]
-        self.assertEqual([i for i in flags if "CLAUDE.md:4:" in i], [], out)
+        self.assertEqual([i for i in flags if "CLAUDE.md:%d:" % first[3] in i], [], out)
 
     def test_lines_that_agree_with_or_quote_a_shared_rule_are_not_flagged(self):
         own = self.unlisted("own-local-rule")
@@ -1312,9 +1323,20 @@ class Supersede(unittest.TestCase):
     def test_unreadable_rule_text_or_no_anchors_is_unknown(self):
         # The departure line would be red if the group went on: unknown must come first, as exit 2 and no item.
         root = self.child(self.DEPARTS).root
-        for name, patch in (("unreadable", {"side_effect": OSError("no such file")}), ("empty", {"return_value": ""}),
-                            ("no anchors", {"return_value": "# Rules\n\nNo anchors here.\n"})):
-            with self.subTest(rule_text=name), mock.patch.object(rule_audit, "rule_text", **patch):
+        real, live_root = rule_audit.rule_text, os.path.realpath(rule_audit.ROOT)
+
+        def broken(text):
+            """rule_text as it is for any other root (a child has no rule files), and `text` for the live rules:
+            the group may read the live rules once or twice, and the child's root in between, in either order."""
+            def rule_text(path=rule_audit.ROOT):
+                if os.path.realpath(path) != live_root:
+                    return real(path)
+                if text is None:
+                    raise OSError("no such file")
+                return text
+            return rule_text
+        for name, text in (("unreadable", None), ("empty", ""), ("no anchors", "# Rules\n\nNo anchors here.\n")):
+            with self.subTest(rule_text=name), mock.patch.object(rule_audit, "rule_text", broken(text)):
                 code, out = in_process(root, "supersede")  # load_probes runs inside the patch, so a `from` import sees it
                 self.assertEqual(code, 2, out)
                 self.assertTrue(head(out).startswith("supersede: unknown"), out)
@@ -1338,21 +1360,22 @@ class Supersede(unittest.TestCase):
                                  (0, "supersede: n/a - this is claude-settings"), done.stderr)
 
     FORMS = (
-        "This repo's review gate is not inherited by its sub-folders.",
-        "These briefs override the global lane cap.",
+        "This repo's review rule is not inherited by its sub-folders.",
+        "These briefs override the global lane rule.",
         "This file overrides the shared review rules.",
-        "We run a two-round review instead of the parent review cap.",
+        "We run a two-round review instead of the parent review rule.",
         "Unlike the claude-settings default, we merge on green.",
         "The shared rules do not apply to this folder.",
         "The global rule does not apply to the docs folder.",
         "THE DESIGNATION IS NEVER INHERITED.",
-        "The shared rules do not apply, and the designation is never inherited.",  # two forms, one line: one flag
+        "The shared rules do not apply, and the designation is never inherited.",  # two forms, one paragraph: one flag
     )
 
-    def test_each_override_form_is_flagged_once(self):
+    def test_each_departure_form_is_flagged_once(self):
+        first = self.starts(*self.FORMS)
         code, out = self.child(*self.FORMS).run("supersede")
         self.assertEqual((code, head(out)), (1, "supersede: out - %d line(s) to read in 1 file(s)" % len(self.FORMS)), out)
-        for number, line in enumerate(self.FORMS, 1):
+        for number, line in zip(first, self.FORMS):
             with self.subTest(line=line):
                 self.assertEqual(out.count("CLAUDE.md:%d:" % number), 1, out)
                 self.assertIn("  departs, no exemption: CLAUDE.md:%d: %s" % (number, line), out.splitlines())
@@ -1374,31 +1397,148 @@ class Supersede(unittest.TestCase):
         code, out = repo.run("supersede")
         self.assertEqual((code, out.splitlines()), (0, ["supersede: in shape - 1 file(s) read"]), out)
 
-    def test_a_long_line_is_cut_to_160_characters(self):
+    TECHNICAL = (
+        "Run `npx tsc` instead of the global tsc.",
+        "A subclass overrides the parent method.",
+        "This file overrides the global ESLint config.",
+        "Env vars are not inherited by the spawned worker.",
+        "Unlike the shared pool, each test gets its own database.",
+        # The old wording of three forms above, now narrower: the rule noun or the cue word is missing, or sits in another sentence.
+        "This repo's review gate is not inherited by its sub-folders.",
+        "These briefs override the global lane cap.",
+        "We run a two-round review instead of the parent review cap.",
+        "Env vars are not inherited by workers. See the rule list for the full set.",
+    )
+
+    def test_technical_prose_with_departure_words_is_not_flagged(self):
+        code, out = self.child(*self.TECHNICAL).run("supersede")
+        self.assertEqual((code, out.splitlines()), (0, ["supersede: in shape - 1 file(s) read"]), out)
+
+    def test_a_departure_wrapped_across_lines_is_flagged_at_its_first_line(self):
+        paragraphs = ("# Rules",
+                      "The designation is never\ninherited by a later session.",
+                      "We keep our own lane list instead of the\nglobal rule on lane caps.")
+        first = self.starts(*paragraphs)
+        code, out = self.child(*paragraphs).run("supersede")
+        self.assertEqual((code, head(out)), (1, "supersede: out - 2 line(s) to read in 1 file(s)"), out)
+        self.assertEqual(out.splitlines()[1:], [
+            "  departs, no exemption: CLAUDE.md:%d: The designation is never inherited by a later session." % first[1],
+            "  departs, no exemption: CLAUDE.md:%d: We keep our own lane list instead of the global rule on lane caps." % first[2]], out)
+
+    def test_a_known_exemption_wrapped_across_lines_passes(self):
+        text = "The designation is never inherited here, a known\nexemption of rule:%s for this folder." % self.anchor()
+        first = self.starts("# Rules", text)
+        code, out = self.child("# Rules", text).run("supersede")
+        self.assertEqual((code, out.splitlines()), (0, [
+            "supersede: in shape - 1 file(s) read",
+            "  known exemption, passes: CLAUDE.md:%d: %s" % (first[1], text.replace("\n", " ")[:160])]), out)
+
+    def test_known_exemptions_in_the_plural_passes(self):
+        line = "%s Known exemptions: rule:%s" % (self.DEPARTS, self.anchor(2))
+        code, out = self.child(line).run("supersede")
+        self.assertEqual((code, out.splitlines()), (0, [
+            "supersede: in shape - 1 file(s) read", "  known exemption, passes: CLAUDE.md:1: " + line]), out)
+
+    def test_a_contracted_do_not_apply_is_a_departure(self):
+        paragraphs = ("Global rules don't apply here.", "The shared rule doesn't apply to this folder.")
+        first = self.starts(*paragraphs)
+        code, out = self.child(*paragraphs).run("supersede")
+        self.assertEqual((code, head(out)), (1, "supersede: out - 2 line(s) to read in 1 file(s)"), out)
+        for number, text in zip(first, paragraphs):
+            self.assertIn("  departs, no exemption: CLAUDE.md:%d: %s" % (number, text), out.splitlines())
+
+    def test_a_fenced_departure_is_not_read(self):
+        # The first fence holds a blank line: the fence, not the paragraph break, decides what is read.
+        paragraphs = ("# Rules",
+                      "```text\nsample output\n\nThe designation is never inherited.\n```",
+                      "~~~\nThe shared rules do not apply to this folder.\n~~~",
+                      "The designation is never inherited.")
+        first = self.starts(*paragraphs)
+        code, out = self.child(*paragraphs).run("supersede")
+        self.assertEqual((code, head(out)), (1, "supersede: out - 1 line(s) to read in 1 file(s)"), out)
+        self.assertEqual(out.splitlines()[1:], ["  departs, no exemption: CLAUDE.md:%d: The designation is never inherited." % first[3]], out)
+
+    def test_a_child_lint_exemption_is_not_ours(self):
+        # "known exemption" with no rule id is flagged only beside departure wording: a child's own lint exemption is not ours.
+        code, out = self.child("`legacy/` is a known exemption from the no-print check.").run("supersede")
+        self.assertEqual((code, out.splitlines()), (0, ["supersede: in shape - 1 file(s) read"]), out)
+
+    def settings_copy(self, drop=None):
+        """A second claude-settings checkout: the rule files of this one at another path, less the anchor `drop`."""
+        repo = Repo(self)
+        for rel in rule_audit.RULE_FILES:
+            with open(os.path.join(rule_audit.ROOT, rel), encoding="utf-8") as handle:
+                text = handle.read()
+            repo.write(rel.replace(os.sep, "/"), text.replace("<!-- rule:%s -->" % drop, "") if drop else text)
+        return repo
+
+    def test_a_second_claude_settings_checkout_is_na(self):
+        repo = self.settings_copy()
+        self.assertEqual(set(rule_audit.claude_md_anchors(rule_audit.rule_text(repo.root))), set(live_anchors()))
+        code, out = repo.run("supersede")
+        self.assertEqual((code, out.strip()), (0, "supersede: n/a - this is claude-settings"), out)
+        # A copy that lost an anchor has not the same rules: it is read as a child, and its live anchors are redefinitions.
+        dropped = self.anchor(5)
+        repo = self.settings_copy(drop=dropped)
+        self.assertNotIn(dropped, rule_audit.claude_md_anchors(rule_audit.rule_text(repo.root)))
+        code, out = repo.run("supersede")
+        self.assertEqual(code, 1, out)
+        self.assertTrue(head(out).startswith("supersede: out - "), out)
+
+    def test_a_file_reached_twice_is_read_once(self):
+        repo = self.child(self.DEPARTS)
+        try:
+            os.symlink("CLAUDE.md", os.path.join(repo.root, "AGENTS.md"))
+        except (OSError, NotImplementedError):
+            self.skipTest("no symlinks here")
+        subprocess.run(["git", "-C", repo.root, "add", "-f", "AGENTS.md"], check=True)
+        code, out = repo.run("supersede")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(head(out), r"^supersede: out - 1 line\(s\) to read in \d+ file\(s\)$")
+        items = out.splitlines()[1:]
+        self.assertEqual(len(items), 1, out)
+        self.assertRegex(items[0], r"^  departs, no exemption: (CLAUDE|AGENTS)\.md:1: " + re.escape(self.DEPARTS) + "$")
+
+    def test_skill_md_names_supersede_among_the_groups_that_list_items(self):
+        with open(os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "SKILL.md"), encoding="utf-8") as handle:
+            text = handle.read()
+        found = re.search(r"([^.]*?)\blist each item under the\s+group line", text)
+        self.assertIsNotNone(found, "SKILL.md no longer says which groups list each item")
+        self.assertIn("Supersede", found.group(1))
+
+    def test_a_long_paragraph_is_cut_to_160_characters(self):
         line = self.DEPARTS + " " + "a" * 200
         code, out = self.child(line).run("supersede")
         self.assertEqual(code, 1, out)
         self.assertEqual(out.splitlines()[1:], ["  departs, no exemption: CLAUDE.md:1: " + line[:160]], out)
+        # A wrapped paragraph is cut after its lines are joined, and reports the line it starts at.
+        wrapped = self.DEPARTS + "\n" + "a" * 200
+        code, out = self.child("# Rules", wrapped).run("supersede")
+        self.assertEqual(out.splitlines()[1:], ["  departs, no exemption: CLAUDE.md:3: " + line[:160]], out)
 
     def test_comment_openers_and_lone_quotes_in_text_hide_nothing(self):
-        # building-scanner-respects-strings: the text is read line by line; no opener or quote reaches the next line.
+        # building-scanner-respects-strings: no opener, quote or backtick in a paragraph reaches the next paragraph,
+        # and a triple backtick in the middle of a line opens no fence.
         live = self.anchor()
-        lines = ("Issue #12 is closed. The designation is never inherited.",
-                 "Open the /* block, then: the designation is never inherited.",
-                 "See https://example.com/a // the designation is never inherited.",
-                 "Don't re-ask: the designation is never inherited.",
-                 'A lone " quote, and the designation is never inherited.',
-                 "A lone ` tick, and the designation is never inherited.",
-                 "Don't",
-                 "The designation is never inherited.",
-                 "Don't pick alone. <!-- rule:%s -->" % live)
-        code, out = self.child(*lines).run("supersede")
+        paragraphs = ("Issue #12 is closed. The designation is never inherited.",
+                      "Open the /* block, then: the designation is never inherited.",
+                      "See https://example.com/a // the designation is never inherited.",
+                      "Don't re-ask: the designation is never inherited.",
+                      'A lone " quote, and the designation is never inherited.',
+                      "A lone ` tick, and the designation is never inherited.",
+                      "Write ``` to start a fence in Markdown.",
+                      "Don't",
+                      "The designation is never inherited.",
+                      "Don't stop here;\nthe designation is never inherited.",  # a lone quote, then a wrapped departure
+                      "Don't pick alone. <!-- rule:%s -->" % live)
+        first = self.starts(*paragraphs)
+        code, out = self.child(*paragraphs).run("supersede")
         self.assertEqual(code, 1, out)
         items = out.splitlines()[1:]
-        for number in (1, 2, 3, 4, 5, 6, 8):
-            self.assertIn("  departs, no exemption: CLAUDE.md:%d: %s" % (number, lines[number - 1]), items)
-        self.assertIn("  redefines rule:%s: CLAUDE.md:9" % live, items)
-        self.assertEqual(len(items), 8, out)  # seven departures and one anchor: the lone-quote line 7 adds none
+        for index in (0, 1, 2, 3, 4, 5, 8, 9):
+            self.assertIn("  departs, no exemption: CLAUDE.md:%d: %s" % (first[index], paragraphs[index].replace("\n", " ")), items)
+        self.assertIn("  redefines rule:%s: CLAUDE.md:%d" % (live, first[10]), items)
+        self.assertEqual(len(items), 9, out)  # eight departures and one anchor: the fence-like and lone-quote paragraphs add none
 
     def test_probe_output_is_a_scorecard_group(self):
         live = self.anchor()
@@ -1419,7 +1559,11 @@ class Supersede(unittest.TestCase):
         probes = load_probes()
         doc = probes.__doc__
         self.assertRegex(doc, r"compliance_probes\.py supersede\s+<child root>")
-        self.assertRegex(doc, r"(?m)^supersede: ")
+        paragraph = re.search(r"(?ms)^supersede: .*?(?=^\w+: |\Z)", doc)
+        self.assertIsNotNone(paragraph, doc)
+        # The owner's typed prompt is the glossary's `override`: the group's own word for what it finds is "departure".
+        self.assertIn("departure wording", paragraph.group(0))
+        self.assertNotIn("override wording", paragraph.group(0))
         for group in probes.GROUPS:
             self.assertIn("compliance_probes.py %s" % group, doc, group)
 
