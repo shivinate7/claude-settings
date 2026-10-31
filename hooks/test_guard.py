@@ -17712,7 +17712,9 @@ CS_STAGED_MIXED = _cs_repo("mixed", lambda w: (_cs_records(w), write(os.path.joi
 CS_UNSTAGED_CODE = _cs_repo("unstaged", _put("src/app.py", "x = 2\n"), stage=False)
 cs("commit_staged_code_denied", "deny", command=COMMIT, cwd=CS_STAGED_CODE, lacks=("app.py",))
 cs("commit_staged_code_denied, with records staged beside it", "deny", command=COMMIT, cwd=CS_STAGED_MIXED, lacks=("app.py",))
-cs("commit_all_denied: -a stages the modified code", "deny", command=VCS + " commit -am x", cwd=CS_UNSTAGED_CODE, lacks=("app.py",))
+for _flags in ("-am x", "-a -m x"):
+    cs("commit_all_denied: -a stages the modified code, as `%s`" % _flags, "deny", command=VCS + " commit " + _flags,
+       cwd=CS_UNSTAGED_CODE, lacks=("app.py",))
 cs("commit_pathspec_denied: a path on the commit line", "deny", command=COMMIT + " src/app.py", cwd=CS_UNSTAGED_CODE, lacks=("app.py",))
 cs("commit_staged_record_allowed", "allow", command=COMMIT, cwd=CS_STAGED_RECORDS)
 cs("commit_unstaged_code_allowed: the commit holds nothing of it", "allow", command=COMMIT, cwd=CS_UNSTAGED_CODE)
