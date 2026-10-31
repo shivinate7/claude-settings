@@ -8,10 +8,10 @@
 import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { removeRunFolder, runFolder } from './temp-root.mjs';
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
 export const SKILL = join(HERE, '..'); // skills/plain-english-map
@@ -33,20 +33,15 @@ export const run = (args, cwd, input, env = {}) => {
   return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 };
 
-const dirs = [];
 const links = [];
 after(() => {
   // A junction goes first, and by `unlinkSync`, so no remove ever walks through it into the folder it names.
   for (const l of links) { try { unlinkSync(l); } catch { /* already gone */ } }
-  for (const d of dirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  removeRunFolder();
 });
 
-/** A new folder under os.tmpdir(), removed when the file's tests end. */
-export const tmpFolder = (prefix) => {
-  const d = mkdtempSync(join(tmpdir(), prefix));
-  dirs.push(d);
-  return d;
-};
+/** A new folder in this process's run folder (test-temp-standard), removed when the file's tests end. Never a folder of the system temp dir itself. */
+export const tmpFolder = (prefix) => mkdtempSync(join(runFolder(), prefix));
 
 /** A junction (a symlink on POSIX) in its own tmp folder, to the folder `target`. It stands for the install link in ~/.claude/skills. */
 export const junction = (target) => {
@@ -79,7 +74,7 @@ export const scratchRepo = ({ commit = false } = {}) => {
   } else git('add', '-N', '.');
   // The scope first: the copy must be a git repository that tracks the fixture, or a verdict below says nothing about the skill.
   const tracked = git('ls-files').split('\n').map((l) => l.trim());
-  for (const f of ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'docs/map/core.md', 'docs/map/traces/home.md'])
+  for (const f of ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md'])
     assert.ok(tracked.includes(f), `the scratch repository does not track ${f}`);
   if (commit) assert.match(git('rev-parse', 'HEAD').trim(), /^[0-9a-f]{40}$/, 'the scratch repository has no commit');
   return dir;
@@ -94,7 +89,7 @@ export const dropMapLine = (dir, file) => {
   writeFileSync(p, kept.join('\n'));
 };
 
-export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8'];
+export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9'];
 
 /** The verdict lines of a run as one string, such as `MAP1=PASS MAP2=FAIL`. A line looks like `[PASS] MAP1`. */
 export const verdicts = (out) =>
