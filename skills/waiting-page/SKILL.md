@@ -283,7 +283,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   the later one wins: compare the answer's `at` with the time of the terminal answer. A task answer
   with no `done` is never a grant.
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
-  the owner withdrew it: the item is still open, and nothing is ruled.
+  the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
+  answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
 - `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
   answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
