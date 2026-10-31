@@ -62,6 +62,13 @@ again = _test_git.apply(dict(out))
 print(json.dumps({"environ": seen, "same_dict": out is d, "applied": out, "applied_again": again}))
 '''
 
+APPLY_DICT = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import _test_git  # noqa: F401  the import, in a child: apply() below gets a dict the test built, not os.environ
+print(json.dumps(_test_git.apply(json.loads(sys.argv[2]))))
+'''
+
 CLONE_AND_COMMIT = r'''
 import subprocess, sys
 sys.path.insert(0, sys.argv[1])
@@ -127,6 +134,37 @@ def config_of(env):
     return {k: v for k, v in env.items() if GIT_CONFIG_KEY.match(k)}
 
 
+def config_from_text(text):
+    """The GIT_CONFIG_* entries of an `env` listing."""
+    return config_of(dict(line.split("=", 1) for line in text.splitlines() if "=" in line))
+
+
+def preset(env):
+    """env with one git config entry already set (key 0), so an import must append after it."""
+    env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="user.useConfigOnly", GIT_CONFIG_VALUE_0="true")
+    return env
+
+
+def assert_preset_appended(test, cfg):
+    """A preset count of 1 becomes 3: key 0 keeps the preset, keys 1 and 2 are the two opt-out pairs."""
+    test.assertEqual(cfg.get("GIT_CONFIG_COUNT"), "3", cfg)
+    test.assertEqual((cfg.get("GIT_CONFIG_KEY_0"), cfg.get("GIT_CONFIG_VALUE_0")),
+                     ("user.useConfigOnly", "true"), "the preset key 0 was not kept")
+    test.assertEqual({(cfg.get("GIT_CONFIG_KEY_1"), cfg.get("GIT_CONFIG_VALUE_1")),
+                      (cfg.get("GIT_CONFIG_KEY_2"), cfg.get("GIT_CONFIG_VALUE_2"))},
+                     {("commit.gpgsign", "false"), ("tag.gpgsign", "false")})
+    test.assertNotIn("GIT_CONFIG_KEY_3", cfg)
+
+
+def fresh_env(case):
+    """A child env built from nothing: the stub-signer global config, HOME and PATH. Never a copy of os.environ."""
+    env, log = signing_env(case)
+    fresh = {k: env[k] for k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "SIGNER_LOG", "GIT_AUTHOR_NAME",
+                                 "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")}
+    fresh.update(HOME=case, PATH=os.environ.get("PATH", ""))
+    return fresh, log
+
+
 class SigningOptOut(unittest.TestCase):
     def setUp(self):
         self.case = tempfile.mkdtemp(prefix="case-", dir=RUN)
@@ -165,13 +203,7 @@ class SigningOptOut(unittest.TestCase):
         self.assertEqual(first.returncode, 0, "first import failed:\n" + first.stderr)
         report = json.loads(first.stdout.strip().splitlines()[-1])
         cfg = report["environ"]
-        self.assertEqual(cfg.get("GIT_CONFIG_COUNT"), "3", cfg)
-        self.assertEqual((cfg.get("GIT_CONFIG_KEY_0"), cfg.get("GIT_CONFIG_VALUE_0")),
-                         ("user.useConfigOnly", "true"), "the preset key 0 was not kept")
-        self.assertEqual({(cfg.get("GIT_CONFIG_KEY_1"), cfg.get("GIT_CONFIG_VALUE_1")),
-                          (cfg.get("GIT_CONFIG_KEY_2"), cfg.get("GIT_CONFIG_VALUE_2"))},
-                         {("commit.gpgsign", "false"), ("tag.gpgsign", "false")})
-        self.assertNotIn("GIT_CONFIG_KEY_3", cfg)
+        assert_preset_appended(self, cfg)
         self.assertTrue(report["same_dict"], "apply() must return the dict it was given")
         self.assertEqual(report["applied"].get("GIT_CONFIG_COUNT"), "3", report["applied"])
         self.assertEqual(report["applied_again"], report["applied"], "a second apply() added keys")
@@ -218,6 +250,41 @@ class SigningOptOut(unittest.TestCase):
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, "importing lint/_test_git.mjs failed:\n" + r.stderr)
         self.assertEqual(signer_log(log), "", "the signer was called from the imported JS twin")
+
+    def test_a_fresh_env_commit_reaches_the_signer_unwrapped_and_not_through_apply(self):
+        env, log = fresh_env(self.case)
+        repo = self.new_repo(env)
+        r = git(env, repo, "commit", "-q", "--allow-empty", "-m", "unwrapped")
+        self.assertNotEqual(r.returncode, 0, "a fresh env without the helper must reach the signer and fail")
+        self.assertNotEqual(signer_log(log), "", "the signer was never called from the fresh env")
+        os.remove(log)
+        child = run_py(env, self.case, APPLY_DICT, json.dumps(env))
+        self.assertEqual(child.returncode, 0, "apply() child failed:\n" + child.stderr)
+        applied = json.loads(child.stdout.strip().splitlines()[-1])
+        self.assertEqual(applied.get("GIT_CONFIG_COUNT"), "2", applied)
+        r = git(applied, repo, "commit", "-q", "--allow-empty", "-m", "through apply")
+        self.assertEqual(r.returncode, 0, "a commit through apply() failed:\n" + r.stderr)
+        self.assertEqual(signer_log(log), "", "the signer was called through apply()")
+
+    def test_shell_twin_appends_to_a_preset_count_and_keeps_key_zero(self):
+        env, _ = signing_env(self.case)
+        preset(env)
+        r = subprocess.run(["sh", "-c", 'set -eu; . "$1"; env', "sh", TWIN_SH], cwd=self.case, env=env,
+                           capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, "sourcing lint/_test_git.sh failed:\n" + r.stderr)
+        assert_preset_appended(self, config_from_text(r.stdout))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not on PATH: the JS twin case is skipped")
+    def test_js_twin_appends_to_a_preset_count_and_keeps_key_zero(self):
+        env, _ = signing_env(self.case)
+        preset(env)
+        code = ("const { pathToFileURL } = await import('node:url');\n"
+                "await import(pathToFileURL(%s).href);\n"
+                "process.stdout.write(JSON.stringify(process.env));\n" % json.dumps(TWIN_MJS))
+        r = subprocess.run([shutil.which("node"), "--input-type=module", "-e", code], cwd=self.case, env=env,
+                           capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, "importing lint/_test_git.mjs failed:\n" + r.stderr)
+        assert_preset_appended(self, config_of(json.loads(r.stdout)))
 
 
 class RunFolderSweep(unittest.TestCase):
