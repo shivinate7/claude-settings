@@ -644,7 +644,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "question-form",
-        "reason": "The one form check, hooks/question_form.py (decision question-form), refuses a chat question box (through hooks/call_judge.py, before any model call) and a waiting-page decision that lacks the Goal, Problem or Based on lines, an option's gain or loss, or marks a widening option as the pick or the recommendation. It reads words, so an unmarked widening option and a false stake pass; the question judge model reads what code cannot (a plain gain and lose, unexplained ids, a pointer outside the box)."
+        "reason": "The one form check, hooks/question_form.py (decision question-form), refuses a chat question box (through hooks/call_judge.py, before any model call) and a waiting-page decision that lacks the Goal, Problem or Based on lines, a valid Departs from line (guard rule question-departs), an option's gain or loss, or marks a widening option as the pick or the recommendation. It reads words, so an unmarked widening option and a false stake pass; the question judge model reads what code cannot (a plain gain and lose, unexplained ids, a pointer outside the box)."
       },
       "test": "hooks/test_question_form.py::guard.data_tool_hit gives item 92 the verdict question_form.item_hit gives (one home)"
     },

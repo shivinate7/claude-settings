@@ -74,7 +74,8 @@ LANDING_TOOLS = {
     "mcp__github__create_or_update_file",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
-LABEL_RE = re.compile(r"^\*\*(.+?)\*\*")
+# A bold "**Departs from:**" starts a line of the item (rule `question-departs`), never a report label.
+LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from))(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
@@ -633,12 +634,19 @@ def main():
     after = records[last_human_idx + 1:]
     text = last_reply(hook)
     if not turn_landed(after):
-        # An unlanded turn is judged on the pick check alone. An error in it fails open.
+        # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
+        # either fails open on its own: the Departs from check never drops the pick refusal.
+        pick = []
         try:
-            pick = []
             if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
                 pick.append(PICK_REFUSAL)
+        except Exception:
+            pass
+        try:
             pick.append(departs_problem(text))
+        except Exception:
+            pass
+        try:
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
