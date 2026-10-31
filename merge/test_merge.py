@@ -20,7 +20,7 @@ import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 # CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
-# merge-role check and make a role writer write the live session's role file. A case that needs one sets it (MergeRoleCheck.cloud).
+# merge-role check and make a role writer write the live session's role file. A case that needs one sets it (CloudSession.cloud).
 for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
     os.environ.pop(_name, None)
 
@@ -4019,6 +4019,25 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
+    def test_a_required_all_jobs_passed_that_only_skipped_reads_pending(self):
+        # A workflow_dispatch run, or a push run in a repo whose push trigger covers branches, skips all-jobs-passed beside a passing scope check. Only a pull_request run passes it, so the head waits; it is not green.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("pass", "")]}, ["all-jobs-passed"])
+        self.assertEqual(red, [])
+        self.assertEqual(pending, ["all-jobs-passed"])
+
+    def test_a_required_all_jobs_passed_with_a_pass_beside_its_skip_reads_green(self):
+        # Two runs of one name: the pass settles it, so the skip is not pending.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", ""), ("pass", "")]}, ["all-jobs-passed"])
+        self.assertEqual((red, pending), ([], []))
+
+    def test_a_skip_only_all_jobs_passed_beside_a_passing_check_does_not_merge(self):
+        # That skip beside a passing scope check, from a dispatch run or a push run in a repo whose push trigger covers branches, must not merge. The wait holds for a pull_request run, then stops at the deadline with the check named.
+        self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "pass", "")]])
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("Still pending: all-jobs-passed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
     def test_a_head_where_no_check_ran_is_unproven_not_green(self):
         # Every check skipped: the synchronize run skipped as a draft.
         red, pending, _ = merge.Host.classify({"checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
@@ -4026,6 +4045,32 @@ class GhHalf(Env):
         self.assertTrue(any("no check ran on this head" in r for r in red), red)
         self.assertTrue(any("gh workflow run checks.yml --ref" in r for r in red), red)
         self.assertTrue(any("gh pr ready" in r for r in red), red)
+
+    def test_a_draft_head_with_all_jobs_passed_required_is_red_not_pending(self):
+        # A draft run skips every job, scope included, so all-jobs-passed skips too. No run is coming for this head: red wins over pending.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
+        self.assertEqual(pending, [])
+        self.assertTrue(any("no check ran on this head" in r for r in red), red)
+
+    def test_a_draft_head_with_all_jobs_passed_required_remedy_names_ready_or_push_not_a_dispatch(self):
+        # A dispatch run skips all-jobs-passed, so a dispatch cannot pass this head. The remedy names gh pr ready or a new push.
+        red, _, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
+        text = " ".join(red)
+        self.assertIn("gh pr ready", text)
+        self.assertIn("push", text)
+        self.assertNotIn("gh workflow run", text)
+
+    def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
+        # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
+        self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "skipping", "")]], runs_seq=[[("checks", "completed", "skipped")]])
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no check ran on this head", out)
+        self.assertIn("gh pr ready", out)
+        self.assertNotIn("gh workflow run", out)
+        self.assertNotIn("Still pending", out)
+        self.assertEqual(self.paused, [], out)  # no pause: the first read is the verdict
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_docs_only_head_whose_scope_check_passed_is_not_unproven(self):
         red, pending, _ = merge.Host.classify({"scope": [("pass", "")], "checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
@@ -8973,11 +9018,10 @@ class BatchBrake(Env):
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
 
-class MergeRoleCheck(Env):
-    """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is coordinator or batch-runner.
-    The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
-    The role check refuses before any host read and before the lock. Preview, --unlock and a run outside the cloud are not checked.
-    Every case runs with CLAUDE_CONFIG_DIR in this run's folder and a made-up session id, so no case touches the live role file."""
+class CloudSession(Env):
+    """The cloud-session fixture, one home for MergeRoleCheck and StandingGrantSwitch: a run's config dir, a made-up session id, and
+    cloud() and run_main() to run merge as a cloud session. Every case runs with CLAUDE_CONFIG_DIR in this run's folder, so no case
+    touches the live role file. No test lives here."""
 
     @classmethod
     def setUpClass(cls):
@@ -9036,6 +9080,11 @@ class MergeRoleCheck(Env):
             except SystemExit as e:
                 rc = e.code
         return rc, out.getvalue(), err.getvalue()
+
+class MergeRoleCheck(CloudSession):
+    """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is coordinator or batch-runner.
+    The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
+    The role check refuses before any host read and before the lock. Preview, --unlock and a run outside the cloud are not checked."""
 
     def assert_refused(self, **env):
         """`merge 7 --confirm` stopped at the role check: rc 1, a line on stderr, no host read, no lock or push, no crash."""
@@ -9270,6 +9319,153 @@ class MergeRoleCheck(Env):
                 self.assert_writer_refused(*argv, rc_is=2)  # 2 is argparse's usage-error code, as p.error gives today
                 self.assertEqual(self.role_files(), {})
                 self.assertEqual(self.host.pr_calls, [])
+
+class StandingGrantSwitch(CloudSession):
+    """merge.standingGrant (decision standing-merge-grant) switches the standing merge grant.
+    The value is read from origin's base with the rest of the merge block, never from the PR tree. Absent or true: `--confirm` runs as
+    before. False: `--confirm` in a cloud session whose recorded role is coordinator or batch-runner is refused with the owner-ask line,
+    after the PR read and before the lock or any claim. Outside the cloud, and for every preview, false changes nothing. A value that
+    is not a bool stops the config load, as the other fields do."""
+
+    def grant_text(self, **fields):
+        """The base's .github/stamp.json: a complete merge block, so no defaults notice prints, with `fields` set."""
+        return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
+
+    def grant_config(self, **fields):
+        put_base_config(self, self.grant_text(**fields))
+
+    def put_pr_tree(self, text):
+        """Commit `text` as .github/stamp.json on the PR branch, as a lane's commit would. Call it after grant_config: the base is already
+        merged into the PR branch there, so this commit is a plain fast-forward."""
+        o, b = self.other, self.host.branch
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", b, f"origin/{b}")
+        put(os.path.join(o, ".github/stamp.json"), text)
+        sh(o, "git", "commit", "-qam", "lane: stamp")
+        sh(o, "git", "push", "-q", "origin", b)
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def assert_merged(self, rc, out, err):
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def assert_grant_refused(self, rc, out, err, refs_before):
+        """The grant refusal: rc 1, no merge, no claim pushed and no lock taken, and the owner-ask wording on stderr. The wording names
+        no key, no value, no config path, no settings and no flag (git-remedy-never-names-target). The key is known here, so the refusal is the
+        grant's own, not a stop on an unknown field."""
+        self.assertEqual(rc, 1, out + err)
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.refs(), refs_before, "the refused run pushed a claim or took the lock")
+        self.assertNotIn("unknown field", out + err)
+        self.assertRegex(err, r"(?i)standing merge grant")
+        self.assertRegex(err, r"(?i)\boff\b")
+        self.assertRegex(err, r"(?i)ask the owner")
+        self.assertNotRegex(err, r"(?i)merge settings")  # the remedy points at no settings page, which is the switch's home
+        self.assertNotRegex(err, r"(?i)settings")
+        self.assertNotRegex(err, r"(?i)standinggrant")
+        self.assertNotRegex(err, r"(?i)true")
+        self.assertNotIn("stamp.json", err)
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("Traceback", err)
+
+    def refused_as(self, role):
+        """`merge 7 --confirm` in a cloud session as `role`, after a false grant on the base: the grant refusal, and nothing merged."""
+        self.put_role(role)
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assert_grant_refused(rc, out, err, refs)
+
+    # ---- the key is optional: absent is today's behaviour, and no notice names it
+    def test_an_absent_key_proceeds_for_a_coordinator_and_no_notice_names_it(self):
+        self.put_role("coordinator")  # the fixture's base is CONFIG, which leaves out requiredChecks: the defaults notice prints
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assert_merged(rc, out, err)
+        self.assertIn("leaves out", out)  # the notice is there, so the check below reads a real one
+        self.assertNotRegex(out + err, r"(?i)standinggrant")
+
+    def test_no_stamp_json_proceeds_for_a_batch_runner_and_no_notice_names_the_key(self):
+        drop_config(self)
+        self.put_role("batch-runner")
+        with unittest.mock.patch.object(merge, "host_default_branch", return_value="main"):
+            rc, out, err = self.run_main("7", "--confirm")
+        self.assert_merged(rc, out, err)
+        self.assertNotRegex(out + err, r"(?i)standinggrant")
+
+    # ---- true is the grant on: `--confirm` runs as before, in the cloud and out of it
+    def test_true_proceeds_for_a_coordinator_in_the_cloud(self):
+        self.grant_config(standingGrant=True)
+        self.put_role("coordinator")
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assert_merged(rc, out, err)
+
+    def test_true_proceeds_for_a_batch_runner_in_the_cloud(self):
+        self.grant_config(standingGrant=True)
+        self.put_role("batch-runner")
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assert_merged(rc, out, err)
+
+    def test_true_proceeds_outside_the_cloud(self):
+        self.grant_config(standingGrant=True)
+        rc, out, err = self.run_main("7", "--confirm", CLAUDE_CODE_REMOTE=None)
+        self.assert_merged(rc, out, err)
+
+    # ---- false: a cloud coordinator or batch runner may not confirm
+    def test_false_refuses_confirm_for_a_coordinator_in_the_cloud(self):
+        self.grant_config(standingGrant=False)
+        self.refused_as("coordinator")
+
+    def test_false_refuses_confirm_for_a_batch_runner_in_the_cloud(self):
+        self.grant_config(standingGrant=False)
+        self.refused_as("batch-runner")
+
+    def test_false_proceeds_outside_the_cloud(self):
+        self.grant_config(standingGrant=False)
+        rc, out, err = self.run_main("7", "--confirm", CLAUDE_CODE_REMOTE=None)
+        self.assert_merged(rc, out, err)
+
+    def test_false_changes_no_preview_in_the_cloud(self):
+        self.grant_config(standingGrant=False)
+        self.put_role("coordinator")
+        refs = self.refs()
+        rc, out, err = self.run_main("7")
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("PREVIEW", out)
+        self.assertNotRegex(out + err, r"(?i)standing merge grant")
+        self.assertEqual(self.refs(), refs)
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    # ---- a value that is not a bool stops the config load, at preview and at confirm, as the other fields do
+    def test_a_value_that_is_not_a_bool_stops_the_config_load_with_one_line(self):
+        for bad in ("false", 0, None):
+            with self.subTest(bad=bad):
+                self.grant_config(standingGrant=bad)  # one commit per value: a second write of the same text is an empty commit
+                for args in (("7",), ("7", "--confirm")):
+                    with self.subTest(args=args):
+                        refs = self.refs()
+                        rc, out, err = self.run_main(*args, CLAUDE_CODE_REMOTE=None)
+                        lines = [l for l in (out + err).splitlines() if l.strip()]
+                        self.assertEqual(rc, 1, out + err)
+                        self.assertEqual(len(lines), 1, out + err)
+                        self.assertTrue(lines[0].startswith("merge:"), out + err)
+                        self.assertIn(".github/stamp.json", lines[0])
+                        self.assertIn("merge.standingGrant is not valid", lines[0])
+                        self.assertNotIn("Traceback", out + err)
+                        self.assertFalse(getattr(self.host, "merged", False))
+                        self.assertEqual(self.refs(), refs, "a stopped config load pushed a claim or took the lock")
+
+    # ---- only the base's value counts: merge.py reads origin/<base>, as load_config does
+    def test_the_base_false_refuses_even_when_the_pr_tree_says_true(self):
+        self.grant_config(standingGrant=False)
+        self.put_pr_tree(self.grant_text(standingGrant=True))
+        self.refused_as("coordinator")
+
+    def test_the_base_without_the_key_proceeds_even_when_the_pr_tree_says_false(self):  # control
+        self.grant_config()
+        self.put_pr_tree(self.grant_text(standingGrant=False))
+        self.put_role("coordinator")
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assert_merged(rc, out, err)
+
 
 REPO_ROOT = os.path.dirname(HERE)
 CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")

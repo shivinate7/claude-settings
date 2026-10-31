@@ -148,7 +148,9 @@ gh run list --commit <head-sha> --json name,status,conclusion   # completed, and
 gh workflow run <workflow-file> --ref <branch>           # none ran: dispatch one
 ```
 
-`gh workflow run` needs a `workflow_dispatch` trigger in the workflow.
+`gh workflow run` needs a `workflow_dispatch` trigger in the workflow. A dispatch run skips
+`all-jobs-passed`, which runs only on a pull request. In a repo that requires it, run `gh pr ready`
+or push anew instead.
 
 ## 6. Read every run after a merge
 

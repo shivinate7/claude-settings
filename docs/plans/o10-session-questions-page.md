@@ -11,8 +11,8 @@ session goes on.
 
 - Rule `questions-go-to-owner` (questions go to the owner): a session brings each question to
   the owner, names what it does meanwhile, and keeps working.
-- The output style `shiv-stylisms` sets the question shape: a `Goal:` line, a `Problem:` line,
-  one to three `Based on:` lines, then options, all inside the question box.
+- The output style `shiv-stylisms` sets the question form, in rule `style-question-form`, inside
+  the question box.
 - Step c31 (a question waiting on you reaches you) found that the desktop app already shows a
   banner for a waiting question. No push was added.
 - Step c28 (a step left to you comes as a one-click command) makes a step for the owner a
