@@ -31,7 +31,20 @@ sys.path.insert(0, HERE)
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 WATCHED = tuple(name.lstrip("/") for name in FROZEN_FILES)
-MACHINE_TAGS = ("<system-reminder>", "<task-notification>")  # pinned; shared_names.py holds the one copy
+MACHINE_TAGS = (  # pinned; shared_names.py holds the one copy
+    "<system-reminder>",
+    "<task-notification>",
+    "<agent-message>",
+    "<agent-message ",
+    "<agent-message\t",
+    "<agent-message\n",
+    "<agent-message\r",
+    "Another Claude session sent a message:\n<agent-message>",
+    "Another Claude session sent a message:\n<agent-message ",
+    "Another Claude session sent a message:\n<agent-message\t",
+    "Another Claude session sent a message:\n<agent-message\n",
+    "Another Claude session sent a message:\n<agent-message\r",
+)
 CLOCK = "2026-07-04T10:30:00-05:00"
 TIME_LINE = "Local time: 2026-07-04 10:30 CDT (UTC-05:00)\n"
 # What local_time may load beyond the standard library: itself, shared_names, and the light
