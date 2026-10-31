@@ -10,9 +10,10 @@
 # (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. Two `uses:` it runs in place, each
 # by its one home and only with a base: actions/ste-lint as `bin/ste-changed <base>` (shared with the action through
 # actions/ste-lint/run.sh), and actions/code-check as its action.yml's command, `python3 code_check.py --base <base>`
-# from this repo. A copied install outside the repo under test has no actions/: it takes code_check.py from the
-# checkout the global rules file names, and with neither the step is unknown and names the file it looked for. A run
-# from the repo under test never borrows: a lane that drops code_check.py FAILs here as in CI. The step's line names
+# from a checkout of this repo. The step's uses: picks which checkout, as CI does. A local uses: (`$/actions/...`,
+# `./actions/...`) runs the repo under test's own code_check.py, never another's: missing or failing, it FAILs. A
+# remote uses: (`owner/repo/actions/code-check@ref`) runs the copy beside ci-job, else the one in the checkout the
+# global rules file names, else the step is unknown and names the paths it looked at. The step's line names
 # the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
@@ -152,13 +153,13 @@ LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a chec
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
 
 
-def code_check(top):
-    """(path, None) to code_check.py beside this file, else in the pointer checkout; (None, looked-for) with neither.
-    In the repo under test (top) it is always the sibling, even when missing, so the step fails there as in CI."""
+def code_check(top, step):
+    """(path, None) to the code_check.py the step's uses: names; (None, looked-at) when a remote uses: finds none.
+    A local uses: is always the repo under test's own file, even when missing, so the step fails here as in CI. A
+    remote uses: is the copy beside this file, else the one in the pointer checkout."""
+    if LOCAL_ACTION.fullmatch(uses(step)):
+        return os.path.join(top, CODE_CHECK), None
     roots = [os.path.dirname(BIN)]
-    same = lambda a, b: os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
-    if same(top, roots[0]):
-        return os.path.join(roots[0], CODE_CHECK), None
     try:
         from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
         roots.append(pointer_checkout())
@@ -215,7 +216,7 @@ def plan(step, pr, values, top):
         if not shutil.which("bash") or not shutil.which("python3"):
             return "unknown", "tool missing: bash and python3", None, None, None
         if action == "code-check":  # the action.yml's own command
-            path, looked = code_check(top)
+            path, looked = code_check(top, step)
             if not path:
                 return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
             return "run", 'python3 "%s" --base "%s"' % (path, values["base"]), SHELLS[None], {}, None
@@ -348,7 +349,7 @@ def main(argv):
         first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "FAIL "))),
                      "(verdict printed no verdict line)")
         if known_action(step) == "code-check":
-            first += " (code_check.py: %s)" % code_check(top)[0]
+            first += " (code_check.py: %s)" % code_check(top, step)[0]
         if rc == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
