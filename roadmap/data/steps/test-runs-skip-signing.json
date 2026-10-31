@@ -1,9 +1,9 @@
 {
   "title": "Test fixtures make unsigned commits, so parallel runs do not exhaust the signing service",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.30493,
   "why": "Batch runner, batch 37 (#900), Oct 31 (via coordinator): parallel test fixtures exhausted the cloud commit-signing service ('too many open files'); the workaround was commit.gpgsign off for test runs. Cost real time today.",
-  "note": "Fix: the shared test-repo helper sets commit.gpgsign false in each fixture repo it makes, so a fixture commit never calls the signing service. Real commits stay signed. Done check: the full suite in parallel in a cloud container passes with signing on globally, and a fixture repo's config reads gpgsign false. Needs no answer. Files: the fixture helpers in hooks/ and lint/ tests.",
-  "updatedAt": "2026-10-31T20:31:00Z"
+  "note": "Fix: the shared test-repo helper sets commit.gpgsign false in each fixture repo it makes, so a fixture commit never calls the signing service. Real commits stay signed. Done check: the full suite in parallel in a cloud container passes with signing on globally, and a fixture repo's config reads gpgsign false. Needs no answer. Files: the fixture helpers in hooks/ and lint/ tests. Built: #912, queued for batch 39 (coordinator, Oct 31 17:59 CDT).",
+  "updatedAt": "2026-10-31T22:59:00Z"
 }

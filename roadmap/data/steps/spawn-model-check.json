@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.33751,
   "why": "shiv, Oct 30 16:14 CDT (via coordinator): pick a on the setup gaps.",
-  "note": "Lane session_013NEJL1GGH2a1vi4dsMq9mB. Guards the model-per-role table in decision agent-model-cap. Done check: a spawn that asks for a model above its role's cap is refused unless shiv's grant names it.",
-  "updatedAt": "2026-10-30T21:32:00Z"
+  "note": "Lane session_013NEJL1GGH2a1vi4dsMq9mB. Guards the model-per-role table in decision agent-model-cap. Done check: a spawn that asks for a model above its role's cap is refused unless shiv's grant names it. Built: draft PR #899 (refuses a spawn above its role's model, and a spawn with no model that would inherit Opus). It does not catch a spawn that runs below its role's model: see step agent-runs-role-model (incident Oct 31, coordinator 17:59 CDT).",
+  "updatedAt": "2026-10-31T22:59:00Z"
 }

@@ -1,0 +1,9 @@
+{
+  "title": "An agent runs its role's model, not a smaller one",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.30496,
+  "why": "Incident, Oct 31 (coordinator, 17:59 CDT): five lanes got Haiku agents where the role's model is Sonnet: question-needs-departure, inbox-saves-agent-reports, gh-account-clear, records-page-before-ready and test-runs-skip-signing. In the last lane, agents name Haiku 5.5 as their serving model even where the report trailer says sonnet.",
+  "note": "Linked to step spawn-model-check: #899 refuses a spawn above its role's model and a no-model spawn that would inherit Opus, but not a spawn that runs below its row. Cause unmeasured; a default subagent model in cloud sessions is one guess. First: measure. Check which roles ran Haiku: in decision agent-model-cap a test-author and a round-1 reviewer run Haiku by design, so only a builder, a round 2 or 3 reviewer, or an audit Explore on Haiku is the defect. In a cloud lane, spawn a builder with no model and one with model sonnet, and read each agent's serving model. Then fix the cause in one home (decision agent-model-cap): the spawn pins the role's model, or the guard refuses a spawn whose model is below its row. A trailer must name the serving model, not the asked one. Done check: in a cloud lane, a builder and a round-2 reviewer spawned with their roles' defaults run Sonnet, red on main and green on the fix. Needs no answer. Files: hooks/guard.py, agents/*.md, docs/decisions/agent-model-cap.md.",
+  "updatedAt": "2026-10-31T22:59:00Z"
+}
