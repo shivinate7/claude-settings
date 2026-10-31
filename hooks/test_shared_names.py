@@ -44,6 +44,11 @@ MACHINE_TAGS = (  # pinned; shared_names.py holds the one copy
     "Another Claude session sent a message:\n<agent-message\t",
     "Another Claude session sent a message:\n<agent-message\n",
     "Another Claude session sent a message:\n<agent-message\r",
+    "Another Claude session sent a message while you were working:\n<agent-message>",
+    "Another Claude session sent a message while you were working:\n<agent-message ",
+    "Another Claude session sent a message while you were working:\n<agent-message\t",
+    "Another Claude session sent a message while you were working:\n<agent-message\n",
+    "Another Claude session sent a message while you were working:\n<agent-message\r",
 )
 CLOCK = "2026-07-04T10:30:00-05:00"
 TIME_LINE = "Local time: 2026-07-04 10:30 CDT (UTC-05:00)\n"
