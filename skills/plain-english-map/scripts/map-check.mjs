@@ -199,6 +199,8 @@ const FACT_LINE_RE = /^[ \t]+[-*+]\s+([^`\s].*) — `([^`]+)`\s*$/;
 const USES_CITE_RE = /^uses\s+([^\s:]+)(?::(\S+))?$/;
 const VALUE_CITE_RE = /^(?:(\S+?):\s+)?(\S+)\s+=\s+(.+)$/;
 const HOME_LINE_RE = /^[ \t]*[-*+]\s+([^`\s].*) — `([^`]+)`\s*$/;
+// The same line with no indent: a fact line that sits outside its map line, which no check would read.
+const UNINDENTED_FACT_RE = /^[-*+]\s+([^`\s].*) — `([^`]+)`\s*$/;
 
 // Every fact line of a page, and each line whose cite no form reads, as { kind: 'bad', line, parent, prose, cite }.
 const parseFacts = (text) => {
@@ -209,7 +211,11 @@ const parseFacts = (text) => {
     const mapLine = l.match(LIST_ITEM_TOKEN_RE);
     if (mapLine) { parent = mapLine[1]; continue; }
     const m = l.match(FACT_LINE_RE);
-    if (!m) continue;
+    if (!m) {
+      const loose = l.match(UNINDENTED_FACT_RE);
+      if (loose && (USES_CITE_RE.test(loose[2]) || VALUE_CITE_RE.test(loose[2]))) out.push({ kind: 'unindented', line, parent, prose: loose[1], cite: loose[2] });
+      continue;
+    }
     const [, prose, cite] = m;
     const uses = cite.match(USES_CITE_RE);
     if (uses) { out.push(parent ? { kind: 'uses', line, parent, prose, file: uses[1], symbol: uses[2] ?? null } : { kind: 'bad', line, parent, prose, cite }); continue; }
@@ -221,7 +227,7 @@ const parseFacts = (text) => {
 };
 
 /** The fact lines of one docs/map/ page, as { kind: 'value' | 'uses', line, parent, prose, file, symbol, literal? }. A line whose cite has no form is left out here, and MAP9 fails it. */
-export const factLines = (text) => parseFacts(text).filter((f) => f.kind !== 'bad');
+export const factLines = (text) => parseFacts(text).filter((f) => f.kind === 'value' || f.kind === 'uses');
 
 // Every line under a `Homes` heading: the ones in the form `capability — \`FILE[:SYMBOL]\``, and the ones that are not.
 const parseHomes = (text) => {
@@ -243,9 +249,8 @@ export const homeLines = (text) => parseHomes(text).homes;
 
 // ---- MAP9 helpers ----
 
-// A number is a whole token: `5` is not inside `15` or `115`. A version such as 5.8.2 is one token. A float compares by value (5 and 5.0).
+// A number is a whole token: `5` is not inside `15` or `115`. A version such as 5.8.2 is one token. Two numbers match as written, so 3.1 is not 3.10.
 const NUMBER_RE = /(?<![\w.])\d+(?:\.\d+)*(?!\w|\.\d)/g;
-const numberKey = (t) => (/^\d+(?:\.\d+)?$/.test(t) ? String(Number(t)) : t);
 const numbersOf = (s) => [...s.matchAll(NUMBER_RE)].map((m) => m[0]);
 
 // The value a literal cite says, and whether it is a set (`{…}`, unordered). Null when the text is no JSON value.
@@ -259,7 +264,8 @@ const sorted = (list) => [...list].sort((a, b) => (JSON.stringify(a) < JSON.stri
 const sameValue = (lit, actual) => (lit.set && Array.isArray(actual) ? isDeepStrictEqual(sorted(lit.value), sorted(actual)) : isDeepStrictEqual(lit.value, actual));
 
 // The first number a line holds outside backticks, or null. A number belongs in a fact line.
-const bareNumber = (l) => l.replace(/`[^`]*`/g, '').match(/\d+(?:\.\d+)*/)?.[0] ?? null;
+// A digit run that starts a token. The digits inside python3 or sha256 belong to a word, and 40s is the number 40.
+const bareNumber = (l) => l.replace(/`[^`]*`/g, '').match(/(?<![\w.])\d+(?:\.\d+)*/)?.[0] ?? null;
 
 // The language word of a file, for the message of an unknown read.
 const factLanguage = (f) => (f.endsWith('.py') ? 'Python' : f.endsWith('.json') ? 'JSON' : /\.(ts|tsx|mts|cts|mjs|cjs|js|jsx)$/.test(f) ? 'JavaScript' : 'source');
@@ -267,13 +273,14 @@ const factLanguage = (f) => (f.endsWith('.py') ? 'Python' : f.endsWith('.json') 
 // Cause 2 of a value fact: the prose and the cite must agree on each number, and the prose must name each item of a set or a list.
 const proseProblems = (here, prose, literalText, lit) => {
   const cited = numbersOf(literalText), said = numbersOf(prose);
-  const citedKeys = new Set(cited.map(numberKey)), saidKeys = new Set(said.map(numberKey));
+  const citedKeys = new Set(cited), saidKeys = new Set(said);
   const out = [];
-  if (said.some((n) => !citedKeys.has(numberKey(n))) || cited.some((n) => !saidKeys.has(numberKey(n))))
+  if (said.some((n) => !citedKeys.has(n)) || cited.some((n) => !saidKeys.has(n)))
     out.push(`${here} prose says ${said.join(', ') || 'no number'}, and its cite says ${cited.join(', ') || 'no number'}`);
-  const items = Array.isArray(lit.value) ? lit.value.filter((i) => typeof i === 'string') : [];
+  // A string cite, alone or as items of a set or a list, must be named in the prose.
+  const items = (Array.isArray(lit.value) ? lit.value : [lit.value]).filter((i) => typeof i === 'string');
   const unnamed = items.filter((i) => !new RegExp(`(?<![\\w])${i.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w])`, 'i').test(prose));
-  if (unnamed.length) out.push(`${here} prose does not name ${unnamed.join(', ')}, and its cite lists ${unnamed.length === 1 ? 'it' : 'them'}`);
+  if (unnamed.length) out.push(`${here} prose does not name ${unnamed.join(', ')}, and its cite ${Array.isArray(lit.value) ? 'lists' : 'says'} ${unnamed.length === 1 ? 'it' : 'them'}`);
   return out;
 };
 
@@ -1192,12 +1199,15 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
       const at = (f, line) => `${f}:${line}`;
       // Cause 6: a number outside backticks in a map line, a table line, a screen line or a trace step belongs in a fact line.
       const numberLine = (f, line, l) => { const n = bareNumber(l); if (n) problems.push(`${at(f, line)} holds the number ${n} with no cite; move it to a fact line`); };
+      // An unclosed fence hides the rest of its page, so no fact line after it would be read.
+      for (const [f, text] of pages) for (const u of unclosedFence(text)) problems.push(`${f}:${u}`);
       for (const [f, text] of pages) for (const [line, l] of unfenced(text)) if (LIST_ITEM_TOKEN_RE.test(l)) numberLine(f, line, l);
       for (const f of all.filter((x) => TRACE_PAGE_RE.test(x))) for (const [line, l] of unfenced(read(f))) if (TRACE_STEP_RE.test(l)) numberLine(f, line, l.replace(/^\s*\d+\.\s+/, ''));
       // Every read of every fact and home goes into one call, so python3 starts once.
       for (const [f, text] of pages) {
         for (const fact of parseFacts(text)) {
           const here = at(f, fact.line);
+          if (fact.kind === 'unindented') { problems.push(`${here} a fact line sits indented under a map line, and this line is not indented: ${fact.prose}`); continue; }
           if (fact.kind === 'bad') { problems.push(`${here} cite \`${fact.cite}\` is neither "SYMBOL = LITERAL" nor "uses FILE", or it has no map line above to name its file`); continue; }
           const untracked = (fact.kind === 'uses' ? [fact.parent, fact.file] : [fact.file]).find((n) => !tracked.has(n));
           if (untracked) { problems.push(`${here} ${untracked} is not tracked by git`); continue; }
@@ -1248,7 +1258,9 @@ export const runMapChecks = (root) => {
   let cfg, bad = null;
   try { cfg = loadMapConfig(path.join(root, 'map.config.json'), root); } catch (e) { bad = e; }
   const read = (f) => readFileSync(path.join(root, f), 'utf8');
-  const bodies = mapChecks({ cfg: cfg ?? {}, root, read });
+  // One run reads the tree once: no check changes it, so each check shares the one file list.
+  let listed = null;
+  const bodies = mapChecks({ cfg: cfg ?? {}, root, read, files: () => (listed ??= gitLsFiles(root)) });
   const lines = [];
   let failed = false;
   // A note is no verdict: it carries no check id.

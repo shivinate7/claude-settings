@@ -84,11 +84,32 @@ def resolve(dotted, parent, tracked):
     return hits[0] if len(hits) == 1 else None
 
 
+def imported_aliases(tree):
+    """Each name an import binds. `from a import b` binds `b`, which may be a module."""
+    aliases = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            aliases.update((a.asname or a.name.split(".")[0]) for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            aliases.update((a.asname or a.name) for a in node.names)
+    return aliases
+
+
+def root_name(node):
+    """The name at the start of a chain such as `a.b.c`, or None when the chain starts with a call or a subscript."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
 def referenced_names(tree):
+    """A bare name is a reference. `x.name` is one only when `x` starts at an imported name, so `job.run()` on an object is none."""
+    aliases = imported_aliases(tree)
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute):
-            names.add(node.attr)
+            if root_name(node.value) in aliases:
+                names.add(node.attr)
         elif isinstance(node, ast.Name):
             names.add(node.id)
     return names

@@ -46,6 +46,33 @@ export const blankCommentsAndStrings = (src, file) => scanSource(src, { keepLeng
  */
 export const stripCommentsAndStrings = (src, file) => scanSource(src, { keepLength: false, blankStrings: true }, file);
 
+/**
+ * Shell source with every comment and the text inside every string blanked to spaces, at the same offsets as the file. Quotes and
+ * newlines stay. One pass. A single-quoted string takes no escape. A double-quoted string takes `\` and may span lines. A `#`
+ * opens a comment at the start of a line or after a space, so `$#` and `${#x}` open none. Stated limit: a heredoc body is read as code.
+ */
+export const blankShell = (src) => {
+  const blank = (ch) => (ch === "\n" ? "\n" : " ");
+  let out = "";
+  let state = "code"; // code | single | double | comment
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (state === "comment") { if (c === "\n") { state = "code"; out += c; } else out += " "; continue; }
+    if (state === "single" || state === "double") {
+      if (c === (state === "single" ? "'" : '"')) { state = "code"; out += c; }
+      else if (c === "\\" && state === "double" && i + 1 < src.length) { out += " " + blank(src[i + 1]); i++; }
+      else out += blank(c);
+      continue;
+    }
+    if (c === "\\" && i + 1 < src.length) { out += c + src[i + 1]; i++; continue; }
+    if (c === "'") state = "single";
+    else if (c === '"') state = "double";
+    else if (c === "#" && (i === 0 || /\s/.test(src[i - 1]))) { state = "comment"; out += " "; continue; }
+    out += c;
+  }
+  return out;
+};
+
 // Sticky: reads only the whitespace run after a brace, never the rest of the file.
 const SPREAD = /\s*\.\.\./y;
 // A `<` that opens a JSX tag: a tag name that ends at a space, a `/`, a `>` or the `<` of a type argument, or the `>` of a fragment.

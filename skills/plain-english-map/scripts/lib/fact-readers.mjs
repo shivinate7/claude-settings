@@ -13,12 +13,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from './lazy-typescript.mjs';
 import { importTargets } from './import-reader.mjs';
-import { blankCommentsAndStrings } from './source-text.mjs';
+import { blankCommentsAndStrings, blankShell } from './source-text.mjs';
 
 const PY_FACTS = fileURLToPath(new URL('./py-facts.py', import.meta.url));
 const TS_EXT = /\.(?:ts|tsx|mts|cts|mjs|cjs|js|jsx)$/;
 // A file whose `#` starts a comment. Only a full-line `#` comment is read as one: a trailing `# note` after code stays a stated limit.
 const HASH_COMMENT_EXT = /\.(?:sh|bash|zsh|ps1|rb|toml|ya?ml|conf|mk)$/;
+const SHELL_EXT = /\.(?:sh|bash|zsh)$/;
 
 const fail = (req, reason, gone = false) => ({ file: req.file, symbol: req.symbol, ok: false, reason, ...(gone && { gone: true }) });
 const good = (req, value) => ({ file: req.file, symbol: req.symbol, ok: true, value });
@@ -84,10 +85,23 @@ const moduleBindings = (sf) => {
   return out;
 };
 
+// The names a file refers to, outside its imports. A member name is no reference: `e.code` and `{ code: 1 }` refer to no `code`.
+// `ns.code` is one when `ns` is a namespace import (`import * as ns`).
 const identifiers = (sf) => {
   const names = new Set();
+  const namespaces = new Set();
+  for (const st of sf.statements) {
+    const bindings = ts.isImportDeclaration(st) ? st.importClause?.namedBindings : null;
+    if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
+  }
   const visit = (n) => {
     if (ts.isImportDeclaration(n)) return;
+    if (ts.isPropertyAccessExpression(n)) {
+      visit(n.expression);
+      if (ts.isIdentifier(n.expression) && namespaces.has(n.expression.text)) names.add(n.name.text);
+      return;
+    }
+    if (ts.isPropertyAssignment(n) && ts.isIdentifier(n.name)) { visit(n.initializer); return; }
     if (ts.isIdentifier(n)) names.add(n.text);
     ts.forEachChild(n, visit);
   };
@@ -120,9 +134,10 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const readRegex = (req, text) => {
   if (req.op === 'uses') return fail(req, `a uses fact is read for Python and JavaScript files, and ${req.file} is neither`);
   // The blanked text keeps every offset, so a match there names the same span of the original, where a string value is still text.
-  // A full-line `#` comment goes first: the scanner reads C-style comments, so a lone quote in it would open a string that hides real code.
-  const scanned = HASH_COMMENT_EXT.test(req.file) ? text.replace(/^[ \t]*#.*$/gm, (m) => ' '.repeat(m.length)) : text;
-  const blank = blankCommentsAndStrings(scanned, req.file);
+  // A shell file has its own scanner: a string may span lines, and `#` opens a comment only after a space.
+  // Another `#` file blanks each full-line `#` comment first: the C-style scanner would read a lone quote in it as a string that hides real code.
+  const hashBlanked = () => (HASH_COMMENT_EXT.test(req.file) ? text.replace(/^[ \t]*#.*$/gm, (m) => ' '.repeat(m.length)) : text);
+  const blank = SHELL_EXT.test(req.file) ? blankShell(text) : blankCommentsAndStrings(hashBlanked(), req.file);
   const re = new RegExp(`^[ \\t]*(?:(?:export\\s+)?(?:let|const|var|readonly|static|final)\\s+)?${escapeRe(req.symbol)}\\s*(?::[^=\\n]*)?=(?!=)[ \\t]*([^\\n]*)$`, 'gm');
   let last = null;
   for (const m of blank.matchAll(re)) last = m;
