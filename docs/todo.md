@@ -9,3 +9,4 @@ Tasks a session caught and did not do. One line each.
 - fb-0359-2: Re-run the compliance probes on q_max and mailaudit main, with `compliance_probes.py <probe> <root>` from claude-settings main. Send triage the r1 lanes still open (mailaudit lanes 1-5, q_max lanes 2-7 and 9). The r1 reports of Oct 30 00:01 and 00:07 CDT predate later merges.
 - Measure one step down per role (roadmap step c201, measure helper-agent cost): one lane per role on the lower model, same brief shape, compared with the numbers in the Measured part of `agent-model-cap` (the model-per-role table).
 - Each child repo gets its own glossary and checked map (c146 rollout; shiv 2026-10-30 16:07-16:09 CDT).
+- Land the two `merge --role` cloud allow rules with #878's tag check (branch merge-role-allow), with their CloudAllow cases (removed from #891, auto-mode owner acts; see its commit).
