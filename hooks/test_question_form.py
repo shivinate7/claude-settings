@@ -507,7 +507,8 @@ def case_page_reasons_are_one_table():
             ("a press with no link", page_item(options=press)),
             ("a step that sends the owner to a file for a command",
              dict(task, steps=["Open plans/merge.md", "Run its command"])),
-            ("a task with no Why yours line", dict(task, context="Nothing here."))):
+            ("a task with no Why yours line", dict(task, context="Nothing here.")),
+            ("a gh command with no switch", gh_task(GH_PATCH))):
         tool_input = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": data}
         rule = guard.data_tool_hit(tool_input, PAGE_REPO)[0]
         if rule not in table:
@@ -523,6 +524,127 @@ def case_page_reasons_are_one_table():
             table[rule] = original
         check("page reasons: the refusal for %s reads its text from the table (%s)" % (name, rule),
               "TABLEMARK" in marked, marked[:200])
+
+
+# ------------------------------------------------------------------ the gh login switch
+
+# Owner ruling, Oct 31 14:55 CDT: shivinate7 is the default login, ssemwal-cdc only for a repo shivinate7
+# cannot reach. The value pins live in test_shared_names.py; the literals here are the inputs.
+GH_PATCH = ("gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/"
+            "required_status_checks -f strict=true")
+GH_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
+def gh_task(command, **over):
+    task = {"kind": "task", "title": "Protect main on claude-settings", "status": "open",
+            "steps": ["Open Terminal", "Paste the command below and run it"], "context": GH_WHY, "command": command}
+    task.update(over)
+    return task
+
+
+def gh_hit(name, data, deny):
+    """gh_login_hit(data) is a non-empty string for a deny and "" for a pass. A missing function, or a call
+    that raises, fails the case by name: neither can pass for a deny."""
+    if getattr(question_form, "gh_login_hit", None) is None:
+        check(name, False, MISSING[1])
+        return
+    got = call("gh_login_hit", data)
+    if not isinstance(got, str):
+        check(name, False, "want a str, got %r" % (got,))
+        return
+    check(name, bool(got) == deny, "want %s, got %r" % ("deny" if deny else "pass", got))
+
+
+def case_gh_login_hit_direct():
+    gh_hit("gh login switch: the incident PATCH with no switch is denied", gh_task(GH_PATCH), True)
+    gh_hit("gh login switch: a switch after the gh line is denied", gh_task(GH_PATCH + "\ngh auth switch -u shivinate7"), True)
+    gh_hit("gh login switch: ssemwal-cdc before a shivinate7/ repo is denied",
+           gh_task("gh auth switch -u ssemwal-cdc && " + GH_PATCH), True)
+    gh_hit("gh login switch: a cd then gh pr ready, with no switch, is denied", gh_task("cd x && gh pr ready 5"), True)
+    gh_hit("gh login switch: a login outside the pair is denied",
+           gh_task("gh auth switch -u someoneelse && gh pr ready 5"), True)
+    gh_hit("gh login switch: a gh command after a pipe is denied",
+           gh_task("printf '{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -"), True)
+    gh_hit("gh login switch: a gh command after a semicolon is denied", gh_task("cd x; gh pr ready 5"), True)
+    gh_hit("gh login switch: a continued gh api with no switch is denied",
+           gh_task("gh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true"),
+           True)
+    gh_hit("gh login switch: a # inside quotes does not hide a gh command is denied",
+           gh_task('echo "# note" && gh api repos/shivinate7/claude-settings/branches/main/protection'), True)
+    gh_hit("gh login switch: a # after a quote does not cut off a gh command is denied",
+           gh_task('echo "x #" ; gh pr ready 5'), True)
+    gh_hit("gh login switch: a gh command after a multi-line quoted argument is denied",
+           gh_task('gh pr comment 5 --body "first\nsecond"'), True)
+    gh_hit("gh login switch: a switch named inside quotes does not count is denied",
+           gh_task('echo "gh auth switch -u shivinate7" && gh pr ready 5'), True)
+    gh_hit("gh login switch: a switch named in a # line does not count is denied",
+           gh_task("# gh auth switch -u shivinate7\ngh pr ready 5"), True)
+    gh_hit("gh login switch: a lone quote in text before a gh command is denied",
+           gh_task("echo Don't && gh pr ready 5"), True)
+
+    gh_hit("gh login switch: a switch to shivinate7, then gh api, is allowed",
+           gh_task("gh auth switch -u shivinate7 && " + GH_PATCH), False)
+    gh_hit("gh login switch: the long form, --user shivinate7, is allowed",
+           gh_task("gh auth switch --user shivinate7 && gh pr ready 5"), False)
+    gh_hit("gh login switch: a switch and a gh command joined by a semicolon are allowed",
+           gh_task("gh auth switch -u shivinate7; gh pr ready 5"), False)
+    gh_hit("gh login switch: a cd line, then the switch, then gh, is allowed",
+           gh_task("cd x\ngh auth switch -u shivinate7\ngh pr ready 5"), False)
+    gh_hit("gh login switch: a # open Git Bash line, cd, the switch, then gh, is allowed",
+           gh_task("# open Git Bash\ncd x\ngh auth switch -u shivinate7\ngh pr ready 5"), False)
+    gh_hit("gh login switch: a switch with no gh command after it is allowed",
+           gh_task("gh auth switch -u shivinate7"), False)
+    gh_hit("gh login switch: a gh command only in a # comment line is allowed",
+           gh_task("# gh pr ready 5"), False)
+    gh_hit("gh login switch: a gh command echoed as text is allowed", gh_task('echo "gh pr list"'), False)
+    gh_hit("gh login switch: a command that is only gh auth login is allowed", gh_task("gh auth login"), False)
+    gh_hit("gh login switch: a command with no gh is allowed", gh_task("python3 hooks/test_guard.py"), False)
+    gh_hit("gh login switch: ghq is not gh and is allowed", gh_task("ghq get x"), False)
+    gh_hit("gh login switch: ssemwal-cdc on a repo not under shivinate7 is allowed",
+           gh_task("gh auth switch -u ssemwal-cdc && gh api repos/ssemwal-cdc/ops-tools/pulls/5"), False)
+    gh_hit("gh login switch: a lone quote in a comment line before the switch is allowed",
+           gh_task("# Don't forget\ngh auth switch -u shivinate7\ngh pr ready 5"), False)
+    gh_hit("gh login switch: a decision holding a gh command is not judged",
+           gh_task(GH_PATCH, kind="decision"), False)
+    # Round 2 (review findings): PowerShell paths, gh text in a quoted body, a lone quote, sudo and env.
+    gh_hit("gh login switch: a PowerShell Set-Location with a trailing backslash, then the switch, then gh, is allowed",
+           gh_task(r'Set-Location "C:\repo\"' + "\n" + "gh auth switch -u shivinate7" + "\ngh pr view 5"), False)
+    gh_hit("gh login switch: a PowerShell cd to a backslash path, then the switch, then gh, is allowed",
+           gh_task(r"cd C:\Users\me\repo" + "\n" + "gh auth switch -u shivinate7" + "\ngh pr view 5"), False)
+    gh_hit("gh login switch: a PowerShell Set-Location with a trailing backslash, then gh with no switch, is denied",
+           gh_task(r'Set-Location "C:\repo\"' + "\ngh pr view 5"), True)
+    gh_hit("gh login switch: a multi-line quoted body that holds gh text, after the switch, is allowed",
+           gh_task('gh auth switch -u shivinate7\ngh pr comment 5 --body "first\ngh pr merge 5\nsecond"'), False)
+    gh_hit("gh login switch: a lone quote in text after the switch is allowed",
+           gh_task("gh auth switch -u shivinate7\necho Don't\ngh pr ready 5"), False)
+    gh_hit("gh login switch: sudo gh after the switch is allowed",
+           gh_task("gh auth switch -u shivinate7 && sudo gh pr ready 5"), False)
+    gh_hit("gh login switch: sudo gh with no switch is denied", gh_task("sudo gh pr ready 5"), True)
+    gh_hit("gh login switch: env GH_HOST=x gh after the switch is allowed",
+           gh_task("gh auth switch -u shivinate7 && env GH_HOST=x gh pr ready 5"), False)
+    gh_hit("gh login switch: env GH_HOST=x gh with no switch is denied",
+           gh_task("env GH_HOST=x gh pr ready 5"), True)
+    gh_hit("gh login switch: a bare switch to ssemwal-cdc, then gh api on a shivinate7 repo, is denied",
+           gh_task("gh auth switch -u ssemwal-cdc\ngh api repos/shivinate7/x"), True)
+
+
+def case_gh_login_switch_on_the_page():
+    page("gh login switch: a gh command with no switch is refused as gh-login-switch", "set",
+         entry_of(gh_task(GH_PATCH)), ("gh-login-switch", None))
+    page("gh login switch: a file step that holds a gh command is refused by command-in-item first", "set",
+         entry_of(gh_task(GH_PATCH, steps=["Open plans/gh.md", "Run its command"])), ("command-in-item", None))
+    page("gh login switch: a switch first is allowed on the page", "set",
+         entry_of(gh_task("gh auth switch -u shivinate7 && " + GH_PATCH)), None)
+    # Round 2: a str_replace on the task's command is judged on the text that replaces old_str.
+    page("gh login switch: a str_replace that adds a gh command with no switch to command is refused", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
+          "new_str": "step one\ngh pr merge 5"}, ("gh-login-switch", None))
+    page("gh login switch: a str_replace on command that adds a switch, then gh, is allowed", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
+          "new_str": "gh auth switch -u shivinate7\ngh pr merge 5"}, None)
+    page("gh login switch: a str_replace on command with no gh text is allowed", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
+          "new_str": "step two"}, None)
 
 
 # ------------------------------------------------------------------ call_judge
@@ -568,7 +690,7 @@ def main():
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
-                 case_call_judge):
+                 case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_call_judge):
         try:
             case()
         except Exception as exc:

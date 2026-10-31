@@ -13,6 +13,11 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 TASK_NOTIFICATION_TAG = "<task-notification>"
 MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG)
 
+# The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
+# the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).
+GH_DEFAULT_LOGIN = "shivinate7"
+GH_FALLBACK_LOGIN = "ssemwal-cdc"
+
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
 
