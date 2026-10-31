@@ -343,6 +343,9 @@ meets each item below. What the tool does when it runs is written in `confirm` i
    branches the batch took in: `merge-deletes-batch-lanes`, a merge deletes its batch's lane branches.
 6. `merge.keepBranches` is an optional list of branch names. The lane cleanup never deletes a name
    in the list. Name each long-lived branch that must survive a merge.
+7. `merge.standingGrant` is an optional boolean, read from the base branch. It is the owner's
+   standing merge grant for the repo: `standing-merge-grant`, the coordinator's standing merge grant.
+   Absent means true. When it is false, a cloud session's `merge <pr> --confirm` stops.
 
 ## Adoption checklist, the merge tool
 

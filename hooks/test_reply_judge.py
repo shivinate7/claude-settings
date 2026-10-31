@@ -1209,9 +1209,10 @@ def case_port_finding_is_a_note_with_its_rule():
 # --------------------------------------------------------------------------- c139
 # Uniform ruling (topic t18): a repo that differs from a shared format changes to match, and the
 # shared tool never grows a second form. An option that widens what a shared tool accepts carries
-# "Goes against your uniform ruling (t18)" and is never the recommended option.
+# "Goes against your uniform ruling (t18)" and is never the recommended option. Rule
+# `style-question-form` holds that text (the one question form, hooks/question_form.py).
 
-WIDENS_RULE = "style-option-widens-marked"
+WIDENS_RULE = "style-question-form"
 WIDENS_ASK = (
     "Done: read banchi's record titles.\n"
     "Input Needed: pick A or B. A: let the stamp accept banchi's titles. B: rename banchi's titles. "
