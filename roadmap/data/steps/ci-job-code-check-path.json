@@ -1,0 +1,9 @@
+{
+  "title": "bin/ci-job finds the code check where install puts it",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.30491,
+  "why": "Batch runner, batch 37 (#900), Oct 31 (via coordinator): ci-job's code-check step looks for ~/.claude/actions/code-check/code_check.py, which install does not place, so the step FAILs locally in 0 s on every run.",
+  "note": "Likely in normal work: every local ci-job run that includes the code-check step reads red. Fix the cause in one home: either install places actions/code-check, or ci-job runs it from the claude-settings checkout. Done check: a local ci-job run reaches the code check and gives its real verdict, red on main and green on the fix. Needs no answer. Files: bin/ci-job, hooks/session_start.sh or the install list.",
+  "updatedAt": "2026-10-31T20:31:00Z"
+}
