@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One page mockup</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen is page.html's own CSS plus the status part below. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+#stage { padding: 16px; }
+#stage > [data-state] { display: none; gap: 24px; justify-items: center; }
+#stage > [data-state].on { display: grid; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No item, step, number, name or time on this page is real.</div>
+<header class="tool">
+  <h1>One page per repo: waiting on you first, status in a tab (lane c136)</h1>
+  <div class="row" id="rowS"><span>State</span>
+    <button data-s="main">Main: questions</button>
+    <button data-s="status">Status tab</button>
+    <button data-s="empty">Nothing waits</button>
+    <button data-s="no-status">No roadmap</button>
+  </div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button data-lab="1" id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=main|status|empty|no-status</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>. In a frame, the Questions and Status tabs switch the state. The header is drawn as on main.</p>
+</header>
+<main id="stage">
+  <section data-state="main" aria-label="Main: questions"></section>
+  <section data-state="status" aria-label="Status tab"></section>
+  <section data-state="empty" aria-label="Nothing waits"></section>
+  <section data-state="no-status" aria-label="No roadmap"></section>
+</main>
+
+<script type="text/plain" id="pagecss">
+/* page.html's own <style>, main 1cc47f01, unchanged. */
+/* Layout: one stable list in three tiers and a last section for picks that stand. A slim bar in the
+   repo's colour and a tinted ground carry the repo. Nothing on the page moves when an answer is picked or sent. */
+:root {
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+/* The repo's own icon sits on a tile chosen so most of its drawn pixels stand out (applyIcon). */
+.mark.icon { background: var(--tile, var(--on-hdr)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-hdr) 28%, transparent); }
+.mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .sub { font-size: 13.5px; opacity: .88; white-space: nowrap; }
+@media (max-width: 420px) { .who .sub { display: none; } }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.stands { border-radius: 50%; background: var(--gold-ink); }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
+.pairchips { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.pairchips .nchip { height: 32px; width: 48px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .chips-n { gap: 4px; }
+  .pairchips { display: flex; }
+  .nchip.sent::before { flex: none; margin-right: 0; }
+  .nchip, .pairchips .nchip { width: 100%; height: 32px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic .dfitwrap { justify-self: center; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+/* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { border-left: 0; margin-left: 0; padding: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .dfitwrap { border-left: 3px solid var(--acc); }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+.ready.on::before { content: "\2713  "; }
+/* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.alts .sp { flex: 1 1 0; }
+.alts .gone { visibility: hidden; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 8px; }
+.receipt .line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-height: 44px; font-size: 15.5px; }
+.receipt .line > .g { grid-column: 1; grid-row: 1; }
+.receipt .line b { grid-column: 2; grid-row: 1; }
+.receipt .line .read { grid-column: 2; grid-row: 2; }
+.receipt .line .changebtn { grid-column: 3; grid-row: 1; }
+.receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
+.receipt .line b { overflow-wrap: anywhere; color: var(--good); }
+.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
+.parked ul { margin: 6px 0 0; padding-left: 20px; }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
+.sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
+.sent-what { min-width: 0; display: grid; gap: 8px; }
+.sent-line { margin: 0; }
+.stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
+@keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
+.sent-list li { display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
+.dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
+#undoBtn { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+
+/* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
+.dprev { display: grid; gap: 8px; }
+.dprev .dbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dprev .dbar .sp { flex: 1; }
+.dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
+.dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap.inert .dframe { pointer-events: none; }
+.dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+.dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
+.dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
+.dsh-head h2 { font: 700 17px/1.25 var(--body); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-head .btn { flex: none; white-space: nowrap; }
+.dsh-head .sm { display: none; }
+@media (max-width: 520px) { .dsh-head .lg { display: none; } .dsh-head .sm { display: inline; font-size: 20px; line-height: 1; } .dsh-head .btn { min-width: 40px; padding-inline: 8px; } #dBack { display: none; } }
+.dsh-head .btn { min-height: 40px; }
+.dsh-head .btn { border-color: color-mix(in srgb, var(--on-hdr) 50%, transparent); }
+.dsh-head .btn:focus-visible { outline-color: var(--on-hdr); }
+.dsh-head .btn.quiet { color: var(--on-hdr); }
+.dsh-body { position: relative; min-height: 0; overflow: auto; display: grid; justify-items: center; align-content: start; margin: 10px clamp(8px, 2vw, 20px) calc(10px + env(safe-area-inset-bottom, 0px)); }
+.dsh-body .dfitwrap { width: min(100%, 780px); }
+.dsh-body .dfitwrap.off { display: none; }
+/* The caption shows only while the head cuts the title. Its min-height keeps a grid row the stage overflows from squeezing it to 0. */
+.dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
+.dcap.on { display: block; }
+body.sheet-open { overflow: hidden; }
+</script>
+<script type="text/plain" id="newcss">
+/* ---- New for c136: the status part ---- */
+/* The roadmap's layout, scoped under .sv and drawn in this page's tokens. Class names that page.html already
+   uses (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) get new names here. */
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+.lonely { margin-top: 18px; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv p { margin: 0; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.sv-head h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.readat { font-size: 14px; color: var(--muted); min-width: 0; }
+.readat summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.readat li { overflow-wrap: anywhere; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.g.unk { width: 12px; height: 12px; vertical-align: -1px; }
+
+.live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.live summary .lh { font-weight: 700; }
+.live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-working, .tag.t-now { color: var(--acc); }
+.tag.t-now { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.tag.st-asking, .tag.blk { color: var(--holds); }
+.tag.st-review, .tag.landed { color: var(--good); }
+.tag.next { color: var(--muted); border-style: dashed; }
+
+.now { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.now > div { background: var(--surface); padding: 12px 14px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.now .ph { font: 700 19px/1.2 var(--body); }
+.now .lead { font-size: 14px; color: var(--muted); }
+.now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
+.now li .id { flex: none; font-size: 13px; color: var(--muted); }
+.now li .tx { min-width: 0; min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.now li .tx:hover { text-decoration: underline; }
+.now .ix { flex: none; width: 12px; font: 13px var(--mono); color: var(--muted); }
+.now .offt .ic { flex: none; font-size: 12px; font-weight: 700; color: var(--holds); border: 1.5px solid currentColor; border-radius: 4px; padding: 0 5px; }
+@container (min-width: 640px) { .now { grid-template-columns: 1fr 1fr; } }
+@container (min-width: 1000px) { .now { grid-template-columns: 1.1fr 1.4fr 1.6fr 1.6fr; } }
+
+.segbar { height: 6px; display: flex; gap: 2px; border-radius: 3px; overflow: hidden; }
+.segbar i { flex: 1; background: var(--line); }
+.segbar i.done { background: var(--acc); }
+.segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
+.segbar i.blk { background: var(--holds); }
+
+/* The view switch sits right above the view it changes. What every view shares sits above the switch. */
+.views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.sview { display: grid; gap: 14px; min-width: 0; }
+
+.prail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.prail button { display: grid; gap: 6px; min-width: 0; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
+.prail button[aria-pressed="true"] { border-color: var(--acc); box-shadow: inset 0 3px 0 var(--acc); }
+.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); white-space: nowrap; }
+.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); }
+.prail .here { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
+@container (max-width: 639px) {
+  .prail { gap: 4px; }
+  .prail button { padding: 6px 5px; }
+  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
+}
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
+.side { display: grid; gap: 12px; min-width: 0; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.box > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box > header h3 { font: 700 15px/1.3 var(--body); }
+.box > header .lbl { font-size: 13px; color: var(--muted); }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px; }
+.ph-head .lbl { font-size: 13.5px; color: var(--muted); }
+.ph-head h3 { font: 700 18px/1.25 var(--body); }
+.ph-head .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.ph-head .prog .segbar { width: 110px; }
+@container (max-width: 639px) { .ph-head .prog { margin-left: 0; width: 100%; } .ph-head .prog .segbar { flex: 1; } }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+.tile { background: var(--surface); padding: 10px 14px; display: grid; gap: 4px; min-width: 0; }
+.tile .tl { font-size: 13.5px; color: var(--muted); }
+.tile .v { font: 600 20px/1.1 var(--mono); }
+.tile .v small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.meter { display: flex; gap: 2px; height: 8px; }
+.meter i { flex: 1; background: var(--line); border-radius: 2px; }
+.meter i.on { background: var(--acc); }
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.rsteps { list-style: none; margin: 0; padding: 0; }
+.rsteps > li + li { border-top: 1px solid var(--line); }
+.rrow { display: grid; grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rrow .ttl { min-width: 0; overflow-wrap: anywhere; }
+.rrow .id { font-size: 13px; color: var(--muted); }
+.rrow .meta { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.rrow .chev { font-size: 11px; color: var(--muted); }
+.rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
+.rsteps .active .ttl { font-weight: 700; }
+.rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+@container (max-width: 639px) {
+  .rrow { grid-template-columns: 16px 40px minmax(0, 1fr) 12px; gap: 4px 8px; padding-inline: 10px; }
+  .rrow .meta { grid-column: 3; grid-row: 2; justify-content: flex-start; }
+  .rrow .chev { grid-column: 4; grid-row: 1; }
+}
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
+.fold { display: flex; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; text-align: left; }
+.feed { list-style: none; margin: 0; padding: 4px 0; }
+.feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
+.feed .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
+.feed .nm { display: block; color: var(--muted); font-size: 13px; }
+.burn { padding: 10px 14px 12px; display: grid; gap: 6px; }
+.burn svg { width: 100%; height: 56px; display: block; }
+.burn .ft { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
+
+/* No roadmap: unknown, why, and one control that leads on. */
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
+.nob p { max-width: 62ch; }
+.nob details { font-size: 14px; color: var(--muted); }
+.nob summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.nob pre { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.g.unk { border: 2px dashed var(--due); border-radius: 50%; }
+@media (pointer: coarse) { .now li .tx { min-height: 44px; } }
+
+/* Sample labels: dashed "Today:" for what exists, "New:" for what this step adds. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+
+<script>
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const SPARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/><path d="M19 15c.25 1.4.8 1.95 2.2 2.2-1.4.25-1.95.8-2.2 2.2-.25-1.4-.8-1.95-2.2-2.2 1.4-.25 1.95-.8 2.2-2.2z"/></svg>';
+const LINK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>';
+
+/* ---------- Waiting part: sample items in the item JSON shape, drawn as main's buildCard draws them ---------- */
+// `rank` is the writer's order inside a tier (step c126). The list below is already in main's sorted() order.
+const ITEMS = [
+  { id: "import-target", n: 12, kind: "decision", tier: "holds", rank: 1, short: "Import target", waited: "waited 3 hours",
+    title: "Which store should the sample import write to?", holds: "Holds up the import lane until you answer.",
+    context: "The import lane is built and waits on one choice. Both stores take the same rows.", ref: "s14, the sample import",
+    options: [
+      { key: "main", label: "The main store", how: "Rows land beside the rows there now.", gain: "One place to look.", lose: "A bad import mixes with good rows." },
+      { key: "side", label: "A side store first", how: "Rows land in a side store. You merge them later.", gain: "A bad import stays apart.", lose: "One more step to merge." },
+    ], pick: "side", why: "A bad first import costs the least there.", home: "s14", added: "Oct 29, 10:40 CDT" },
+  { id: "release-name", n: 9, kind: "decision", tier: "due", rank: 1, group: "release", short: "Release name", waited: "waited 1 day",
+    title: "Which name should the November release carry?", by: "Answer by Nov 3, 17:00 CDT, 5 days from now.",
+    context: "Two names are free. The date you pick in No. 10 can take one of them.", ref: "s17, release plan",
+    options: [
+      { key: "north", label: "North", how: "Short, and free in both stores.", gain: "Easy to say.", lose: "Close to last year's name." },
+      { key: "harbor", label: "Harbor", how: "Free only after Nov 20.", gain: "Clearly new.", lose: "Ties the date to late November." },
+    ], pick: "north", why: "It leaves the date free.", home: "s17", added: "Oct 28, 09:15 CDT" },
+  { id: "release-week", n: 10, kind: "decision", tier: "due", rank: 2, group: "release", short: "Release week", waited: "waited 1 day",
+    title: "Which week should the November release ship?", by: "Answer by Nov 3, 17:00 CDT, 5 days from now.",
+    context: "The second week leaves room for one more test run.", ref: "s17, release plan",
+    options: [
+      { key: "w1", label: "First week", how: "Ships Nov 6.", gain: "Out before the holiday.", lose: "One test run fewer." },
+      { key: "w2", label: "Second week", how: "Ships Nov 13.", gain: "One more test run.", lose: "Closer to the holiday." },
+    ], pick: "w2", why: "The extra test run is worth a week.", home: "s17", added: "Oct 28, 09:15 CDT" },
+  { id: "export-folder", n: 7, kind: "decision", tier: "calm", rank: 1, short: "Export folder", answered: true,
+    title: "Where should a finished export land?", chose: "You chose B: A folder per project.", filed: "Answered, filed in s15 ", at: "Oct 29, 10:02 CDT" },
+  { id: "plug-in", n: 8, kind: "task", tier: "calm", rank: 2, short: "Plug in Mac", waited: "waited 1 day", minutes: 2,
+    title: "Plug the build Mac into power before the overnight run", context: "The overnight build stops when the battery runs out.", ref: "s20, overnight builds",
+    steps: ["Find the white cable at the desk", "Plug it into the Mac"], home: "s20", added: "Oct 27, 18:02 CDT" },
+  { id: "log-age", n: 5, kind: "decision", tier: "stands", rank: 1, stands: true, short: "Log age", waited: "waited 2 days",
+    title: "How long should the page keep old logs?", context: "Logs older than a month are never read today.", ref: "s11, log upkeep",
+    options: [
+      { key: "thirty", label: "30 days", how: "Drop logs after 30 days.", gain: "Small store.", lose: "No old logs for a late bug." },
+      { key: "ninety", label: "90 days", how: "Drop logs after 90 days.", gain: "Covers a late bug.", lose: "Three times the store." },
+    ], pick: "thirty", why: "No log older than a month was read this year.", home: "s11", added: "Oct 27, 08:30 CDT" },
+];
+const GROUPS = { release: { title: "Answer these together", why: "The week you pick decides which name is free." } };
+const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
+const letter = (i) => String.fromCharCode(65 + i);
+const isOpen = (it) => !it.answered;
+const ready = (it) => it.stands; // a pick that stands is ready with no press
+const OPEN = ITEMS.filter(isOpen).length, SENT = ITEMS.length - OPEN, READY = ITEMS.filter(ready).length;
+
+function optCard(it, o, i) {
+  const sel = it.stands && o.key === it.pick;
+  return `<label class="opt${sel ? " sel" : ""}"><input type="radio" name="g-${it.id}"${sel ? " checked" : ""}>
+    <span class="head"><span class="key">${letter(i)}</span><span class="lab">${esc(o.label)}</span></span>
+    <p class="how">${esc(o.how)}</p>
+    <div class="tr"><div class="gain"><span class="s" aria-label="You gain">+</span><span>${esc(o.gain)}</span></div><div class="lose"><span class="s" aria-label="You lose">−</span><span>${esc(o.lose)}</span></div></div>
+    ${o.key === it.pick ? `<div class="pick"><b class="spark" aria-label="My pick" title="My pick">${SPARK}</b>${esc(it.why)}</div>` : '<span class="nopick"></span>'}</label>`;
+}
+function card(it) {
+  const mates = it.group ? ITEMS.filter((x) => x.group === it.group && x !== it) : [];
+  if (it.answered) {
+    return `<article class="card ${it.tier} answered" id="item-${it.id}" aria-labelledby="t-${it.id}"><div class="top"><span class="num">No. ${it.n}</span><span class="ans filed">${it.filed}<span class="t">${it.at}</span></span></div>
+      <h3 class="title" id="t-${it.id}">${esc(it.title)}</h3>
+      <div class="receipt"><div class="line"><span class="g done" aria-hidden="true"></span><b>${esc(it.chose)}</b><button class="btn quiet changebtn" type="button">Change</button></div></div></article>`;
+  }
+  let b = `<div class="top"><span class="num">No. ${it.n}</span><span>${it.waited}</span>${it.minutes ? `<span>about ${it.minutes} min</span>` : ""}${mates.length ? `<span class="inbundle">goes with No. ${mates.map((m) => m.n).join(", No. ")}</span>` : ""}</div>
+    <h3 class="title" id="t-${it.id}">${esc(it.title)}</h3>`;
+  if (it.holds) b += `<p class="stake holds"><span class="g holds" aria-hidden="true"></span><span>${esc(it.holds)}</span></p>`;
+  if (it.by) b += `<p class="stake due"><span class="g due" aria-hidden="true"></span><span>${esc(it.by)}</span></p>`;
+  b += `<p class="ctx">${esc(it.context)}</p><p class="about">${esc(it.ref)}</p>`;
+  if (it.kind === "decision") {
+    b += `<div class="opts" role="radiogroup" aria-label="Options for No. ${it.n}">${it.options.map((o, i) => optCard(it, o, i)).join("")}</div>`;
+    b += `<p class="ready${it.stands ? " on" : ""}" aria-live="polite">${it.stands ? "My pick goes with your next Send." : ""}</p>`;
+    const pk = it.options.findIndex((o) => o.key === it.pick);
+    b += `<div class="alts"><button class="btn dash nonebtn" type="button" aria-pressed="false">None of these</button><button class="btn quiet notebtn" type="button">Add a note</button><button class="btn alt takepick${it.stands ? " gone" : ""}" type="button">Take my pick (${esc(it.options[pk].label)})</button></div>`;
+  } else {
+    b += `<ol class="steps">${it.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol><p class="ready" aria-live="polite"></p><div class="alts"><button class="btn dash donebtn" type="button" aria-pressed="false">Mark done</button><button class="btn quiet notebtn" type="button">Add a note</button></div>`;
+  }
+  b += `<p class="dest">Lands in ${it.home}. Added ${it.added}.</p>`;
+  return `<article class="card ${it.tier}" id="item-${it.id}" aria-labelledby="t-${it.id}">${b}</article>`;
+}
+function rail() {
+  let out = `<div class="ov-prog"><div class="big"><b>${SENT}</b>of ${ITEMS.length} sent</div><div class="sub"><i class="sw"></i>${READY} ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:${(SENT / ITEMS.length) * 100}%"></i><i class="r" style="width:${(READY / ITEMS.length) * 100}%"></i></div></div>`;
+  const chip = (it) => `<button type="button" class="nchip${it.answered ? " sent filed" : ready(it) ? " ready" : ""}" aria-label="No. ${it.n}, ${esc(it.title)}${it.answered ? ", answered, filed" : ready(it) ? ", ready to send" : ", open"}" title="${esc(it.title)}"><span class="no">${it.n}</span><span class="nt">${esc(it.short)}</span></button>`;
+  TIERS.forEach((T) => {
+    const list = ITEMS.filter((i) => i.tier === T.k), open = list.filter(isOpen).length, seen = new Set();
+    let row = "";
+    list.forEach((it) => {
+      if (seen.has(it)) return;
+      const m = it.group ? list.filter((x) => x.group === it.group) : [it];
+      m.forEach((x) => seen.add(x));
+      row += m.length > 1 ? `<span class="pairchips" title="${esc(GROUPS[it.group].title)}">${m.map(chip).join("")}</span>` : chip(it);
+    });
+    out += `<div class="ov-tier"><a class="ov-head" href="#tier-${T.k}" aria-label="${open} open, ${T.name}"><span class="g ${T.k}" aria-hidden="true"></span>${T.name}<span class="ct">${open}</span></a><div class="chips-n">${row}</div></div>`;
+  });
+  return `<nav class="rail" id="rail" aria-label="Overview">${out}</nav>`;
+}
+function list() {
+  return `<div class="list" id="list">${TIERS.map((T) => {
+    const items = ITEMS.filter((i) => i.tier === T.k), seen = new Set();
+    let body = "";
+    items.forEach((it) => {
+      if (seen.has(it)) return;
+      const m = it.group ? items.filter((x) => x.group === it.group) : [it];
+      m.forEach((x) => seen.add(x));
+      if (m.length < 2) { body += card(it); return; }
+      const g = GROUPS[it.group];
+      body += `<section class="bundle" id="group-${it.group}" aria-label="${esc(g.title)}"><header>${LINK}<b>${esc(g.title)}</b><p>${esc(g.why)}</p></header>${m.map(card).join("")}</section>`;
+    });
+    return `<section class="tier" id="tier-${T.k}" aria-labelledby="th-${T.k}"><header><h2 id="th-${T.k}"><span class="g ${T.k}" aria-hidden="true"></span>${T.name}<span class="ct">${items.filter(isOpen).length}</span></h2></header>${body}</section>`;
+  }).join("")}<p class="checked">Checked against main at 0a1b2c3</p></div>`;
+}
+
+/* ---------- Status part: sample roadmap data, in the shapes ROADMAP_DB and ROADMAP_BUILD give today ---------- */
+const PH = [{ k: "cleanup", n: "Clean up", d: 10, t: 10 }, { k: "organize", n: "Organize", d: 3, t: 9, a: 2, b: 1 }, { k: "design", n: "Design", d: 0, t: 6 }, { k: "rollout", n: "Roll out", d: 0, t: 9 }, { k: "later", n: "Later", d: 0, t: 7 }];
+const OPEN_STEPS = [
+  { id: "s21", title: "Fold the two status pages into one", st: "active", tags: [] },
+  { id: "s22", title: "Rank the open items on the page", st: "active", tags: ['<span class="tag landed">Landed in #51</span>'] },
+  { id: "s23", title: "Name a home for each record kind", st: "todo", tags: ['<span class="tag next">Next 1</span>'] },
+  { id: "s24", title: "Move the sample importer to its own folder", st: "todo", tags: ['<span class="tag next">Next 2</span>'] },
+  { id: "s26", title: "Write the phone layout for the import screen", st: "todo", tags: ['<span class="tag next">Next 3</span>'] },
+  { id: "s25", title: "Split the import lane in two", st: "blocked", tags: ['<span class="tag blk">Blocked</span>'] },
+];
+const GLY = {
+  done: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" stroke="var(--surface)" stroke-width="1.7" fill="none"/></svg>',
+  active: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--acc)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--acc)"/></svg>',
+  todo: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+  blocked: '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--holds)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>',
+};
+const LBL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked" };
+const rg = (s) => `<span class="rg">${GLY[s]}</span>`;
+// In the feed the mark alone carries the state, so the word shows once on the page (ux-label-once).
+const rgl = (s) => `<span class="rg" role="img" aria-label="${LBL[s]}">${GLY[s]}</span>`;
+const segs = (d, a, b, n) => '<i class="done"></i>'.repeat(d) + '<i class="act"></i>'.repeat(a) + '<i class="blk"></i>'.repeat(b) + "<i></i>".repeat(Math.max(0, n - d - a - b));
+
+function readAt(known) {
+  const rows = known
+    ? ['<li>Steps: roadmap branch, read at <span class="num">4f2a1c9</span></li>', '<li>Decisions: docs/decisions, read at <span class="num">0a1b2c3</span></li>', '<li>Debts: docs/debts, read at <span class="num">0a1b2c3</span></li>']
+    : ['<li class="unk"><span class="g unk" aria-hidden="true"></span> Steps: no roadmap branch on origin or here.</li>', '<li>Decisions: docs/decisions, read at <span class="num">0a1b2c3</span></li>'];
+  return `<details class="readat" data-new="read-at stamps in a closed disclosure"><summary>${known ? "Read Oct 29, 13:10 CDT" : 'Read Oct 29, 13:10 CDT <span class="g unk" role="img" aria-label="one part not read"></span>'}</summary><ul>${rows.join("")}</ul></details>`;
+}
+function live(known) {
+  if (!known) return `<details class="live"><summary><span class="lh">Live work</span><span class="unk"><span class="g unk" aria-hidden="true"></span> not read: the build had no live file</span></summary></details>`;
+  return `<details class="live" data-new="&quot;asking in its chat&quot;, not a page item"><summary><span class="lh">Live work</span><span class="tag st-working">2 working</span><span class="tag st-asking">1 asking in its chat</span><span class="tag st-review">1 ready for review</span><span>3 open pull requests</span><span class="asof">read <span class="num">13:05 CDT</span></span></summary></details>`;
+}
+function now() {
+  return `<section class="now" aria-label="Where the plan stands" data-today="roadmap band, in this page's tokens">
+    <div><h3>Phase <span class="num">2/5</span></h3><div class="ph">Organize</div><div class="lead"><span class="num">3</span> of <span class="num">9</span> done, <span class="num">2</span> in progress</div><div class="segbar">${segs(3, 2, 0, 9)}</div><div class="lead">Whole plan <span class="num">13/41</span> done</div></div>
+    <div><h3>Doing now</h3><ul>${OPEN_STEPS.filter((s) => s.st === "active").map((s) => `<li>${rg("active")}<span class="id">${s.id}</span><button class="tx" type="button">${esc(s.title)}</button></li>`).join("")}</ul></div>
+    <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${OPEN_STEPS.filter((s) => s.st === "todo").map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${s.id}</span><button class="tx" type="button">${esc(s.title)}</button></li>`).join("")}</ol></div>
+    <div class="offt"><h3>Off track <span class="num" style="color:var(--holds)">1</span></h3><ul><li>${rgl("blocked")}<button class="tx" type="button">In Organize: <span class="id">s25</span> Split the import lane in two</button></li></ul></div>
+  </section>`;
+}
+function views() {
+  return `<div class="views" role="tablist" aria-label="Status views" data-new="view switch right above its view">${["Plan", "Changes", "Reference", "Records"].map((v, i) => `<button type="button" role="tab" aria-selected="${i === 0}">${v}</button>`).join("")}</div>`;
+}
+function plan() {
+  const prail = `<nav class="prail" aria-label="Phases">${PH.map((p) => `<button type="button" aria-pressed="${p.k === "organize"}" aria-label="${p.n}: ${p.d} of ${p.t} done${p.k === "organize" ? ", current phase" : ""}"><span class="nm"><span>${p.n}${p.k === "organize" ? '<span class="here"></span>' : ""}</span><span class="num">${p.d}/${p.t}</span></span><span class="segbar">${segs(p.d, p.a || 0, p.b || 0, p.t)}</span></button>`).join("")}</nav>`;
+  const rows = OPEN_STEPS.map((s) => `<li class="${s.st}"><button class="rrow" type="button" aria-expanded="false" aria-label="${s.id}, ${LBL[s.st]}: ${esc(s.title)}">${rg(s.st)}<span class="id">${s.id}</span><span class="ttl">${esc(s.title)}</span><span class="meta">${s.tags.join("")}</span><span class="chev" aria-hidden="true">▶</span></button></li>`).join("");
+  const phase = `<section class="box" aria-label="Phase 2, Organize">
+    <div class="ph-head" data-new="phase name and done once"><h3>Phase 2<span class="sr">, Organize</span></h3><div class="prog"><span class="num" aria-label="3 of 9 steps done">3/9</span><div class="segbar">${segs(3, 2, 1, 9)}</div></div></div>
+    <div class="tiles"><div class="tile"><span class="tl">Record kinds with a home</span><span class="v">4<small>/7</small></span><span class="meter" aria-hidden="true">${'<i class="on"></i>'.repeat(4)}${"<i></i>".repeat(3)}</span></div><div class="tile"><span class="tl">Pages merged</span><span class="v">0<small>/2</small></span><span class="meter" aria-hidden="true"><i></i><i></i></span></div></div>
+    <div class="hint"><span>6 open steps, in work order</span><span>Read only</span></div>
+    <ul class="rsteps">${rows}</ul>
+    <button class="fold" type="button" aria-expanded="false"><span aria-hidden="true">▶</span><span><span class="num">3</span> done</span></button>
+  </section>`;
+  const side = `<aside class="side"><section class="box"><header><h3>Latest changes</h3><span class="lbl">Oct 29</span></header><ul class="feed">
+      <li><span class="when">11:02 CDT</span>${rgl("done")}<span>s20 Name the page writer</span></li>
+      <li><span class="when">09:40 CDT</span>${rgl("active")}<span>s21 Fold the two status pages into one</span></li>
+      <li><span class="when">08:15 CDT</span>${rgl("blocked")}<span>s25 Split the import lane in two</span></li></ul></section>
+    <section class="box"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num" aria-label="13 of 41 steps">13/41</span></span></header><div class="burn"><svg viewBox="0 0 200 56" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,54 30,50 60,44 90,40 120,30 150,24 180,20 200,18" fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="ft"><span>Oct 1</span><span>Oct 29</span></div></div></section></aside>`;
+  return `<div class="sview" role="tabpanel" aria-label="Plan">${prail}<div class="cols">${phase}${side}</div></div>`;
+}
+function noRoadmap() {
+  return `<div class="sview" role="tabpanel" aria-label="Plan"><section class="box nob" data-new="unknown, why, and a way on">
+    <h3><span class="g unk" aria-hidden="true"></span>Plan: unknown</h3>
+    <p>This repo has no roadmap yet, so the build had no steps to read. Your questions are not affected.</p>
+    <details><summary>What the build said</summary><pre>No record branch "roadmap" on origin or in the checkout. Wrote ROADMAP_DB = null.</pre></details>
+    <button class="btn alt" type="button">Copy the ask to start a roadmap</button>
+  </section></div>`;
+}
+function status(s) {
+  const known = s !== "no-status";
+  return `<div class="in svwrap"><section class="sv" id="sView" aria-label="Status">
+    <div class="sv-head">${readAt(known)}</div>${live(known)}${known ? now() : ""}${views()}${known ? plan() : noRoadmap()}</section></div>`;
+}
+
+/* ---------- One page: header, tabs, then the part the tab names ---------- */
+function screen(s, theme, lab) {
+  const onStatus = s === "status" || s === "no-status", empty = s === "empty";
+  const tabs = `<nav class="in tabs" id="tabs" aria-label="Page"><a href="#" id="tabQ" data-go="main"${onStatus ? "" : ' aria-current="page"'}>Questions <span class="cnt" data-new="open count">${empty ? 0 : OPEN}</span></a><a href="#" id="tabS" data-go="${s === "no-status" ? "no-status" : "status"}"${onStatus ? ' aria-current="page"' : ""} data-new="Status tab, always second">Status</a></nav>`;
+  let body;
+  if (empty) body = `<div class="in lonely"><div class="empty" data-new="one line; a new card takes its slot">Nothing on this page waits on you. Sessions add an item here when they need your word.</div></div>`;
+  else if (onStatus) body = status(s);
+  else body = `<div class="in main" id="qView" data-today="questions as on main">${rail()}${list()}</div>`;
+  const bar = empty
+    ? `<div class="bar" id="bar"><div class="in"><span class="st"></span><button class="btn send" type="button" disabled>Send answers</button></div></div>`
+    : `<div class="bar" id="bar"${onStatus ? ' data-new="bar stays on the Status tab"' : ""}><div class="in"><span class="st"><b>${READY}</b> ready (${READY} where my pick stands). <b>${OPEN - READY}</b> stay open.</span><button class="btn send" type="button">Send ${READY} answer${READY === 1 ? "" : "s"}</button></div></div>`;
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>sample-repo: ${onStatus ? "Status" : "Questions"}</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo" data-new="repo name only; the title names the tab">sample-repo</h1></div></div></header>
+${tabs}${body}${bar}
+<script>document.addEventListener("click",function(e){var a=e.target.closest("[data-go]");if(a){e.preventDefault();parent.postMessage({oneState:a.dataset.go},"*");}});<\/script></body></html>`;
+}
+
+/* ---------- Harness ---------- */
+const STATES = ["main", "status", "empty", "no-status"];
+const P = { s: "main", w: "all", t: "", lab: "on" };
+function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k in P) P[k] = v; }); if (!STATES.includes(P.s)) P.s = "main"; }
+function writeHash() { const q = new URLSearchParams({ s: P.s, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); history.replaceState(null, "", "#" + q); }
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function frame(host, w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : w === 800 ? "Mid" : "Wide") + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "One page, " + P.s + ", at " + w + " wide"; f.style.width = w + "px";
+  wrap.append(f); box.append(cap, wrap); host.append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 900;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { fit(); setTimeout(fit, 200); });
+  f.srcdoc = screen(P.s, theme(), P.lab !== "off");
+  addEventListener("resize", fit);
+}
+function render() {
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === P.s)));
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.querySelectorAll("#stage > [data-state]").forEach((sec) => { const on = sec.dataset.state === P.s; sec.classList.toggle("on", on); sec.replaceChildren(); if (on) (P.w === "all" ? [390, 800, 1280] : [Number(P.w) || 390]).forEach((w) => frame(sec, w)); });
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.dataset.lab) P.lab = P.lab === "off" ? "on" : "off";
+  render();
+});
+addEventListener("message", (e) => { const s = e.data && e.data.oneState; if (STATES.includes(s) && s !== P.s) { P.s = s; render(); } });
+addEventListener("hashchange", () => { readHash(); render(); });
+readHash(); render();
+</script>
+</body>
+</html>

@@ -5,13 +5,16 @@
 
 Each case runs the scaffold into an empty temp folder, the dry run of the skill. The cases prove
 the file list, the filled placeholders, the refusal over an existing file, and that nothing the
-skill writes or ships names this project's threads, sessions or people.
+skill writes or ships names this project's threads, sessions or people. The HandoffCheck cases
+judge scripts/check_handoff.py, and the Scaffold cases name the template lines that feed it.
+Temp files: the run folder of lint/_test_temp.py (decision test-temp-standard).
 """
 import contextlib
 import io
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,7 +22,18 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(SKILL, "scripts"))
+sys.path.insert(1, os.path.join(SKILL, "..", "..", "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import scaffold  # noqa: E402
+
+try:
+    import check_handoff  # noqa: E402
+except ModuleNotFoundError as e:  # Only a missing check_handoff.py: a broken one must fail loud.
+    if e.name != "check_handoff":
+        raise
+    check_handoff = None
+CLI = os.path.join(SKILL, "scripts", "check_handoff.py")
+RUN_FOLDER = None  # made in setUpModule
 
 EXPECTED = [
     "CLAUDE.md",
@@ -33,6 +47,15 @@ EXPECTED = [
 ]
 # A claude.ai thread or session id, the owner's names, and the live page of this project.
 PRIVATE = re.compile(r"cmsg_|session_[0-9A-Za-z]{8}|shiv|R3iCpK91QRjC5he8bwfY7m", re.IGNORECASE)
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 def run(*args):
@@ -53,10 +76,30 @@ def tree(root):
     return found
 
 
-class Scaffold(unittest.TestCase):
+def pages_section(text):
+    """The body of the `## Pages` section of a hand-off, or None."""
+    m = re.search(r"## Pages\n(.*?)(?=\n## |\Z)", text, re.S)
+    return m.group(1) if m else None
+
+
+def rotation_rule(text):
+    """The `## Rotation of standing sessions` section of the operating model."""
+    return re.search(r"## Rotation of standing sessions.*?(?=\n## )", text, re.S).group(0)
+
+
+def rotation_steps(rule):
+    """The numbered steps of the rotation rule, number -> text on one line."""
+    return dict(zip(map(int, re.findall(r"(?m)^\s+(\d+)\.\s", rule)),
+                    [" ".join(t.split()) for t in re.split(r"(?m)^\s+\d+\.\s", rule)[1:]]))
+
+
+class TempDest(unittest.TestCase):
     def setUp(self):
-        self.dest = tempfile.mkdtemp()
+        self.dest = tempfile.mkdtemp(dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.dest)
+
+
+class Scaffold(TempDest):
 
     def test_writes_the_skeleton(self):
         code, out, err = run("--dest", self.dest, "--repo", "acme/widgets")
@@ -89,8 +132,12 @@ class Scaffold(unittest.TestCase):
     def test_triage_passes_live_at_each_publish(self):
         text = tree(SKILL)["templates/operating-model.md"]
         bullet = re.search(r"- \*\*Triage\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
-        self.assertIn("publishes the roadmap page", bullet)
-        self.assertIn("--live", bullet)
+        flat = " ".join(bullet.split())  # a line wrap must not split a phrase
+        # The roadmap is a block of the repo's one page, which the waiting-page writer publishes (skill roadmap).
+        self.assertRegex(flat, r"builds? the roadmap block", "triage must build the roadmap block")
+        self.assertIn("--block", flat)
+        self.assertIn("--live", flat)
+        self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the waiting-page writer publishes it")
 
     def assertInOrder(self, flat, clauses):
         at = [flat.find(x) for x in clauses]
@@ -100,10 +147,10 @@ class Scaffold(unittest.TestCase):
 
     def test_handoff_template_lists_pages_to_watch(self):
         text = tree(SKILL)["templates/role-handoff.md"]
-        section = re.search(r"## Pages\n(.*?)(?=\n## |\Z)", text, re.S)
+        section = pages_section(text)
         self.assertIsNotNone(section, "no Pages section")
-        self.assertRegex(section.group(1), r"(?m)^Watches stopped at <time>$")
-        flat = " ".join(section.group(1).split())
+        self.assertRegex(section, r"(?m)^Watches stopped at <time>$")
+        flat = " ".join(section.split())
         self.assertIn("The URL of each page this role owns", flat)
         self.assertInOrder(flat, (
             "old session stopped watching each one at that time",
@@ -114,8 +161,7 @@ class Scaffold(unittest.TestCase):
 
     def test_handoff_rule_moves_page_watches(self):
         text = tree(SKILL)["templates/operating-model.md"]
-        rule = re.search(r"## Rotation of standing sessions.*?(?=\n## )", text, re.S).group(0)
-        flat = " ".join(rule.split())
+        flat = " ".join(rotation_rule(text).split())
         self.assertInOrder(flat, (
             "old session stops watching each page its role owns",
             "It notes the time",
@@ -135,6 +181,38 @@ class Scaffold(unittest.TestCase):
         self.assertIn("<triage limit>", flat)
         self.assertIn("<batch runner limit>", flat)
         self.assertIn("The coordinator never hands its own sessions to a successor", flat)
+
+    def test_handoff_template_has_the_open_items_and_watch_lines(self):
+        # The two fixed forms that scripts/check_handoff.py reads. A placeholder stands in for the values.
+        section = pages_section(tree(SKILL)["templates/role-handoff.md"])
+        self.assertIsNotNone(section, "no Pages section")
+        line = re.search(r"(?m)^Open items: .*$", section)
+        self.assertIsNotNone(line, "no `Open items:` line")
+        # The home of the items is a URL, or `none`. A hand-off never carries item ids (the triage incident).
+        self.assertRegex(line.group(0), r"(?i)\burl\b", "the `Open items:` line must offer the items collection by URL")
+        self.assertRegex(line.group(0), r"\bnone\b", "the `Open items:` line must offer `none`")
+        self.assertNotRegex(line.group(0), r"<n\b|\.\.\.", "the `Open items:` line must not offer a list of ids")
+        self.assertNotRegex(section, r"(?i)number of each", "the Pages section must not tell the role to copy item numbers")
+        self.assertRegex(section, r"(?m)^Watch: \S", "no `Watch: <page URL>` line")
+
+    def test_rotation_runs_the_handoff_check_before_the_successor_starts(self):
+        rule = rotation_rule(tree(SKILL)["templates/operating-model.md"])
+        steps = rotation_steps(rule)
+        holders = [n for n, text in sorted(steps.items()) if "check_handoff.py" in text]
+        self.assertTrue(holders, "no rotation step names check_handoff.py")
+        self.assertIn(holders[0], (3, 4), "the check belongs to the hand-off file step")
+        self.assertInOrder(" ".join(rule.split()), (
+            "writes the hand-off file",
+            "check_handoff.py",
+            "coordinator starts the successor from the hand-off file"))
+
+    def test_rotation_hand_off_names_the_home_of_the_open_items_not_each_item(self):
+        rule = rotation_rule(tree(SKILL)["templates/operating-model.md"])
+        step = rotation_steps(rule)[3]
+        self.assertIn("writes the hand-off file", step, "step 3 is the hand-off file step")
+        self.assertIn("items collection", step, "step 3 must name the home of the open items")
+        self.assertRegex(step, r"\bURL\b")
+        self.assertNotRegex(step, r"(?i)\beach open\b[\w\s-]*\bitem\b", "step 3 must not copy each open item into the file")
 
     def test_tiers_start_as_a_trio(self):
         text = tree(SKILL)["templates/operating-model.md"]
@@ -193,6 +271,185 @@ class Scaffold(unittest.TestCase):
         self.assertEqual(run("--dest", self.dest, "--repo", "a/b", "--branch", "x y")[0], 2)
         self.assertEqual(run("--dest", os.path.join(self.dest, "none"), "--repo", "a/b")[0], 2)
         self.assertEqual(tree(self.dest), {})
+
+
+PAGE = "https://claude.ai/code/artifact/example"
+PAGE_TWO = "https://claude.ai/code/artifact/example-two"
+ITEMS = "https://claude.ai/code/artifact/example/items"  # the waiting page's items collection
+# Each is a list of ids or numbers, which a hand-off must not carry. `05` and `0, 4` start with a zero.
+IDS = ("12", "7", "10", "12, 14", "05", "0, 4", "A12, B14")
+# A URL beside an id list is still a copied id list: the ids go stale, the URL does not.
+IDS_BESIDE_URL = (f"12, 14, 15 ({PAGE})", f"{PAGE} 12, 14", f"#12 {PAGE}")
+# A placeholder, or a URL that holds `<` or `>`, is no page and no items home.
+BAD_WATCHES = ("https://<page-url>", "<page URL>", "https://claude.ai/code/artifact/<id>",
+               "https://claude.ai/code/artifact/example>")
+# The words of a missing Watch line. A Watch line that is there but wrong names its fault instead.
+NO_WATCH_LINE = re.compile(r"(?i)\bno\s+`?watch\b")
+# A message that still offers item numbers as the way to fill the `Open items:` line.
+OFFERS_IDS = re.compile(r"(?i)\bitem numbers?\b")
+
+
+def handoff_text(open_items="none", watches=()):
+    """A full role hand-off. open_items=None leaves the `Open items:` line out. Each watch is the
+    text after `Watch: `, one line each. The one fixture of the HandoffCheck cases: a case adds an option, never a copy."""
+    pages = ["Watches stopped at 10:00", ""]
+    if open_items is not None:
+        pages.append(f"Open items: {open_items}")
+    pages.extend(f"Watch: {w}" for w in watches)
+    return "\n".join([
+        "# Triage handoff, 2026-01-02", "",
+        'From "old triage" at the limit. Checked: main abc1234, record branch def5678.', "",
+        "## Standing instructions", "", "Don't skip the check.", "",
+        "## State", "", "Item 12 is in flight.", "",
+        "## Pages", "", *pages, "",
+        "## Sessions", "", "The batch runner.", ""])
+
+
+def problems(text):
+    """handoff_problems(text), or a failure of the one case when check_handoff.py does not exist yet."""
+    if check_handoff is None:
+        raise AssertionError("skills/project-ops/scripts/check_handoff.py does not exist")
+    return check_handoff.handoff_problems(text)
+
+
+class HandoffCheck(TempDest):
+    """A save of the waiting page wakes only a session that watches it. A successor that inherits open items
+    and gets no Watch line hears nothing (the owner's two test saves). The check judges the hand-off file."""
+
+    def test_open_items_without_a_watch_line_is_one_problem(self):
+        found = problems(handoff_text(ITEMS))
+        self.assertEqual(len(found), 1, found)
+        self.assertRegex(found[0], r"(?i)watch")
+
+    def test_a_watch_line_without_a_url_is_no_watch(self):
+        for watch in ("", "<page URL>", "none"):
+            with self.subTest(watch=watch):
+                found = problems(handoff_text(ITEMS, [watch]))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"(?i)watch")
+
+    def test_open_items_with_a_watch_line_is_ok(self):
+        for items in (ITEMS, "http://example.test/items"):
+            with self.subTest(items=items):
+                self.assertEqual(problems(handoff_text(items, [PAGE])), [])
+                self.assertEqual(problems(handoff_text(items, [PAGE, PAGE_TWO])), [])
+
+    def test_a_list_of_ids_is_a_problem_that_names_the_url_home(self):
+        # A copied id list goes stale after a compaction and keeps closed items (the triage incident).
+        for items in IDS + IDS_BESIDE_URL:
+            with self.subTest(items=items):
+                found = problems(handoff_text(items, [PAGE]))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"(?i)items collection")
+                self.assertRegex(found[0], r"(?i)\burl\b")
+                self.assertRegex(found[0], r"(?i)\bids?\b")
+                self.assertNotRegex(found[0], OFFERS_IDS)
+
+    def test_a_url_alone_or_with_words_or_digits_in_its_path_is_ok(self):
+        # The fix for ids beside a URL must not flag the URL itself: its path may hold digits.
+        for items in (ITEMS, PAGE, f"see {ITEMS}", "https://claude.ai/code/artifact/abc123/items",
+                      f"none, see {PAGE}"):
+            with self.subTest(items=items):
+                self.assertEqual(problems(handoff_text(items, [PAGE])), [])
+
+    def test_a_placeholder_url_is_no_items_home(self):
+        for items in BAD_WATCHES:
+            with self.subTest(items=items):
+                found = problems(handoff_text(items, [PAGE]))
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("Open items", found[0])
+                self.assertNotRegex(found[0], OFFERS_IDS)
+
+    def test_no_open_items_still_needs_a_watch_url_or_watch_none(self):
+        # Every role that rotates owns a page, so each hand-off names a real Watch URL.
+        # The one exception is `Watch: none` together with `Open items: none`.
+        self.assertEqual(problems(handoff_text("none", [PAGE])), [])
+        self.assertEqual(problems(handoff_text("none", ["none"])), [])
+        for watches in ((), ("<page URL>",)):
+            with self.subTest(watches=watches):
+                found = problems(handoff_text("none", watches))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"(?i)watch")
+
+    def test_open_items_with_watch_none_is_a_problem(self):
+        found = problems(handoff_text(ITEMS, ["none"]))
+        self.assertEqual(len(found), 1, found)
+        self.assertRegex(found[0], r"(?i)watch")
+
+    def test_a_none_line_with_extra_text_is_none(self):
+        for items in ("none (all answered)", "None.", "0"):
+            with self.subTest(items=items):
+                self.assertEqual(problems(handoff_text(items, [PAGE])), [])
+                self.assertEqual(problems(handoff_text(items, ["none"])), [])
+
+    def test_a_number_that_starts_with_a_zero_is_not_none(self):
+        # `0` is none. `05` and `0, 4` are ids: the zero needs a word boundary after it.
+        for items in ("10", "05", "0, 4", "007"):
+            with self.subTest(items=items):
+                self.assertTrue(problems(handoff_text(items, ["none"])), "read as `none`")
+
+    def test_a_placeholder_url_is_no_watch(self):
+        for items in (ITEMS, "none"):
+            for watch in BAD_WATCHES + ("https://<page-url> (waiting page)",):
+                with self.subTest(items=items, watch=watch):
+                    found = problems(handoff_text(items, [watch]))
+                    self.assertEqual(len(found), 1, found)
+
+    def test_a_watch_line_with_trailing_text_counts(self):
+        for items in (ITEMS, "none"):
+            with self.subTest(items=items):
+                self.assertEqual(problems(handoff_text(items, [PAGE + " (waiting page)"])), [])
+
+    def test_a_watch_line_that_is_wrong_says_what_is_wrong(self):
+        # A Watch line that is there must not draw the message of a missing one.
+        for watch in BAD_WATCHES + ("", "none"):
+            with self.subTest(watch=watch):
+                found = problems(handoff_text(ITEMS, [watch]))
+                self.assertEqual(len(found), 1, found)
+                self.assertNotRegex(found[0], NO_WATCH_LINE)
+                if watch not in ("", "none"):
+                    self.assertIn(watch, found[0])
+
+    def test_a_missing_open_items_line_is_a_problem(self):
+        for watches in ((), (PAGE,)):
+            with self.subTest(watches=watches):
+                found = problems(handoff_text(None, watches))
+                self.assertTrue(found, "the hand-off must say whether items are open")
+                self.assertTrue(any("Open items" in p for p in found), found)
+                self.assertFalse(any(OFFERS_IDS.search(p) for p in found), found)
+                self.assertTrue(any(re.search(r"(?i)\burl\b", p) for p in found), "the message must offer the URL home")
+
+    def cli(self, *args):
+        self.assertTrue(os.path.isfile(CLI), "skills/project-ops/scripts/check_handoff.py does not exist")
+        r = subprocess.run([sys.executable, CLI, *args], capture_output=True, text=True)
+        self.assertNotIn("Traceback", r.stderr)
+        return r.returncode, r.stdout, r.stderr
+
+    def write(self, text, name="handoff.md"):
+        path = os.path.join(self.dest, name)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        return path
+
+    def test_cli_exits_0_and_says_so_when_ok(self):
+        code, out, err = self.cli(self.write(handoff_text(ITEMS, [PAGE])))
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue(out.strip(), "an ok hand-off prints its verdict")
+
+    def test_cli_exits_1_and_prints_each_problem(self):
+        text = handoff_text(ITEMS)
+        expected = problems(text)
+        self.assertTrue(expected)
+        code, out, err = self.cli(self.write(text))
+        self.assertEqual(code, 1, out + err)
+        for p in expected:
+            self.assertIn(p, out + err)
+
+    def test_cli_exits_2_on_bad_arguments_or_an_unreadable_file(self):
+        good = self.write(handoff_text("none", ["none"]))
+        for args in ((), (good, good), (os.path.join(self.dest, "none.md"),), (self.dest,)):
+            with self.subTest(args=args):
+                self.assertEqual(self.cli(*args)[0], 2)
 
 
 class Protect(unittest.TestCase):

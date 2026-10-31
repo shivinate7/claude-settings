@@ -2,20 +2,33 @@
 
 ## The ruling
 
-`main` of shivinate7/claude-settings requires the checks that its branch protection lists. The list lives in
-the protection and nowhere else: `.github/stamp.json` `merge.requiredChecks` is `"protection"`, so the `merge` tool reads
-the names from the protection. GitHub's branch protection setting is the owner's to change.
+`main` of shivinate7/claude-settings requires one check: `all-jobs-passed`, the job in
+`.github/workflows/checks.yml` that runs the shared action `actions/all-jobs-passed`. Owner ruling,
+2026-10-30 15:03 CDT (waiting-page item 87): branch protection requires that one check. Record
+same-check-kinds (PR #877) holds the ruling for every repo.
+`.github/stamp.json` `merge.requiredChecks` is `"protection"`, so the `merge` tool reads the name from the
+protection. GitHub's branch protection setting is the owner's to change.
 
+- `all-jobs-passed` needs every job that runs on a pull request, except `ci-done`, which needs it. It fails
+  when a needed job failed, was cancelled or was skipped. `lint/test_all_jobs_passed.py` goes red when such a
+  job is missing from its `needs`.
+- `all-jobs-passed` runs only on a pull request. The five Windows shard jobs run only off a pull request, so
+  they are not in its `needs`. On main their own job results are the verdict.
+- A job that a scope flag turns off skips its steps, not the job, so it ends green, not skipped. Cost: a
+  pull request that turns every flag off starts 11 runners (6 Windows, 2 macOS, 3 Linux) that skip every
+  step.
+- A draft PR runs no CI: `scope` skips on a draft, and every other job skips with it.
 - A merge needs a pull request and no approval.
 - `strict` is false: GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base).
 - Admins are included (`enforce_admins`), so the rule binds the owner.
 - Force pushes and branch deletion are blocked. The repo has no rulesets.
-- The protection holds the one list of contexts. Change it when a job is renamed or added. A repo that pins a list in
-  `stamp.json` instead has `merge` refuse the run when the pinned list and a non-empty protection disagree, and name both
-  sets (c189).
-- The PUT is `gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input <json>`.
-  A PUT replaces the whole rule, so the input carries every field. It needs the owner's login:
-  `ssemwal-cdc` has push, not admin.
+- The protection holds the one required check. A new job goes in the `needs` of `all-jobs-passed`, not in
+  the protection. A repo that pins a list in `stamp.json` instead has `merge` refuse the run when the pinned
+  list and a non-empty protection disagree, and name both sets (c189).
+- The switch changes only the required checks:
+  `gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks`
+  with `strict=false` and one check, `all-jobs-passed`, app id 15368 (GitHub Actions). It needs the owner's
+  login: `ssemwal-cdc` has push, not admin.
 - Before every merge, read the checks yourself and refuse on red. The `merge` tool reads its checks
   from the branch protection.
 - Owner ruling, 2026-10-28 (waiting-page item 33 a): a rename of required checks switches branch

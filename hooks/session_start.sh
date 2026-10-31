@@ -1,12 +1,25 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
-# Silent outside a git tree or when git is missing. Always exits 0, nothing on stderr.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
+# Outside a git tree or when git is missing, prints only the cloud tier line. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
 cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 [ -n "$cwd" ] || cwd=$(pwd)
+session_id=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+source=$(printf '%s' "$input" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 
-command -v git >/dev/null 2>&1 || exit 0
+# tier_line: cloud sessions only (the CLAUDE_CODE_REMOTE read install.sh makes), tell the session how
+# to find its tier (decision session-tiers). One call runs per run: at the no-git or no-toplevel exit,
+# or right after the checkout line, so a cloud session gets it in any folder. The hook cannot read the
+# tier itself: get_session and list_sessions are MCP tools only, and a hook never calls the sessions API
+# with a token. Cost: one env read, no network, no new process, no timer, no file written.
+tier_line() {
+  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+    printf '%s\n' 'session tier: read your own record with get_session (no session_id). A parent_session_id means you are a child of that session, and your cs-build:<tier> tag is your tier. No parent: pick solo, one lane or coordinator from the request. Before you act as coordinator, read every page of list_sessions for a session tagged both cs-build:coordinator and cs-repo:<owner>/<name> for this repo whose session_status is not archived; if one is found, coordinate with it, else proceed. Merge role: this sentence is for a session whose own tag is cs-build:coordinator or cs-build:batch-runner, and for no other. Such a session runs `~/.claude/bin/merge --role <tier>` (its own tier) at session start and again after each resume, because a fresh container loses the role file. A lane or any other tier never runs it, and this line is no instruction to it.'
+  fi
+}
+
+command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
 # bounded_git <dir> <outfile> <git args...>: runs git in <dir>, stdout to <outfile>, killed after
 # CLAUDE_SETTINGS_FETCH_TIMEOUT seconds (default 2). Returns git's status, or a kill's (above 1)
@@ -34,7 +47,7 @@ bounded_fetch() {
 }
 
 toplevel=$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
-[ -n "$toplevel" ] || exit 0
+[ -n "$toplevel" ] || { tier_line; exit 0; }
 
 branch=$(cd "$cwd" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
 [ "$branch" = "HEAD" ] && branch="detached"
@@ -42,6 +55,29 @@ branch=$(cd "$cwd" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
 n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
+tier_line
+
+# Rule session-home: a resumed session whose recorded worktree folder is gone says so once, before it
+# writes. The record is `<primary>/.git/session-homes/<session_id>` (hooks/guard.py writes it). The
+# primary comes from the toplevel's path shape, so this adds no git call. The line never names the path.
+if [ "$source" = "resume" ]; then
+  case "$session_id" in
+    ""|*[!A-Za-z0-9._-]*) ;;
+    *)
+      sh_primary="$toplevel"
+      case "$toplevel" in
+        */.claude/worktrees/*) sh_primary="${toplevel%%/.claude/worktrees/*}" ;;
+      esac
+      sh_record="$sh_primary/.git/session-homes/$session_id"
+      if [ -d "$sh_primary/.git" ] && [ -f "$sh_record" ]; then
+        sh_home=$(cat "$sh_record" 2>/dev/null)
+        if [ -n "$sh_home" ] && [ ! -d "$sh_home" ]; then
+          printf '%s\n' "session-home: this session's worktree is gone. Call the EnterWorktree tool before you change any file; the guard refuses a write into the primary checkout until then."
+        fi
+      fi
+      ;;
+  esac
+fi
 
 # core.worktree in the SHARED config re-points every checkout of the clone at one tree. A child
 # `git init` that inherits GIT_DIR and GIT_WORK_TREE writes it.
@@ -142,7 +178,11 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   # instead of staying silent, which would read as "up to date".
   #
   # CLAUDE_SETTINGS_FETCH_TIMEOUT overrides the 2 second bound, for tests.
-  if [ "$pointer_branch" = "main" ]; then
+  #
+  # A clone install.sh made (claude-settings.cloudMirror) is refreshed by install.sh in the same
+  # session start, so a behind count on it is a false alarm. The check skips it.
+  cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
+  if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
     if bounded_fetch "$d" main; then
       behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then

@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<title>Waiting on you</title>
+<title>Questions</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -51,12 +51,10 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
 .who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.who .sub { font-size: 13.5px; opacity: .88; white-space: nowrap; }
-@media (max-width: 420px) { .who .sub { display: none; } }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
 .tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
-.tabs a[aria-current="page"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
 .tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
 
 /* State shapes: a tier shows by shape and word, never by colour alone. */
@@ -143,7 +141,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 
 /* Options side by side; each card's rows line up so lose sits beside lose. */
 .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
-.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; scroll-margin-top: 64px; scroll-margin-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 @supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
 .opt:hover { border-color: var(--faint); }
 .opt input { position: absolute; opacity: 0; pointer-events: none; }
@@ -182,10 +180,58 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
 .opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
 .opt .nopick { align-self: end; }
+/* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
+.multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
+.tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
+.opt.sel .tick { background: var(--acc); border-color: var(--acc); }
+.opt.sel .tick.mark::before { content: ""; width: 6px; height: 12px; border: solid var(--on-acc); border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
+/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down, View and the marked rows sit above the label. */
+.opt.ranked { cursor: default; }
+.opt.ranked > label.head { cursor: pointer; }
+.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); z-index: 1; }
+.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 2; }
+.opts.ranked .opt { grid-template-rows: auto auto 1fr auto auto; }
+.opts.ranked.pics .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked .opt { grid-row: span 5; grid-template-rows: subgrid; } .opts.ranked.pics .opt { grid-row: span 6; } }
+.opt .rank { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.opt .rank.gone { visibility: hidden; }
+.btn.mv { position: relative; min-height: 44px; min-width: 44px; padding: 8px 12px; background: var(--surface); color: var(--acc); }
+.btn.mv svg { flex: none; }
+/* At an end of the order the button stays in place and focusable. It is marked off by a dashed border, and the reason shows on hover and focus. */
+.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
+.btn.mv[aria-disabled="true"] svg { opacity: .5; }
+.btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* Links on an option card: optCard puts <div class="links"> after .how and before .tr. A card with no links gets <span class="nolinks">,
+   as .nopick does, so the subgrid rows still line up. buildCard adds "olinks" to .opts only when some option has links. */
+.opts.olinks .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.olinks .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opts.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
+/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. A flex item
+   is a block, and a screen reader puts a space between blocks, so the one span inside the link holds all its text:
+   the arrow's gap sits in CSS and the link's name is the label plus the hidden phrase. */
+.links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a [aria-hidden] { margin-inline-start: 4px; }
+/* A block-level .sr (position: absolute is one) gets a space before it in the link's name, so in a link it stays inline and takes no room. */
+.links a .sr { position: static; display: inline; font-size: 0; }
+/* Links on a ranked card: one more row than the ranked rows above. The label's ::after overlay covers the card, so the links row sits above it as .rank and .opic do. */
+.opt.ranked .links { position: relative; z-index: 2; }
+/* A press anywhere on a ranked card ticks it, so only the link itself is raised above the overlay. */
+.opt.ranked .links { pointer-events: none; }
+.opt.ranked .links a { pointer-events: auto; }
+.opts.ranked.olinks .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+.opts.ranked.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } .opts.ranked.pics.olinks .opt { grid-row: span 7; grid-template-rows: subgrid; } }
 
 .ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
 .ready.on { color: var(--good); font-weight: 600; }
-.ready.on::before { content: "\2713  "; }
+/* A multi item names its picks, so its line may wrap. Hidden copies of its longest possible lines share the live line's grid cell,
+   so the cell is always as tall as the longest line at the current width: the tail is never cut and the cards never move. */
+.readybox { display: grid; }
+.readybox > * { grid-area: 1 / 1; min-width: 0; }
+.ready.multi, .readyfit { white-space: normal; overflow: visible; }
+.readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
+.ready.on::before, .readyfit::before { content: "\2713  "; }
 /* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
 .alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .alts .sp { flex: 1 1 0; }
@@ -201,8 +247,25 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .note.need label { color: var(--due); font-weight: 600; }
 .note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
 .note.need textarea { border-color: var(--due); }
-ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+/* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
+.cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
+/* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
+.btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
+.cmd-copy > span { grid-area: 1 / 1; }
+.cmd-copy .ok, .cmd.copied .cmd-copy .go { visibility: hidden; }
+.cmd.copied .cmd-copy .ok { visibility: visible; }
+.cmd-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--acc); font-weight: 600; font-size: 14.5px; }
+.cmd-more[open] > summary { margin-bottom: 8px; }
+/* Each written line is one block. A long line wraps in the block, and its wrapped part hangs 2ch in. */
+.cmd-text { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.cmd-text code { font: inherit; }
+.cmd-text .ln { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+.cmd-text .ln:empty::after { content: " "; }
 .dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
 .status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
 .status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
@@ -217,6 +280,12 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
 .receipt .line b { overflow-wrap: anywhere; color: var(--good); }
 .receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* A multi answer lists each pick with its letter and title, in order. */
+.receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
+.receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
+.receipt ol.picks li { grid-template-columns: 2ch auto minmax(0, 1fr); }
+.receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
+.receipt .picks .key { color: var(--ink); }
 .card.answered { border-left: 6px solid var(--good); }
 .ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
 .ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
@@ -262,8 +331,19 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dprev .dbar .sp { flex: 1; }
 .dframe { width: 100%; border: 1px solid var(--line); border-radius: 10px; background: #fff; display: block; }
 .dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
-.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; width: 390px; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
+.dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
 .dfitwrap.inert .dframe { pointer-events: none; }
+/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
+:root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
+.dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }
+.dfitwrap .dtop, .dfitwrap .dcue { display: none; }
+.dfitwrap.scroll { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable; }
+.dfitwrap.scroll .dtop { display: block; position: sticky; top: 0; z-index: 1; height: 12px; margin-bottom: -12px; background: linear-gradient(rgb(22 27 34 / 0.28), rgb(22 27 34 / 0)); opacity: 0; pointer-events: none; }
+.dfitwrap.scroll.scrolled .dtop { opacity: 1; }
+.dfitwrap.scroll .dcue { display: flex; position: sticky; bottom: 0; z-index: 1; height: 40px; margin-top: -40px; align-items: flex-end; justify-content: center; padding-bottom: 8px; background: linear-gradient(rgb(22 27 34 / 0), rgb(22 27 34 / 0.28)); pointer-events: none; }
+.dfitwrap.scroll.at-end .dcue { opacity: 0; }
+.dfitwrap .dmore { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 12px; background: var(--pic-cue); color: var(--on-pic-cue); box-shadow: 0 0 0 1px var(--on-pic-cue); font: 600 12px/1 var(--body); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) { .dfitwrap.scroll .dcue, .dfitwrap.scroll .dtop { transition: opacity 150ms linear; } }
 .dsheet { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
 .dsh-head { background: var(--hdr); color: var(--on-hdr); padding-top: env(safe-area-inset-top, 0px); }
 .dsh-head .in { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding-block: 8px; }
@@ -282,18 +362,295 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; }
 .dcap { display: none; margin: 0 0 6px; justify-self: stretch; min-width: 0; min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.4 var(--body); color: var(--muted); }
 .dcap.on { display: block; }
 body.sheet-open { overflow: hidden; }
+
+/* Status tab: the roadmap's layout in this page's tokens, under .sv. The names page.html also uses
+   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) are renamed here, so no rule above reaches status. */
+.tabs .tl { display: flex; gap: 4px; }
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+.tabs #qCount:empty { display: inline-block; }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+:where(.sv) button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+:where(.sv) button:disabled { cursor: default; }
+.sv .id, .sv .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.readat { font-size: 14px; color: var(--muted); min-width: 0; }
+.readat summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.readat li { overflow-wrap: anywhere; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+
+.live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.live summary .lh { font-weight: 700; }
+.live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); padding: 0; }
+.live h4 { padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.live ul { list-style: none; margin: 0; padding: 0; }
+.live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.live li .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.livenone { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 8px 14px; display: grid; gap: 2px; font-size: 14.5px; }
+.livenone .lh { font-weight: 700; }
+.livenone details { font-size: 14px; color: var(--muted); }
+.livenone summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.livenone pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.live a { color: var(--acc); text-decoration: none; }
+.live a:hover { text-decoration: underline; }
+@container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
+.tag.st-working { color: var(--acc); }
+.tag.st-blocked, .tag.blk { color: var(--holds); }
+.tag.st-review_ready, .tag.landed { color: var(--good); }
+.tag.st-failed, .tag.st-stopped { color: var(--due); }
+.tag.st-done { color: var(--muted); }
+.tag.next { color: var(--muted); border-style: dashed; }
+
+.now { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.now > div { background: var(--surface); padding: 12px 14px; min-width: 0; display: grid; gap: 6px; align-content: start; }
+.now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.now .ph { font: 700 19px/1.2 var(--body); }
+.now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+.now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
+.now li .id { flex: none; font-size: 13px; color: var(--muted); }
+.now li .tx { min-width: 0; min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.now li .tx:hover, .lnk:hover { text-decoration: underline; }
+.now li.none { color: var(--muted); }
+.now .ix { flex: none; width: 12px; font: 13px var(--mono); color: var(--muted); }
+.now .offt .ic { flex: none; font-size: 12px; font-weight: 700; color: var(--holds); border: 1.5px solid currentColor; border-radius: 4px; padding: 0 5px; }
+@container (min-width: 640px) { .now { grid-template-columns: 1fr 1fr; } }
+@container (min-width: 1000px) { .now { grid-template-columns: 1.1fr 1.4fr 1.6fr 1.6fr; } }
+
+.segbar { height: 6px; display: flex; gap: 2px; border-radius: 3px; overflow: hidden; }
+.segbar i { flex: 1; background: var(--line); }
+.segbar i.done { background: var(--acc); }
+.segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
+.segbar i.blk { background: var(--holds); }
+
+/* The view switch sits right above the view it changes. What every view shares sits above the switch. */
+.views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
+/* Below 340px four equal columns cut "Reference": each column takes its label's width, and the rest is shared. */
+@container (max-width: 339px) {
+  .views { grid-template-columns: repeat(4, auto); }
+  .views button { padding-inline: 4px; font-size: 14px; }
+}
+.views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.sview { display: grid; gap: 14px; min-width: 0; }
+
+.prail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.prail button { display: grid; gap: 6px; min-width: 0; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
+.prail button[aria-pressed="true"] { border-color: var(--acc); box-shadow: inset 0 3px 0 var(--acc); }
+.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); white-space: nowrap; }
+.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); }
+.prail .here { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
+@container (max-width: 639px) {
+  .prail { gap: 4px; }
+  .prail button { padding: 6px 5px; }
+  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
+  .prail .nm > span:first-child { overflow-wrap: anywhere; }
+}
+/* Five chips keep each phase name and the current-phase dot on one line from a 452px box in DejaVu Sans, a wide fallback if the web font fails, and from a 410px box in the web font (Organize current is the widest). Five columns start at 464px, a 12px margin over the wide font. Below that the rail wraps to three columns. */
+@container (max-width: 463px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container (min-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr) 320px; } }
+.side { display: grid; gap: 12px; min-width: 0; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.box > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box > header h3 { font: 700 15px/1.3 var(--body); }
+.sv .lbl { font-size: 13px; color: var(--muted); }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px; }
+.ph-head h3 { font: 700 18px/1.25 var(--body); }
+.ph-head .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.ph-head .prog .segbar { width: 110px; }
+@container (max-width: 639px) { .ph-head .prog { margin-left: 0; width: 100%; } .ph-head .prog .segbar { flex: 1; } }
+.asof { font-size: 13px; color: var(--muted); padding: 0 14px 8px; }
+.howto { display: inline-flex; align-items: center; min-height: 32px; margin-left: 4px; font-size: 13px; font-weight: 600; color: var(--acc); }
+.howbody { font-size: 13.5px; color: var(--muted); padding: 0 14px 10px; }
+.foot { font-size: 13px; color: var(--muted); padding: 6px 14px; border-bottom: 1px solid var(--line); }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-block: 1px solid var(--line); }
+.tile { background: var(--surface); padding: 10px 14px; display: grid; gap: 4px; min-width: 0; align-content: start; text-align: left; }
+button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surface)); }
+.tile .tl { font-size: 13.5px; color: var(--muted); }
+.tile .row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tile .v { font: 600 20px/1.1 var(--mono); overflow-wrap: anywhere; }
+.tile .v small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.tile .goal { font-size: 13px; color: var(--muted); }
+.tile svg { display: block; width: 100%; height: 30px; overflow: visible; }
+.tile .ft { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
+.tile .rule { display: none; font-size: 13.5px; color: var(--ink); border-top: 1px dashed var(--line); padding-top: 5px; margin-top: 2px; }
+.tile[aria-expanded="true"] .rule { display: block; }
+.tiles .none { grid-column: 1 / -1; background: var(--surface); padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.dl { font: 500 12px var(--mono); padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.dl.good { color: var(--good); background: var(--good-soft); }
+.dl.bad { color: var(--holds); background: color-mix(in srgb, var(--holds) 14%, var(--surface)); }
+.dl.flat { color: var(--muted); background: var(--chip); }
+.meter { display: flex; gap: 2px; height: 8px; }
+.meter i { flex: 1; background: var(--line); border-radius: 2px; }
+.meter i.on { background: var(--acc); }
+.one { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.one::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); }
+.hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.rsteps { list-style: none; margin: 0; padding: 0; }
+.rsteps > li + li { border-top: 1px solid var(--line); }
+.rrow { display: grid; grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.rrow .ttl { min-width: 0; overflow-wrap: anywhere; }
+.rrow .id { font-size: 13px; color: var(--muted); }
+.rrow .meta { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.rrow .chev { font-size: 11px; color: var(--muted); }
+.rsteps li.open .chev, .donefold.open > .fold .chev { transform: rotate(90deg); }
+.rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
+.rsteps .active .ttl { font-weight: 700; }
+.rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
+.rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
+.rsteps li.open .rbody { display: block; }
+.rbody dl { margin: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 6px 10px; }
+.rbody dt { font-size: 13px; padding-top: 2px; }
+.rbody dd { margin: 0; overflow-wrap: anywhere; min-width: 0; color: var(--ink); }
+.ask { display: flex; gap: 8px; align-items: flex-start; background: var(--ground); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 13px var(--mono); color: var(--ink); }
+.ask span { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; max-height: 12em; overflow: auto; }
+.copy { flex: none; min-height: 44px; padding: 0 12px; border-radius: var(--r); background: var(--acc); color: var(--on-acc); font: 600 14px var(--body); }
+.sv .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.more { min-height: 32px; font-size: 13.5px; font-weight: 600; color: var(--acc); }
+.noneyet { padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
+.fold { display: flex; gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; text-align: left; }
+.donefold .fb { display: none; border-top: 1px solid var(--line); }
+.donefold.open .fb { display: block; }
+@container (max-width: 639px) {
+  .rrow { grid-template-columns: 16px 40px minmax(0, 1fr) 12px; gap: 4px 8px; padding-inline: 10px; }
+  .rrow .meta { grid-column: 3; grid-row: 2; justify-content: flex-start; }
+  .rrow .chev { grid-column: 4; grid-row: 1; }
+  .rbody { padding: 2px 10px 12px; }
+}
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-top: 1px solid var(--line); background: var(--ground); }
+.pager .pc { font-size: 13.5px; color: var(--muted); text-align: center; }
+.pager button { min-height: 44px; padding: 4px 12px; font-size: 13.5px; font-weight: 600; color: var(--acc); border: 1px solid var(--line); background: var(--surface); border-radius: 8px; white-space: nowrap; }
+.pager button:disabled { color: var(--muted); opacity: .5; }
+.box > .pager:last-child { border-radius: 0 0 12px 12px; }
+
+.feed { list-style: none; margin: 0; padding: 4px 0; }
+.feed li { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 14px; font-size: 14px; }
+.feed .when, .ev .when { font: 13px var(--mono); color: var(--muted); padding-top: 1px; }
+.lnk { display: inline; min-height: 32px; color: var(--ink); text-align: left; }
+.lnk .id { color: var(--muted); }
+.morelink { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; font-weight: 600; color: var(--acc); }
+.trend { padding: 8px 14px 10px; display: grid; gap: 8px; }
+.trow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.trow .k { font-size: 13px; color: var(--muted); line-height: 1.2; }
+.trow svg { width: 100%; height: 30px; display: block; overflow: visible; }
+.trow .r { text-align: right; line-height: 1.15; }
+.trow .r .num { font-size: 13px; font-weight: 600; display: block; }
+.legend { display: flex; gap: 12px; font-size: 13px; color: var(--muted); padding: 0 14px 10px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 12px; border-top: 1px dashed var(--muted); vertical-align: middle; margin-right: 4px; }
+.burn { padding: 10px 14px 12px; display: grid; gap: 6px; }
+.burn svg { width: 100%; height: 110px; display: block; overflow: visible; }
+.dot { width: 8px; height: 8px; display: inline-block; flex: none; border-radius: 2px; background: var(--acc); }
+
+.day h3 { padding: 10px 14px; font: 700 15px/1.3 var(--body); display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); background: var(--chip); }
+.day:not(:first-child) h3 { border-top: 1px solid var(--line); }
+.day h3 .lbl { font-weight: 400; }
+.ev { display: grid; grid-template-columns: 76px 16px minmax(0, 1fr); gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.day h3 + .ev { border-top: 0; }
+.ev .rg { margin-top: 3px; }
+.ev .gist { color: var(--muted); font-size: 13.5px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ev.done .t { text-decoration: line-through; text-decoration-color: var(--line); }
+.lead { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+.gcard { margin-bottom: 16px; }
+.gcard ol { margin: 0; padding: 0 0 0 18px; font-size: 14px; }
+.gcard ol li { padding: 2px 0; }
+.tp > button { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; gap: 8px; width: 100%; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); align-items: baseline; }
+.tp:first-of-type > button { border-top: 0; }
+.tp > button:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
+.tp .id { font-size: 13px; color: var(--muted); }
+.tp .sm { display: block; font-size: 13px; color: var(--muted); }
+.tp .tb { display: none; padding: 0 14px 12px 52px; min-width: 0; }
+.tp.open .tb { display: block; }
+.tp.open .chev { transform: rotate(90deg); }
+.tp .chev { font-size: 11px; color: var(--muted); }
+.tp ul { margin: 0; padding-left: 16px; font-size: 14px; color: var(--ink); }
+.tp ul li { margin: 3px 0; }
+.tp .ask { margin-top: 6px; }
+.tp .ask span { max-height: 16em; }
+.tp .blbl { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.src { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13.5px; margin-top: 8px; }
+.hl, .rc { list-style: none; margin: 0; padding: 0; }
+.hl li, .rc li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.hl li:first-child, .rc li:first-child { border-top: 0; }
+.hl .k { color: var(--muted); font-weight: 600; }
+.rc li { grid-template-columns: 72px minmax(0, 1fr); }
+.rc .when { font: 13px var(--mono); color: var(--muted); padding-top: 2px; }
+.rc a, .hl a { color: var(--acc); text-decoration: none; }
+.rc a:hover, .hl a:hover { text-decoration: underline; }
+.rc .nm { display: block; font: 13px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.count { font: 600 22px var(--mono); padding: 10px 14px 2px; }
+@container (max-width: 559px) { .hl li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* No roadmap: unknown, why, and one control that leads on. */
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
+.nob p { max-width: 62ch; }
+.nob details { font-size: 14px; color: var(--muted); }
+.nob summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.nob pre, .nob textarea { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nob textarea { width: 100%; background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.sv-tip { position: fixed; z-index: 12; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 13px; padding: 4px 7px; border-radius: 4px; max-width: 240px; opacity: 0; transition: opacity .08s; left: 0; top: 0; }
+.sv-tip.on { opacity: 1; }
+.sv-toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 12; background: var(--ink); color: var(--surface); font-size: 14px; padding: 8px 14px; border-radius: 8px; max-width: calc(100vw - 32px); }
+@media (pointer: coarse) { .now li .tx, .feed .lnk, .ev .lnk { min-height: 44px; } }
+/* Arbiter rulings: a section after the open tiers; each ruling is a quiet card with one Overturn toggle. */
+/* Its own shape: a hollow diamond, unlike the square, triangle, ring, dot and check of the other sections. */
+.g.ruled { width: 10px; height: 10px; margin: 0 1px; border: 2px solid var(--muted); border-radius: 1px; transform: rotate(45deg); }
+/* The section sits after the open tiers. Its head is a disclosure button inside the h2, so the heading stays a heading. */
+.tier.ruled { gap: 10px; }
+.tier.ruled > header { display: grid; gap: 2px; }
+.tier.ruled > header h2 { font: 700 17px/1.25 var(--body); }
+.rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
+.rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
+.rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
+.rsub { margin: 0; font-size: 14px; color: var(--muted); }
+/* Not .rbody: the Status tab already uses that class. */
+.rlist { display: grid; gap: 10px; }
+/* A ruling card is quieter than an ask: a lighter ground, a smaller title, no tier edge. */
+.card.rcard { padding: 14px 16px; gap: 8px; }
+.card.rcard:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
+.rcard .title { font-size: 17px; max-width: 60ch; }
+.rcard.armed { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.ruledline { margin: 0; display: flex; gap: 10px; align-items: flex-start; font-size: 15.5px; }
+.ruledline .key { flex: none; max-width: none; }
+.ruledline b { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; padding-top: 1px; }
+.rwhy { margin: 0; max-width: 70ch; font-size: 14.5px; color: var(--muted); }
+.rfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.rfoot .dest { flex: 1 1 12rem; border: 0; padding: 0; }
+.rfoot .btn { min-width: 7.5rem; justify-content: center; }
 </style>
 
 <header class="hdr"><div class="in">
   <div class="mark" id="mark" aria-hidden="true"></div>
-  <div class="who"><h1 class="repo" id="repoName">Waiting on you</h1><span class="sub" id="repoSub" hidden>waiting on you</span></div>
+  <div class="who"><h1 class="repo" id="repoName">Questions</h1></div>
 </div></header>
 
-<nav class="in tabs" id="tabs" aria-label="Page" hidden><a href="#" id="tabQ" aria-current="page">Questions</a><a href="#" id="tabD" role="button">Designs <span class="cnt" id="dCount"></span></a></nav>
-<div class="in main" id="qView">
+<nav class="in tabs" id="tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" id="tabQ" role="tab" aria-selected="true" aria-controls="qView">Questions <span class="cnt" id="qCount"></span></a><a href="#" id="tabStatus" role="tab" aria-selected="false" aria-controls="sPanel" tabindex="-1">Status</a></div><a href="#" id="tabD" role="button" hidden>Designs <span class="cnt" id="dCount"></span></a></nav>
+<div class="in main" id="qView" role="tabpanel" aria-labelledby="tabQ">
   <nav class="rail" id="rail" aria-label="Overview"></nav>
   <div class="list" id="list"><div class="empty">Loading the items waiting on you…</div></div>
 </div>
+
+<div class="in svwrap" id="sPanel" role="tabpanel" aria-labelledby="tabStatus" hidden><section class="sv" id="sView" aria-label="Status"></section></div>
 
 <div class="bar" id="bar">
   <div class="sent" id="sent" hidden><div class="in" id="sentIn"></div></div>
@@ -316,19 +673,40 @@ body.sheet-open { overflow: hidden; }
   <div class="dsh-body" id="dStage"><p class="dcap" id="dCap"></p></div>
 </div>
 
+<div class="sv-tip" id="svTip" role="tooltip"></div>
+<div class="sv-toast" id="svToast" role="status" aria-live="polite" hidden></div>
+
 <!-- A session that adds designs republishes this page with {slug: whole mockup HTML}, "<" written as <. -->
 <script type="application/json" id="designData">{}</script>
 
+<!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The waiting-page writer replaces it on each publish
+     (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
+<!-- roadmap:data -->
+<!-- /roadmap:data -->
+
 <script>
-const state = { items: [], answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
-const choiceText = (k) => (k === NONE ? "none of these" : k);
+// "overturn" is no option key. It is the answer to an arbiter ruling: a closed item the arbiter's writer filed with `arbiter: true`.
+const OVERTURN = "overturn";
+const isRuling = (it) => it.status === "closed" && it.arbiter === true;
+const choiceText = (k) => (k === NONE ? "none of these" : k === OVERTURN ? "overturn" : Array.isArray(k) ? k.join("+") : k);
 // The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
 const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
 const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
 const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o ? shorten(String(o.label), 28) : ""; };
+// A multi item takes a list of option keys: `multi`, or `ranked`, which also orders them. A list is valid when it holds distinct keys of the item's options.
+const isMulti = (it) => it.kind === "decision" && (it.multi === true || it.ranked === true);
+const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size === l.length && l.every((k) => (it.options || []).some((o) => o.key === k));
+// The keys of my pick, or null when the pick does not fit the kind of item: a pick-one pick is one key, a multi pick is a valid list. An unranked multi pick is shown and saved in option order, as ticks are; a ranked one keeps its order.
+const pickKeys = (it) => (isMulti(it) ? (validKeys(it, it.pick) ? (it.ranked === true ? it.pick : (it.options || []).map((o) => o.key).filter((k) => it.pick.includes(k))) : null) : typeof it.pick === "string" && (it.options || []).some((o) => o.key === it.pick) ? [it.pick] : null);
+const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : it.pick);
+// "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
+const namesOf = (it, l) => { const n = l.map((k) => pickName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
+const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]);
+const sameList = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((k, i) => k === b[i]);
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v === true) n.setAttribute(k, ""); else if (v !== false && v != null) n.setAttribute(k, v); }
@@ -435,9 +813,16 @@ function applyIdentity() {
     $("mark").classList.remove("icon"); $("mark").style.removeProperty("--tile");
     applyIcon(id.icon);
   }
-  $("repoName").textContent = name || "Waiting on you";
-  $("repoSub").hidden = !name;
-  document.title = name ? name + ": waiting on you" : "Waiting on you";
+  setTitle();
+}
+// Each part has one name, the name of its tab, and the title names the open one.
+function setTitle() {
+  const name = state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "";
+  const part = state.tab === "s" ? "Status" : "Questions";
+  document.title = (name ? name + ": " : "") + part;
+  // With no name the tab row already shows the part's name, so the header shows the mark only; the h1 stays for a screen reader.
+  $("repoName").textContent = name || part;
+  $("repoName").classList.toggle("sr", !name);
 }
 
 /* ---------- Time: always US Central, 24-hour, with the zone named ---------- */
@@ -457,9 +842,9 @@ const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" },
 const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
 const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
 // A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
-const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && (it.options || []).some((o) => o.key === it.pick);
+const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && !!pickKeys(it);
 const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by && validT(it.by) ? "due" : "calm");
-const mates = (it) => (it.group ? state.items.filter((x) => x.group === it.group) : [it]);
+const mates = (it) => (it.group && !isRuling(it) ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
 function sorted() {
@@ -480,19 +865,26 @@ function sorted() {
 
 /* ---------- Answers ---------- */
 const byId = (id) => state.items.find((i) => i.id === id);
-const isSaved = (it) => !!state.answers[it.id] && !state.changing[it.id];
+// Every item that can hold an answer: the open ones, and the rulings an Overturn may answer.
+const answerable = () => [...state.items, ...state.rulings];
+// The owner's saved answer. A ruling was an open item once, so a record under its id that is no overturn is stale and counts as none.
+const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) ? a : undefined; };
+const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
 // The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
-const stoodNow = (it) => standsOk(it) && !state.answers[it.id];
+const stoodNow = (it) => standsOk(it) && !savedOf(it);
 const eff = (it) => {
   const d = state.draft[it.id];
-  if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: it.pick, auto: true, stood: true };
-  return d || (stoodNow(it) ? { choice: it.pick, auto: true, stood: true } : undefined);
+  // A ruling holds one draft, overturn. A pick draft left from when the item was open is ignored.
+  if (isRuling(it)) return d && d.choice === OVERTURN ? d : undefined;
+  if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: pickChoice(it), auto: true, stood: true };
+  return d || (stoodNow(it) ? { choice: pickChoice(it), auto: true, stood: true } : undefined);
 };
 function draftReady(it) {
   const d = eff(it); if (!d || blocked(it)) return false;
-  if (it.kind === "task") return !!d.done;
+  if (isRuling(it)) return d.choice === OVERTURN;
+  if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
-  return !!d.choice && (it.options || []).some((o) => o.key === d.choice);
+  return isMulti(it) ? validKeys(it, d.choice) : (it.options || []).some((o) => o.key === d.choice);
 }
 // An option's picture must show that option's own difference. Two options whose card pictures are one slug, or one mockup, with one focus, show the same thing.
 // A focus that finds nothing in its mockup shows nothing of what is being decided. A missing mockup is warned in the frame, so it is not flagged here.
@@ -520,6 +912,8 @@ function problem(it) {
   const okN = typeof it.n === "number" && isFinite(it.n);
   const fix = " Ask the session to fix " + (okN ? "item " + it.n : "this item") + ".";
   if (!okN) return { text: "This item has no number, so it cannot be answered." + fix, blocks: true };
+  // A ruling is closed: it has no picture, stake or option checks to pass. Only its id is read back.
+  if (isRuling(it)) return it.rawId !== it.id ? { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false } : null;
   if (it.kind !== "decision" && it.kind !== "task") return { text: "This item is neither a decision nor a task, so it cannot be answered." + fix, blocks: true };
   if (it.kind === "decision") {
     if (it.optionsBad) return { text: "The options of this decision are not a list, so it cannot be answered." + fix, blocks: true };
@@ -536,10 +930,10 @@ function problem(it) {
   return null;
 }
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
-const staged = () => state.items.filter((it) => !isSaved(it) && draftReady(it));
+const staged = () => answerable().filter((it) => !isSaved(it) && draftReady(it));
 // A changed answer whose draft the owner emptied: Send withdraws the saved record.
-const withdrawing = (it) => !!state.answers[it.id] && !!state.changing[it.id] && !state.draft[it.id];
-const withdrawn = () => state.items.filter(withdrawing);
+const withdrawing = (it) => !!savedOf(it) && !!state.changing[it.id] && !state.draft[it.id];
+const withdrawn = () => answerable().filter(withdrawing);
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
   if (!next.choice && !next.done && !next.unstood && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
@@ -554,10 +948,28 @@ function choose(it, key) {
   edited(); setDraft(it, patch); repaint(it);
   if (key === NONE) { const t = $("n-" + it.id); if (t) t.focus(); }
 }
+// A multi item's choice is the list of ticked keys. A new tick goes last, an untick closes the gap, and a ranked item's order is the list's order.
+const tickList = (it) => { const c = (eff(it) || {}).choice; return Array.isArray(c) ? c : []; };
+function toggle(it, key) {
+  // A ranked item adds a new tick last. An unranked item has no order, so its ticks stay in option order.
+  const cur = tickList(it), on = !cur.includes(key);
+  const next = it.ranked === true ? (on ? [...cur, key] : cur.filter((k) => k !== key))
+    : (it.options || []).map((o) => o.key).filter((k) => k === key ? on : cur.includes(k));
+  const patch = { choice: next.length ? next : null, auto: false };
+  if (!next.length && stoodNow(it)) patch.unstood = true;
+  if ((eff(it) || {}).choice === NONE) patch.note = "";
+  edited(); setDraft(it, patch); repaint(it);
+}
+function move(it, key, dir) {
+  const cur = tickList(it).slice(), i = cur.indexOf(key), j = dir === "up" ? i - 1 : i + 1;
+  if (i < 0 || j < 0 || j >= cur.length) return;
+  [cur[i], cur[j]] = [cur[j], cur[i]];
+  edited(); setDraft(it, { choice: cur, auto: false }); repaint(it);
+}
 function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
-  if (it.kind === "decision") body.choice = d.choice || NONE; else body.done = true;
+  if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
   return body;
 }
 const edited = () => { state.barNote = ""; state.copyOffer = false; };
@@ -565,14 +977,22 @@ const edited = () => { state.barNote = ""; state.copyOffer = false; };
 /* ---------- Cards ---------- */
 const glyph = (k) => h("span", { class: "g " + k, "aria-hidden": "true" });
 function linkIcon() { const d = document.createElement("span"); d.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>'; return d.firstChild; }
+function arrow(dir) { const d = document.createElement("span"); d.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="' + (dir === "up" ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M5 12l7 7 7-7") + '"/></svg>'; return d.firstChild; }
 function readyText(it) {
   const d = eff(it) || {};
   if (blocked(it)) return "This item cannot be sent.";
-  if (it.kind === "task") return d.done ? "Ready to send: done." : "";
+  if (isRuling(it)) return d.choice === OVERTURN ? "Ready to send: overturn." : "";
+  if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
+  if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (d.auto ? ", my pick." : it.ranked === true ? ", your order." : ", your choice.") : "";
   return "Ready to send: " + pickName(it, d.choice) + (d.auto ? ", my pick." : ", your choice.");
+}
+// The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
+function readyFits(it) {
+  const all = "Ready to send: " + namesOf(it, (it.options || []).map((o) => o.key));
+  return [all + (it.ranked === true ? ", your order." : ", your choice."), all + ", my pick.", "Ready to send: none of these, with your note.", "My pick goes with your next Send."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
 function sparkle() {
@@ -601,42 +1021,87 @@ function optPic(it, o, dif) {
   if (!has && !it.look) return h("span", { class: "opic" });
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
-  return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: open, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); } },
-    fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480), h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
+  const pic = fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480);
+  // A press on the scrollbar is no press on the picture. The click that follows it, wherever a drag ends, opens nothing and picks nothing.
+  const onBar = (e) => { const r = pic.getBoundingClientRect(); return pic.classList.contains("scroll") && e.clientX >= r.left + pic.clientLeft + pic.clientWidth && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
+  pic.addEventListener("pointerdown", (e) => {
+    // Only the main button fires a click, so another button arms nothing.
+    if (e.button !== 0 || !onBar(e)) return;
+    // The cancel ends with the next pointer click, or with the next press when no click follows. A keyboard click (detail 0) passes.
+    const stop = (c) => { if (c.detail === 0) return; c.preventDefault(); c.stopPropagation(); off(); };
+    const off = () => { document.removeEventListener("click", stop, true); document.removeEventListener("pointerdown", off, true); };
+    document.addEventListener("click", stop, true); document.addEventListener("pointerdown", off, true);
+  });
+  return h("span", { class: "opic" + (dif ? " dif" : ""), role: "button", tabindex: "0", "aria-label": "View " + o.label + " full screen" + (dif ? ". Its picture sets this option apart" : ""), onclick: (e) => { if (onBar(e)) { e.preventDefault(); e.stopPropagation(); } else open(e); }, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") open(e); else picKeys(e, pic); } },
+    pic, h("span", { class: "view", "aria-hidden": "true" }, dif ? ne() : null, "View"));
 }
 // Designs that no option names show at the front of the item.
 const looseDesigns = (it) => { const named = new Set((it.options || []).map((o) => o.design).filter(Boolean)); return designsOf(it).filter((d) => !named.has(d.slug) && !(d.option && (it.options || []).some((o) => o.key === d.option))); };
+// One home for a link on an option card and on a task card. The arrow is hidden from screen readers; a hidden phrase says where it opens.
+const linkEl = (l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, h("span", {}, l.label, h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab")));
+// `links` counts only as an Array; any other value renders no links row and no error.
+// A link that is not an object with a string url and label would draw an empty or broken anchor.
+const isLink = (l) => !!l && typeof l === "object" && typeof l.url === "string" && typeof l.label === "string";
+const linksOf = (x) => (Array.isArray(x.links) ? x.links.filter(isLink) : []);
+const hasOptLinks = (it) => (it.options || []).some((o) => linksOf(o).length);
 // An option that widens what a shared tool accepts (`widens`) breaks the owner's uniform ruling, topic t18; its card says so.
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key, m = marks(it, o), on = (f) => m.includes(f);
   const mark = (f) => on(f) ? [sr()] : [], tail = (f) => on(f) ? [ne()] : [];
-  return h("label", { class: "opt" + (chosen === o.key ? " sel" : ""), for: id },
-    hasPics(it) ? optPic(it, o, on("picture")) : null,
-    h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": "h-" + sfx + " t-" + sfx + (o.key === it.pick ? " p-" + sfx : ""), checked: chosen === o.key, onchange: () => choose(it, o.key),
-      onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } }),
-    h("span", { class: "head" }, h("span", { class: "key" }, letterOf(it, o.key)), h("span", { class: "lab", id: "l-" + sfx }, o.label)),
+  const multi = isMulti(it), ranked = it.ranked === true, list = multi && Array.isArray(chosen) ? chosen : [], at = list.indexOf(o.key), sel = multi ? at >= 0 : chosen === o.key;
+  const pk = pickKeys(it), pi = pk ? pk.indexOf(o.key) : -1;
+  const desc = (ranked ? "r-" + sfx + " " : "") + "h-" + sfx + " t-" + sfx + (pi >= 0 ? " p-" + sfx : "");
+  const pic = hasPics(it) ? optPic(it, o, on("picture")) : null;
+  const input = multi
+    ? h("input", { type: "checkbox", id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => toggle(it, o.key) })
+    : h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => choose(it, o.key),
+      onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } });
+  const key = h("span", { class: "key" }, letterOf(it, o.key)), lab = h("span", { class: "lab", id: "l-" + sfx }, o.label);
+  // On a ranked item the tick box holds the rank number.
+  const headKids = multi ? [h("span", { class: "tick" + (ranked ? "" : " mark"), "aria-hidden": "true" }, ranked && sel ? String(at + 1) : ""), key, lab] : [key, lab];
+  const body = [
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
+    hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your uniform ruling (t18)")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
-    o.key === it.pick ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), it.why) : h("span", { class: "nopick" }));
+    pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" })];
+  if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
+  const n = list.length;
+  const mv = (dir) => {
+    const off = dir === "up" ? at === 0 : at === n - 1, why = dir === "up" ? "Already first" : "Already last";
+    return h("button", { class: "btn alt mv", type: "button", id: "mv-" + sfx + "-" + dir, "aria-label": "Move " + o.label + " " + dir, "aria-disabled": off ? "true" : null, "data-why": off ? why : null, title: off ? why : null, onclick: () => { if (!off) move(it, o.key, dir); } }, arrow(dir), dir === "up" ? "Up" : "Down");
+  };
+  const rank = h("div", { class: "rank" + (sel ? "" : " gone") }, h("span", { class: "sr", id: "r-" + sfx }, sel ? ordinal(at + 1) + " of " + n : "Not in your order"), mv("up"), mv("down"));
+  return h("div", { class: "opt ranked" + (sel ? " sel" : "") }, pic, input, h("label", { class: "head", for: id }, ...headKids), ...body, rank);
 }
 const minutesText = (m) => "about " + (typeof m === "number" ? m + " min" : m);
 // A receipt from an earlier answer says nothing about a changed one, so only a receipt at or after the answer counts.
 function rcOf(it) {
-  const sv = state.answers[it.id], r = state.receipts[it.id] || {};
+  const sv = savedOf(it), r = state.receipts[it.id] || {};
   if (!sv) return r;
   const ok = (t) => !t || !(Date.parse(t) < Date.parse(sv.at));
   return { read: ok(r.read) ? r.read : undefined, filed: ok(r.filed) ? r.filed : undefined };
 }
+// The option or options the arbiter ruled, as letter chips and full labels, for a ruling card and its receipt.
+function ruledOf(it) {
+  const ks = pickKeys(it) || [], lab = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || k);
+  return { letters: ks.map((k) => letterOf(it, k)).join(", "), label: ks.length ? ks.map(lab).join(" and ") : "an option" };
+}
 function receipt(it) {
-  const sv = state.answers[it.id], rc = rcOf(it);
-  let what;
-  if (it.kind === "task") what = "Marked done";
+  const sv = savedOf(it), rc = rcOf(it);
+  let what, picks = null;
+  if (isRuling(it) && sv.choice === OVERTURN) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
+  else if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
   else if (sv.choice === NONE) what = "None of these";
+  else if (isMulti(it) && validKeys(it, sv.choice)) {
+    what = it.ranked === true ? "You chose, in order:" : "You chose:";
+    picks = h(it.ranked === true ? "ol" : "ul", { class: "picks", "aria-label": "Your picks" }, sv.choice.map((k) => h("li", {}, h("span", { class: "key" }, letterOf(it, k)), h("span", {}, it.options.find((x) => x.key === k).label))));
+  }
   else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
   return h("div", { class: "receipt" },
-    h("div", { class: "line" }, glyph("done"), h("b", {}, what + "."),
+    h("div", { class: "line" }, glyph("done"), h("b", {}, picks ? what : what + "."),
       rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
-      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+    picks,
     sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
 }
 function designPreview(it) {
@@ -654,11 +1119,58 @@ function designPreview(it) {
   };
   draw(); return box;
 }
+// The command block of a task. Copy writes it.command as written, never the text on screen. A refused copy opens the command and selects it.
+function cmdBlock(it) {
+  const say = h("p", { class: "cmd-say", id: "cs-" + it.id, "aria-live": "polite" }, "Command");
+  const pre = h("pre", { class: "cmd-text", id: "cc-" + it.id }, h("code", {}, it.command.split("\n").map((l) => h("span", { class: "ln" }, l))));
+  const more = h("details", { class: "cmd-more" }, h("summary", {}, "Show the command"), pre);
+  let timer = 0;
+  const box = h("div", { class: "cmd", id: "cmd-" + it.id });
+  const copy = h("button", { class: "btn alt cmd-copy", type: "button", "aria-label": "Copy the command for No. " + it.n, "aria-controls": "cc-" + it.id, onclick: async () => {
+    clearTimeout(timer);
+    box.classList.remove("copied", "failed");
+    if (await copyText(it.command)) {
+      box.classList.add("copied"); say.replaceChildren("Command", h("span", { class: "sr" }, " Copied."));
+      timer = setTimeout(() => { box.classList.remove("copied"); say.textContent = "Command"; }, 2000);
+    } else {
+      box.classList.add("failed"); say.textContent = "Not copied. The text is selected; copy it by hand.";
+      more.open = true;
+      const r = document.createRange(); r.selectNodeContents(pre.firstChild);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    }
+  } }, h("span", { class: "go" }, "Copy"), h("span", { class: "ok", "aria-hidden": "true" }, "Copied"));
+  box.append(h("div", { class: "cmd-head" }, say, copy), more);
+  return box;
+}
+// Block "nearest" honours the scroll margins, so it would move an option already whole between the header and the bar.
+function showOpt(o) {
+  const r = o.getBoundingClientRect();
+  if (r.top < document.querySelector(".hdr").getBoundingClientRect().bottom || r.bottom > $("bar").getBoundingClientRect().top) o.scrollIntoView({ block: "nearest" });
+}
+// A ruling card: the title, the option the arbiter ruled, why, where it is recorded, and one Overturn toggle. A press changes only the draft, until Send.
+function buildRuling(it) {
+  const saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it), armed = !saved && d.choice === OVERTURN, r = ruledOf(it);
+  const card = h("article", { class: "card rcard" + (saved ? " answered" : "") + (armed ? " armed" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
+  const num = h("span", { class: "num", "aria-label": "No. " + it.n + ", ruling, from the arbiter", title: "Ruled by the arbiter for " + it.owner }, "No. " + it.n);
+  card.append(h("div", { class: "top" }, num, saved
+    ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at)))
+    : h("span", {}, "ruled ", validT(it.ruled) ? h("time", { datetime: it.ruled }, fmt(it.ruled)) : "")), h("h3", { class: "title", id: "t-" + it.id }, it.title));
+  const bad = problem(it);
+  if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));
+  if (saved) { card.append(receipt(it)); return card; }
+  card.append(h("p", { class: "ruledline" }, h("span", { class: "sr" }, "The arbiter ruled "), r.letters ? h("span", { class: "key" }, r.letters) : null, h("b", {}, r.label)),
+    h("p", { class: "rwhy" }, it.why || ""),
+    h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it)),
+    h("div", { class: "rfoot" }, h("p", { class: "dest" }, "Recorded in " + it.home + "."),
+      h("button", { class: "btn dash overturn", type: "button", id: "b-over-" + it.id, disabled: blocked(it), "aria-pressed": String(armed), "aria-label": "Overturn the ruling on No. " + it.n, onclick: () => { edited(); setDraft(it, { choice: armed ? null : OVERTURN }); repaint(it); } }, "Overturn")));
+  return card;
+}
 function buildCard(it) {
+  if (isRuling(it)) return buildRuling(it);
   const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it);
   const card = h("article", { class: "card " + T + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
-    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(state.answers[it.id].at))) : h("span", {}, waited(it.added)));
+    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? "Answered, filed in " + it.home + " " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
@@ -678,19 +1190,25 @@ function buildCard(it) {
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
   const noteShown = !!(state.noteOpen[it.id] || d.choice === NONE || d.note);
   const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
-  const ready = h("p", { class: "ready" + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
+  // Take my pick hides whenever the ticks equal the pick, ranked or not: nothing is left for it to do. It is not shown at all when the pick is not valid.
+  const multi = isMulti(it), pk = pickKeys(it);
+  const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
+  const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
   if (it.kind === "decision") {
     // data-d names each option's pictures, so a pick keeps the frames already drawn (see syncOpts).
-    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : ""), role: "radiogroup", "aria-label": "Options for No. " + it.n, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
+    const opts = h("div", { class: "opts" + (hasPics(it) ? " pics" : "") + (it.ranked === true ? " ranked" : "") + (hasOptLinks(it) ? " olinks" : ""), role: multi ? "group" : "radiogroup", "aria-label": "Options for No. " + it.n, "aria-describedby": multi ? "mh-" + it.id : null, "data-d": hasPics(it) ? (it.options || []).map((o) => o.key + ":" + optionDesigns(it, o).map((d) => d.slug + "@" + (d.focus || "") + "#" + (d.state || "")).join("+")).join() : null });
     (it.options || []).forEach((o) => opts.append(optCard(it, o, d.choice)));
-    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), ready,
+    if (multi) card.append(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
+    card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
         h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
         addNote,
-        h("button", { class: "btn alt takepick" + (d.choice === it.pick ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: it.pick, auto: true }); repaint(it); } }, "Take my pick (" + pickName(it, it.pick) + ")")));
+        multi ? h("span", { class: "sp" }) : null,
+        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); const r = $("o-" + it.id + "-" + pk[0]); if (r) { showOpt(r.closest(".opt")); r.focus({ preventScroll: true }); } } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
-    if (it.links && it.links.length) card.append(h("div", { class: "links" }, it.links.map((l) => h("a", { href: l.url, target: "_blank", rel: "noopener" }, l.label + " ↗"))));
+    if (typeof it.command === "string" && it.command.trim()) card.append(cmdBlock(it));
+    if (linksOf(it).length) card.append(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     card.append(ready, h("div", { class: "alts" },
       h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),
       addNote));
@@ -709,7 +1227,7 @@ function buildCard(it) {
     nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
     card.append(nb);
   }
-  if (blocked(it)) card.querySelectorAll(".opts input, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
+  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
@@ -771,7 +1289,7 @@ function syncOpts(old, nu) {
   copyAttrs(old, nu);
   [...old.children].forEach((ol, i) => {
     const nl = nu.children[i];
-    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic"), (o, n) => { copyAttrs(o, n); const v = o.querySelector(".view"), nv = n.querySelector(".view"); if (v && nv) v.replaceWith(nv); }]], nl);
+    copyAttrs(ol, nl); graft(ol, [[ol.querySelector(":scope > .opic"), nl.querySelector(":scope > .opic"), (o, n) => { copyAttrs(o, n); picHint(o); const v = o.querySelector(".view"), nv = n.querySelector(".view"); if (v && nv) v.replaceWith(nv); }]], nl);
   });
 }
 function patch(old, nu) {
@@ -819,10 +1337,29 @@ function bundleEl(slug) {
   b.head.replaceChildren(linkIcon(), h("b", {}, title), h("p", {}, g.why || ""));
   return b;
 }
+// The section after the open tiers: a disclosure head, a line of its own, and the rulings newest first. It is open on load.
+const ruledAt = (it) => Date.parse(it.ruled) || 0;
+const rulingEls = {};
+function rulingsEl() {
+  if (!rulingEls.el) {
+    rulingEls.ct = h("span", { class: "ct" });
+    rulingEls.head = h("button", { class: "rhead", type: "button", "aria-controls": "rb", onclick: () => { state.rulingsOpen = !state.rulingsOpen; render(); } }, h("span", { class: "chev", "aria-hidden": "true" }), glyph("ruled"), "Arbiter rulings", rulingEls.ct);
+    rulingEls.sub = h("p", { class: "rsub" });
+    rulingEls.list = h("div", { class: "rlist", id: "rb" });
+    rulingEls.el = h("section", { class: "tier ruled", id: "tier-ruled", "aria-labelledby": "th-ruled" }, h("header", {}, h("h2", { id: "th-ruled" }, rulingEls.head), rulingEls.sub), rulingEls.list);
+  }
+  const list = state.rulings.slice().sort((a, b) => ruledAt(b) - ruledAt(a) || b.n - a.n), on = state.rulingsOpen;
+  rulingEls.ct.textContent = String(list.length);
+  rulingEls.head.setAttribute("aria-expanded", String(on));
+  rulingEls.sub.textContent = "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".");
+  rulingEls.list.hidden = !on;
+  reconcile(rulingEls.list, list.map(cardFor));
+  return rulingEls.el;
+}
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
   if (!state.items.length) {
-    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing is waiting on you right now. Sessions add items here when they park something for your word."));
+    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
   }
   const live = new Set();
   TIERS.forEach((T) => {
@@ -841,7 +1378,8 @@ function renderList() {
     reconcile(te.el, [te.head, ...body]);
     want.push(te.el);
   });
-  const open = new Set(state.items.map((i) => i.id));
+  if (state.rulings.length) want.push(rulingsEl());
+  const open = new Set(answerable().map((i) => i.id));
   Object.keys(cards).forEach((id) => { if (!open.has(id)) delete cards[id]; });
   if (state.meta) {
     want.push(h("p", { class: "checked" }, "Checked against " + (state.meta.checked || "")));
@@ -857,9 +1395,9 @@ function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smo
 const shortOf = (it) => typeof it.short === "string" && it.short.trim() && it.short.trim().length <= 24 ? it.short.trim() : it.title;
 function renderRail() {
   const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
-  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().length;
-  rail.hidden = !total;
-  const kids = [h("div", { class: "ov-prog" },
+  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().filter((i) => !isRuling(i)).length;
+  rail.hidden = !total && !state.rulings.length;
+  const kids = !total ? [] : [h("div", { class: "ov-prog" },
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
@@ -875,6 +1413,8 @@ function renderRail() {
     });
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
+  // One row for the rulings: no chips, so a ruling never counts as open or sent.
+  if (state.rulings.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-ruled", "aria-label": state.rulings.length + (state.rulings.length === 1 ? " ruling" : " rulings") + ", Arbiter rulings", onclick: (e) => { e.preventDefault(); state.rulingsOpen = true; render(); jump("tier-ruled"); } }, glyph("ruled"), "Arbiter rulings", h("span", { class: "ct" }, String(state.rulings.length)))));
   rail.replaceChildren(...kids);
   if (focusId && $(focusId)) $(focusId).focus({ preventScroll: true });
 }
@@ -882,11 +1422,11 @@ function renderRail() {
 /* ---------- Bar and Send ---------- */
 function renderBar() {
   const st = staged(), open = state.items.filter((i) => !isSaved(i)), sa = $("send");
-  const mine = st.filter((i) => (eff(i) || {}).auto && !(eff(i) || {}).stood).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - st.length;
+  const over = st.filter(isRuling).length, mine = st.filter((i) => (eff(i) || {}).auto && !(eff(i) || {}).stood).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over);
   const parts = [];
   if (state.barNote) parts.push(state.barNote);
   else {
-    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [mine && mine + " by Take my pick", stood && stood + " where my pick stands"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
+    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [mine && mine + " by Take my pick", stood && stood + " where my pick stands", over && over + " overturn"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
     if (left) parts.push(h("b", {}, String(left)), " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
@@ -906,7 +1446,7 @@ const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]
 const nList = (ns) => { const a = ns.slice().sort((x, y) => x - y).map((n) => "No. " + n); return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; };
 function noticeText(entries, head, tail) {
   const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
-  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : "done") + (note ? " (" + note + ")" : "")); }).join(", ");
+  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
   let text = head + " Owners: " + owners + ". Items: " + line + (tail || ".");
   const enc = new TextEncoder();
   while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
@@ -958,7 +1498,7 @@ async function sendAll() {
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from No. " + it.n : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id] });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id]; delete state.noteOpen[it.id];
-      entries.push({ n: it.n, choice: body.choice, note: body.note, owner: it.owner });
+      entries.push({ n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
@@ -1014,7 +1554,7 @@ async function undoSend() {
       if (w.prior) await ref.set(w.prior); else await ref.delete();
     } catch (e) { todo.slice(i).forEach((x) => failed.push(x.it.n)); state.barNote = "Undo failed (" + (e && e.code || "error") + "). Not undone: " + nList(failed) + "."; break; }
     if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
-    if (w.draft) state.draft[w.it.id] = w.draft; if (w.changing) state.changing[w.it.id] = true;
+    if (w.draft) { state.draft[w.it.id] = w.draft; if (isRuling(w.it)) state.rulingsOpen = true; } if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
     // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else, and the old receipt leaves the page state either way.
     if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); } catch (e) {} delete state.receipts[w.it.id]; }
@@ -1024,25 +1564,36 @@ async function undoSend() {
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
   if (told.length) {
     const can = await canTell();
-    await notifyClaude(noticeText(told.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", " are open again."), can);
+    // An undone overturn leaves the ruling in force, so it is told apart from items that are open again.
+    const tell = (ws, tail) => ws.length ? notifyClaude(noticeText(ws.map((w) => ({ n: w.it.n, owner: w.it.owner })), "Undone on the waiting page.", tail), can) : null;
+    const rul = told.filter((w) => isRuling(w.it)), rest = told.filter((w) => !isRuling(w.it));
+    await tell(rest, " are open again.");
+    await tell(rul, rul.length === 1 ? " ruling stands again." : " rulings stand again.");
   }
 }
 
 function answerLine() {
   const parts = [];
-  state.items.slice().sort((a, b) => a.n - b.n).forEach((it) => {
+  answerable().sort((a, b) => a.n - b.n).forEach((it) => {
     if (blocked(it)) return;
-    const a = state.answers[it.id], d = eff(it) || {};
+    const a = savedOf(it), d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
-    if (it.kind === "decision" && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
-    else if (it.kind === "task" && (d.done || (a && a.done))) parts.push(it.n + " done" + (note ? " (" + note + ")" : ""));
+    if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
+    else if (it.kind === "task") {
+      const live = !!state.draft[it.id] && draftReady(it); // only a draft that would send replaces the saved answer
+      const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : (a && a.note);
+      if (done) parts.push(it.n + " done" + (tnote ? " (" + tnote + ")" : ""));
+      else if ((tnote || "").trim()) parts.push(it.n + " note, not done (" + tnote + ")");
+    }
   });
   return parts.join(", ");
 }
+// One home for the clipboard write. A frame without permission refuses it, so each caller shows its own fallback.
+async function copyText(text) { try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; } }
 $("copy").addEventListener("click", async () => {
   const text = answerLine() || "No answers yet.", box = $("copyBox");
-  try { await navigator.clipboard.writeText(text); state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
-  catch (e) { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
+  if (await copyText(text)) { state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
+  else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
   renderBar();
 });
 $("send").addEventListener("click", sendAll);
@@ -1063,7 +1614,7 @@ function withState(html, state) {
   return m ? m[0] + sc + html.slice(m[0].length) : sc + html;
 }
 const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
-// A mockup is drawn 390 wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
+// A mockup is drawn FIT_W wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const MIN_PIC = 120; // a capped picture is never narrower than this, however tall the mockup
 const FIT_W = 390;
 let FITS = [];
@@ -1081,7 +1632,10 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
   const f = h("iframe", { class: "dframe dfit", title, sandbox: "allow-scripts" });
   f.srcdoc = withState(DESIGN_HTML[slug] || "<p style='font:15px system-ui;padding:20px'>This design is missing from the page.</p>", state) + fitScript(focus);
   f.style.width = DW + "px";
-  const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : "") }, f);
+  // A capped picture draws in a sizer, so a taller one scrolls inside its box. Its wrap is no tab stop of its own; the button round it is.
+  const sizer = maxH ? h("div", { class: "dsizer" }, f) : null;
+  const wrap = h("div", { class: "dfitwrap" + (inert ? " inert" : ""), ...(maxH ? { tabindex: "-1", "aria-hidden": "true" } : {}) }, ...(maxH ? [h("div", { class: "dtop" }), sizer, h("div", { class: "dcue" }, h("span", { class: "dmore" }, "↓ More"))] : [f]));
+  if (maxH) { f.inert = true; wrap.addEventListener("scroll", () => picEdges(wrap), { passive: true }); }
   let po;
   const fit = () => {
     if (head) head();
@@ -1089,19 +1643,44 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
     const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
     const ht = c ? c.h : (!focus && size ? size.h : 200);
     const bw = box ? Math.max(box.w, 1) : DW, sc = Math.min(maxScale || 1, ww / bw, maxH ? Math.max(maxH / Math.max(box ? box.h : ht, 1), MIN_PIC / bw) : Infinity);
-    if (maxH) { wrap.style.width = Math.ceil(bw * sc) + 2 + "px"; if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); } }
+    // A box more than 4 times as tall as it is wide would pass maxH. It keeps its scale and scrolls in a maxH box. A pass of 1px or less counts as fitting.
+    const scroll = !!maxH && Math.ceil(Math.max(box ? box.h : ht, 1) * sc) > maxH + 1;
+    if (maxH) wrap.classList.toggle("scroll", scroll);
+    const g = scroll && wrap.isConnected ? Math.max(wrap.offsetWidth - wrap.clientWidth - 2, 0) : 0; // the scrollbar's gutter, plus any border past 1px; the box grows by it so the scrollbar takes none of the picture's width
+    if (maxH) {
+      wrap.style.width = Math.ceil(bw * sc) + 2 + g + "px";
+      sizer.style.width = Math.ceil(bw * sc) + "px"; sizer.style.height = Math.ceil((box ? box.h : ht) * sc) + "px";
+      const o = wrap.closest(".opic"); if (o) picHint(o, scroll);
+      if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
+    }
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
-    if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.ceil((box ? box.h : ht) * sc) + "px"; }
+    if (scroll) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = maxH + "px"; }
+    else if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.min(maxH || Infinity, Math.ceil((box ? box.h : ht) * sc)) + "px"; }
     else {
       // Declared size only: the height follows the width by aspect ratio, so the first paint is already the right height.
       const dw = focus ? size.w : DW;
-      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.ceil(size.h * (maxScale || 1)) + "px";
+      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.min(maxH || Infinity, Math.ceil(size.h * (maxScale || 1))) + "px";
     }
+    if (scroll) picEdges(wrap);
   };
   FITS.push({ f, key, fit });
   if (window.ResizeObserver) { const ro = new ResizeObserver(fit); ro.observe(wrap); if (head) ro.observe($("dTitle")); }
   fit(); return wrap;
+}
+const SCROLL_HINT = ". Arrow keys scroll its picture";
+// A picture that scrolls says so in its button's name. A repaint copies the plain name back, so it is set again.
+function picHint(o, on = !!o.querySelector(".dfitwrap.scroll")) { const l = (o.getAttribute("aria-label") || "").replace(SCROLL_HINT, "") + (on ? SCROLL_HINT : ""); if (l !== o.getAttribute("aria-label")) o.setAttribute("aria-label", l); }
+// The shade at the top shows once the picture is scrolled, and the cue goes at its end.
+function picEdges(w) { w.classList.toggle("scrolled", w.scrollTop > 0); w.classList.toggle("at-end", w.scrollTop + w.clientHeight >= w.scrollHeight - 1); }
+// While the picture's button has focus, the arrow, page and end keys scroll a picture that scrolls. At an end the key is left to the page.
+function picKeys(e, w) {
+  if (!w.classList.contains("scroll")) return;
+  const st = w.scrollTop, pg = w.clientHeight - 40;
+  const to = { ArrowDown: st + 40, ArrowUp: st - 40, PageDown: st + pg, PageUp: st - pg, Home: 0, End: w.scrollHeight }[e.key];
+  if (to === undefined) return;
+  w.scrollTop = to;
+  if (w.scrollTop !== st) e.preventDefault();
 }
 window.addEventListener("message", (e) => {
   const d = e.data; if (!d || d.dfit !== 1 || typeof d.h !== "number") return;
@@ -1160,7 +1739,22 @@ function closeDesign(toItem) {
 $("dPrev").onclick = () => showDesign(dAt - 1); $("dNext").onclick = () => showDesign(dAt + 1);
 $("dClose").onclick = () => closeDesign(); $("dBack").onclick = () => closeDesign(dList[dAt].it);
 $("tabD").onclick = (e) => { e.preventDefault(); openDesign(""); };
-$("tabQ").onclick = (e) => e.preventDefault();
+// Status hides #qView and never removes it, so a note typed on a card survives a switch. A load always opens Questions.
+function showTab(which) {
+  state.tab = which;
+  const q = which === "q";
+  $("qView").hidden = !q; $("sPanel").hidden = q;
+  [["tabQ", q], ["tabStatus", !q]].forEach(([id, on]) => { $(id).setAttribute("aria-selected", String(on)); $(id).tabIndex = on ? 0 : -1; });
+  setTitle();
+  if (!q) document.dispatchEvent(new Event("statusshown"));
+}
+$("tabQ").onclick = (e) => { e.preventDefault(); showTab("q"); };
+$("tabStatus").onclick = (e) => { e.preventDefault(); showTab("s"); };
+$("tabs").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  if (!e.target.closest || !e.target.closest('[role="tab"]')) return;
+  e.preventDefault(); const to = state.tab === "q" ? "s" : "q"; showTab(to); $(to === "q" ? "tabQ" : "tabStatus").focus();
+});
 
 /* ---------- Keys: A to C pick on the focused card, Ctrl or Cmd+Enter sends. Nothing on screen teaches them. ---------- */
 let hoverItem = null;
@@ -1174,14 +1768,16 @@ document.addEventListener("keydown", (e) => {
   const it = byId(fc ? fc.id.replace("item-", "") : hoverItem);
   if (!it || isSaved(it) || it.kind !== "decision") return;
   const k = e.key.toLowerCase();
-  if ((it.options || []).some((o) => o.key === k)) { e.preventDefault(); choose(it, k); const r = $("o-" + it.id + "-" + k); if (r) r.focus({ preventScroll: true }); }
+  if ((it.options || []).some((o) => o.key === k)) { e.preventDefault(); if (isMulti(it)) toggle(it, k); else choose(it, k); const r = $("o-" + it.id + "-" + k); if (r) r.focus({ preventScroll: true }); }
 });
 
 function render() {
   renderList(); renderRail(); renderBar(); renderSent();
   FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
   const nd = allDesigns().length;
-  $("dCount").textContent = nd || ""; $("tabs").hidden = !state.items.some((i) => designsOf(i).length);
+  $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
+  // The count box has a fixed width, so a count that grows moves no tab. It stays empty until the items load.
+  $("qCount").textContent = state.loaded ? String(state.items.filter((i) => !isSaved(i)).length) : "";
 }
 
 render();
@@ -1192,10 +1788,516 @@ render();
   state.db = db;
   try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   const map = (s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); return m; };
-  db.collection("items").onSnapshot((s) => { state.items = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter((i) => i && i.status !== "closed"); state.loaded = true; render(); }, () => {});
+  db.collection("items").onSnapshot((s) => {
+    const all = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter(Boolean);
+    // A closed item stays hidden, unless the arbiter's writer filed it as a ruling.
+    state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.loaded = true; render();
+  }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { state.meta = s.exists ? s.data() : null; applyIdentity(); render(); }, () => {});
+})();
+</script>
+
+<script>
+/* Status tab (read only). It reads window.ROADMAP_DATA and window.ROADMAP_BUILD, the block the roadmap build bakes in
+   (roadmap:data above), and never the artifact database: with no record branch the block holds ROADMAP_DATA = null,
+   and the tab says the plan is unknown. The page draws it the first time the tab opens, so row heights can be measured. */
+(() => {
+const D = window.ROADMAP_DATA, B = window.ROADMAP_BUILD;
+const hasData = !!D && typeof D === "object";
+const root = $("sView");
+
+/* The five phases, in the order the work happens. Steps carry one of these ids in their `phase` field. */
+const PH = [{ k: "cleanup", n: "Clean up" }, { k: "organize", n: "Organize" }, { k: "design", n: "Design" }, { k: "rollout", n: "Roll out" }, { k: "later", n: "Later" }];
+const ORDER = ["todo", "active", "done", "blocked"];
+const LBL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked" };
+const CULL_KEYS = [{ k: "debts", n: "Debt files" }, { k: "decisions", n: "Decision files" }, { k: "hooks", n: "Hook lines" }, { k: "words", n: "CLAUDE.md words" }];
+/* Which step each clean-up warning points to. A link is left out when that step no longer exists. */
+const OFF_TRACK_LINKS = { hooks: "c18", debts: "c10", stop: "c2" };
+const THREAD_NAME = { blocked: "asking in its chat", working: "working", review_ready: "ready for review", failed: "failed", stopped: "stopped", done: "done" };
+
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (n) => (typeof n === "number" ? n.toLocaleString("en-US") : n == null || n === "" ? "—" : String(n));
+const isNum = (v) => typeof v === "number" && isFinite(v);
+const when = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d : null; };
+// Days and times are US Central, as the rest of the page (fmt).
+const CT = "America/Chicago";
+const dayKey = (d) => d.toLocaleDateString("en-CA", { timeZone: CT });
+const dayLabel = (d) => d.toLocaleDateString("en-US", { timeZone: CT, weekday: "short", month: "short", day: "numeric" });
+const timeLabel = (d) => fmt(d.toISOString(), false);
+const ago = (iso) => { const d = when(iso); if (!d) return ""; const hrs = (Date.now() - d) / 36e5; if (hrs < 1) return "just now"; if (hrs < 24) return Math.round(hrs) + "h ago"; return Math.round(hrs / 24) + "d ago"; };
+const fresh = (iso) => { const d = when(iso); return !!d && dayKey(d) === dayKey(new Date()); };
+const firstSentence = (t) => { if (!t) return ""; const m = String(t).match(/^.*?[.!?](\s|$)/); return (m ? m[0] : String(t)).trim(); };
+const pct = (a, b) => (a - b) / b * 100;
+const pctS = (v) => (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+const phaseName = (k) => (PH.find((p) => p.k === k) || {}).n || k;
+const unknownRead = (r) => String(r).startsWith("unknown");
+// "unknown (why)" shows as its why, so the word "unknown" appears once on the screen, at the plan.
+const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
+const segs = (d, a, b, n) => '<i class="done"></i>'.repeat(d) + '<i class="act"></i>'.repeat(a) + '<i class="blk"></i>'.repeat(b) + "<i></i>".repeat(Math.max(0, n - d - a - b)) + (n ? "" : "<i></i>");
+
+/* Status marks: shape and colour together, never colour alone. */
+const GLY = {
+  done: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" stroke="var(--surface)" stroke-width="1.7" fill="none"/></svg>',
+  active: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--acc)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--acc)"/></svg>',
+  todo: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+  blocked: '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--holds)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>',
+};
+const rg = (s) => `<span class="rg">${GLY[s] || GLY.todo}</span>`;
+// Where the mark alone carries the state, it names the state for a screen reader, so the word shows once.
+const rgl = (s) => `<span class="rg" role="img" aria-label="${LBL[s] || LBL.todo}">${GLY[s] || GLY.todo}</span>`;
+
+/* ---------- data: baked, never read from the database ---------- */
+const byOrder = (a, b) => (isNum(a.order) ? a.order : 1e9) - (isNum(b.order) ? b.order : 1e9) || String(a.id).localeCompare(String(b.id));
+const bag = (k) => (hasData && D[k] && typeof D[k] === "object" ? D[k] : {});
+const listOf = (k) => Object.entries(bag(k)).map(([id, v]) => ({ id, ...v })).sort(byOrder);
+const steps = listOf("steps").map((s) => ({ ...s, status: ORDER.includes(s.status) ? s.status : "todo" }));
+const topics = hasData ? listOf("topics") : null;
+const meta = bag("meta");
+const phases = meta.phases && typeof meta.phases === "object" ? meta.phases : null;
+const cull = meta.cull && typeof meta.cull === "object" ? meta.cull : null;
+const advisor = meta.advisor && typeof meta.advisor === "object" ? meta.advisor : null;
+
+const ui = { view: "plan", phase: null, page: {}, donePage: {}, logPage: 0, open: new Set(), tiles: new Set(), folds: new Set(), notes: new Set(), tps: new Set(), how: false };
+try { const r = JSON.parse(localStorage.getItem("rm-view") || "null"); if (r && typeof r === "object") { if (["plan", "log", "ref", "rec"].includes(r.v)) ui.view = r.v; if (PH.some((p) => p.k === r.p)) ui.phase = r.p; } } catch (e) { /* nothing remembered */ }
+const saveView = () => { try { localStorage.setItem("rm-view", JSON.stringify({ v: ui.view, p: ui.phase })); } catch (e) { /* not kept */ } };
+
+/* Rows per page follow the window: as many collapsed rows as fit in one screen, less room for the header and pager.
+   rowH is measured from the rendered rows, so a phone's two-line rows count right. */
+let rowH = 52;
+const pageSize = () => Math.max(5, Math.min(20, Math.floor((window.innerHeight - 150) / rowH)));
+function measureRows() {
+  const rs = [...document.querySelectorAll("#svPhases > section > .rsteps > li:not(.open)")];
+  if (!rs.length) return false;
+  const hgt = rs.reduce((t, r) => t + r.offsetHeight, 0) / rs.length;
+  if (!hgt || Math.abs(hgt - rowH) < 2) return false;
+  rowH = hgt; return true;
+}
+
+const byPhase = (k) => steps.filter((s) => s.phase === k);
+/* Work order: active steps first, then everything else by its `order` field. */
+const workOrder = (list) => [...list.filter((s) => s.status === "active").sort(byOrder), ...list.filter((s) => s.status !== "active").sort(byOrder)];
+const openList = (k) => workOrder(byPhase(k).filter((s) => s.status !== "done"));
+const doneList = (k) => byPhase(k).filter((s) => s.status === "done").sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) || byOrder(a, b));
+function curPhase() { for (const p of PH) if (byPhase(p.k).some((s) => s.status !== "done")) return p; return PH[PH.length - 1]; }
+const nextUp = () => workOrder(byPhase(curPhase().k)).filter((s) => s.status === "todo").slice(0, 3);
+const shownPhase = () => (ui.phase && PH.some((p) => p.k === ui.phase) ? ui.phase : curPhase().k);
+
+function cullInfo() {
+  if (!cull) return null;
+  const base = cull.baseline || {}, batches = Array.isArray(cull.batches) ? cull.batches.filter((b) => b && typeof b === "object") : [];
+  const pts = [{ label: "Start" + (base.at ? " (" + base.at + ")" : ""), v: base }, ...batches.map((b, i) => ({ label: b.label || b.at || "Reading " + (i + 2), v: b }))];
+  // The cull's own batches are labelled "Cull ..."; later re-measures on main are not. The last "Cull" batch is where it ended.
+  let closeIx = -1; pts.forEach((p, i) => { if (i > 0 && /^cull\b/i.test(p.label)) closeIx = i; });
+  return { base, batches, pts, closeIx, last: pts[pts.length - 1] };
+}
+const series = (ci, k) => { const out = []; ci.pts.forEach((p, i) => { if (isNum(p.v[k])) out.push({ v: p.v[k], label: p.label, i }); }); return out; };
+
+function offTrack() {
+  const items = [], ci = cullInfo();
+  const link = (key) => { const id = OFF_TRACK_LINKS[key]; return steps.some((s) => s.id === id) ? id : null; };
+  if (ci && ci.batches.length) {
+    const b = ci.base, l = ci.last.v;
+    if (isNum(b.hooks) && isNum(l.hooks) && l.hooks > b.hooks) items.push({ t: `Hook lines ${num(l.hooks)}, ${pctS(pct(l.hooks, b.hooks))} vs start. The rule says they only go down.`, k: "Growing", id: link("hooks") });
+    const c = ci.closeIx > 0 && ci.closeIx < ci.pts.length - 1 ? ci.pts[ci.closeIx].v : null;
+    if (c && isNum(c.debts) && isNum(l.debts) && l.debts > c.debts) items.push({ t: `Debt files back up ${num(c.debts)} → ${num(l.debts)} since the cull ended.`, k: "Back up", id: link("debts") });
+  }
+  if (cull && /time box/i.test(String(cull.closed || ""))) items.push({ t: `The cull's stop rule was not met; it ended on the time box${cull.timebox ? " (" + cull.timebox + ")" : ""}.`, k: "Missed", id: link("stop") });
+  workOrder(steps.filter((s) => s.status === "blocked")).forEach((s) => items.push({ blocked: true, id: s.id }));
+  return items;
+}
+
+/* ---------- small chart helpers ---------- */
+function spark(vals, { w = 200, h = 30, labels = [], markIx = null, fmtv = num } = {}) {
+  const min = Math.min(...vals), max = Math.max(...vals), r = (max - min) || 1;
+  const x = (i) => (vals.length === 1 ? w / 2 : i * (w / (vals.length - 1)));
+  const y = (v) => h - 2 - ((v - min) / r) * (h - 6);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  let s = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Trend: ${esc(vals.map(fmtv).join(", "))}">`;
+  s += `<line x1="0" x2="${w}" y1="${h - 1}" y2="${h - 1}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+  if (markIx != null && markIx >= 0 && markIx < vals.length - 1) { const mx = (x(markIx) + x(markIx + 1)) / 2; s += `<line x1="${mx}" x2="${mx}" y1="0" y2="${h}" stroke="var(--muted)" stroke-dasharray="2 2" stroke-width="1" vector-effect="non-scaling-stroke"/>`; }
+  s += `<polyline points="${pts}" fill="none" stroke="var(--acc)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+  s += `<circle cx="${x(vals.length - 1)}" cy="${y(vals[vals.length - 1])}" r="3" fill="var(--acc)" stroke="var(--surface)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+  const bw = w / Math.max(vals.length, 1);
+  vals.forEach((v, i) => { s += `<rect x="${Math.max(0, x(i) - bw / 2)}" y="0" width="${bw}" height="${h}" fill="transparent" data-tip="${esc((labels[i] || "") + ": " + fmtv(v))}"/>`; });
+  return s + "</svg>";
+}
+function delta(cur, ref, { downGood = true, pctMode = false, neutral = false } = {}) {
+  if (!isNum(cur) || !isNum(ref)) return "";
+  const d = cur - ref; if (d === 0) return '<span class="dl flat">±0</span>';
+  const cls = neutral ? "flat" : ((downGood ? d < 0 : d > 0) ? "good" : "bad");
+  return `<span class="dl ${cls}">${pctMode ? pctS(pct(cur, ref)) : (d > 0 ? "▲" : "▼") + num(Math.abs(d))}</span>`;
+}
+
+/* ---------- read-at stamps and live work ---------- */
+function readAt() {
+  const panels = B && Array.isArray(B.panels) ? B.panels : null;
+  if (!panels) return '<details class="readat"><summary>Read at: not known <span class="rg unk" role="img" aria-label="not read"></span></summary><ul><li class="unk">This page holds no roadmap build yet.</li></ul></details>';
+  const at = when(B.builtAt), bad = panels.some((p) => unknownRead(p.read));
+  const rows = panels.map((p) => unknownRead(p.read)
+    ? `<li class="unk"><span class="rg unk" aria-hidden="true"></span> ${esc(p.name)}: ${esc(reason(p.read))}</li>`
+    : `<li>${esc(p.name)}: ${p.home ? esc(p.home) + ", " : ""}read at <span class="num">${esc(p.read)}</span></li>`);
+  return `<details class="readat"><summary>Read ${at ? esc(fmt(at.toISOString())) : "at a time not known"}${bad ? ' <span class="rg unk" role="img" aria-label="one part not read"></span>' : ""}</summary><ul>${rows.join("")}</ul></details>`;
+}
+function liveWork() {
+  const w = (B && B.live) || {};
+  if (!Array.isArray(w.threads)) {
+    // Nothing was read and there is no body, so this is a line, not a disclosure. The build's own words sit behind one.
+    const plain = !w.read ? "this page holds no roadmap build yet" : /--live/.test(w.read) ? "the build had no live file" : "the build could not read it";
+    return `<div class="livenone"><p><span class="lh">Live work</span> <span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${plain}</span></p>`
+      + (w.read ? `<details><summary>What the build said</summary><pre>${esc(reason(w.read))}</pre></details>` : "") + "</div>";
+  }
+  const day = (iso) => { const d = when(iso); return d ? fmt(d.toISOString()) : ""; };
+  const link = (url, text) => (/^https?:\/\//.test(url || "") ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text);
+  const open = w.threads.filter((t) => t.state !== "done"), done = w.threads.length - open.length;
+  const counts = Object.keys(THREAD_NAME).filter((k) => k !== "done").map((k) => [k, open.filter((t) => t.state === k).length]).filter(([, n]) => n);
+  const pulls = w.pulls || [], branches = w.branches || [];
+  return `<details class="live"><summary><span class="lh">Live work</span>${counts.map(([k, n]) => `<span class="tag st-${k}">${n} ${esc(THREAD_NAME[k])}</span>`).join("")}`
+    + `<span>${pulls.length} open pull request${pulls.length === 1 ? "" : "s"}</span><span class="asof">read <span class="num">${esc(unknownRead(w.read) ? reason(w.read) : day(w.read))}</span></span></summary>`
+    + `<h4>Threads</h4><ul>${open.length ? open.map((t) => `<li><span><span class="tag st-${esc(t.state)}">${esc(THREAD_NAME[t.state] || t.state)}</span></span><span>${esc(t.title)}<span class="nm">${[t.step ? "step " + t.step : "", t.pr || "", t.lastActivity ? "active " + day(t.lastActivity) : ""].filter(Boolean).map(esc).join(", ")}</span></span></li>`).join("") : "<li><span></span><span>No thread is open.</span></li>"}</ul>`
+    + (done ? `<p class="asof" style="padding:4px 14px">${done} done thread${done === 1 ? "" : "s"} not shown.</p>` : "")
+    + `<h4>Open pull requests</h4><ul>${pulls.length ? pulls.map((p) => `<li><span class="num">#${esc(p.number)}${p.draft ? " draft" : ""}</span><span>${link(p.url, esc(p.title))}<span class="nm">${[p.branch || "", p.checks ? "checks " + p.checks : ""].filter(Boolean).map(esc).join(", ")}</span></span></li>`).join("") : "<li><span></span><span>No pull request is open.</span></li>"}</ul>`
+    + (branches.length ? `<h4>Branches with no open pull request</h4><ul>${branches.map((r) => `<li><span class="num">${esc(day(r.updatedAt))}</span><span class="nm">${esc(r.name)}</span></li>`).join("")}</ul>` : "")
+    + (w.skipped && w.skipped.length ? `<p class="asof unk" style="padding:4px 14px">Skipped, wrong shape in the live file: ${esc(w.skipped.join(", "))}</p>` : "") + "</details>";
+}
+
+/* ---------- where you are ---------- */
+function renderNow() {
+  const cur = curPhase(), ss = byPhase(cur.k), done = ss.filter((s) => s.status === "done").length, act = ss.filter((s) => s.status === "active").length;
+  const tot = steps.length, tdone = steps.filter((s) => s.status === "done").length;
+  const active = workOrder(steps.filter((s) => s.status === "active")), nu = nextUp(), off = offTrack();
+  $("svNow").innerHTML = `
+  <div><h3>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h3><div class="ph">${esc(cur.n)}</div>
+    <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}</div>
+    <div class="segbar" aria-hidden="true">${segs(done, act, 0, ss.length)}</div>
+    <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
+  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
+  <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing left to start in this phase.</li>'}</ol></div>
+  <div class="offt"><h3>Off track <span class="num" style="color:${off.length ? "var(--holds)" : "var(--muted)"}">${off.length}</span></h3><ul>${off.map((o) => {
+    const s = steps.find((x) => x.id === o.id);
+    if (o.blocked) return `<li>${rgl("blocked")}<button class="tx" type="button" data-go="${esc(s.id)}">In ${esc(phaseName(s.phase))}: <span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></li>`;
+    return `<li><span class="ic">${esc(o.k)}</span><span>${esc(o.t)}${s ? ` <button class="tx" type="button" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button>` : ""}</span></li>`;
+  }).join("") || '<li class="none">Nothing off track.</li>'}</ul></div>`;
+}
+
+function renderRail() {
+  const cur = curPhase(), shown = shownPhase();
+  $("svRail").innerHTML = PH.map((p) => {
+    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+    return `<button type="button" data-phase="${p.k}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur ? ", current phase" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="num" aria-hidden="true">${d}/${ss.length}</span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
+  }).join("");
+}
+
+/* ---------- number tiles ---------- */
+const ofCount = (n, t) => `${n}<small aria-hidden="true">/${t}</small><span class="sr"> of ${t}</span>`;
+function cullTiles(ci) {
+  if (!ci) return '<div class="none">No clean-up numbers saved yet.</div>';
+  const stop = cull.stopRule ? "Stop rule: " + cull.stopRule : "";
+  const rules = { debts: stop, decisions: stop, hooks: "Rule: hook lines only go down.", words: "Watched for regrowth." };
+  return CULL_KEYS.map((m, ki) => {
+    const sr = series(ci, m.k); if (!sr.length) return `<div class="tile"><span class="tl">${m.n}</span><span class="v">—</span></div>`;
+    const v = sr.map((x) => x.v), cur = v[v.length - 1], start = ci.base[m.k];
+    const markIx = ci.closeIx > 0 ? sr.findIndex((x) => x.i === ci.closeIx) : -1, key = "cleanup:" + ki;
+    return `<button type="button" class="tile" data-tile="${key}" aria-expanded="${ui.tiles.has(key)}">
+      <span class="tl">${m.n}</span>
+      <span class="row"><span class="v">${num(cur)}</span>${v.length > 1 ? delta(cur, start, { pctMode: true }) + delta(cur, v[v.length - 2]) : ""}</span>
+      ${v.length > 1 ? spark(v, { labels: sr.map((x) => x.label), markIx }) : '<span class="one">1 reading so far. The trend starts at the next measure.</span>'}
+      <span class="ft"><span>start <span class="num">${num(start)}</span></span><span>${v.length} reading${v.length === 1 ? "" : "s"}</span></span>
+      <span class="rule">${esc(rules[m.k] || "")} The % is against the start; ▲▼ is against the reading before.${markIx >= 0 && markIx < v.length - 1 ? " The dashed line is where the cull ended." : ""}</span></button>`;
+  }).join("");
+}
+function metaTiles(k) {
+  const data = phases && phases[k], list = data && Array.isArray(data.metrics) ? data.metrics.filter((m) => m && typeof m === "object") : [];
+  if (!list.length) return '<div class="none">No numbers saved for this phase yet.</div>';
+  return list.map((m, i) => {
+    const of = typeof m.value === "string" && m.value.match(/^\s*(\d+)\s+of\s+(\d+)\s*$/);
+    const sr = Array.isArray(m.series) ? m.series.filter(isNum) : [];
+    const tNum = m.target != null && /^\s*\d+(\.\d+)?\s*$/.test(String(m.target)) ? +m.target : null;
+    let viz;
+    if (sr.length > 1) {
+      const cur = isNum(m.value) ? m.value : sr[sr.length - 1], downGood = tNum != null ? cur > tNum : true;
+      viz = spark(sr, { labels: sr.map((_, j) => "Reading " + (j + 1)) }) + `<span class="ft"><span>was <span class="num">${num(sr[0])}</span></span>${delta(sr[sr.length - 1], sr[sr.length - 2], { downGood, neutral: tNum == null })}</span>`;
+    } else if (of) {
+      const n = +of[1], t = +of[2];
+      viz = t > 0 && t <= 30 ? `<span class="meter" aria-hidden="true">${Array.from({ length: t }, (_, j) => `<i class="${j < n ? "on" : ""}"></i>`).join("")}</span><span class="ft"><span>${Math.max(t - n, 0)} to go</span><span>1 reading</span></span>` : `<span class="one">${Math.max(t - n, 0)} to go.</span>`;
+    } else if (isNum(m.value)) viz = '<span class="one">1 reading so far. The trend starts at the next measure.</span>';
+    else viz = '<span class="one">No number yet.</span>';
+    const val = of ? ofCount(of[1], of[2]) : esc(num(m.value)), key = k + ":" + i;
+    const body = `<span class="tl">${esc(m.label || "Number")}</span><span class="row"><span class="v">${val}</span>${m.target != null && m.target !== "" ? `<span class="goal">goal ${esc(m.target)}</span>` : ""}</span>${viz}${m.rule ? `<span class="rule">${esc(m.rule)}</span>` : ""}`;
+    // A tile with no rule has nothing to open, so it is not a control.
+    return m.rule ? `<button type="button" class="tile" data-tile="${esc(key)}" aria-expanded="${ui.tiles.has(key)}">${body}</button>` : `<div class="tile">${body}</div>`;
+  }).join("");
+}
+
+/* ---------- steps ---------- */
+const landed = (id) => { const w = B && B.landed && B.landed[id]; return Array.isArray(w) && w.length ? w : null; };
+function stepRow(s, nextIds) {
+  const ni = nextIds.indexOf(s.id), lw = landed(s.id);
+  const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : ""];
+  const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = LBL[s.status] || LBL.todo;
+  return `<li class="${s.status}${open ? " open" : ""}" id="s-${esc(s.id)}">
+    <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
+      <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
+    <div class="rbody"><dl>
+      <dt>Status</dt><dd>${lbl}</dd>
+      ${s.why ? `<dt>Why</dt><dd>${esc(s.why)}</dd>` : ""}
+      ${s.note ? `<dt>Note</dt><dd><div class="${noteOpen ? "" : "clamp"}">${esc(s.note)}</div>${String(s.note).length > 260 ? `<button type="button" class="more" data-more="${esc(s.id)}">${noteOpen ? "Show less" : "Show all"}</button>` : ""}</dd>` : ""}
+      ${s.ask ? `<dt>Ask</dt><dd><div class="ask"><span>${esc(s.ask)}</span><button type="button" class="copy" data-copy="${esc(s.ask)}">Copy</button></div></dd>` : ""}
+      ${d ? `<dt>When</dt><dd><span class="num" style="font-size:13px">${esc(fmt(d.toISOString()))}</span></dd>` : ""}
+    </dl></div></li>`;
+}
+function pager(scope, page, pages, total, noun) {
+  if (pages <= 1) return "";
+  return `<div class="pager"><button type="button" data-pg="prev" data-scope="${scope}" ${page <= 0 ? "disabled" : ""}>← Previous</button>
+    <span class="pc">Page <span class="num">${page + 1}</span> of <span class="num">${pages}</span><span> · ${total} ${noun}</span></span>
+    <button type="button" data-pg="next" data-scope="${scope}" ${page >= pages - 1 ? "disabled" : ""}>Next →</button></div>`;
+}
+const clampPage = (p, pages) => Math.max(0, Math.min(p, pages - 1));
+const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "done"); return ix < 0 ? 0 : Math.floor(ix / pageSize()); };
+
+function renderPhase() {
+  const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
+  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+  const nextIds = nextUp().map((s) => s.id), size = pageSize();
+  const pages = Math.max(1, Math.ceil(open.length / size));
+  if (ui.page[k] == null) ui.page[k] = defaultPage(open);
+  const pg = ui.page[k] = clampPage(ui.page[k], pages);
+  const dPages = Math.max(1, Math.ceil(d / size)), dpg = ui.donePage[k] = clampPage(ui.donePage[k] || 0, dPages);
+  let asof = "", foot = "", tiles = "";
+  if (k === "cleanup") {
+    const ci = cullInfo(); tiles = cullTiles(ci);
+    if (ci) asof = ["Clean-up numbers", cull.closed ? "cull ended " + cull.closed : "", ci.batches.length ? "latest reading: " + ci.last.label : "no batch reported yet"].filter(Boolean).map(esc).join(" · ")
+      + (cull.note ? ` <button type="button" class="howto" data-how aria-expanded="${ui.how}">${ui.how ? "Hide how these are counted" : "How these are counted"}</button>` : "");
+  } else {
+    const pd = phases && phases[k]; tiles = metaTiles(k); asof = pd && pd.asOf ? esc(pd.asOf) : ""; foot = pd && pd.foot ? esc(pd.foot) : "";
+  }
+  const n = PH.indexOf(p) + 1;
+  $("svPhases").innerHTML = `<section class="box phase" id="p-${k}" aria-label="Phase ${n}, ${esc(p.n)}">
+    <div class="ph-head"><h3>Phase ${n}<span class="sr">, ${esc(p.n)}</span></h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done</span><div class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</div></div></div>
+    ${asof ? `<div class="asof">${asof}</div>` : ""}
+    ${k === "cleanup" && ui.how && cull && cull.note ? `<div class="howbody">${esc(cull.note)}</div>` : ""}
+    <div class="tiles">${tiles}</div>
+    ${foot ? `<div class="foot">${foot}</div>` : ""}
+    <div class="hint"><span>${open.length} open step${open.length === 1 ? "" : "s"}, in work order</span><span>Read only</span></div>
+    <ul class="rsteps">${open.slice(pg * size, (pg + 1) * size).map((s) => stepRow(s, nextIds)).join("") || `<li class="noneyet">${ss.length ? "Every step in this phase is done." : "No steps in this phase yet."}</li>`}</ul>
+    ${pager("open", pg, pages, open.length, "open steps")}
+    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${k}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
+      <div class="fb"><ul class="rsteps">${done.slice(dpg * size, (dpg + 1) * size).map((s) => stepRow(s, nextIds)).join("")}</ul>${pager("done", dpg, dPages, d, "done")}</div></div>` : ""}
+  </section>`;
+}
+
+/* ---------- side cards ---------- */
+function trendCard() {
+  const ci = cullInfo(); if (!ci || ci.pts.length < 2) return "";
+  return `<section class="box"><header><h3>Clean-up numbers over time</h3><span class="lbl">${ci.pts.length} readings</span></header>
+    <div class="trend">${CULL_KEYS.map((m) => { const sr = series(ci, m.k); if (sr.length < 2) return ""; const v = sr.map((x) => x.v), cur = v[v.length - 1];
+      const markIx = ci.closeIx > 0 ? sr.findIndex((x) => x.i === ci.closeIx) : -1;
+      return `<div class="trow"><span class="k">${m.n}</span>${spark(v, { w: 160, labels: sr.map((x) => x.label), markIx })}<span class="r"><span class="num">${num(cur)}</span>${delta(cur, ci.base[m.k], { pctMode: true })}</span></div>`; }).join("")}</div>
+    <div class="legend">${ci.closeIx > 0 && ci.closeIx < ci.pts.length - 1 ? "<span><i></i>cull ended</span>" : ""}<span>% against the start · down is good</span></div></section>`;
+}
+function burnCard() {
+  if (!steps.length) return "";
+  const today = new Date(), days = [];
+  for (let i = 4; i >= 0; i--) { const d = new Date(today); d.setDate(d.getDate() - i); days.push(d); }
+  const keys = days.map(dayKey);
+  const doneK = steps.filter((s) => s.status === "done").map((s) => { const d = when(s.updatedAt); return d ? dayKey(d) : ""; });
+  const touched = keys.map((k) => steps.filter((s) => { const d = when(s.updatedAt); return d && dayKey(d) === k; }).length);
+  const cum = keys.map((k) => doneK.filter((x) => x <= k).length);
+  const W = 300, H = 110, max = Math.max(steps.length, 1), bw = W / days.length, tmax = Math.max(...touched, 1);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Steps done by day">`;
+  [0, .5, 1].forEach((f) => { const y = H - 16 - (H - 26) * f; s += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)"/>`; });
+  days.forEach((d, i) => {
+    const x = i * bw + bw / 2, hC = (H - 26) * cum[i] / max, hT = (H - 26) * 0.45 * touched[i] / tmax;
+    s += `<rect x="${x - 14}" y="${H - 16 - hC}" width="12" height="${Math.max(hC, 1)}" rx="2" fill="var(--acc)"/>`;
+    s += `<rect x="${x + 2}" y="${H - 16 - hT}" width="12" height="${Math.max(hT, 1)}" rx="2" fill="var(--faint)"/>`;
+    s += `<text x="${x - 8}" y="${H - 19 - hC}" font-size="10" text-anchor="middle" fill="var(--muted)" font-family="var(--mono)">${cum[i]}</text>`;
+    s += `<text x="${x}" y="${H - 3}" font-size="10" text-anchor="middle" fill="var(--muted)" font-family="var(--mono)">${d.toLocaleDateString("en-US", { timeZone: CT, weekday: "short" })}</text>`;
+    s += `<rect x="${i * bw}" y="0" width="${bw}" height="${H}" fill="transparent" data-tip="${esc(dayLabel(d))}: ${cum[i]} done in total · ${touched[i]} steps changed that day"/>`;
+  });
+  s += "</svg>";
+  return `<section class="box"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num" aria-hidden="true">${cum[cum.length - 1]}/${steps.length}</span><span class="sr">${cum[cum.length - 1]} of ${steps.length} steps</span></span></header>
+    <div class="burn">${s}</div><div class="legend"><span><span class="dot"></span> done so far</span><span><span class="dot" style="background:var(--faint)"></span> steps changed that day</span></div></section>`;
+}
+function feedCard(n = 8) {
+  const recent = steps.filter((s) => when(s.updatedAt)).sort((a, b) => when(b.updatedAt) - when(a.updatedAt)).slice(0, n);
+  if (!recent.length) return "";
+  return `<section class="box"><header><h3>Latest changes</h3><span class="lbl">${esc(dayLabel(new Date()))}</span></header>
+    <ul class="feed">${recent.map((s) => `<li><span class="when">${esc(fresh(s.updatedAt) ? timeLabel(when(s.updatedAt)) : ago(s.updatedAt))}</span>${rgl(s.status)}<span><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join("")}</ul>
+    <button type="button" class="morelink" data-view-go="log">All changes by day →</button></section>`;
+}
+function renderSide() {
+  $("svSide").innerHTML = (shownPhase() === "cleanup" ? trendCard() : "") + feedCard() + burnCard();
+  $("svSide2").innerHTML = trendCard() + burnCard();
+}
+
+/* ---------- changes view ---------- */
+function renderLog() {
+  const ev = steps.filter((s) => when(s.updatedAt)).map((s) => ({ d: when(s.updatedAt), s })).sort((a, b) => b.d - a.d);
+  if (!ev.length) { $("svDays").innerHTML = '<section class="box"><p class="lead">No changes recorded yet.</p></section>'; return; }
+  const perDay = {}; ev.forEach((e) => { const k = dayKey(e.d); perDay[k] = (perDay[k] || 0) + 1; });
+  const size = pageSize(), pages = Math.max(1, Math.ceil(ev.length / size)), pg = ui.logPage = clampPage(ui.logPage, pages);
+  const slice = ev.slice(pg * size, (pg + 1) * size), before = pg > 0 ? dayKey(ev[pg * size - 1].d) : null;
+  const groups = []; slice.forEach((e) => { const k = dayKey(e.d); let g = groups[groups.length - 1]; if (!g || g.k !== k) { g = { k, d: e.d, list: [] }; groups.push(g); } g.list.push(e); });
+  $("svDays").innerHTML = `<section class="box">${groups.map((g, gi) => {
+    const all = ev.filter((e) => dayKey(e.d) === g.k), nd = all.filter((e) => e.s.status === "done").length, cont = gi === 0 && before === g.k;
+    return `<div class="day"><h3><span>${esc(dayLabel(g.d))}${cont ? ' <span class="lbl">continued</span>' : ""}</span><span class="lbl">${perDay[g.k]} change${perDay[g.k] === 1 ? "" : "s"}${nd ? ` · <span style="color:var(--good)">${nd} done</span>` : ""}</span></h3>
+    ${g.list.map((e) => { const s = e.s;
+      return `<div class="ev ${s.status}"><span class="when">${esc(timeLabel(e.d))}</span>${rgl(s.status)}<div><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
+        <div class="gist">${esc(firstSentence(s.note) || firstSentence(s.why))}</div></div></div>`; }).join("")}</div>`;
+  }).join("")}${pager("log", pg, pages, ev.length, "changes")}</section>
+  <p class="lead">Each step shows once, on the day it last changed.</p>`;
+}
+
+/* ---------- reference view ---------- */
+function renderRef() {
+  const copyBlock = (text) => `<div class="ask"><span>${esc(text)}</span><button type="button" class="copy" data-copy="${esc(text)}">Copy</button></div>`;
+  const tp = (key, id, title, sub, body) => `<div class="tp${ui.tps.has(key) ? " open" : ""}"><button type="button" data-tp="${esc(key)}" aria-expanded="${ui.tps.has(key)}"><span class="id">${esc(id)}</span><span>${esc(title)}<span class="sm">${esc(sub)}</span></span><span class="chev" aria-hidden="true">▶</span></button><div class="tb">${body}</div></div>`;
+  const a = advisor;
+  let guide;
+  if (!a) guide = '<p class="lead">No hand-off guide saved yet.</p>';
+  else {
+    const setup = Array.isArray(a.setup) ? a.setup : [], each = Array.isArray(a.each) ? a.each : [];
+    guide = (setup.length ? tp("g1", "1", "Set up once", `${setup.length} steps`, `<ol>${setup.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>`) : "")
+      + (each.length ? tp("g2", "2", "Every time", `${each.length} habits`, `<ol>${each.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>`) : "")
+      + (a.prompt ? tp("g3", "3", "Project instructions", "The advisor guide, ready to paste", copyBlock(a.prompt)) : "");
+  }
+  const list = Array.isArray(topics) ? topics : [];
+  const tbody = (t) => `<ul>${(Array.isArray(t.points) ? t.points : []).map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`
+    + (Array.isArray(t.blocks) ? t.blocks : []).filter((b) => b && b.text).map((b) => `${b.label ? `<div class="blbl">${esc(b.label)}</div>` : ""}${copyBlock(b.text)}`).join("")
+    + (() => { const l = (Array.isArray(t.sources) ? t.sources : []).filter((x) => x && /^https:\/\//.test(x.url || "")); return l.length ? `<div class="src"><span class="lbl">Sources:</span>${l.map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.label || x.url)}</a>`).join("")}</div>` : ""; })();
+  $("svRef").innerHTML = `<section class="box gcard"><header><h3>Hand-off guide</h3><span class="lbl">for a new advisor chat</span></header>${guide}</section>
+    <section class="box gcard"><header><h3>Reasoning topics</h3><span class="lbl"><span class="num">${list.length}</span> topics</span></header>
+    ${list.length ? list.map((t) => tp("t:" + t.id, t.id, t.title || "Topic", t.summary || "", tbody(t))).join("") : '<p class="lead">No topics saved yet.</p>'}</section>`;
+}
+
+/* ---------- records view: health, then the count and newest entries of each listed record kind ---------- */
+function renderRec() {
+  const link = (url, text) => (url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text}</a>` : text);
+  const day = (iso) => { const d = when(iso); return d ? d.toLocaleDateString("en-US", { timeZone: CT, month: "short", day: "numeric" }) : ""; };
+  const health = B && Array.isArray(B.health) ? B.health : [], recs = B && Array.isArray(B.records) ? B.records : [];
+  $("svRec").innerHTML = `<section class="box gcard"><header><h3>Health</h3><span class="lbl">read when built</span></header>
+    ${health.length ? `<ul class="hl">${health.map((x) => `<li><span class="k">${esc(x.name)}</span><span${unknownRead(x.read) ? ' class="unk"' : ""}>${x.home ? link(x.url, `<span class="id">${esc(x.home)}</span>`) + ", changed at " : ""}<span class="num">${esc(unknownRead(x.read) ? reason(x.read) : x.read)}</span></span></li>`).join("")}</ul>`
+      : '<p class="lead unk">Health: not read. This page holds no roadmap build yet.</p>'}</section>`
+    + (recs.length ? recs.map((r) => `<section class="box gcard"><header><h3>${esc(r.name)}</h3><span class="lbl">${r.home ? `<span class="id">${esc(r.home)}</span>` : ""}</span></header>
+      ${r.count == null ? `<p class="lead unk">${esc(reason(r.why || "not read"))}</p>`
+        : `<div class="count">${r.count}</div>${r.newest.length ? `<div class="asof">Newest ${r.newest.length}</div><ul class="rc">${r.newest.map((n) => `<li><span class="when">${esc(day(n.added))}</span><span>${link(n.url, esc(n.title))}<span class="nm">${esc(n.name)}</span></span></li>`).join("")}</ul>${r.newestWhy ? `<p class="asof">${esc(r.newestWhy)}</p>` : ""}` : (r.newestWhy ? `<p class="lead unk">Newest: ${esc(reason(r.newestWhy))}</p>` : '<p class="lead">No entry has a commit yet.</p>')}`}
+      </section>`).join("")
+      : '<section class="box gcard"><p class="lead unk">Records: not read. This page holds no roadmap build yet.</p></section>');
+}
+
+/* ---------- no roadmap ---------- */
+// The repo's name is the page's identity name (meta/page); with none, "this repo".
+const askText = () => {
+  const id = (state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
+  return "Start a roadmap for " + (name || "this repo") + ", as the roadmap skill says. Then have the waiting-page writer put its roadmap block on this repo's waiting page.";
+};
+function noRoadmap() {
+  const steps0 = B && Array.isArray(B.panels) ? B.panels.find((p) => p.name === "Steps") : null;
+  const said = steps0 ? reason(steps0.read) : "This page holds no roadmap build yet.";
+  const why = B && D === null ? "This repo has no roadmap yet, so the build had no steps to read. Your questions are not affected."
+    : "No roadmap has been built into this page yet, so there are no steps to show. Your questions are not affected.";
+  return `<section class="box nob"><h3><span class="rg unk" aria-hidden="true"></span>Plan: unknown</h3>
+    <p>${why}</p>
+    <details><summary>What the build said</summary><pre>${esc(said)}</pre></details>
+    <button type="button" class="btn alt" data-ask>Copy the ask to start a roadmap</button>
+    <textarea id="svAsk" rows="4" readonly hidden aria-label="The ask to start a roadmap"></textarea></section>`;
+}
+
+/* ---------- views ---------- */
+const VIEWS = [["plan", "Plan"], ["log", "Changes"], ["ref", "Reference"], ["rec", "Records"]];
+const NOPLAN = (what) => `<section class="box"><p class="lead">${what} appear here once the plan can be read.</p></section>`;
+function renderPlan() { if (!hasData) return; renderNow(); renderRail(); renderPhase(); renderSide(); renderLog(); }
+function setView(v) {
+  ui.view = v;
+  root.querySelectorAll("[data-view]").forEach((b) => { b.setAttribute("aria-selected", String(b.dataset.view === v)); b.tabIndex = b.dataset.view === v ? 0 : -1; });
+  VIEWS.forEach(([k]) => { $("v-" + k).hidden = k !== v; });
+  saveView();
+}
+function build() {
+  root.innerHTML = `<div class="sv-head">${readAt()}</div>${liveWork()}${hasData ? '<section class="now" id="svNow" aria-label="Where the plan stands"></section>' : ""}
+    <div class="views" role="tablist" aria-label="Status views">${VIEWS.map(([k, n]) => `<button type="button" role="tab" id="vt-${k}" data-view="${k}" aria-controls="v-${k}" aria-selected="false">${n}</button>`).join("")}</div>
+    <div class="sview" id="v-plan" role="tabpanel" aria-labelledby="vt-plan">${hasData ? '<nav class="prail" id="svRail" aria-label="Phases"></nav><div class="cols"><div id="svPhases"></div><aside class="side" id="svSide"></aside></div>' : noRoadmap()}</div>
+    <div class="sview" id="v-log" role="tabpanel" aria-labelledby="vt-log" hidden>${hasData ? '<div class="cols"><div id="svDays"></div><aside class="side" id="svSide2"></aside></div>' : NOPLAN("Changes")}</div>
+    <div class="sview" id="v-ref" role="tabpanel" aria-labelledby="vt-ref" hidden>${hasData ? '<div class="cols"><div id="svRef"></div><aside class="side"><section class="box"><header><h3>About this area</h3></header><p class="lead">Reference is not a phase. It holds the hand-off guide for a new advisor thread and the reasoning behind the plan. Steps point here; nothing here is a to-do.</p></section></aside></div>' : NOPLAN("The hand-off guide and topics")}</div>
+    <div class="sview" id="v-rec" role="tabpanel" aria-labelledby="vt-rec" hidden><div class="cols"><div id="svRec"></div><aside class="side"><section class="box"><header><h3>About this area</h3></header><p class="lead">Health and records are read from the repo when the page is built. Each card says the commit it read. A card that could not be read says why.</p></section></aside></div></div>`;
+  if (hasData) { renderPlan(); renderRef(); }
+  renderRec();
+  setView(ui.view);
+}
+
+/* ---------- actions ---------- */
+function toast(msg) { const t = $("svToast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 2800); }
+function copyText(txt, btn, fallback) {
+  const label = btn.textContent;
+  const ok = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = label; }, 1400); };
+  try { navigator.clipboard.writeText(txt).then(ok, fallback); } catch (e) { fallback(); }
+}
+function goStep(id) {
+  const s = steps.find((x) => x.id === id); if (!s) return;
+  if (PH.some((p) => p.k === s.phase)) ui.phase = s.phase;
+  const size = pageSize();
+  if (s.status === "done") { ui.folds.add(s.phase); ui.donePage[s.phase] = Math.floor(doneList(s.phase).findIndex((x) => x.id === id) / size); }
+  else ui.page[s.phase] = Math.floor(openList(s.phase).findIndex((x) => x.id === id) / size);
+  ui.open.add(id);
+  setView("plan"); renderPlan();
+  const li = document.getElementById("s-" + id);
+  if (li) { li.scrollIntoView({ behavior: "smooth", block: "center" }); const b = li.querySelector(".rrow"); if (b) b.focus({ preventScroll: true }); }
+}
+root.addEventListener("click", (e) => {
+  const hit = (sel) => e.target.closest(sel);
+  let n;
+  if ((n = hit("[data-ask]"))) { const ask = askText(); copyText(ask, n, () => { const box = $("svAsk"); box.value = ask; box.hidden = false; box.select(); toast("Select the text in the box and copy it."); }); return; }
+  if ((n = hit("[data-copy]"))) { copyText(n.dataset.copy, n, () => { const sp = n.previousElementSibling; if (sp) { const r = document.createRange(); r.selectNodeContents(sp); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast("Selected. Copy it with your keyboard."); }); return; }
+  if ((n = hit("[data-more]"))) { const id = n.dataset.more, c = n.previousElementSibling, shut = c.classList.toggle("clamp"); shut ? ui.notes.delete(id) : ui.notes.add(id); n.textContent = shut ? "Show all" : "Show less"; return; }
+  if ((n = hit("[data-go]"))) { goStep(n.dataset.go); return; }
+  if ((n = hit("[data-view-go]"))) { setView(n.dataset.viewGo); window.scrollTo({ top: 0 }); return; }
+  if ((n = hit("[data-view]"))) { setView(n.dataset.view); return; }
+  if ((n = hit("[data-phase]"))) { ui.phase = n.dataset.phase; setView("plan"); renderPlan(); const f = root.querySelector(`[data-phase="${ui.phase}"]`); if (f) f.focus(); return; }
+  if ((n = hit("[data-pg]"))) {
+    const sc = n.dataset.scope, dir = n.dataset.pg === "next" ? 1 : -1, k = shownPhase();
+    if (sc === "log") ui.logPage += dir; else if (sc === "done") ui.donePage[k] = (ui.donePage[k] || 0) + dir; else ui.page[k] = (ui.page[k] || 0) + dir;
+    if (sc === "log") renderLog(); else renderPhase();
+    const btn = root.querySelector(`[data-scope="${sc}"][data-pg="${n.dataset.pg}"]:not(:disabled)`) || root.querySelector(`[data-scope="${sc}"][data-pg]:not(:disabled)`);
+    if (btn) btn.focus({ preventScroll: true });
+    const top = sc === "log" ? $("svDays") : root.querySelector("#svPhases .rsteps");
+    if (top && top.getBoundingClientRect().top < 60) top.scrollIntoView({ block: "start" });
+    return;
+  }
+  if ((n = hit("[data-how]"))) { ui.how = !ui.how; renderPhase(); const x = root.querySelector("[data-how]"); if (x) x.focus(); return; }
+  if ((n = hit("[data-tile]"))) { const k = n.dataset.tile, o = n.getAttribute("aria-expanded") !== "true"; n.setAttribute("aria-expanded", String(o)); o ? ui.tiles.add(k) : ui.tiles.delete(k); return; }
+  const toggle = (btn, set, key) => { const p = btn.closest("li, .tp, .donefold"); const o = !p.classList.contains("open"); p.classList.toggle("open", o); btn.setAttribute("aria-expanded", String(o)); o ? set.add(key) : set.delete(key); };
+  if ((n = hit("[data-row]"))) { toggle(n, ui.open, n.dataset.row); return; }
+  if ((n = hit("[data-tp]"))) { toggle(n, ui.tps, n.dataset.tp); return; }
+  if ((n = hit("[data-fold]"))) { toggle(n, ui.folds, n.dataset.fold); return; }
+});
+// The view switch takes the arrow keys, as a tab row does.
+root.addEventListener("keydown", (e) => {
+  const t = e.target.closest && e.target.closest("[data-view]"); if (!t || (e.key !== "ArrowRight" && e.key !== "ArrowLeft")) return;
+  e.preventDefault();
+  const at = VIEWS.findIndex(([k]) => k === t.dataset.view), nx = VIEWS[(at + (e.key === "ArrowRight" ? 1 : VIEWS.length - 1)) % VIEWS.length][0];
+  setView(nx); $("vt-" + nx).focus();
+});
+const tip = $("svTip");
+root.addEventListener("pointerover", (e) => { const el = e.target.closest && e.target.closest("[data-tip]"); if (!el) { tip.classList.remove("on"); return; } tip.textContent = el.dataset.tip; tip.classList.add("on"); });
+root.addEventListener("pointerleave", () => tip.classList.remove("on"));
+root.addEventListener("pointermove", (e) => { if (!tip.classList.contains("on")) return; const x = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8); tip.style.left = Math.max(8, x) + "px"; tip.style.top = (e.clientY + 14) + "px"; });
+
+// Rows are measured once they show, so the first draw may change the page size: draw again then.
+let built = false;
+function shown() {
+  if (!built) { built = true; build(); if (hasData && measureRows()) { ui.page = {}; renderPlan(); } return; }
+  if (hasData && measureRows()) { ui.page = {}; renderPlan(); }
+}
+document.addEventListener("statusshown", shown);
+let lastSize = pageSize(), sizeT = null;
+window.addEventListener("resize", () => {
+  clearTimeout(sizeT);
+  sizeT = setTimeout(() => {
+    if (!built || $("sPanel").hidden || !hasData) return;
+    measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = {}; renderPlan();
+  }, 150);
+});
 })();
 </script>

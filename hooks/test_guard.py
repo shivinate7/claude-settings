@@ -57,6 +57,7 @@ REPO = os.path.dirname(HERE)
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
+from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
@@ -77,6 +78,7 @@ FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
+    "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
     "hand-made-worktree": "a lane worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
@@ -97,6 +99,10 @@ FAMILIES = {
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
+    "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
+    "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
+    "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
+    "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -3067,6 +3073,8 @@ TEMP_DIR = None   # back to the system temp for the sections below
 
 # THE REFUSAL TEXT and THE POINTER REMEDY, judged on the printed reason (see the two checks below).
 HM_REFUSED_PATH = "hm-text-lane"
+# The call shape every EnterWorktree remedy names. A `path` makes Claude Code ask the owner to approve the worktree.
+ENTER_WORKTREE_SHAPE = "with a `name` and no `path`"
 
 
 def hand_made_refusal_text_case():
@@ -3079,7 +3087,7 @@ def hand_made_refusal_text_case():
         return False, "expected deny, got %s: %s" % (got, reason[:90])
     if "Rule (hand-made worktree)" not in reason:
         return False, "the reason does not hold 'Rule (hand-made worktree)': %s" % reason[:90]
-    for want in ("isolation", "EnterWorktree"):
+    for want in ("isolation", "EnterWorktree", ENTER_WORKTREE_SHAPE):
         if want not in reason:
             return False, "the reason does not name %r: %s" % (want, reason[:90])
     if not re.search(r"which layer", reason):
@@ -3087,7 +3095,7 @@ def hand_made_refusal_text_case():
     for bad in (HM_REFUSED_PATH, "worktree add"):
         if bad in reason:
             return False, "the reason holds %r, which it must not" % bad
-    return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree and the layer"
+    return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
 def pointer_remedy_names_enter_worktree_case():
@@ -3101,7 +3109,9 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy still names 'worktree add'"
     if "EnterWorktree" not in reason:
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
-    return True, "the pointer remedy names EnterWorktree and no 'worktree add'"
+    if ENTER_WORKTREE_SHAPE not in reason:
+        return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
+    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -11380,11 +11390,32 @@ with open(os.path.join(PQ_REPO, ".claude", "layout-extras.json"), "w", encoding=
     json.dump({"kinds": {}, "waiting-page": PQ_URL}, _f)
 
 
+# The lines a waiting-page decision carries (rule question-form, its cases in the owner-judge section: the
+# one form of hooks/question_form.py). Each decision fixture below starts its context with them and gives
+# each option a gain and a lose, so a case stays on its own rule, as TN_WHY does for a task. The lines hold
+# no port word and no press word.
+OJ_GOAL = "Goal: keep the CI checks fast, and keep every check"
+OJ_STAKE = "Problem (risk): a wrong pick here changes what the guard lets through, so it needs your word"
+OJ_BASED = "Based on (read): the stamp check runs in the lint job today"
+OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
+
+
+def with_stake(item):
+    """The item with OJ_FORM on the lines before its context, and a gain and a lose on each option that
+    lacks one. An item with no context, or no options, stays as it is."""
+    if isinstance(item.get("context"), str):
+        item["context"] = OJ_FORM + "\n" + item["context"]
+    if isinstance(item.get("options"), list):
+        item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
+                           for o in item["options"]]
+    return item
+
+
 def pq_item(**over):
     item = {"id": "suspense-cards", "kind": "decision", "status": "open", "title": PQ_TITLE,
             "context": PQ_CTX, "holds": PQ_HOLDS}
     item.update(over)
-    return {k: v for k, v in item.items() if v is not None}
+    return with_stake({k: v for k, v in item.items() if v is not None})
 
 
 def pq(name, expected, item, action="set", **extra):
@@ -11505,12 +11536,17 @@ UP_MATCH = {"key": "b", "label": "Rename banchi's titles to the shared form", "h
             "lose": "l"}
 
 
+# The line a waiting-page task carries (rule task-names-check, its cases below). It sits here, above its
+# first use in this section.
+TN_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
 def up_item(**over):
     item = {"id": "banchi-titles", "kind": "decision", "status": "open", "title": "Banchi record titles",
             "context": "Banchi's titles differ from the shared form.", "options": [UP_WIDE, UP_MATCH],
             "pick": "a", "why": "Fewer renames."}
     item.update(over)
-    return {k: v for k, v in item.items() if v is not None}
+    return with_stake({k: v for k, v in item.items() if v is not None})
 
 
 def up(name, expected, item, action="set", **extra):
@@ -11530,7 +11566,8 @@ up("a stood pick of a widening option is denied", "deny", up_item(stands=True))
 up("an update that carries options and a widening pick is denied", "deny",
    {"options": [UP_WIDE, UP_MATCH], "pick": "a"}, action="update")
 up("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
-up("a task is not judged", "allow", up_item(kind="task"))
+# A task now needs its Why yours line (task-names-check, below). The line keeps this case on the pick rule.
+up("a task is not judged", "allow", up_item(kind="task", context="Banchi's titles differ from the shared form.\n" + TN_WHY))
 up("an items set to another artifact is allowed", "allow", up_item(), url="https://claude.ai/artifact/other")
 add("uniform pick: a batch with today's item among the sets is denied", "deny", "uniform-pick",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -11538,6 +11575,605 @@ add("uniform pick: a batch with today's item among the sets is denied", "deny", 
 add("uniform pick: the refusal names the ruling and what to pick", "deny", "uniform-pick",
     carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="banchi-titles", data=up_item())
+
+# Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
+# option keys. The list never holds a key of an option marked `widens: true`, as a string pick never does.
+UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
+            "lose": "l"}
+UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
+
+up("a multi item whose list pick holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+up("a multi item whose list pick holds the widening option last is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c", "a"]))
+up("a multi item whose list pick is the widening option alone is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a"]))
+up("a multi item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"]))
+up("a multi item with a widening option offered and not in the list pick is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["c"], why="One form."))
+up("a multi item whose widening option has widens false is allowed", "allow",
+   up_item(multi=True, options=[dict(UP_WIDE, widens=False), UP_MATCH, UP_THIRD], pick=["a", "b"]))
+up("a ranked item whose list pick holds the widening option is denied", "deny",
+   up_item(ranked=True, options=UP_THREE, pick=["b", "a"]))
+up("a ranked item whose list pick holds only non-widening keys is allowed", "allow",
+   up_item(ranked=True, options=UP_THREE, pick=["c", "b"]))
+up("a stood multi pick that holds the widening option is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", "c"], stands=True))
+up("a stood multi pick of non-widening keys is allowed", "allow",
+   up_item(multi=True, options=UP_THREE, pick=["b", "c"], stands=True))
+up("an update that carries options and a widening list pick is denied", "deny",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
+up("an update that carries options and a non-widening list pick is allowed", "allow",
+   {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
+up("a task with a list pick is not judged", "allow",
+   up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"],
+           context="Banchi's titles differ from the shared form.\n" + TN_WHY))
+# A list that holds a non-string member still names its string members. The page reads such a list as
+# not valid and shows no pick, but the writer judges the keys it can read, not the list's shape.
+up("a multi item whose list pick holds the widening key and a null is denied", "deny",
+   up_item(multi=True, options=UP_THREE, pick=["a", None]))
+up("a multi item whose list pick holds a number and a widening key is denied", "deny",
+   up_item(multi=True, options=[dict(UP_WIDE, key="w"), UP_MATCH, UP_THIRD], pick=[1, "w"]))
+# A widening option with no key is named by no pick. An item with no pick, or a null pick, picks nothing, so
+# the missing pick never reads as the key None.
+UP_KEYLESS = {k: v for k, v in UP_WIDE.items() if k != "key"}
+up("a widening option with no key and an item with no pick is allowed", "allow",
+   up_item(options=[UP_KEYLESS, UP_MATCH], pick=None, why=None))
+up("a widening option with no key and an item with a null pick is allowed", "allow",
+   dict(up_item(options=[UP_KEYLESS, UP_MATCH], why=None), pick=None))
+up("a widening option with no key and a multi item with no pick is allowed", "allow",
+   up_item(multi=True, options=[UP_KEYLESS, UP_MATCH, UP_THIRD], pick=None, why=None))
+add("uniform pick: a batch with a multi item whose list pick holds the widening option is denied",
+    "deny", "uniform-pick", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
+             "data": up_item(multi=True, options=UP_THREE, pick=["a", "b"])}])
+add("uniform pick: the refusal of a widening list pick names the ruling and what to pick", "deny",
+    "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    action="set", collection="items", doc_id="banchi-titles",
+    data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
+
+
+# --------------------------------------------------------------------------- a press in a web app carries its link
+FAMILY = "press-link"
+#
+# A waiting item that asks the owner to press in a web app (GitHub, a PR, a pull request, a
+# `home#374` ref, Settings) carries a link to that exact page: on the option whose label or how asks
+# it, or on a task's `links`. The writer refuses it at the same ArtifactData call. The red case is
+# the old shape of item 47, rebuilt from its step note: the option said to press Merge, with no link.
+
+WP_DOC = "home-374-merge"
+PL_LINK = [{"label": "home#374 on GitHub", "url": "https://github.com/shivinate7/home/pull/374"}]
+PL_WRONG = [{"label": "home#375 on GitHub", "url": "https://github.com/shivinate7/home/pull/375"}]
+PL_BAD_OPT = {"key": "a", "label": "Merge home#374 yourself", "how": "Mark home#374 ready and press Merge.",
+              "gain": "g", "lose": "l"}
+PL_KEEP_OPT = {"key": "b", "label": "Leave home#374 open", "how": "Do nothing yet.", "gain": "g", "lose": "l"}
+
+
+def pl_opt(label, how, key="a", **more):
+    return dict({"key": key, "label": label, "how": how, "gain": "g", "lose": "l"}, **more)
+
+
+def pl_item(**over):
+    item = {"id": WP_DOC, "kind": "decision", "status": "open", "title": "Merge home#374 yourself or wait?",
+            "context": "The home pull request is ready for review.", "options": [PL_BAD_OPT, PL_KEEP_OPT]}
+    item.update(over)
+    return with_stake({k: v for k, v in item.items() if v is not None})
+
+
+def pl_task(steps, links=None, **over):
+    # The Why yours line keeps each case on the press-link rule; task-names-check reads it (TN_WHY).
+    task = {"id": WP_DOC, "kind": "task", "status": "open", "title": "Merge home#374", "steps": steps,
+            "links": links, "context": TN_WHY}
+    task.update(over)
+    return {k: v for k, v in task.items() if v is not None}
+
+
+def wp_write(name, expected, rule, item, action="set", doc_id=WP_DOC, **extra):
+    """One ArtifactData write of a waiting item to the fixture repo's waiting page. The rule is named on a deny only.
+    An item of None sends no `data`, as a str_replace does."""
+    kw = dict(action=action, collection="items", doc_id=doc_id)
+    if item is not None:
+        kw["data"] = item
+    kw.update(extra)
+    add(name, expected, rule if expected == "deny" else None, tool="ArtifactData", cwd=PQ_REPO,
+        **{"url": PQ_URL, **kw})
+
+
+def pl(name, expected, item, **extra):
+    wp_write("press link: " + name, expected, "press-link", item, **extra)
+
+
+pl("today's item (a press on home#374, no link) is denied", "deny", pl_item())
+pl("the refusal names the link to add", "deny", pl_item(), carries=("links", "url"))
+pl("a press option with a link to the exact page is allowed", "allow",
+   pl_item(options=[dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT]))
+pl("a link to the wrong number, /pull/375, is denied", "deny",
+   pl_item(options=[dict(PL_BAD_OPT, links=PL_WRONG), PL_KEEP_OPT]))
+pl("a link to /pull/3745 is not the exact page and is denied", "deny",
+   pl_item(options=[dict(PL_BAD_OPT, links=[{"label": "home#374 on GitHub",
+                                             "url": "https://github.com/shivinate7/home/pull/3745"}]),
+                    PL_KEEP_OPT]))
+pl("a link to the issue page of the same number is allowed", "allow",
+   pl_item(options=[dict(PL_BAD_OPT, links=[{"label": "home#374",
+                                             "url": "https://github.com/shivinate7/home/issues/374"}]),
+                    PL_KEEP_OPT]))
+pl("a link on another option does not stand in for this one", "deny",
+   pl_item(options=[PL_BAD_OPT, dict(PL_KEEP_OPT, links=PL_LINK)]))
+pl("a press in an option label, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Press Merge in GitHub", "Do it by hand."), PL_KEEP_OPT]))
+pl("the PR merged, with no press, is allowed", "allow",
+   pl_item(options=[pl_opt("Wait until the PR merged", "Do nothing yet."), PL_KEEP_OPT]))
+pl("press on with the plan, with no web marker, is allowed", "allow",
+   pl_item(options=[pl_opt("Press on with the plan", "Finish the work in this session."), PL_KEEP_OPT]))
+pl("a click on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Click Merge on GitHub."), PL_KEEP_OPT]))
+pl("a tap on a PR with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Tap Merge on the PR."), PL_KEEP_OPT]))
+pl("a press on a pull request with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on the pull request."), PL_KEEP_OPT]))
+pl("a press in Settings with no link is denied", "deny",
+   pl_item(options=[pl_opt("Turn it on", "Press Save in Settings."), PL_KEEP_OPT]))
+pl("a press on the settings page with no link is denied", "deny",
+   pl_item(options=[pl_opt("Turn it on", "Press Save on the settings page."), PL_KEEP_OPT]))
+pl("marking a PR ready with no link is denied", "deny",
+   pl_item(options=[pl_opt("Ready it", "Mark the PR ready for review."), PL_KEEP_OPT]))
+pl("a press on GitHub with a link to the repo is allowed", "allow",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on GitHub.",
+                           links=[{"label": "home on GitHub", "url": "https://github.com/shivinate7/home"}]),
+                    PL_KEEP_OPT]))
+pl("a task step that presses Merge on home#374, with no links, is denied", "deny",
+   pl_task(["Press Merge on home#374"]))
+pl("a task step that presses Merge on home#374, with the link to /pull/374, is allowed", "allow",
+   pl_task(["Press Merge on home#374"], links=PL_LINK))
+pl("a task step that presses Merge on home#374, with the link to /pull/375, is denied", "deny",
+   pl_task(["Press Merge on home#374"], links=PL_WRONG))
+pl("a task step that presses Merge in GitHub, with no links, is denied", "deny",
+   pl_task(["Press Merge in GitHub"]))
+pl("a task step that presses Merge in GitHub, with any link, is allowed", "allow",
+   pl_task(["Press Merge in GitHub"], links=[{"label": "home on GitHub", "url": "https://github.com/shivinate7/home"}]))
+pl("a task step with a press and no web marker is allowed", "allow", pl_task(["Press on with the plan"]))
+pl("a task step that names the PR with no press is allowed", "allow", pl_task(["Read the PR notes"]))
+pl("an update that carries a pressing option with no link is denied", "deny",
+   {"options": [PL_BAD_OPT, PL_KEEP_OPT]}, action="update")
+pl("an update that carries a pressing option with its link is allowed", "allow",
+   {"options": [dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT]}, action="update")
+pl("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+pl("an update that carries a press step with the exact link is allowed", "allow",
+   {"steps": ["Press Merge on home#374"], "links": PL_LINK}, action="update")
+pl("an update that carries a press step with a wrong link is denied", "deny",
+   {"steps": ["Press Merge on home#374"], "links": PL_WRONG}, action="update")
+pl("an items set to another artifact is allowed", "allow", pl_item(), url="https://claude.ai/artifact/other")
+add("press link: a batch with the press item among the sets is denied", "deny", "press-link",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+            {"op": "set", "collection": "items", "doc_id": WP_DOC, "data": pl_item()}])
+add("press link: a batch of linked sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
+    url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": WP_DOC,
+             "data": pl_item(options=[dict(PL_BAD_OPT, links=PL_LINK), PL_KEEP_OPT])}])
+
+
+pl("a Merge on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Merge home#374 on GitHub."), PL_KEEP_OPT]))
+pl("an Approve on GitHub with no link is denied", "deny",
+   pl_item(options=[pl_opt("Approve it", "Approve the PR on GitHub."), PL_KEEP_OPT]))
+pl("a Hit on the PR with no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Hit Merge on the PR."), PL_KEEP_OPT]))
+pl("a Go to Settings with no link is denied", "deny",
+   pl_item(options=[pl_opt("Turn it on", "Go to Settings and turn it on."), PL_KEEP_OPT]))
+pl("a press with a space before the # and no link is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374."), PL_KEEP_OPT]))
+pl("a press with a space before the # and a link to /pull/375 is denied", "deny",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374.", links=PL_WRONG), PL_KEEP_OPT]))
+pl("a press with a space before the # and a link to /pull/374 is allowed", "allow",
+   pl_item(options=[pl_opt("Merge it", "Press Merge on home #374.", links=PL_LINK), PL_KEEP_OPT]))
+pl("a label with the ref and a how with the click are judged together and denied", "deny",
+   pl_item(options=[pl_opt("Merge home#374 yourself", "Click the green button."), PL_KEEP_OPT]))
+pl("a task step that opens the PR #374 and approves it, with no links, is denied", "deny",
+   pl_task(["Open the PR #374 and approve it"]))
+pl("press on with the PR open is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press on; the PR stays open."), PL_KEEP_OPT]))
+pl("press on with the claude-settings lane is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press on with the claude-settings lane."), PL_KEEP_OPT]))
+pl("press Save after editing settings.json is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Press Save after you edit settings.json."), PL_KEEP_OPT]))
+pl("marking the decision ready once the PR is open is allowed", "allow",
+   pl_item(options=[pl_opt("Keep going", "Mark the decision ready once the PR is open."), PL_KEEP_OPT]))
+# Task steps are judged joined: the page named in one step and the press in the next is still a press.
+pl("task steps that open home#374 on GitHub, then press Merge, with no link, are denied", "deny",
+   pl_task(["Open home#374 on GitHub.", "Press Merge."]))
+pl("task steps that open the PR on GitHub, then click Merge, with no link, are denied", "deny",
+   pl_task(["Open the PR on GitHub.", "Click Merge."]))
+pl("a task titled Merge home#374 with a step that presses Merge, with no link, is denied", "deny",
+   pl_task(["Press Merge."]))
+pl("the task steps with a link to /pull/374 are allowed", "allow",
+   pl_task(["Open home#374 on GitHub.", "Press Merge."], links=PL_LINK))
+pl("an option that says then you merge home#374, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "Then you merge home#374."), PL_KEEP_OPT]))
+pl("an option that says you approve the PR on GitHub, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "You approve the PR on GitHub."), PL_KEEP_OPT]))
+pl("an option that says mark it ready for review on home#374, with no link, is denied", "deny",
+   pl_item(options=[pl_opt("Go ahead", "Mark it ready for review on home#374."), PL_KEEP_OPT]))
+# The page's own buttons and item numbers are not web-app presses.
+pl("task steps that press Send when the PR is merged are allowed", "allow",
+   pl_task(["Check the PR is merged.", "Press Send when the PR is merged."]))
+pl("an option that answers item #47, then presses Send, is allowed", "allow",
+   pl_item(options=[pl_opt("Go ahead", "Answer item #47, then press Send."), PL_KEEP_OPT]))
+pl("a step that taps Mark done after step #2 is allowed", "allow",
+   pl_task(["Tap Mark done after step #2."]))
+pl("a step that takes my pick, then presses Send, is allowed", "allow",
+   pl_task(["Take my pick, then press Send."]))
+
+
+# --------------------------------------------------------------------------- a task step never sends the owner to a file for a command
+FAMILY = "command-in-item"
+#
+# A waiting task's steps never send the owner to a file for a command: the owner would open the file
+# and copy the command out. The steps are judged joined, since the two halves can sit in separate
+# steps. The red case is the old shape of item 39, rebuilt from its step note: one step opened a plan
+# file and the next said to run its command. A decision is not judged by this rule.
+
+CI_DOC = "c152-stale-branch-deletes"
+CI_STEPS = ["Open plans/c152-stale-branch-deletes.md", "Run its command"]
+
+
+def ci_task(steps, **over):
+    # The Why yours line keeps each case on the command rule; task-names-check reads it (TN_WHY).
+    task = {"id": CI_DOC, "kind": "task", "status": "open", "title": "Delete the stale branches",
+            "steps": steps, "context": TN_WHY}
+    task.update(over)
+    return {k: v for k, v in task.items() if v is not None}
+
+
+def ci(name, expected, item, **extra):
+    wp_write("command in item: " + name, expected, "command-in-item", item, doc_id=CI_DOC, **extra)
+
+
+ci("a step that opens a plan file, then one that says run its command, is denied", "deny", ci_task(CI_STEPS))
+ci("the refusal names the command to add", "deny", ci_task(CI_STEPS),
+   carries=("`command`", "paste the command below"))
+ci("an update that carries those steps is denied", "deny", {"steps": CI_STEPS}, action="update")
+ci("a run-the-command-in-file step is denied", "deny",
+   ci_task(["Run the command in plans/c152-stale-branch-deletes.md"]))
+ci("a copy-the-command-from-file step is denied", "deny",
+   ci_task(["Copy the command from plans/c152-stale-branch-deletes.md"]))
+ci("a file opened and its command run in one step is denied", "deny",
+   ci_task(["Open plans/c152-stale-branch-deletes.md and run its command"]))
+ci("a terminal step with the command on the item is allowed", "allow",
+   ci_task(["Open Terminal", "Paste the command below and run it"], command="git push origin --delete old-a"))
+ci("a decision that opens a file and runs its command is not judged", "allow",
+   {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
+    "context": OJ_FORM + "\nThe plan file lists them.",
+    "options": [{"key": "a", "label": "Delete them",
+                 "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
+                {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
+
+
+ci("a file step with the command set is denied", "deny",
+   ci_task(CI_STEPS, command="git push origin --delete old-a"))
+ci("a run-the-command-in-file step with the command set is denied", "deny",
+   ci_task(["Run the command in plans/c152.md"], command="git push origin --delete old-a"))
+
+
+# --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
+FAMILY = "task-names-check"
+#
+# Decision task-names-its-check: a waiting-page task carries a "Why yours:" line naming the check that
+# showed no session could do the act. The fixture is a task with a cloud refusal in context and no Why
+# yours line. Its steps are plain and it carries a
+# `command`, so command-in-item passes it and only this rule judges it. The rule judges only this
+# repo's waiting page.
+
+TN_CTX = "The cloud proxy refused the branch deletes (403)."
+TN_STEPS = ["Open Terminal", "Paste the command below and run it"]
+TN_COMMAND = "git push origin --delete old-a"
+
+
+def tn_task(**over):
+    task = {"id": "stale-branch-deletes", "kind": "task", "status": "open", "title": "Delete the stale branches",
+            "context": TN_CTX, "steps": TN_STEPS, "command": TN_COMMAND}
+    task.update(over)
+    return {k: v for k, v in task.items() if v is not None}
+
+
+def tn(name, expected, data, action="set", **extra):
+    kw = dict(action=action, collection="items", doc_id="stale-branch-deletes", data=data)
+    kw.update(extra)
+    add("task names its check: " + name, expected, "task-names-check" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
+
+
+tn("a task with steps and no Why yours line is denied", "deny", tn_task())
+tn("a Why yours line in context allows the task", "allow", tn_task(context=TN_CTX + "\n" + TN_WHY))
+tn("the Why yours line is read in any case, at a line start", "allow",
+   tn_task(context=TN_CTX + "\nwhy yours: none could reach the remote"))
+tn("a Why yours phrase mid-line does not count", "deny", tn_task(context="Reason. " + TN_WHY))
+tn("a task with no context is denied", "deny", tn_task(context=None))
+tn("an update that carries kind task and context with no Why yours line is denied", "deny",
+   {"kind": "task", "context": TN_CTX}, action="update")
+tn("an update that carries kind task, context and a Why yours line is allowed", "allow",
+   {"kind": "task", "context": TN_CTX + "\n" + TN_WHY}, action="update")
+tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
+# The form lines keep this case on the task rule; the question form reads them (OJ_FORM).
+tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + TN_CTX))
+tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
+add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": "stale-branch-deletes", "data": tn_task()}])
+add("task names its check: the refusal says to ask a session on the owner's computer and add the line", "deny",
+    "task-names-check", carries=("Why yours", "computer"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    action="set", collection="items", doc_id="stale-branch-deletes", data=tn_task())
+tn("a bare Why yours line with nothing after the colon is denied", "deny",
+   tn_task(context=TN_CTX + "\nWhy yours:   "))
+
+
+def tn_replace(name, expected, field, old, new):
+    """One str_replace on a field of the task. The rule judges the text that replaces old_str."""
+    add("task names its check: " + name, expected, "task-names-check" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items",
+        doc_id="stale-branch-deletes", field=field, old_str=old, new_str=new)
+
+
+tn_replace("a str_replace that drops the Why yours line from context is denied", "deny", "context",
+           TN_CTX + "\n" + TN_WHY, TN_CTX)
+tn_replace("a str_replace that keeps the Why yours line in context is allowed", "allow", "context",
+           TN_CTX + "\n" + TN_WHY, "The cloud proxy refused the branch deletes (403) again.\n" + TN_WHY)
+tn_replace("a str_replace on the title is allowed", "allow", "title",
+           "Delete the stale branches", "Delete the old branches")
+tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "allow", "context",
+           TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
+
+
+# --------------------------------------------------------------------------- a decision states the question form
+FAMILY = "owner-judge"
+#
+# Rules question-form and owner-judge: one form for a waiting-page decision, judged by hooks/question_form.py.
+# These cases run the real guard; the module's own cases, with item 92's shape, are in
+# hooks/test_question_form.py. Built against a named incident: waiting item 34, Oct 28 13:40 CDT. A decision
+# about CI internals, which CI job runs a check, reached the owner with options, a pick and a why. He saved b
+# with "i really can't figure out how to decide". A decision carries these lines in `context`, each at a line
+# start, in any case: `Goal: <goal>`, `Problem (<stake>): <text>`, and one to three
+# `Based on (<kind>): <premise>`. <stake> is one of goal, money, risk, rule, cannot undo; <kind> is one of
+# PREMISE_KINDS. Each option has a non-empty gain and lose. Only those lines count: the same words in the
+# title, an option, why or elsewhere in context never do. A stood pick (`stands: true`) may write
+# `Problem: <text>` with no stake. A task, a status-only or rank-only update, another artifact's page and a
+# decision with status closed (the chat-answer flow writes one already answered) pass.
+# A missing line is refused by `question-form`. The contract does not say whether `question-form` or
+# `owner-judge` names a bare Problem line or a stake outside the set, so those cases accept either id.
+
+OJ_KINDS = ("goal", "money", "risk", "rule", "cannot undo")
+OJ_DOC = "ci-check-job"
+OJ_CTX = "The stamp check runs in the lint job today. The test job could run it too."
+OJ_RULE = "question-form"
+OJ_PROBLEM_RULES = ("question-form", "owner-judge")
+OJ_OPTIONS = [
+    {"key": "a", "label": "Keep the check in the lint job", "how": "Leave the workflow as it is.",
+     "gain": "No change to review.", "lose": "The lint job stays the slow one."},
+    {"key": "b", "label": "Move the check to the test job", "how": "Move the step to the test job.",
+     "gain": "The lint job gets faster.", "lose": "The test job runs longer."}]
+
+
+def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX):
+    """The context of a decision: the form lines, then the prose. A line passed as None or empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, tail) if line)
+
+
+OJ_GOOD = oj_ctx()
+
+
+def oj_item(**over):
+    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
+    item = {"id": OJ_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+            "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
+            "why": "The lint job already holds the other format checks."}
+    item.update(over)
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def oj(name, expected, item, rule=OJ_RULE, **extra):
+    """One write of the item. `rule` names the refusal on a deny. A tuple of ids is any-of, and the
+    refusal must name the Problem line either way."""
+    if isinstance(rule, tuple):
+        extra["carries"] = (*extra.get("carries", ()), "Problem", rule)
+        rule = None
+    wp_write("owner judge: " + name, expected, rule, item, doc_id=OJ_DOC, **extra)
+
+
+def oj_replace(name, expected, field, old, new, rule=OJ_RULE):
+    """One str_replace on a field of the decision. The rule judges a context edit that takes a form line out."""
+    oj("a str_replace " + name, expected, None, rule=rule, action="str_replace", field=field, old_str=old,
+       new_str=new)
+
+
+def oj_write(data, op="set", collection="items"):
+    return {"op": op, "collection": collection, "doc_id": OJ_DOC, "data": data}
+
+
+def oj_batch(name, expected, writes, **extra):
+    add("owner judge: a batch " + name, expected, OJ_RULE if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", writes=writes, **extra)
+
+
+oj("item 34's shape (a CI job choice with options, a pick, a why and no form lines) is denied", "deny",
+   oj_item())
+oj("the refusal names the three lines, the five stakes and stands: true", "deny", oj_item(),
+   carries=("Goal", "Problem", "Based on", "stands: true", *OJ_KINDS))
+# Wrong-field class: the words are there, the lines are not.
+oj("risk and rule words in the title, the options and why, with no form lines, are denied", "deny",
+   oj_item(title="Which CI job runs the stamp check? A risk, a rule",
+           options=[dict(OJ_OPTIONS[0], label="Keep it in the lint job (a rule, no risk)",
+                         how="Goal: leave the workflow. Money: none. Cannot undo: nothing."), OJ_OPTIONS[1]],
+           why="Small stake: a risk and a rule, no goal, no money, nothing that cannot undo."))
+oj("risk and rule words in context, away from the form lines, are denied", "deny",
+   oj_item(context=OJ_CTX + "\nThis is a rule change and a risk to the goal."))
+oj("a Problem line in the title, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), title=OJ_STAKE))
+oj("a Problem line in why, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), why="The lint job already holds the other format checks.\n" + OJ_STAKE))
+oj("a Problem line in an option, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), options=[dict(OJ_OPTIONS[0], how=OJ_STAKE), OJ_OPTIONS[1]]))
+
+# Missing and malformed lines.
+oj("no Goal line is denied", "deny", oj_item(context=oj_ctx(goal=None)))
+oj("a Goal phrase mid-line does not count", "deny", oj_item(context=oj_ctx(goal="Aim. " + OJ_GOAL)))
+oj("no Problem line is denied", "deny", oj_item(context=oj_ctx(problem=None)))
+oj("a Problem phrase mid-line does not count", "deny", oj_item(context=oj_ctx(problem="Reason. " + OJ_STAKE)))
+oj("a stake outside the set (internals) is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (internals): which job runs the check")), rule=OJ_PROBLEM_RULES)
+oj("a bare Problem line with nothing after the colon is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (risk):   ")), rule=OJ_PROBLEM_RULES)
+oj("a stake with no colon and no text is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (risk)")), rule=OJ_PROBLEM_RULES)
+oj("a Problem line with no stake, on a decision that is not a stood pick, is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")),
+   rule=OJ_PROBLEM_RULES)
+oj("no Based on line is denied", "deny", oj_item(context=oj_ctx(based=())))
+oj("four Based on lines are denied", "deny",
+   oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (notes): three",
+                                 "Based on (notes): four"))))
+oj("a Based on kind outside the set is denied", "deny",
+   oj_item(context=oj_ctx(based=("Based on (guess): the lint job is slow.",))))
+oj("a Based on line with no kind is denied", "deny",
+   oj_item(context=oj_ctx(based=("Based on: the lint job is slow.",))))
+oj("an option with no lose is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], {k: v for k, v in OJ_OPTIONS[1].items() if k != "lose"}]))
+oj("an option with no gain is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[{k: v for k, v in OJ_OPTIONS[0].items() if k != "gain"}, OJ_OPTIONS[1]]))
+oj("an option with an empty lose is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], dict(OJ_OPTIONS[1], lose="")]))
+oj("a decision with no context is denied", "deny", oj_item(context=None))
+oj("an item with no kind is judged as a decision and denied", "deny", oj_item(kind=None))
+oj("stands false with no form lines is denied", "deny", oj_item(stands=False))
+oj("port false with no form lines is denied", "deny", oj_item(port=False))
+
+# False-alarm class: a stake of any kind, a premise of any kind, in any case, at a line start, is the form.
+for _kind in OJ_KINDS:
+    oj("a Problem line of stake %s is allowed" % _kind, "allow",
+       oj_item(context=oj_ctx(problem="Problem (%s): the pick changes what ships" % _kind)))
+for _premise in PREMISE_KINDS:
+    oj("a Based on line of kind %s is allowed" % _premise, "allow",
+       oj_item(context=oj_ctx(based=("Based on (%s): the lint job is slow." % _premise,))))
+oj("three Based on lines are allowed", "allow",
+   oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (assumed): three"))))
+oj("a Problem line with no dash is allowed", "allow",
+   oj_item(context=oj_ctx(problem="Problem (money): about $40 a month of runner time")))
+oj("the Problem label is read in lower case", "allow",
+   oj_item(context=oj_ctx(problem="problem (risk): the pick changes what ships")))
+oj("the Problem line is read in upper case", "allow",
+   oj_item(context=oj_ctx(problem="PROBLEM (RISK): the pick changes what ships")))
+oj("comment openers and an apostrophe in the form lines are plain text", "allow",
+   oj_item(context=oj_ctx(goal="Goal: keep the stamp check's job, with //path, /* glob and # tags, working.",
+                          problem="Problem (risk): don't parse # or // here, so it needs your word")))
+oj("a context that holds only the form lines is allowed", "allow", oj_item(context=oj_ctx(tail=None)))
+oj("form lines with more lines after them are allowed", "allow",
+   oj_item(context=oj_ctx(tail=OJ_CTX + "\nThe test job runs longer.")))
+oj("a decision with the form is allowed", "allow", oj_item(context=OJ_GOOD))
+
+# Stood-pick class: the session's own pick stands, so the stake needs no kind.
+oj("a stood pick with `Problem:` and no stake is allowed", "allow",
+   oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")))
+oj("a stood pick with a stake is allowed", "allow", oj_item(stands=True, context=OJ_GOOD))
+oj("a port with a Departs from line and the form is allowed", "allow",
+   oj_item(port=True, context=oj_ctx(tail=OJ_CTX + "\n" + PQ_DEPARTS)))
+oj("a task with a Why yours line and no form lines is not judged", "allow",
+   tn_task(context=TN_CTX + "\n" + TN_WHY))
+oj("a record that is neither a decision nor a task is not judged", "allow", oj_item(kind="note"))
+oj("an items set to another artifact is allowed", "allow", oj_item(), url="https://claude.ai/artifact/other")
+oj("a set to another collection is allowed", "allow", oj_item(), collection="answers")
+add("owner judge: a repo with no waiting page allows item 34's shape", "allow", tool="ArtifactData",
+    cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=OJ_DOC, data=oj_item())
+
+# Updates: judged only for the fields they carry (context, options), and only with kind decision.
+oj("an update that carries kind decision and context with no form lines is denied", "deny",
+   {"kind": "decision", "context": OJ_CTX}, action="update")
+oj("an update that carries kind decision and a context with the form is allowed", "allow",
+   {"kind": "decision", "context": OJ_GOOD}, action="update")
+oj("an update that carries kind decision, a stood pick and `Problem:` with no stake is allowed", "allow",
+   {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check"), "stands": True},
+   action="update")
+oj("an update that carries kind decision and no context is allowed", "allow",
+   {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
+oj("an update that carries kind decision and options with an option that has no lose is denied", "deny",
+   {"kind": "decision", "options": [OJ_OPTIONS[0], {k: v for k, v in OJ_OPTIONS[1].items() if k != "lose"}]},
+   action="update")
+oj("an update that carries kind decision and options with a gain and a lose each is allowed", "allow",
+   {"kind": "decision", "options": OJ_OPTIONS}, action="update")
+oj("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+oj("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
+
+# A closed decision asks the owner nothing. The writer's chat-answer flow (skills/waiting-page) writes a
+# decision already answered: status closed, the answer and its time in context, no form lines. An open
+# decision with the same context is still judged.
+OJ_ANSWERED = OJ_CTX + "\nAnswer from chat, 10:42: keep the check in the lint job."
+oj("a closed decision with the chat answer in context and no form lines is allowed", "allow",
+   oj_item(status="closed", context=OJ_ANSWERED))
+oj("a closed decision with no options and no form lines is allowed", "allow",
+   {"id": OJ_DOC, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
+    "context": OJ_ANSWERED})
+oj("an update that carries kind decision, status closed and context, no form lines, is allowed", "allow",
+   {"kind": "decision", "status": "closed", "context": OJ_ANSWERED}, action="update")
+oj("an open decision with the chat answer in context and no form lines is denied", "deny",
+   oj_item(status="open", context=OJ_ANSWERED))
+oj("an update that carries kind decision, status open and context, no form lines, is denied", "deny",
+   {"kind": "decision", "status": "open", "context": OJ_ANSWERED}, action="update")
+
+# A str_replace on context is judged when old_str holds a form line and new_str does not.
+oj_replace("that drops the Problem line from context is denied", "deny", "context", OJ_GOOD,
+           oj_ctx(problem=None))
+oj_replace("that drops the Goal line from context is denied", "deny", "context", OJ_GOOD, oj_ctx(goal=None))
+oj_replace("that drops the only Based on line from context is denied", "deny", "context", OJ_GOOD,
+           oj_ctx(based=()))
+oj_replace("that swaps the Problem line for a stake outside the set is denied", "deny", "context", OJ_STAKE,
+           "Problem (internals): which job runs the check", rule=OJ_PROBLEM_RULES)
+oj_replace("that keeps every form line in context is allowed", "allow", "context", OJ_GOOD,
+           oj_ctx(tail="The stamp check runs in the test job today."))
+oj_replace("that swaps the Problem line for another stake is allowed", "allow", "context", OJ_STAKE,
+           "Problem (money): the test job costs more runner time, so it needs your word")
+oj_replace("whose old_str holds no form line is allowed", "allow", "context", OJ_CTX,
+           "The stamp check runs in the test job today.")
+oj_replace("on the title is allowed", "allow", "title", "Which CI job runs the stamp check?",
+           "Which CI job runs the format check?")
+oj_replace("on why is not judged", "allow", "why", OJ_STAKE, "The lint job is shorter.")
+
+# A batch judges each write.
+oj_batch("with an item that has no form lines among the sets is denied", "deny",
+         [oj_write({"note": "x"}, collection="answers"), oj_write(oj_item())])
+oj_batch("whose second write has no form lines is denied", "deny",
+         [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second"))])
+oj_batch("with an update that carries kind decision and context, no form lines, is denied", "deny",
+         [oj_write({"kind": "decision", "context": OJ_CTX}, op="update")])
+oj_batch("with a str_replace that drops the Problem line is denied", "deny",
+         [{"op": "str_replace", "collection": "items", "doc_id": OJ_DOC, "field": "context",
+           "old_str": OJ_GOOD, "new_str": oj_ctx(problem=None)}])
+oj_batch("of decisions that each carry the form is allowed", "allow",
+         [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second", context=OJ_GOOD))])
+oj_batch("with a stood pick that writes `Problem:` with no stake is allowed", "allow",
+         [oj_write(oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check")))])
+oj_batch("with a closed decision and no form lines is allowed", "allow",
+         [oj_write(oj_item(status="closed", context=OJ_ANSWERED))])
+oj_batch("with a closed decision, then an open one with no form lines, is denied", "deny",
+         [oj_write(oj_item(status="closed", context=OJ_ANSWERED)), oj_write(oj_item(id="second"))])
+
+# file_path data is read as `data` is.
+os.makedirs(os.path.join(ROOT, "oj"), exist_ok=True)
+OJ_FILE_BAD = os.path.join(ROOT, "oj", "bad.json")
+OJ_FILE_GOOD = os.path.join(ROOT, "oj", "good.json")
+with open(OJ_FILE_BAD, "w", encoding="utf-8") as _f:
+    json.dump(oj_item(), _f)
+with open(OJ_FILE_GOOD, "w", encoding="utf-8") as _f:
+    json.dump(oj_item(context=OJ_GOOD), _f)
+oj("file_path data with no form lines is denied", "deny", None, file_path=OJ_FILE_BAD)
+oj("file_path data with the form is allowed", "allow", None, file_path=OJ_FILE_GOOD)
+
+# An older rule keeps its own id when the form is there (which rule names an item that breaks both is not fixed).
+wp_write("owner judge: a widening pick with the form lines is refused by uniform-pick", "deny",
+         "uniform-pick", oj_item(context=OJ_GOOD, options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
+wp_write("owner judge: a port with no Departs from line and the form lines is refused by port-question",
+         "deny", "port-question", oj_item(context=oj_ctx(tail=PQ_CTX)), doc_id=OJ_DOC)
+wp_write("owner judge: a press with no link and the form lines is refused by press-link", "deny",
+         "press-link", oj_item(context=OJ_GOOD, options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
 
 
 # --------------------------------------------------------------------------- the runner
@@ -11580,6 +12216,9 @@ def decide(case):
     # environment only when the payload carries none. A real session id in the runner's own
     # environment would leak into every case, so it is dropped here and each case names its own.
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    # The runner's own lane id (CLAUDE_CODE_REMOTE_SESSION_ID) would bind every case to a lane, so it is
+    # dropped here too. A step-grant case sets its own through `env`.
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
     env.update(case.get("env") or {})   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
     if case.get("no_root"):   # no forced root, and a PATH with no `ps`: the root is unknown
@@ -12173,6 +12812,10 @@ for _name, _verdict, _script in (
          _step_flow("'Round 3 of 3. Finish the fix.'", "agentType: 'builder'")),
         ("builder Round 3 on opus", "allow",
          _step_flow('"Round 3 of 3. Finish the fix."', 'agentType: "builder", model: "opus"')),
+        ("builder Round 3 after a role word on line one, on sonnet", "deny",
+         _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'sonnet'")),
+        ("builder Round 3 after a role word on line one, on opus", "allow",
+         _step_flow("'Builder, Round 3 of 3. Finish the fix.'", "agentType: 'builder', model: 'opus'")),
         ("builder Round 3 as a prompt key on sonnet", "deny",
          "await agent({prompt: 'Round 3 of 3. Finish.', agentType: 'builder', model: 'sonnet'})"),
         ("builder Round 2 on sonnet", "allow",
@@ -12281,6 +12924,71 @@ for _role, _brief in (
         ("builder", "Plan: Try 3 of 3 later, after the review.")):
     add("ceiling: Agent %s on opus with the brief %r asks" % (_role, _brief[:24]), "ask", CEILING,
         tool="Agent", prompt=_brief, model="opus", subagent_type=_role)
+# A brief may open with a role word before the marker, or wrap the marker in markup. The first
+# non-blank line counts when it holds the marker anywhere, word-bounded. A later line counts only
+# when it starts with the marker. Failure classes: a false ask (a third-try builder on opus asks
+# because a word or markup sits before the marker), a false allow (a middle-step marker, a near-miss
+# like "of 30", or the marker in later prose earns the grant; a reviewer behind a role word dodges
+# its step-up).
+FIRST_LINE_BRIEF = "Builder, Round 3 of 3. Lane c204 fix the marker scan.\nFiles: hooks/guard.py."
+add("first-line marker: builder on opus with a role word before Round 3 of 3 on line one is allowed",
+    "allow", tool="Agent", prompt=FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with blank lines ahead of that first line is allowed",
+    "allow", tool="Agent", prompt="\n \t\n" + FIRST_LINE_BRIEF, model="opus", subagent_type="builder")
+add("first-line marker: the same brief on sonnet is denied by the step-up", "deny", STEP_UP,
+    tool="Agent", prompt=FIRST_LINE_BRIEF, model="sonnet", subagent_type="builder")
+for _label, _first in (("a role word and a dash", "Builder — Round 3 of 3"),
+                       ("bold markup", "**Round 3 of 3**"),
+                       ("a heading mark", "## Round 3 of 3")):
+    add("first-line marker: builder on opus whose first line is %s around the marker is allowed" % _label,
+        "allow", tool="Agent", prompt=_first + "\nLane c204 fix the marker scan.", model="opus",
+        subagent_type="builder")
+add("first-line marker: builder on opus with the marker on its own line two is allowed", "allow",
+    tool="Agent", prompt="Builder, lane c204: don't skip the scan.\nRound 3 of 3\nFiles: hooks/guard.py.",
+    model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with Round 2 of 3 on line one asks", "ask", CEILING,
+    tool="Agent", prompt="Builder, Round 2 of 3. Lane c204 continue the fix.", model="opus",
+    subagent_type="builder")
+add("first-line marker: builder on opus with Round 3 of 3 only in later prose asks", "ask", CEILING,
+    tool="Agent", model="opus", subagent_type="builder",
+    prompt="Builder, lane c204: fix the marker scan.\nFiles: hooks/guard.py.\n"
+           "Notes: the review said Round 3 of 3 is next, after this pass.")
+for _label, _first in (("a longer total", "Builder, Round 3 of 30. Lane c204 fix the marker scan."),
+                       ("a longer word before it", "Builder, Subround 3 of 3. Lane c204 fix the marker scan.")):
+    add("first-line marker: builder on opus with %s on line one asks" % _label, "ask", CEILING,
+        tool="Agent", prompt=_first, model="opus", subagent_type="builder")
+add("first-line marker: builder on opus with no marker in the brief asks, and says what was missing",
+    "ask", CEILING, tool="Agent", prompt="Builder. Lane c204 fix the marker scan.\nFiles: hooks/guard.py.",
+    model="opus", subagent_type="builder",
+    carries=("Round 3 of 3", ("first line", "first non-blank line")))
+add("first-line marker: reviewer with no model and Round 2 of 3 after a role word on line one is denied",
+    "deny", STEP_UP, tool="Agent", prompt="Reviewer, Round 2 of 3. Lane c204 re-check the diff.",
+    subagent_type="reviewer")
+# On the first line only the leftmost marker counts. A second marker later on that line is prose
+# about another step, so it never earns the grant, never adds a step-up deny, and never hides the
+# leftmost one.
+TWO_MARKERS = "Builder, Round 2 of 3. Do not jump to Round 3 of 3 yet."
+add("first-line marker: builder on opus with a later marker on line one after Round 2 of 3 asks", "ask",
+    CEILING, tool="Agent", prompt=TWO_MARKERS, model="opus", subagent_type="builder")
+add("first-line marker: the same brief on sonnet is allowed", "allow", tool="Agent",
+    prompt=TWO_MARKERS, model="sonnet", subagent_type="builder")
+add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 3 later asks, no step-up deny",
+    "ask", CEILING, tool="Agent", model="opus", subagent_type="reviewer",
+    prompt="Round 3 of 3. The Round 2 of 3 report found one defect.")
+add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="Round 1 of 3: check that Round 3 of 3 logic works")
+# A first line that already starts with a marker, in any case or spelling, is read by that start alone.
+# A first line whose leftmost marker-shaped text is the old spelling adds nothing either. A later
+# marker on the line is prose in both.
+for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("lowercase at the start", "round 2 of 3. Do not jump to Round 3 of 3 yet."),
+                       ("the old spelling after a role word", "Builder, Try 2 of 3. Round 3 of 3 later.")):
+    add("first-line marker: builder on opus with %s and a later Round 3 of 3 asks" % _label, "ask", CEILING,
+        tool="Agent", prompt=_first, model="opus", subagent_type="builder")
+add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
+    "allow", tool="Agent", subagent_type="reviewer",
+    prompt="round 1 of 3: check Round 2 of 3 logic")
 # Text that only names opus is no model.
 add("ceiling: Agent on sonnet whose brief names opus is allowed", "allow",
     tool="Agent", prompt="Use opus for the review.\nmodel: opus", model="sonnet",
@@ -13122,15 +13830,15 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
-def _decide_full(tool, cwd, agent_id=None, process_cwd=None, **tool_input):
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, **tool_input):
     """`decide`, but for a hand-built payload naming every key `decide` reads by index.
 
     `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
     relative `file_path` must resolve against the payload `cwd`, never against wherever the
-    guard subprocess happens to run from.
+    guard subprocess happens to run from. `session` is the payload's session_id.
     """
     return decide({
-        "raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": None,
+        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
         "config": None, "agent_id": agent_id, "process_cwd": process_cwd,
         "tool_input": tool_input,
     })
@@ -13766,6 +14474,668 @@ LOG_CHECKS = (
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+
+
+# =========================================================================== session-home
+#
+# Rule session-home: a session whose linked worktree is gone may not write into the primary
+# checkout. The record is `<primary>/.git/session-homes/<session_id>`, one file per session. It
+# holds the worktree path, and a top-level call (no agent_id) from inside
+# `<primary>/.claude/worktrees/<name>` writes it when it is missing or differs. That session's
+# ExitWorktree deletes it. An agent shares its session's id, so an agent call never writes or
+# deletes the record. The rule reads the path shape and walks the folders up for `.git`: no git read.
+FAMILY = "session-home"
+SH_AGENT = "shomeagent0f1e2d3c"  # an agent id in the shape AGENT_ID accepts
+
+
+def sh_session():
+    """A session id in the shape SESSION_ID_RE accepts, unique to one case."""
+    return "shome-" + uuid.uuid4().hex
+
+
+def sh_new_primary(name):
+    """A primary checkout of its own, with one commit, under this run's folder."""
+    primary = os.path.join(ROOT, "shome_" + name)
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    return primary
+
+
+def sh_add_lane(primary, name):
+    """A linked worktree at `.claude/worktrees/<name>`, the shape the harness makes. Returns
+    (folder, branch)."""
+    lane = os.path.join(primary, ".claude", "worktrees", name)
+    branch = "shome-" + name
+    made = run_vcs(primary, "worktree", "add", "-q", lane, "-b", branch)
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: the worktree add at %r: %s" % (lane, made.stderr.strip()))
+    return lane, branch
+
+
+def sh_lose_lane(primary, lane, branch):
+    """The harness removes a worktree's folder and its branch together."""
+    run_vcs(primary, "worktree", "remove", "--force", lane)
+    run_vcs(primary, "branch", "-D", branch)
+
+
+def sh_record(primary, session):
+    return os.path.join(primary, ".git", "session-homes", session)
+
+
+def sh_holds(primary, session, folder):
+    """True when the session's record names `folder`, compared through realpath. A missing or
+    empty record holds nothing."""
+    try:
+        with open(sh_record(primary, session), encoding="utf-8") as handle:
+            text = handle.read().strip()
+    except OSError:
+        return False
+    return bool(text) and os.path.realpath(text) == os.path.realpath(folder)
+
+
+def sh_refusal_problems(label, got, reason, primary, lost):
+    """What a session-home refusal holds: the rule's name and the EnterWorktree tool. It never
+    names a path: not the primary, not the lost folder, not the `.claude` folder."""
+    if got != "deny":
+        return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
+    problems = []
+    if "session-home" not in reason or "EnterWorktree" not in reason:
+        problems.append("%s: the refusal must name session-home and EnterWorktree: %s"
+                        % (label, reason[:160]))
+    for text in (primary, slash(primary), lost, slash(lost), ".claude"):
+        if text in reason:
+            problems.append("%s: the refusal names %r" % (label, text))
+    return problems
+
+
+def session_home_lost_refuses_case():
+    """Rule session-home: a session whose worktree is gone is refused a write into the primary
+    checkout, by Write, Edit, MultiEdit, NotebookEdit and a shell write. The refusal names
+    EnterWorktree with a `name` and no `path`, and names no file path. The lane call that makes
+    the record is checked first."""
+    primary = sh_new_primary("lost")
+    lane, branch = sh_add_lane(primary, "lane-lost")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", lane, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    src = os.path.join(primary, "src", "app.py")
+    rows = (
+        ("Write", {"file_path": src, "content": "x"}),
+        ("Edit", {"file_path": src, "old_string": "1", "new_string": "2"}),
+        ("MultiEdit", {"file_path": src, "edits": [{"old_string": "1", "new_string": "2"}]}),
+        ("NotebookEdit", {"notebook_path": os.path.join(primary, "nb.ipynb"), "new_source": "x"}),
+        ("Bash", {"command": "echo x > f.txt"}),
+        ("Bash", {"command": "echo x > " + slash(os.path.join(primary, "f.txt"))}),
+    )
+    for index, (tool, tool_input) in enumerate(rows):
+        got, reason = _decide_full(tool, primary, session=session, **tool_input)
+        problems += sh_refusal_problems("row %d, %s" % (index, tool), got, reason, primary, lane)
+        if ENTER_WORKTREE_SHAPE not in reason:
+            problems.append("row %d, %s: the refusal does not say %s"
+                            % (index, tool, ENTER_WORKTREE_SHAPE))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "every write tool and shell write is refused, naming session-home, EnterWorktree and its shape"
+
+
+def session_home_present_folder_passes_case():
+    """A session whose worktree folder is still there may write into the primary checkout. The
+    record is checked first, so the pass is the record's doing, not a missing record's."""
+    primary = sh_new_primary("present")
+    lane, _ = sh_add_lane(primary, "lane-present")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if got != "allow":
+        problems.append("the primary Write with the folder present: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command="echo x > f.txt")
+    if got != "allow":
+        problems.append("the primary shell write with the folder present: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the primary checkout is writable while the recorded folder stands"
+
+
+def session_home_fresh_session_passes_case():
+    """Pinned: a session with no record, which never had a worktree, writes into the primary
+    checkout, and a primary call writes no record."""
+    primary = sh_new_primary("fresh")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write: want allow, got %s (%s)" % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command="echo x > f.txt")
+    if got != "allow":
+        problems.append("the primary shell write: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("a primary call wrote a session record")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a session with no record writes into the primary checkout and writes no record"
+
+
+def session_home_other_sessions_pass_case():
+    """Records are per session. Another session's lost record refuses that session only. A session
+    that never had a worktree, and a session whose record file is empty, both write into the
+    primary checkout."""
+    primary = sh_new_primary("other")
+    lane, branch = sh_add_lane(primary, "lane-other")
+    lost_for = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=lost_for, command="echo hi")
+    if not sh_holds(primary, lost_for, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=lost_for, file_path=src, content="x")
+    problems += sh_refusal_problems("the session that lost its worktree", got, reason, primary, lane)
+    never = sh_session()
+    got, reason = _decide_full("Write", primary, session=never, file_path=src, content="x")
+    if got != "allow":
+        problems.append("a session that never had a worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    empty = sh_session()
+    write(sh_record(primary, empty), "")  # a record that names no folder
+    got, reason = _decide_full("Write", primary, session=empty, file_path=src, content="x")
+    if got != "allow":
+        problems.append("a session whose record is empty: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the lost session is refused; a session with no record or an empty one passes"
+
+
+def session_home_agent_call_writes_no_record_case():
+    """An agent shares its session's id, so an agent call never writes or rewrites the session's
+    record. A lost record never refuses an agent's call from the primary checkout."""
+    primary = sh_new_primary("agent")
+    agent_lane, _ = sh_add_lane(primary, "agent-" + SH_AGENT)
+    lane, lane_branch = sh_add_lane(primary, "lane-agent")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", agent_lane, session=session, agent_id=SH_AGENT,
+                               command="echo hi")
+    if got != "allow":
+        problems.append("an agent call from its own worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("an agent call wrote the session record")
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the top-level call from the lane wrote no session record naming it")
+    _decide_full("Bash", agent_lane, session=session, agent_id=SH_AGENT, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("after an agent call the session record no longer names the lane")
+    sh_lose_lane(primary, lane, lane_branch)
+    got, reason = _decide_full("Write", primary, session=session, agent_id=SH_AGENT,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if "session-home" in reason:
+        problems.append("an agent's Write from the primary checkout was refused as session-home: %s"
+                        % reason[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent call neither writes nor rewrites the session record, nor is refused by it"
+
+
+def session_home_new_worktree_rewrites_case():
+    """After a lost worktree, a call from a new worktree rewrites the session's record to name it.
+    The primary write then follows the record's folder: allowed while that folder stands, refused
+    once it is gone."""
+    primary = sh_new_primary("rewrite")
+    old, old_branch = sh_add_lane(primary, "lane-old")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", old, session=session, command="echo hi")
+    sh_lose_lane(primary, old, old_branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write after the first loss", got, reason,
+                                    primary, old)
+    new, new_branch = sh_add_lane(primary, "lane-new")
+    got, reason = _decide_full("Write", new, session=session,
+                               file_path=os.path.join(new, "src", "new.py"), content="x")
+    if got != "allow":
+        problems.append("a write inside the new worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if not sh_holds(primary, session, new):
+        problems.append("the call from the new worktree did not rewrite the record to name it")
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write while the new worktree stands: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    sh_lose_lane(primary, new, new_branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write after the second loss", got, reason,
+                                    primary, new)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the record follows the newest worktree, and the primary write follows the record"
+
+
+def session_home_exit_worktree_clears_case():
+    """ExitWorktree from a session's live lane deletes its record, so the primary checkout is writable
+    again. The clear is the live lane's: an ExitWorktree from the primary leaves the record in place,
+    see session_home_exit_from_primary_case. An agent's ExitWorktree shares the session's id, so it
+    leaves the record in place too."""
+    primary = sh_new_primary("exit")
+    lane, branch = sh_add_lane(primary, "lane-exit")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    got, reason = _decide_full("ExitWorktree", lane, session=session, agent_id=SH_AGENT)
+    if got != "allow":
+        problems.append("an agent's ExitWorktree: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("after an agent's ExitWorktree the session record no longer names the lane")
+    got, reason = _decide_full("ExitWorktree", lane, session=session)
+    if got != "allow":
+        problems.append("the session's ExitWorktree: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("the session's ExitWorktree left its record")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after ExitWorktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "ExitWorktree from the session clears the record; an agent's leaves it"
+
+
+def session_home_pass_through_case():
+    """While a session's worktree is gone, its writes into the clone's .git and into a folder in
+    no checkout still pass, and so does every read and every non-writing shell call. Only a write
+    into the primary's own files is refused. The refusal is checked first."""
+    primary = sh_new_primary("pass")
+    lane, branch = sh_add_lane(primary, "lane-pass")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    exclude = os.path.join(primary, ".git", "info", "exclude")
+    scratch = os.path.join(ROOT, "shome_scratch", "note.txt")
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    sh_lose_lane(primary, lane, branch)
+    problems = []
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the control: the primary Write", got, reason, primary, lane)
+    rows = (
+        ("Write into the clone's .git", "Write", {"file_path": exclude, "content": "x"}),
+        ("Write to a folder in no checkout", "Write", {"file_path": scratch, "content": "x"}),
+        ("shell append into the clone's .git", "Bash", {"command": "echo x >> " + slash(exclude)}),
+        ("shell git fetch of main", "Bash", {"command": VCS + " fetch origin main"}),
+        ("shell git status", "Bash", {"command": VCS + " status"}),
+        ("shell cat of a primary file", "Bash", {"command": "cat " + slash(src)}),
+        ("Read of a primary file", "Read", {"file_path": src}),
+        ("Grep of the primary checkout", "Grep", {"pattern": "x", "path": primary}),
+    )
+    for label, tool, tool_input in rows:
+        got, reason = _decide_full(tool, primary, session=session, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    # The refusal is for a call whose cwd is the primary checkout. A call from another live linked
+    # worktree is judged by the other rules alone. This check runs last: its own call from a
+    # `.claude/worktrees/<name>` folder rewrites the record to name that live folder.
+    live, _ = sh_add_lane(primary, "lane-live")
+    got, reason = _decide_full("Write", live, session=session,
+                               file_path=os.path.join(live, "src", "new.py"), content="x")
+    if got != "allow":
+        problems.append("a write from another live worktree: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the control is refused; .git, a scratch folder, fetch, status, reads and a live worktree pass"
+
+
+def session_home_owner_override_lifts_case():
+    """session-home is liftable: the owner may mean the write. It is refused before a timed
+    override and allowed under it. It is not in never_lifted, so the override reaches it."""
+    config = ov_config("session-home")
+    primary = sh_new_primary("override")
+    lane, branch = sh_add_lane(primary, "lane-override")
+    session = sh_session()
+    ov_call("Bash", {"command": "echo hi"}, lane, config, session, 0)  # records the lane
+    sh_lose_lane(primary, lane, branch)
+    src = os.path.join(primary, "src", "app.py")
+    call = lambda s: ov_call("Write", {"file_path": src, "content": "x"}, primary, config,
+                             session, s)
+    problem = ov_want(*call(0), "deny", "session-home")
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, session, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: call(60), "allow", "session-home")], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def session_home_spawn_cost_case():
+    """The record and the refusal add no git read to the same call made with no session. Each
+    check compares the two, so the other rules' reads cancel out: the record write adds none, a
+    refused primary write adds no more than the same write would, and a non-writing shell call
+    adds none. A stand-in git on PATH logs each spawn."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    real = shutil.which(VCS)
+    if not real:
+        return False, "no git on PATH"
+    primary = sh_new_primary("cost")
+    lane, branch = sh_add_lane(primary, "lane-cost")
+    folder = os.path.join(ROOT, "shome_cost_bin")
+    log = os.path.join(ROOT, "shome_cost_spawns.log")
+    stand_in = os.path.join(folder, VCS)
+    write(stand_in, "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (log, real))
+    os.chmod(stand_in, 0o755)
+    path = folder + os.pathsep + os.environ.get("PATH", "")
+
+    def counted(tool, cwd, session, **tool_input):
+        """(decision, reason, git spawns) for one guard call."""
+        if os.path.exists(log):
+            os.remove(log)
+        got, reason = decide({
+            "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": path,
+            "config": None, "agent_id": None, "tool_input": tool_input,
+        })
+        spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        return got, reason, len(spawns)
+
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    lane_write = {"file_path": os.path.join(lane, "src", "new.txt"), "content": "x"}
+    got, reason, with_record = counted("Write", lane, session, **lane_write)
+    _, _, without = counted("Write", lane, None, **lane_write)
+    if got != "allow":
+        problems.append("the lane write: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane write wrote no session record naming the lane")
+    if with_record < 1:  # other-checkout reads the worktree list on any write: no spawn means no stand-in
+        problems.append("the stand-in git saw no spawn, so the counts below prove nothing")
+    if with_record != without:
+        problems.append("the record write spent %d git spawn(s), the same call with no session %d"
+                        % (with_record, without))
+    sh_lose_lane(primary, lane, branch)
+    lost_got, lost_reason, lost_n = counted("Write", primary, session, file_path=src, content="x")
+    _, _, free_n = counted("Write", primary, None, file_path=src, content="x")
+    problems += sh_refusal_problems("the lost primary Write", lost_got, lost_reason, primary, lane)
+    if lost_n > free_n:
+        problems.append("the refused primary write spent %d git spawn(s), more than the same write "
+                        "with no session %d" % (lost_n, free_n))
+    status = {"command": VCS + " status"}
+    _, _, status_with = counted("Bash", primary, session, **status)
+    _, _, status_without = counted("Bash", primary, None, **status)
+    if status_with != status_without:
+        problems.append("a non-writing shell call spent %d git spawn(s), the same call with no "
+                        "session %d" % (status_with, status_without))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the record write, the refused write and a non-writing shell call add no git spawn"
+
+
+def session_home_non_isolated_agent_case():
+    """An agent with no worktree of its own (no agent-home record, cwd in the primary checkout) is
+    not refused as session-home while the session's record is lost. Rule session-home judges only a
+    call with no agent_id: an agent shares its session's id, so the session's lost record must not
+    refuse a non-isolated agent's write into the primary. The session's own write is refused, which
+    shows the record is live."""
+    primary = sh_new_primary("nonisolated")
+    lane, branch = sh_add_lane(primary, "lane-nonisolated")
+    session = sh_session()
+    agent = "shomenonisolated01"  # an agent id in the shape AGENT_ID accepts, with no worktree
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the session's own primary Write (control)", got, reason,
+                                    primary, lane)
+    got, reason = _decide_full("Write", primary, session=session, agent_id=agent, file_path=src,
+                               content="x")
+    if got != "allow":
+        problems.append("a non-isolated agent's Write into the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, agent_id=agent,
+                               command="echo x > f.txt")
+    if got != "allow":
+        problems.append("a non-isolated agent's shell write into the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a non-isolated agent writes into the primary while the session's record is lost"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a non-isolated agent, with no record of its own, writes into the "
+                         "primary checkout while the session's record is lost",
+                         session_home_non_isolated_agent_case))
+
+
+def session_home_exit_from_primary_case():
+    """Rule session-home: only an ExitWorktree whose cwd sits in the recorded, live worktree clears the
+    record. From the primary checkout, with the recorded worktree lost, the record stays and the
+    primary write stays refused."""
+    primary = sh_new_primary("exitprim")
+    lane, branch = sh_add_lane(primary, "lane-exitprim")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("ExitWorktree", primary, session=session)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("an ExitWorktree from the primary changed the lost session's record")
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write after that ExitWorktree", got, reason,
+                                    primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an ExitWorktree from the primary leaves the lost record; the primary write stays refused"
+
+
+def session_home_lost_home_path_case():
+    """Rule session-home: a write to the lost home path, `.claude/worktrees/<name>/...`, would re-create
+    the gone worktree by mistake, and is refused while the record is lost. A write into a different,
+    live worktree is other-checkout's business: this case checks only that session-home does not name it."""
+    primary = sh_new_primary("lostpath")
+    lane, branch = sh_add_lane(primary, "lane-lostpath")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    live, _ = sh_add_lane(primary, "lane-livepath")
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(lane, "x.ts"), content="x")
+    problems += sh_refusal_problems("a Write to the lost home path", got, reason, primary, lane)
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(live, "x.ts"), content="x")
+    if "session-home" in reason:
+        problems.append("a Write into the live worktree was named session-home: %s" % reason[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write to the lost home path is refused; a live worktree write is not session-home's"
+
+
+def session_home_git_verbs_case():
+    """Rule session-home: while the record is lost, a git verb that changes the primary's files or
+    branch is refused from the primary. A read, a fetch, a branch, a worktree add under
+    `.claude/worktrees`, and a commit run with -C into a live worktree pass."""
+    primary = sh_new_primary("verbs")
+    lane, branch = sh_add_lane(primary, "lane-verbs")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    live, _ = sh_add_lane(primary, "lane-verbslive")
+    for verb in ("checkout -b x", "switch main", "pull --ff-only", "merge origin/main", "commit -m x",
+                 "reset --hard", "stash", "rebase origin/main", "restore f"):
+        command = VCS + " " + verb
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(command, got, reason, primary, lane)
+    for verb in ("fetch origin main", "status", "log", "diff", "worktree add .claude/worktrees/y origin/main",
+                 "branch y"):
+        command = VCS + " " + verb
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    command = VCS + " -C " + slash(live) + " commit -m x"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the primary's file and branch verbs are refused; reads, fetch, branch, worktree add and a live -C commit pass"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: an ExitWorktree from the primary checkout leaves a lost session's "
+                         "record in place, and the primary write stays refused", session_home_exit_from_primary_case))
+LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused; a write into a live "
+                         "worktree is not named session-home", session_home_lost_home_path_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
+                         "refused; reads, fetch, branch, worktree add and a live -C commit pass",
+                         session_home_git_verbs_case))
+
+
+def session_home_agent_tree_inspect_case():
+    """Rule session-home: a top-level call (no agent_id) whose cwd sits in an agent's worktree,
+    `.claude/worktrees/agent-<id>`, is an orchestrator inspecting that tree. It writes no session
+    record. Once that tree is removed, the primary checkout stays writable, and so does a git commit
+    made there."""
+    primary = sh_new_primary("inspect")
+    tree, branch = sh_add_lane(primary, "agent-" + SH_AGENT)
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Bash", tree, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the inspecting call: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("a top-level call inside an agent's worktree wrote a session record")
+    sh_lose_lane(primary, tree, branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after the agent tree is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command=VCS + " commit -m x")
+    if got != "allow":
+        problems.append("the primary git commit after the agent tree is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an inspecting call writes no record; the primary write and commit pass after removal"
+
+
+def session_home_exit_live_from_primary_case():
+    """Rule session-home: an ExitWorktree from the primary checkout clears a record that names a live
+    worktree. A record that names a lost worktree is kept, and the primary write stays refused."""
+    primary = sh_new_primary("exitlive")
+    live, live_branch = sh_add_lane(primary, "lane-exitlive")
+    session = sh_session()
+    src = os.path.join(primary, "src", "app.py")
+    problems = []
+    _decide_full("Bash", live, session=session, command="echo hi")
+    if not sh_holds(primary, session, live):
+        problems.append("the live lane call wrote no session record naming the lane")
+    got, reason = _decide_full("ExitWorktree", primary, session=session)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary: want allow, got %s (%s)" % (got, reason[:120]))
+    if os.path.exists(sh_record(primary, session)):
+        problems.append("an ExitWorktree from the primary left the record naming a live worktree")
+    sh_lose_lane(primary, live, live_branch)
+    got, reason = _decide_full("Write", primary, session=session, file_path=src, content="x")
+    if got != "allow":
+        problems.append("the primary Write after the live lane is removed: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    lost, lost_branch = sh_add_lane(primary, "lane-exitlost")
+    other = sh_session()
+    _decide_full("Bash", lost, session=other, command="echo hi")
+    if not sh_holds(primary, other, lost):
+        problems.append("the lane call that is lost next wrote no session record naming the lane")
+    sh_lose_lane(primary, lost, lost_branch)
+    got, reason = _decide_full("ExitWorktree", primary, session=other)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary, lost record: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if not sh_holds(primary, other, lost):
+        problems.append("an ExitWorktree from the primary cleared a lost session's record")
+    got, reason = _decide_full("Write", primary, session=other, file_path=src, content="x")
+    problems += sh_refusal_problems("the primary Write for the lost session", got, reason,
+                                    primary, lost)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an ExitWorktree from the primary clears a live record and keeps a lost one"
+
+
+def session_home_variable_folder_commit_case():
+    """Rule session-home: while the record is lost, a git commit whose folder is a shell variable
+    passes, both as `cd "$WT" && git commit` and as `git -C "$WT" commit`. The folder is unknown, and
+    an unknown folder is no hit."""
+    primary = sh_new_primary("varcommit")
+    lane, branch = sh_add_lane(primary, "lane-varcommit")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    for command in ('cd "$WT" && ' + VCS + " commit -m x", VCS + ' -C "$WT" commit -m x'):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a commit whose folder is a variable passes, by cd and by -C"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a top-level call inside an agent's worktree writes no session "
+                         "record, and the primary write and commit pass once that tree is removed",
+                         session_home_agent_tree_inspect_case))
+LOG_CHECKS_EXTRA.append(("session-home: an ExitWorktree from the primary clears a record that names a "
+                         "live worktree, and keeps a lost one", session_home_exit_live_from_primary_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a commit whose folder is a shell variable passes, "
+                         "by cd and by -C", session_home_variable_folder_commit_case))
+LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree is gone is refused a write into the "
+                         "primary checkout, by each write tool and a shell write, naming EnterWorktree "
+                         "and no path", session_home_lost_refuses_case))
+LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree folder stands writes into the primary "
+                         "checkout", session_home_present_folder_passes_case))
+LOG_CHECKS_EXTRA.append(("session-home: a fresh session with no record writes into the primary checkout "
+                         "and writes no record", session_home_fresh_session_passes_case))
+LOG_CHECKS_EXTRA.append(("session-home: records are per session; another session's lost record, or an "
+                         "empty one, does not refuse this session", session_home_other_sessions_pass_case))
+LOG_CHECKS_EXTRA.append(("session-home: an agent call writes and rewrites no session record, and is "
+                         "never refused as session-home", session_home_agent_call_writes_no_record_case))
+LOG_CHECKS_EXTRA.append(("session-home: a call from a new worktree rewrites the record, and the primary "
+                         "write follows the record's folder", session_home_new_worktree_rewrites_case))
+LOG_CHECKS_EXTRA.append(("session-home: the session's ExitWorktree clears its record, an agent's leaves it",
+                         session_home_exit_worktree_clears_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, the clone's .git, a folder in no checkout, fetch, "
+                         "status, reads and a live worktree pass; the primary write is refused",
+                         session_home_pass_through_case))
+LOG_CHECKS_EXTRA.append(("session-home: an owner override lifts the refusal, which stays out of "
+                         "never_lifted", session_home_owner_override_lifts_case))
+LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git spawn to the same call "
+                         "with no session", session_home_spawn_cost_case))
 
 
 # =========================================================================== mask_script lexemes
@@ -14949,13 +16319,17 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None):
+            temp=None, env=None, load=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
-    reads as the system temp: a git write under it is a throwaway, and silent-write skips it."""
+    reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
+    adds variables to this one guard run. `load` is the machine reading a lane-start call meets
+    (LB_NORMAL when None)."""
+    fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
+    fixed.update(env or {})
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
-        "env": {"LOCAL_TIME_NOW": ov_clock(seconds)}, "tool_input": tool_input,
+        "env": fixed, "tool_input": tool_input, "load": load,
     })
 
 
@@ -15234,8 +16608,9 @@ def op_pass_path(config, session):
     return os.path.join(config, "state", "override", "opus", session + ".json")
 
 
-def op_spawn(config, session, seconds, spawn=None, agent_id=None):
-    return ov_call("Agent", dict(spawn or OV_OPUS_SPAWN), NOGIT, config, session, seconds, agent_id)
+def op_spawn(config, session, seconds, spawn=None, agent_id=None, cwd=NOGIT, env=None):
+    return ov_call("Agent", dict(spawn or OV_OPUS_SPAWN), cwd, config, session, seconds, agent_id,
+                   env=env)
 
 
 def op_timed_check():
@@ -15464,6 +16839,273 @@ for _label, _check in (
     ("opus override: the grant, each lift and the end each write one log line", op_log_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# THE STEP GRANT (lane opus-grant-on-step: the lift of rule agent-model-cap that reads the lane's roadmap
+# step). An Opus spawn that no typed override lifts is read against the owner's grant on the lane's step:
+# the step record on the local `origin/roadmap` ref, read from the call's cwd. Each case builds a real
+# repository whose `origin/roadmap` ref holds the step records, so no case mocks the reader. The lane's
+# id comes from the environment, not from the payload's session id, so the payload names another id.
+GS_LANE = "a1b2c3"  # the lane: its step names it as session_<this>
+GS_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_" + GS_LANE}  # the environment names it as cse_<this>
+GS_STEP = "step-a"  # the step bound to this lane
+GS_AT = "2026-10-17T10:00:00-05:00"  # a grant time before the clock these cases run at
+GS_SONNET = {"prompt": "Round 1 of 3. Review the diff.", "model": "sonnet", "subagent_type": "reviewer"}
+GS_WIZARD = {"prompt": "Round 1 of 3. Start the fix.", "model": "claude-opus-5-5", "subagent_type": "wizard"}
+GS_BAD = ("roadmap/data/steps/%s.json" % GS_STEP,  # a bound record cut short: it does not parse
+          '{"id": "%s", "lane": "session_%s", "status": ' % (GS_STEP, GS_LANE))
+
+
+def gs_step(step_id, lane, status="in_progress", grants=()):
+    """One step record as the roadmap holds it: its path and its JSON text. `lane` is the bare lane id;
+    the record names it session_<lane>, as the roadmap does."""
+    body = {"id": step_id, "title": "Step " + step_id, "status": status, "lane": "session_" + lane,
+            "grants": list(grants)}
+    return "roadmap/data/steps/%s.json" % step_id, json.dumps(body, indent=2) + "\n"
+
+
+def gs_grant(role="reviewer", drop_role=False):
+    """A grant as triage writes it: role None covers every Opus spawn. drop_role leaves the key out."""
+    grant = {"words": "opus 2h" if role is None else "opus %s 2h" % role, "at": GS_AT, "role": role,
+             "by": "triage"}
+    if drop_role:
+        del grant["role"]
+    return grant
+
+
+def gs_repo(name, files, ref=True):
+    """A checkout under this run's folder, holding `files` on main. With `ref`, its commit is also
+    refs/remotes/origin/roadmap, the one ref the guard reads."""
+    where = os.path.join(ROOT, "grant", name)
+    make_repo(where, dict(files))
+    if ref:
+        made = run_vcs(where, "update-ref", "refs/remotes/origin/roadmap", "HEAD")
+        if made.returncode != 0:
+            sys.exit("fixture setup failed in gs_repo: update-ref in %r. stderr: %s"
+                     % (where, made.stderr.strip()))
+    return where
+
+
+def gs_read(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def gs_log_lines(config):
+    return [line for line in gs_read(os.path.join(config, "guard.log")).splitlines() if line.strip()]
+
+
+def gs_spawn(config, session, repo, spawn, seconds=60, env=GS_ENV):
+    """The lane's call: a spawn from inside `repo`, with the lane's environment."""
+    return op_spawn(config, session, seconds, spawn, cwd=repo, env=env)
+
+
+def gs_verdict_check(name, files, spawn, want, ref=True):
+    """A check: the lane's spawn, judged in the repository `name` holds `files` gives `want`."""
+    def check():
+        repo = gs_repo(name, files, ref)
+        config, session = ov_config("grant-" + name), "gs-payload-" + name
+        problem = ov_want(*gs_spawn(config, session, repo, spawn), want, "agent-model-cap")
+        return (not problem), (problem or "%s, as wanted" % want)
+    return check
+
+
+def gs_lift_check():
+    """A reviewer spawn on the lane's step, which grants reviewers, is allowed. guard.log gets one
+    step-grant line that names the step and ends in the payload's session id."""
+    repo = gs_repo("lift", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]))
+    config, session = ov_config("grant-lift"), "gs-payload-lift"
+    problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER), "allow", "agent-model-cap")
+    if problem:
+        return False, problem
+    lifts = [line.split("\t") for line in gs_log_lines(config) if "\tstep-grant\t" in line]
+    fields = lifts[0] if len(lifts) == 1 else []
+    if (len(fields) != 6 or fields[3] != "agent-model-cap" or GS_STEP not in fields[4]
+            or fields[5] != session):
+        return False, ("guard.log wrote %r, want one step-grant line for agent-model-cap that names %s"
+                       % (["\t".join(f) for f in lifts], GS_STEP))
+    return True, "allowed on the lane's own grant; one step-grant line names the step"
+
+
+def gs_unread_log_check():
+    """A bound step the guard cannot parse asks, and guard.log gets a step-grant-unread line for it."""
+    repo = gs_repo("unread-log", dict([GS_BAD]))
+    config, session = ov_config("grant-unread-log"), "gs-payload-unread-log"
+    problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER), "ask", "agent-model-cap")
+    if problem:
+        return False, problem
+    if not [line for line in gs_log_lines(config) if "\tstep-grant-unread\t" in line]:
+        return False, "guard.log has no step-grant-unread line for the bound step"
+    return True, "asked, and the unreadable bound step is logged as step-grant-unread"
+
+
+def gs_cost_check():
+    """A Sonnet spawn runs no git call that names the roadmap. GIT_TRACE makes each git process write its
+    argv, and the guard's git children inherit it. A control runs first, through the guard itself: a hard
+    reset in a linked worktree makes the guard read git state, so its trace must be written. Only then
+    does an empty roadmap trace on the Sonnet spawn mean something."""
+    repo = gs_repo("cost", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]))
+    config, session = ov_config("grant-cost"), "gs-payload-cost"
+    control, traced = os.path.join(ROOT, "grant", "control.trace"), os.path.join(ROOT, "grant", "cost.trace")
+    ov_call("Bash", {"command": VCS + " reset --hard"}, GITWT, ov_config("grant-cost-control"),
+            "gs-control", 0, env={"GIT_TRACE": control})
+    if not gs_read(control).strip():
+        return False, "the guard's own git call wrote no trace, so an empty roadmap trace would prove nothing"
+    problem = ov_want(*gs_spawn(config, session, repo, GS_SONNET, env=dict(GS_ENV, GIT_TRACE=traced)),
+                      "allow", "agent-model-cap")
+    if problem:
+        return False, "the Sonnet spawn: " + problem
+    named = [line for line in gs_read(traced).splitlines() if "origin/roadmap" in line or "roadmap/data" in line]
+    if named:
+        return False, "a git call names the roadmap on a Sonnet spawn: %s" % named[0][:120]
+    return True, "a Sonnet spawn was allowed, and no git call the guard made named the roadmap"
+
+
+def gs_runner_id_check():
+    """The runner's own lane id would bind a case that sets none to a lane. The runner drops it, so a reviewer
+    spawn on a step bound to that id, with a reviewer grant, still asks. The id is set in this process only,
+    and restored after the call."""
+    repo = gs_repo("runner-id", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]))
+    config, session = ov_config("grant-runner-id"), "gs-payload-runner-id"
+    saved = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = "cse_" + GS_LANE
+    try:
+        problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER, env=None), "ask", "agent-model-cap")
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        else:
+            os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"] = saved
+    return (not problem), (problem or "asked: the runner's own lane id did not reach the case")
+
+
+# Each ask case below has a control: the same fixture with its one defect repaired, which must be allowed.
+# A control that asks would mean the reader never ran, so the ask case would pass for the wrong reason.
+GS_CHECKS = (
+    ("step grant: a reviewer spawn on the lane's step is allowed by a grant for reviewers, and logged",
+     gs_lift_check),
+    ("step grant: a step with no grant asks an Opus spawn",
+     gs_verdict_check("no-grant", dict([gs_step(GS_STEP, GS_LANE)]), OP_REVIEWER, "ask")),
+    ("step grant: control for no grant, the step with a reviewer grant is allowed",
+     gs_verdict_check("ctl-no-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant on another lane's step does not lift this lane's Opus spawn",
+     gs_verdict_check("other-step", dict([gs_step(GS_STEP, GS_LANE),
+                                          gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for another lane's step, this lane's own step with a grant is allowed",
+     gs_verdict_check("ctl-other-step", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")]),
+                                              gs_step("step-b", "zz9y8x", grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant for builders does not lift a reviewer spawn",
+     gs_verdict_check("builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("builder")])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for a builder grant, a reviewer grant for a reviewer is allowed",
+     gs_verdict_check("ctl-builder-grant", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a bound step that cannot be parsed asks an Opus spawn",
+     gs_verdict_check("bad-json", dict([GS_BAD]), OP_REVIEWER, "ask")),
+    ("step grant: control for an unparseable step, the same step parsed with a reviewer grant is allowed",
+     gs_verdict_check("ctl-bad-json", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant with an unknown role asks, even for a spawn of that role",
+     gs_verdict_check("unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("wizard")])]),
+                      GS_WIZARD, "ask")),
+    ("step grant: control for an unknown role, a reviewer grant for a reviewer is allowed",
+     gs_verdict_check("ctl-unknown-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant with no role key asks an Opus spawn",
+     gs_verdict_check("no-role-key", dict([gs_step(GS_STEP, GS_LANE,
+                                                   grants=[gs_grant("reviewer", drop_role=True)])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for no role key, the same grant with its role is allowed",
+     gs_verdict_check("ctl-no-role-key", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a grant with role null allows a builder spawn",
+     gs_verdict_check("null-role", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_BUILDER, "allow")),
+    ("step grant: a step with status done asks an Opus spawn, even with a grant",
+     gs_verdict_check("done", dict([gs_step(GS_STEP, GS_LANE, status="done", grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for done, the same step not done is allowed",
+     gs_verdict_check("ctl-done", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a repository with no origin/roadmap ref asks an Opus spawn",
+     gs_verdict_check("no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "ask", ref=False)),
+    ("step grant: control for no ref, the same step on the ref is allowed",
+     gs_verdict_check("ctl-no-ref", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: two steps bound to this lane ask an Opus spawn, even with a grant on one",
+     gs_verdict_check("two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)]),
+                                         gs_step("step-c", GS_LANE)]),
+                      OP_REVIEWER, "ask")),
+    ("step grant: control for two steps, one step bound to this lane with the grant is allowed",
+     gs_verdict_check("ctl-two-steps", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant(None)])]),
+                      OP_REVIEWER, "allow")),
+    ("step grant: a Sonnet spawn runs no git call that names the roadmap", gs_cost_check),
+    ("step grant: an unparseable bound step is logged as step-grant-unread", gs_unread_log_check),
+    ("step grant: the runner's own lane id does not reach a case that sets none", gs_runner_id_check),
+)
+for _label, _check in GS_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
+
+
+# THE LOAD BRAKE ON A LIFTED OPUS SPAWN. A lifted Opus spawn ask exits in refuse(), so unless rule 9c, the
+# machine-load brake, runs first, a full machine would not refuse a spawn that a grant or an override lifted.
+# The brake applies to every lane start, lifted or not. LB_ALL_HIGH is a full machine: memory and disk both
+# over the full line, and the case's `load` key is that reading.
+def gl_check(name, tool_input, config_name, session_name, typed=None, grant=None, load=None, want="deny"):
+    """One lane-start call on a machine with the given reading. `grant` is the step's grant list, when the
+    lane is bound to a step; `typed` is an owner prompt typed before the call. Returns the verdict wanted."""
+    config, session = ov_config(config_name), session_name
+    if grant is not None:
+        repo = gs_repo(name, dict([gs_step(GS_STEP, GS_LANE, grants=grant)]))
+        cwd, env = repo, GS_ENV
+    else:
+        cwd, env = NOGIT, None
+    note = ov_type(config, session, typed) if typed else ""
+    problem = ov_want(*ov_call("Agent", dict(tool_input), cwd, config, session, 60, env=env, load=load),
+                      want, "load-brake" if want == "deny" else "agent-model-cap")
+    return (not problem), (problem or ("%s, as wanted" % want)) + ("; " + note if note and problem else "")
+
+
+def gl_step_grant_full_check():
+    return gl_check("load-grant", OP_BUILDER, "load-grant", "gl-payload-grant",
+                    grant=[gs_grant(None)], load=LB_ALL_HIGH)
+
+
+def gl_typed_override_full_check():
+    return gl_check("load-typed", OP_BUILDER, "load-typed", "gl-payload-typed",
+                    typed="opus 2h", load=LB_ALL_HIGH)
+
+
+def gl_step_grant_normal_check():
+    return gl_check("load-normal", OP_BUILDER, "load-normal", "gl-payload-normal",
+                    grant=[gs_grant(None)], want="allow")
+
+
+def gl_sonnet_full_check():
+    return gl_check("load-sonnet", GS_SONNET, "load-sonnet", "gl-payload-sonnet", load=LB_ALL_HIGH)
+
+
+GL_CHECKS = (
+    ("lift and load brake: a step grant lifts an Opus spawn, and a full machine still denies it",
+     gl_step_grant_full_check),
+    ("lift and load brake: a typed opus 2h lifts an Opus spawn, and a full machine still denies it",
+     gl_typed_override_full_check),
+    ("lift and load brake: control, the same step grant on a normal machine lets the spawn through",
+     gl_step_grant_normal_check),
+    ("lift and load brake: control, a Sonnet spawn on a full machine is denied by the load brake",
+     gl_sonnet_full_check),
+)
+for _label, _check in GL_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
 
 
 def ov_once_expiry_check():

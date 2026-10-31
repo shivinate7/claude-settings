@@ -2,12 +2,15 @@
 
 ## The ruling
 
-Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a pick with options, the stop passes only if the same main-session turn did one of two things.
+Roadmap step c118, 2026-10-27. When the last reply's Input Needed item offers a pick with options, the stop passes only if one of these holds for the same main-session turn.
 
 - It called `AskUserQuestion`, the question box. The guard does not re-check that nothing runs. `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs, and the guard does not repeat that.
-- It called `ArtifactData` with a `set` or `update`, or a `batch` holding such a write, on collection `items`. The URL is the one `layout.waiting_page` gives for this repo, and the reply text holds that URL. When the repo has no waiting page, only the box passes.
+- The reply text holds the repo's waiting page URL, from `layout.waiting_page`. No page write is needed.
+- The Input Needed item names a 5-minute phrase (`5 min`, `5 minutes`, `5-minute` or `five minutes`) and the words "waiting page".
 
-The refusal is one line. It says to open the question box, or to put the item on the repo's waiting page and link it.
+The box passes in every repo. Owner ruling, 2026-10-28 15:10 CDT, under roadmap step c202 (chat first, then the page), added the last two. Each page path needs a waiting page in the repo, so in a repo with none only the box passes.
+
+The refusal is one line: "Pick guard: Input Needed offers a pick with options and gives no way to answer it. Ask in chat and say it goes to the waiting page after 5 minutes unanswered, link the waiting page, or, only with nothing running, open the question box."
 
 Incident, named: on 2026-10-27 a degen session put "Two ways: A (my pick) ... B ..." under Input Needed as report text only. No control offered a click, and the owner found it late. This guard is the answer to that named incident. It also guards a likely risk: any session ends a report this way.
 
@@ -20,13 +23,13 @@ One marker alone is not a pick. "You picked A on Oct 26; I went with it" quotes 
 
 **Which turns.** Any turn whose reply carries the report labels, not only the turns that ran a git write. The incident report had Done, Input Needed and Next, and nothing says its turn landed a commit. A guard limited to landed turns would miss an ask-only turn. On an unlanded turn the guard judges the pick alone and leaves the report shape to the landed-turn rules.
 
-**Whose calls count.** Only the main session's records. A record marked `isSidechain` (an agent's lines) never counts, so a builder's page write cannot clear the main session's pick.
+**Whose calls count.** Only the main session's records. A record marked `isSidechain` (an agent's lines) never counts, so a builder's box cannot clear the main session's pick.
 
 **Failure.** The check fails open on any error, as the rest of the guard does. A rewrite turn (`stop_hook_active`) stays quiet.
 
 Known limit: a drive name such as "the A: drive and the B: drive" reads as two lettered markers.
 
-Cost: no new process, file or timer. One layout read, only when the turn wrote to `ArtifactData`.
+Cost: no new process, file or timer. One layout read per turn whose Input Needed offers a pick and that opened no box.
 
 Kind: process
 Home: lint/report_guard.py

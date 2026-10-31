@@ -57,7 +57,7 @@ BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
-                "style-limits-kept-silently", "style-option-widens-marked")
+                "style-limits-kept-silently", "style-question-form")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
@@ -87,6 +87,8 @@ INSTRUCTIONS = (
     "Also flag an Input Needed item that asks the owner to pick between visual options, a look or a layout, "
     "and only links to them, such as a link to a folder, a repo or a file; each option needs its own picture or design in the item. "
     "A reply that points to the waiting-page item that carries the designs is fine; never flag it. "
+    "Also flag a pick-one question whose options could combine, options that can all be done together; "
+    "say to ask it as a multi item (multi: true), and never flag options that exclude each other, such as now or later. "
     "Also flag a reply that marks work blocked on, or an Input Needed item as blocking, a question about a port or redesign "
     "of an existing app; the existing app's behaviour answers it, so the session reads it and cites file and symbol. "
     "Also flag such a port or redesign question that has no \"Departs from:\" line. "
@@ -103,7 +105,7 @@ INSTRUCTIONS = (
     "A result or verdict the reply reports, anywhere in the reply, such as \"tests pass\" in Done, \"CI green\", "
     "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
     "Flag only a limit or rule named as a note on the session's own conduct. "
-    "style-option-widens-marked: flag a reply whose recommended option widens what a shared tool accepts, "
+    "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
     "such as a second accepted form, an allow-list entry or a per-repo exception. "
     "Also flag an option that widens a shared tool offered without the words \"Goes against your uniform ruling (t18)\". "
     "Never flag an option where the repo changes to match the shared format. "

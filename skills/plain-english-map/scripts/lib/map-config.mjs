@@ -99,7 +99,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
       for (const k of ['variable', 'callback']) {
         const only = { [k]: cfg.workerStage[k] };
         // A file that does not hold the name as text has no site for it, so the scan skips that file.
-        if (!trackedFiles().some((f) => { if (!ext.test(f)) return false; const src = readTracked(f); return src.includes(cfg.workerStage[k]) && stageSitesOf(src, only).length; }))
+        if (!trackedFiles().some((f) => { if (!ext.test(f)) return false; const src = readTracked(f); return src.includes(cfg.workerStage[k]) && stageSitesOf(src, only, f).length; }))
           bad(`"workerStage.${k}" ${cfg.workerStage[k]} finds no stage site in any tracked code file`);
       }
     });

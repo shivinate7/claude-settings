@@ -44,6 +44,12 @@ class Matcher(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers))
 
+    def test_guard_matcher_covers_exit_worktree(self):
+        # Rule session-home deletes a session's record on ExitWorktree, so the guard must see that call.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, "ExitWorktree") for m in matchers),
+                        "no guard matcher covers ExitWorktree: %r" % matchers)
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
@@ -230,33 +236,35 @@ class ModsAutoUpdate(unittest.TestCase):
 
 # The question reviewer: ONE agent hook on PreToolUse AskUserQuestion, model
 # pinned to an Opus id, the rubric in the hook prompt. It replaces the prompt judge and
-# hooks/question_outcome.py. A failed or timed-out agent hook lets the question through, so no code
-# guard backs the rubric: the prompt text is the only home of it, and these cases pin that text.
+# hooks/question_outcome.py. A failed or timed-out model call lets the question through. Code reads the
+# form lines and the marks on each option (hooks/question_form.py), so the prompt text is the only home of
+# the items code cannot decide, and these cases pin that text.
 # An agent hook takes only these keys (probed on Claude Code 2.1.296 on Windows). The prompt
 # hooks beside it carry `continueOnBlock`, which is not one of them.
 COMMAND_HOOK_KEYS = {"type", "command", "if", "timeout", "statusMessage", "once", "async"}
 OPUS_PREFIX = "claude-opus-"
 # Each rubric item the prompt must name, with the patterns that must all match the prompt. The prompt is
-# whitespace-folded and matched without case, except the three labels, which match as written.
-GOAL, PROBLEM, BASED = "(?-i:Goal:)", "(?-i:Problem:)", "(?-i:Based on:)"
+# whitespace-folded and matched without case. Code reads that the Goal, Problem and Based on lines are there
+# (question_form.chat_hit); the prompt judges how they read, and never names a line.
 RUBRIC = {
-    "Goal line first": [GOAL, GOAL + r".{0,100}\bfirst\b|\bfirst\b.{0,100}" + GOAL],
-    "Problem line": [PROBLEM],
-    "option says gain and lose": [r"\bgains?\b", r"\blos(?:e|es|ing|s)\b"],
-    "recommendation": [r"\brecommend"],
+    "goal in the owner's terms": [r"\bgoal\b.{0,40}\bowner.s terms\b"],
+    "problem is one plain sentence": [r"\bproblem\b.{0,60}\bplain\b.{0,60}\bneeds? his word\b"],
+    "premises in plain words": [r"\bpremises?\b.{0,40}\bplain words\b"],
+    "gain and lose are plain": [r"\bgains?\b.{0,80}\bplain\b|\bplain\b.{0,80}\bgains?\b", r"\blos(?:e|es|ing|s)\b"],
     "no unexplained ids": [r"\bunexplained\b.{0,40}\b(?:ids?|names?|identifiers?)\b"
                            r"|\b(?:ids?|identifiers?)\b.{0,80}\b(?:(?:un)?explain\w*|(?:un)?gloss\w*|plain)\b"],
-    "Based on: lines with source kind": [BASED, r"\bsource[- ]kind\b|\bkind of source\b"
-                                                r"|\bsource\b.{0,60}\bkind\b|\bkind\b.{0,60}\bsource\b"],
+    "nothing outside the box": [r"\boutside\b.{0,20}\bbox\b"],
+    "one option recommended": [r"\bone\b.{0,40}\brecommend|\brecommend\w*\b.{0,40}\bone\b"],
 }
 # One sentence per item: a prompt that meets the rubric, and the mutants the check must see.
 SAMPLE = {
-    "Goal line first": "The box opens with a Goal: line first.",
-    "Problem line": "Then a Problem: line.",
-    "option says gain and lose": "Each option says what the owner would gain and lose.",
-    "recommendation": "The box carries a recommendation.",
+    "goal in the owner's terms": "The Goal is in the owner's terms.",
+    "problem is one plain sentence": "The Problem is one plain sentence that says why it needs his word.",
+    "premises in plain words": "Each premise is in plain words.",
+    "gain and lose are plain": "Each option's gain and lose are plain effects on the owner.",
     "no unexplained ids": "Reject unexplained ids.",
-    "Based on: lines with source kind": "Premises show as Based on: lines, each with its source kind.",
+    "nothing outside the box": "Nothing points outside the box.",
+    "one option recommended": "One option is recommended.",
 }
 
 
@@ -266,9 +274,9 @@ def rubric_gaps(prompt):
     return [item for item, pats in RUBRIC.items() if not all(re.search(p, text, re.I) for p in pats)]
 
 
-# The hook prompt cannot point at docs/decisions/, so it lists the premise kinds itself: a second copy of
-# the kinds table in docs/decisions/premise-format.md. These cases keep the copy equal to the table.
-# PREMISE_FORMAT_UNDER_TEST points the test at another copy of the table, as SETTINGS_UNDER_TEST does.
+# The premise kinds have two readers and no copy: the table in docs/decisions/premise-format.md says what each
+# means, and PREMISE_KINDS in hooks/precompact_handoff.py is the list the form check reads. The question
+# reviewer prompt lists none. PREMISE_FORMAT_UNDER_TEST points the test at another copy of the table, as SETTINGS_UNDER_TEST does.
 PREMISE_FORMAT = os.environ.get("PREMISE_FORMAT_UNDER_TEST") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "docs", "decisions", "premise-format.md")
 KIND_ROW = re.compile(r"^\|\s*`([a-z]+)`\s*\|", re.M)
@@ -328,14 +336,23 @@ class QuestionReviewer(unittest.TestCase):
                 rest = " ".join(v for k, v in SAMPLE.items() if k != item)
                 self.assertEqual(rubric_gaps(rest), [item])
 
-    def test_reviewer_prompt_lists_the_kinds_of_the_premise_table(self):
+    def test_the_premise_table_kinds_equal_the_kinds_the_form_check_reads(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+        import question_form
+        from precompact_handoff import PREMISE_KINDS
         with open(PREMISE_FORMAT, encoding="utf-8") as f:
             table = table_kinds(f.read())
         self.assertTrue(table, "no kind rows in %s" % PREMISE_FORMAT)
+        self.assertEqual(sorted(table), sorted(question_form.PREMISE_KINDS),
+                         "premise table kinds %s, question_form kinds %s: update the one that drifted"
+                         % (table, list(question_form.PREMISE_KINDS)))
+        self.assertIs(question_form.PREMISE_KINDS, PREMISE_KINDS,
+                      "question_form must import PREMISE_KINDS from precompact_handoff, never copy it")
+
+    def test_the_reviewer_prompt_lists_no_premise_kinds(self):
+        # The form check is the one reader of the kinds; a list in the prompt would be a second copy.
         listed = prompt_kinds(self.question_prompt())
-        self.assertTrue(listed, "the question reviewer prompt lists no source kinds after 'source kind:'")
-        self.assertEqual(sorted(listed), sorted(table),
-                         "hook prompt kinds %s, premise table kinds %s: update the one that drifted" % (listed, table))
+        self.assertEqual(listed, [], "the question reviewer prompt lists source kinds %s: code reads them" % listed)
 
     def test_the_kinds_readers_see_a_kind_added_or_dropped(self):
         # Green on main by design: it tests the two readers, not settings.json.

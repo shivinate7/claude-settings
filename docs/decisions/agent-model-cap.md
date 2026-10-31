@@ -6,7 +6,7 @@ Each agent role has its own model and effort, in the table below. Sonnet is the 
 Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
 and the owner watches that cost. A reviewer's round 3 may run Opus on the owner's grant for that spawn.
 An audit Explore may run Opus on the owner's grant, given at class level on 2026-10-21. So may the question reviewer agent hook (same class-level grant and date, see its row). Any other spawn
-runs Opus only when the owner names it. A lane session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
+runs Opus only when the owner names it. A lane session or an arbiter session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling: an Agent
 or Task spawn that sets model opus asks, unless Plan, Explore, designer, design-reviewer or a builder's `Round 3 of 3` covers it.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
@@ -55,6 +55,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`) | main model unless the owner names one | default |
 | lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | default |
+| arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a path with a `decisions` folder segment) | haiku, through `decision_watch.invoke_model` | xhigh |
@@ -86,8 +87,12 @@ cannot time out, so the guard allows Opus at round 3 and the owner's grant stays
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
 
-**The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` line in
-the brief. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
+**The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
+the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
+leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
+leftmost `Try N of 3` there adds nothing. Owner ruling 2026-10-29 16:29 CDT: a round-3
+builder on Opus just runs, with no approval. The first-line form is case-sensitive. Later lines count only
+when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet, or Opus on the owner's
 word. A try 3 builder needs Opus.
 
 **No pin, and the ceiling is an ask.** The variable is a true fallback: it decides only the spawns that name no
@@ -129,7 +134,7 @@ the same container, reads the same order.
 The guard holds the ceiling by an ask (owner, 2026-10-21: Opus runs on the owner's grant, with no magic
 words, and Claude never picks it alone). An Agent or Task spawn that sets model opus asks under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role Explore (the
-class-level grant above), the role designer or design-reviewer (the 2026-10-26 grant above), or a builder whose brief has a `Round 3 of 3` line. A reviewer's round 3 is no standing grant, so
+class-level grant above), the role designer or design-reviewer (the 2026-10-26 grant above), or a builder whose brief has the `Round 3 of 3` marker (the step-up above names the forms). A reviewer's round 3 is no standing grant, so
 it asks. The owner answers the ask in the prompt, and a spawn on sonnet or haiku never asks. An override
 lifts the spawn ask like any other ask (`owner-override`); the ask on a settings write under the same
 id stays outside every override. The ask fires only on an Opus spawn, so it stalls a fan-out only where Opus was
@@ -139,6 +144,25 @@ write that changes the fallback stays: a write is a standing change, not a dispa
 Agent and Task calls. The Opus ask never reads a Workflow `agent({model: 'opus'})` literal or a
 `start_session` on Opus. The static scan of a Workflow script reads only the Haiku floor and the step-up, and a model set
 through a variable is unseen by both (`floor-workflow-runtime-models`, `model-ceiling-no-after-read`).
+
+A step grant also lifts the Opus spawn ask (owner, 2026-10-29 13:44 CDT: grants live in the roadmap).
+Triage writes the owner's grant in the `grants` field of the lane's roadmap step. The step names its
+lane in the field `lane`. `take()` in `hooks/override.py` reads it only on an Opus spawn ask that no Opus
+override lifted. It reads the local ref `origin/roadmap` in the call's cwd and never fetches. Cost: one
+`git grep` for the lane id, and one `git show` for each hit. Freshness: the lane sees a grant only after
+it fetches `origin/roadmap`; until then the ask stays. Kind of risk: likely. Landed 2026-10-29. Incident:
+the Opus reviewer spawn of step c202, ask-in-chat-first, waited about 2 hours on the ask.
+
+**Measured.** (measured 2026-10-30, 5 lanes) Tokens per agent run, in thousands (k), from the lane reports. The models are the models the lane reports name. They are not checked against the table above. The lane reports name sonnet for each agent unless the line names a model.
+
+- `small-fixes`: builder 84k; reviewer round 1 84k (4 findings); reviewer round 2 82k (0 findings).
+- `wp-fit-w-one-home`: test-author 113k; builder 90k; reviewer round 1 105k (0 blocking, 3 notes).
+- `triage-watches-page`: test-author 140k (2 rounds); builder 108k; reviewer round 1 108k (9 findings); reviewer round 2 94k (3 low notes).
+- `handoff-no-copied-lists`: test-author 83k, 84k, 100k, 80k; builder 82k, 75k, 82k, and try 3 on opus 74k; reviewer round 1 106k (5 findings), round 2 103k (4 findings), round 3 89k (PASS, 3 notes).
+- `arbiter-ruling-page-item`: designer opus 182k; test-author 100k, 134k; builder 155k, 100k; reviewer round 1 146k (6 findings), round 2 115k (2 low notes); design reviewer opus 176k (PASS 18/18).
+- Side points. Step c204 (the waiting page's scrolling option picture): designers opus 175k and 187k; design reviewers opus 173k and sonnet 95k. A design reviewer run in another repo: opus 123k (1 blocker, 3 notes).
+
+One step-down data point: the c204 design reviewer on sonnet, one step down from the table's opus, cost 95k against 173k on opus. It is the only step-down data point. The two runs are not the same task, and quality is unmeasured. For every other role, no lane ran one step down (a lower model per role). So cost and quality against one step down are unmeasured. The table names haiku for test-author, reviewer round 1 and record-writer. The lane reports name sonnet for the test-author and reviewer round 1 runs, and the numbers above hold no record-writer run. So the haiku rows are unmeasured too. Findings counts are not a quality measure. The ruling stands: keep today's table (owner, 17:50, waiting item 59, pick a).
 
 Code reads the rows of the model table, and `lint/hook_catalog.py` builds `docs/catalog.md` from them.
 Before a rename or a move, find every reader: search for `agent-model-cap`.

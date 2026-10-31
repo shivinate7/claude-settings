@@ -100,6 +100,13 @@ Other tools, in `judge` order:
                        passes. The shell form reads the targets frozen-path reads, after a
                        leading `cd`. An override lifts it.
                        (an-agent-outside-its-home-tree-must-stop)
+  session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
+                       checkout, and a write (Write family or shell) that lands in the primary's own
+                       files. Its record is `<primary>/.git/session-homes/<session_id>`, written by a
+                       call with no `agent_id` from a `.claude/worktrees/<name>` folder, cleared by that
+                       session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
+                       `.git`, a target outside the clone, reads and non-writing shell pass. An
+                       override lifts it. It adds no git spawn beyond what the call already spends.
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -150,7 +157,8 @@ The matched text goes to the log, so a person can still see what fired.
 An "ask" decision puts the answer in the owner's hands. The one lift is the owner override
 (decision owner-override): the owner types `override` as a whole prompt, and refuse() lets the
 next refused act through, or every refused act for a time. The narrower Opus override (`opus 2h`) lifts
-only the Opus spawn ask. No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
+only the Opus spawn ask, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
+No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
 `agent-model-floor`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
@@ -231,7 +239,7 @@ while True:
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, names_only_files, one_place, session_id_of, shared_tree_match,
-            in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -712,7 +720,8 @@ WORKTREE_HAND_MADE_REASON = (
     "Rule (hand-made worktree): a lane tree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
     "A hand-made tree sends a lane to work in the main clone and loses the isolation. "
-    "Remedy: start the lane with one of those two tools. If the tool's isolation was refused, "
+    "Remedy: start the lane with one of those two tools. Call EnterWorktree with a `name` and no "
+    "`path`. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
@@ -1820,21 +1829,36 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
+# A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
+# it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
+# prose, so a leftmost `Try N of 3` adds nothing. Case-sensitive, so lowercase prose does not count (decision agent-model-cap).
+FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
 
 
+def brief_markers(brief) -> list:
+    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
+    marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
+    home of the marker scan."""
+    if not isinstance(brief, str):
+        return []
+    found = STEP_UP_MARKER.findall(brief)
+    first = next((line for line in brief.split("\n") if line.strip()), "")
+    lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
+    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
+
+
 def builder_third_round(brief) -> bool:
-    """True when a brief holds a builder's third-round marker line, in either spelling."""
-    return isinstance(brief, str) and any(
-        kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in STEP_UP_MARKER.findall(brief))
+    """True when a brief holds a builder's third-round marker, in either spelling."""
+    return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
 
 
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
-    """The step-up reason for a spawn whose marker line and model disagree, or "". Only a line
-    that is the marker counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
+    """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
+    that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
     frontmatter model is haiku, so a reviewer round 2 must name sonnet and round 3 must name sonnet or opus."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
@@ -1855,7 +1879,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 def step_up_reason(prompt: str, role, model) -> str:
     model = str(model or "").lower()
-    for kind, n in STEP_UP_MARKER.findall(prompt):
+    for kind, n in brief_markers(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
@@ -2025,12 +2049,16 @@ OPUS_SPAWN_REASON = (
     "reviewer and a builder's Round 3 of 3 "
     "(decision agent-model-cap). Approve it only when the owner asked for Opus here."
 )
+OPUS_BUILDER_REASON = (
+    OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
+    "any line. The marker applies only to a builder's third try, after review round 2 failed."
+)
 OPUS_STANDING_ROLES = ("Plan", "Explore", "designer", "design-reviewer")
 
 
 def opus_spawn_hit(tool: str, tool_input) -> str:
     """The model of an Agent or Task spawn that sets Opus with no standing grant, or "". A standing grant
-    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds the third-round marker line (the same marker
+    is the role Plan, Explore, designer or design-reviewer, or a builder whose brief holds the third-round marker (the same marker
     step_up_hit reads). A reviewer's spawn is no standing grant, so a reviewer on Opus asks. The spawn ask is liftable by an
     override, so never_lifted does not read it."""
     if tool not in SPAWN_TOOLS or "opus" not in str(tool_input.get("model") or "").lower():
@@ -2490,57 +2518,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
-# ------------------------------------------------------------------ a port question departs or is not asked
+# ------------------------------------------------------------------ a waiting-page item states the question form
 #
-# docs/decisions/port-keeps-behaviour.md, rule `port-question`, built against a named incident
-# (incident in the record): a waiting item about a port or redesign of an
-# existing app carries a "Departs from:" line and never holds work, since the existing app answers
-# the question. The item is read at the ArtifactData call that writes it.
+# hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
+# `command-in-item`, `task-names-check`, `owner-judge`, `question-form`). This check runs them only for a
+# write to this repo's waiting page.
 DATA_TOOL = "ArtifactData"
 WAITING_ITEMS = "items"
-PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|redesign(?:s|ed|ing)?"
-                       r"|rewrite\s+of|rebuild\s+of)\b", re.I)
-DEPARTS_LINE = re.compile(r"^\s*Departs from:", re.I | re.M)
-PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
-               "departs from the app, and it never holds work. Add a line to context that starts "
-               "\"Departs from: <file>:<symbol> \u2014 <what changes>\", leave out holds, or set "
-               "port to false if this is not a port.")
-
-
-def _item_text(data) -> str:
-    return " ".join(str(data.get(k) or "") for k in ("title", "context", "holds"))
-
-
-def port_item_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting item is a port question that skips the rule."""
-    if not isinstance(data, dict) or ("kind" in data and data["kind"] not in ("decision", "task")):
-        return ""
-    if op == "set" and "kind" not in data:
-        return ""
-    if "port" in data:
-        on_port = bool(data["port"])
-    else:
-        on_port = op == "set" and bool(PORT_WORD.search(_item_text(data)))
-    if not on_port:
-        return ""
-    if data.get("holds"):
-        return "port item with holds"
-    if (op == "set" or "context" in data) and not DEPARTS_LINE.search(str(data.get("context") or "")):
-        return "port item with no Departs from line"
-    return ""
-
-
-def _write_data(entry):
-    """The data of one write: `data`, else the JSON in `file_path`. None when neither reads."""
-    data = entry.get("data")
-    path = entry.get("file_path")
-    if data is None and isinstance(path, str) and path:
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return None
-    return data
 
 
 def _is_waiting_page(tool_input, cwd) -> bool:
@@ -2567,29 +2551,6 @@ def _git_root_of(cwd):
         here = parent
 
 
-# ------------------------------------------------------------------ a pick never widens a shared tool
-#
-# docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
-# (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `pick`. Read at the same ArtifactData call.
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
-                 "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
-                 "match the shared format, or leave pick out.")
-
-
-def widens_pick_hit(data) -> str:
-    """The matched text when this write's `pick` names an option it marks `widens: true`. An update
-    that carries `pick` without `options` cannot see the stored options and passes."""
-    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
-        return ""
-    options, pick = data.get("options"), data.get("pick")
-    if not isinstance(options, list) or not isinstance(pick, str):
-        return ""
-    if any(isinstance(o, dict) and o.get("key") == pick and o.get("widens") is True for o in options):
-        return "pick names a widening option"
-    return ""
-
-
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
@@ -2599,17 +2560,14 @@ def data_tool_hit(tool_input, cwd=""):
     else:
         entries = [(tool_input.get("action"), tool_input)]
     writes = [(op, e) for op, e in entries
-              if op in ("set", "update") and e.get("collection") == WAITING_ITEMS]
+              if op in ("set", "update", "str_replace") and e.get("collection") == WAITING_ITEMS]
     if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
         return "", ""
+    import question_form
     for op, entry in writes:
-        data = _write_data(entry)
-        hit = port_item_hit(op, data)
-        if hit:
-            return "port-question", hit
-        hit = widens_pick_hit(data)
-        if hit:
-            return "uniform-pick", hit
+        hit = question_form.item_hit(op, entry)
+        if hit[0]:
+            return hit
     return "", ""
 
 
@@ -2863,6 +2821,188 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ the session's own worktree
+#
+# Rule session-home. The harness removes a session's linked worktree and branch while the session
+# runs on, and its shell falls back to the primary checkout. A write there lands on the clone's
+# default branch, behind everything. The record `<primary>/.git/session-homes/<session_id>` holds the
+# worktree path, so a later call can tell "never had a worktree" from "its worktree is gone". Only a
+# call with no `agent_id` writes or clears it: an agent shares its session's id. The primary is found
+# by path shape and a stat walk, never by git, so the rule adds no git spawn beyond what the call
+# already spends. A git verb in the primary is read off the command text with `git_calls`.
+SESSION_HOME_DIR = "session-homes"
+# The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
+# is left out in session_home_git_hit.
+SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
+                          "stash", "cherry-pick", "revert", "am", "apply")
+SESSION_HOME_REASON = (
+    "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
+    "checkout. "
+    "Remedy: call the EnterWorktree tool first. Call it with a `name` and no `path`. It branches "
+    "from origin's default branch. Then write inside that worktree."
+)
+
+
+def session_home_place(cwd: str):
+    """Return (primary, lane) for a call's cwd, by path shape and a stat walk. `lane` is the
+    `<primary>/.claude/worktrees/<name>` folder holding cwd, or '' when cwd sits in the primary's own
+    files. (None, '') when neither shape fits: no checkout, a linked worktree elsewhere, or no
+    `.git` directory at the primary."""
+    if not cwd:
+        return None, ""
+    try:
+        folder = os.path.realpath(cwd)
+    except Exception:
+        return None, ""
+    while True:
+        parent = os.path.dirname(folder)
+        grand = os.path.dirname(parent)
+        if (os.path.basename(parent) == "worktrees" and os.path.basename(grand) == ".claude"
+                and os.path.isdir(os.path.join(os.path.dirname(grand), ".git"))):
+            return os.path.dirname(grand), folder
+        if os.path.isdir(os.path.join(folder, ".git")):
+            return folder, ""
+        if os.path.exists(os.path.join(folder, ".git")) or parent == folder:
+            return None, ""
+        folder = parent
+
+
+def session_home_agent_tree(lane: str) -> bool:
+    """True when LANE has an agent worktree's shape, `.claude/worktrees/agent-<agent_id>` (rule
+    worktree-home). A top-level call there is the session inspecting an agent's tree, not its home."""
+    name = os.path.basename(lane)
+    return name.startswith("agent-") and bool(AGENT_ID.match(name[len("agent-"):]))
+
+
+def session_home_record(payload, primary: str):
+    """The record's path for this session, or '' when the call carries no valid session id."""
+    sid = payload.get("session_id") if isinstance(payload, dict) else None
+    if not isinstance(sid, str) or not SESSION_ID_RE.match(sid):
+        return ""
+    return os.path.join(primary, ".git", SESSION_HOME_DIR, sid)
+
+
+def session_home_keep(payload, tool: str, cwd: str) -> None:
+    """Write the session's record from a lane call, only when it is missing or different. The
+    session's own ExitWorktree deletes it. An agent call does neither."""
+    if not isinstance(payload, dict) or payload.get("agent_id"):
+        return
+    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    primary, lane = session_home_place(where)
+    record = session_home_record(payload, primary) if primary else ""
+    if not record:
+        return
+    try:
+        try:
+            with open(record, encoding="utf-8") as handle:
+                held = handle.read().strip()
+        except OSError:
+            held = ""
+        if tool == "ExitWorktree":
+            # An exit ends a record whose worktree still stands, from any cwd. A record whose
+            # worktree is gone stays, and the guard keeps judging.
+            if held and os.path.isdir(held):
+                os.remove(record)
+            return
+        if not lane or held == lane or session_home_agent_tree(lane):
+            return
+        import tempfile   # lazy: only a first or changed record reaches here
+        folder = os.path.dirname(record)
+        os.makedirs(folder, exist_ok=True)
+        handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(lane)
+            os.replace(temp, record)  # one step: a reader never sees a half-written path
+        except BaseException:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            raise
+    except Exception:
+        pass  # an unwritable record means no refusal later, never a failed call
+
+
+def session_home_git_hit(command: str, where: str, in_primary) -> str:
+    """The verb of a git call in COMMAND that changes the primary's files or branch and runs in the
+    primary checkout, else ''. A leading `cd` and `git -C <path>` name the folder it runs in; a folder
+    that holds a variable is unknown and passes."""
+    ends = []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        verbs = [(verb, args) for verb, args in git_calls(segment) if verb in SESSION_HOME_GIT_VERBS]
+        if not verbs:
+            continue
+        folder = dir_before_segment(segments, number, where, ends)
+        tokens = segment_tokens(segment)
+        named = _segment_git_c_target(tokens) if tokens else None
+        if named is not None:
+            folder = None if _unexpanded(named) else shell_abs(named, folder)
+        if not folder:
+            continue
+        for verb, args in verbs:
+            if verb == "stash" and args[:1] in (["list"], ["show"]):
+                continue
+            if in_primary(folder, folder):
+                return verb
+    return ""
+
+
+def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule session-home: the log detail when a session whose recorded worktree is gone writes into
+    the primary checkout, else ''. Only a call with no `agent_id` and a cwd in the primary's own files
+    is judged. A missing, empty or unreadable record is unknown and passes. The clone's `.git`,
+    `.claude/worktrees/`, and a target outside the clone pass. Liftable by an owner override."""
+    if not isinstance(payload, dict) or payload.get("agent_id"):
+        return ""
+    if tool in WRITE_TOOLS:
+        targets = write_targets(tool_input)
+    elif tool in SHELL_TOOLS:
+        targets = None
+        command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
+        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
+        if not writes and "git" not in command:
+            return ""
+    else:
+        return ""
+    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
+    primary, lane = session_home_place(where)
+    record = session_home_record(payload, primary) if primary and not lane else ""
+    if not record:
+        return ""
+    try:
+        with open(record, encoding="utf-8") as handle:
+            home = handle.read().strip()
+    except OSError:
+        return ""
+    if not home or os.path.isdir(home):
+        return ""
+    lanes = os.path.join(primary, ".claude", "worktrees")
+    clone_git = os.path.join(primary, ".git")
+
+    def in_primary(target, at):
+        try:
+            resolved = _resolved(target, at)
+        except Exception:
+            return False
+        return (path_is_inside(resolved, primary) is True
+                and path_is_inside(resolved, clone_git) is not True
+                and (path_is_inside(resolved, lanes) is not True
+                     or path_is_inside(resolved, home) is True))  # the gone home path is the primary's too
+
+    if targets is None:
+        verb = session_home_git_hit(command, where, in_primary)
+        if verb:
+            return "git " + verb + " in the primary checkout"
+        hit = _shell_write_hit(command, where, in_primary, follow_cd=True) if writes else ""
+        return "shell write into the primary checkout: " + hit if hit else ""
+    for target in targets:
+        if in_primary(target, where):
+            return "write target in the primary checkout: " + target
+    return ""
+
+
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
@@ -2902,6 +3042,7 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
@@ -2911,6 +3052,11 @@ def judge(payload) -> None:
     other_hit = other_checkout_hit(tool, tool_input, cwd)
     if other_hit:
         refuse(tool, "deny", "other-checkout", OTHER_CHECKOUT_REASON, other_hit)
+    # 0, session-home. A session whose own worktree is gone writes nowhere in the primary checkout. An
+    # override lifts it, and it is not in never_lifted: the owner may mean the write.
+    session_hit = session_home_hit(payload, tool, tool_input, cwd)
+    if session_hit:
+        refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
@@ -2923,19 +3069,22 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9c. The Opus ceiling: a spawn on Opus with no standing grant asks. An override or an Opus
-    # pass for the spawn's role lifts it. A spawn with no role runs general-purpose.
-    opus_model = opus_spawn_hit(tool, tool_input)
-    if opus_model:
-        refuse(tool, "ask", "agent-model-cap", OPUS_SPAWN_REASON, opus_model,
-               spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
-
-    # 9d. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
         load_reason, load_matched = running_lane_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
+
+    # 9d. The Opus ceiling: a spawn on Opus with no standing grant asks. An override, an Opus
+    # pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
+    opus_model = opus_spawn_hit(tool, tool_input)
+    if opus_model:
+        refuse(tool, "ask", "agent-model-cap",
+               OPUS_BUILDER_REASON if tool_input.get("subagent_type") == "builder" else OPUS_SPAWN_REASON,
+               opus_model,
+               spawn_role=str(tool_input.get("subagent_type") or "general-purpose"))
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
@@ -2958,10 +3107,23 @@ def judge(payload) -> None:
 
     if tool == DATA_TOOL:
         rule, matched = data_tool_hit(tool_input, cwd)
+        if rule:
+            import question_form
+        # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
         if rule == "port-question":
-            refuse(tool, "deny", "port-question", PORT_REASON, matched)
+            refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
         if rule == "uniform-pick":
-            refuse(tool, "deny", "uniform-pick", WIDENS_REASON, matched)
+            refuse(tool, "deny", "uniform-pick", question_form.PAGE_REASONS["uniform-pick"], matched)
+        if rule == "press-link":
+            refuse(tool, "deny", "press-link", question_form.PAGE_REASONS["press-link"], matched)
+        if rule == "command-in-item":
+            refuse(tool, "deny", "command-in-item", question_form.PAGE_REASONS["command-in-item"], matched)
+        if rule == "task-names-check":
+            refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
+        if rule == "owner-judge":
+            refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
+        if rule == "question-form":
+            refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
         return
 
     if tool in SHELL_TOOLS:
@@ -3052,7 +3214,7 @@ def main() -> None:
     except Exception:
         pass  # a guard_core without the setter still judges: its line has no session cell (unknown session)
     try:
-        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
+        guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"))
     except Exception:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:

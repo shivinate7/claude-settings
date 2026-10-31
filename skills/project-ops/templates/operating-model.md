@@ -12,15 +12,18 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
   writes each lane brief, starts each lane session in roadmap order, and talks with the owner. The load brake, not a
   number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
-  (`coordinator`, `triage`, `batch-runner` or `lane`), so another coordinator can find it.
+  (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
 - **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
-  Only triage publishes the roadmap page, from the head of the record branch, with `--live` at each
-  publish (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
+  At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
+  and `--live`. Triage, as the waiting-page writer, splices it into the repo's one page and
+  publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
-  Each merge it runs names `frozen at <sha>`. It prints the merge output on the terminal, never
+  When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
+  runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
+  runs names `frozen at <sha>`. It prints the merge output on the terminal, never
   to a log only. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
@@ -29,7 +32,8 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 When the owner names the wrong tier, or brings work that belongs to another tier, the session
 says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
 
-A coordinator may work in another repo, by hand-off or by its own lane PR there. Before it acts,
+A coordinator's work in another repo is compliance only, by handoff or by its own lane PR in that repo
+(claude-settings decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
 it checks whether that repo has an active coordinator: a live session tagged both
 `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`. It reads every page of
 `list_sessions` and filters the tags itself. If one is active, it coordinates with it.
@@ -51,17 +55,22 @@ parent, or miss a message while busy.
 - Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
   re-asked question, a reply that contradicts the roadmap, or a missed ruling.
 - On a rotation, in this order. The coordinator tells the session to rotate.
-  1. The old session stops watching each page its role owns (the roadmap page, the project's
+  1. The old session stops watching each page its role owns (the repo's one page, the project's
      waiting page). It notes the time, then answers each comment still open at that time on
      those pages.
   2. It drains its work in flight: it starts nothing new, and ends or hands over each wait it holds.
   3. It writes the hand-off file, `handoffs/<role>-<date>.md` on the record branch, from
-     `role-handoff.md`, with that time. The file names each wait it handed over.
+     `role-handoff.md`, with that time. The file names each wait it handed over, the home of
+     the open waiting-page items (the items collection, by URL, never each item), and each page to watch. It runs
+     `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
+     fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from
      the hand-off file and updates the roster. The coordinator sends no broadcast. Sessions read
      the roster.
-  5. The successor watches each page at once. It reads each page's comments since the time in
-     the hand-off file.
+  5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
+     before any other act. It reads each page's comments since the time in the hand-off file.
+     It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
+     that reads the answer, so an item left with the old `owner` gets no reader.
 - The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
@@ -71,11 +80,15 @@ parent, or miss a message while busy.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
   A lane never rebases onto main and never merges.
-- Nobody pushes to a branch frozen for a merge go until the result is back.
+- Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
+  standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
+  runs the merge tool on it. The owner is not asked.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   It ends each turn that leaves work in flight with a timed check-in, so a lost wake costs one gap.
+- A check-in's message names the home of each list it tracks (a page collection, a roadmap ref, a git
+  ref or a GitHub query), never a copy.
 
 ## Filing
 

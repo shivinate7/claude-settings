@@ -19,9 +19,9 @@ const typeOnly = (clause) => {
 // The specifier of each import in a source, in source order. `{ types: false }` drops each link the
 // build erases: `import type`, `export type ... from`, an all-`type` import, `import('./x').T` and
 // `typeof import('./x')`. A dynamic `import('./x')` and `import('./x').then(...)` stay.
-export const importEntries = (src, { types = true } = {}) => {
+export const importEntries = (src, { types = true, file } = {}) => {
   const out = [];
-  const bare = blankCommentsAndStrings(src);
+  const bare = blankCommentsAndStrings(src, file);
   for (const m of bare.matchAll(SPEC_RE)) {
     const after = src.slice(m.index + m[0].length);
     const spec = /^[^'"`]*/.exec(after)[0];
@@ -50,7 +50,7 @@ export const importSpecifiers = (src, opts) => importEntries(src, opts).map((e) 
 export const importTargets = (from, src, tracked, opts) => {
   const found = new Set();
   if (!/\.(ts|tsx|mjs|js|cjs)$/.test(from)) return []; // A .py, .sh or .sql file has no JS imports.
-  for (const spec of importSpecifiers(src, opts)) {
+  for (const spec of importSpecifiers(src, { file: from, ...opts })) {
     if (!spec.startsWith('.')) continue;
     const base = path.posix.join(path.posix.dirname(from), spec);
     const ext = path.posix.extname(base);

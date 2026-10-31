@@ -456,7 +456,7 @@ export const lookAlikes = ({ nodes }, sources) => {
   const entry = ({ p, a, j }) => ({ p, a, j });
   const defs = new Map(), ends = new Map();
   for (const n of code) {
-    const text = sources[n.p] === undefined ? '' : stripCommentsAndStrings(sources[n.p]);
+    const text = sources[n.p] === undefined ? '' : stripCommentsAndStrings(sources[n.p], n.p);
     for (const name of new Set([...text.matchAll(EXPORT_RE)].map((m) => m[1]))) (defs.get(name) ?? defs.set(name, []).get(name)).push(n);
     const base = path.posix.basename(n.p).replace(/\.[^.]+$/, '');
     const end = base.match(/[A-Z][a-z0-9]*$/)?.[0];

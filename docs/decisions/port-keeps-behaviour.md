@@ -9,7 +9,7 @@ Owner, 2026-10-27 15:32 CDT: when a session ports or redesigns an existing app, 
 - A port question is never marked blocking. The session keeps working on the default.
 - A question that the code or a standing grant answers is not asked. Before it asks, a session reads the repo's CLAUDE.md for standing grants (owner, 2026-10-27 15:51 CDT). A grant the owner gives in chat lands in the repo's CLAUDE.md or the merge tool's config, never only in a hand-off.
 - Rule `building-port-keeps-behaviour` holds the text. The designer, builder and Plan agents carry one line each, copied, because each agent reads its own file first and not the rule file.
-- Guard rule `port-question` (`hooks/guard.py`) refuses an `ArtifactData` set or update to `items`. It reads each set in a batch and data read from `file_path`.
+- Guard rule `port-question` (`hooks/question_form.py`, run by `hooks/guard.py`) refuses an `ArtifactData` set or update to `items`. It reads each set in a batch and data read from `file_path`.
   - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`). A repo with no page is not judged.
   - It judges an item of kind `decision` or `task`. An item with no kind passes.
   - It refuses a port item that has no line starting "Departs from:" or that has `holds`.

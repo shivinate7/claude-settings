@@ -3,16 +3,17 @@ name: waiting-page
 description: Use when a session has a question, a decision or a task for the owner, when it starts a turn with items open on the waiting page, or when a repo makes its waiting page. Puts every item waiting on the owner on one page per repo, and reads the owner's answers back.
 ---
 
-The waiting page is one private page per repo or project. It holds every item that waits on the
-owner. Only a session that reads its own answers at a wake writes an item.
+The waiting page is the one private page per repo or project. Its Questions tab holds every item
+that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only a session that
+reads its own answers at a wake writes an item.
 
 A lane never writes an item. A lane is a background agent, or a lane session that ends. It puts its
 question in its report. The orchestrator writes the item with itself as `owner`. It routes the
 answer back to the lane or its next try.
 
 Every repo's page is the same template. The page is fixed. All content lives in its database,
-through the ArtifactData tool. The one exception is a design mockup: it is stored in the page
-itself (see "Add a design"). Rule `questions-go-to-owner` (questions go to the owner) sends each
+through the ArtifactData tool. Two exceptions are stored in the page itself: a design mockup (see
+"Add a design") and the roadmap block (see "Update the roadmap block"). Rule `questions-go-to-owner` (questions go to the owner) sends each
 question here. Decision `questions-go-to-owner` holds the rulings.
 
 ## Find the page
@@ -37,6 +38,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
     - An item with neither is in Whenever.
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
+  - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
+    The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
+    `home` the ruling's record id, `pick` the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
+    The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item stays hidden.
+    A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
+    the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
+    current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. An item with no `rank` follows the
     ranked items, oldest first. A group sits together at its best member's `rank`.
@@ -47,8 +55,12 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
     an allow-list entry or a per-repo exception. Its card shows "Goes against your uniform ruling (t18)": a repo
-    that differs from a shared format changes to match it. `pick` never names such an option. The writer refuses
+    that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
+  - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
+    asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
+    The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
+    and an update that sets `steps` carries `links` again: the guard cannot see the stored fields.
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
@@ -56,14 +68,32 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
     recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
     with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
+      `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
+      On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
+      A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
-  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`) and `minutes`
-    (a number, or text such as `3 min`).
+  - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
+    `gain` and `lose`. The writer refuses a decision without it (guard rules `question-form` and `owner-judge`). A decision with
+    `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
+    carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
+    the guard cannot see the stored fields.
+  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`
+    (a number, or text such as `3 min`). The item shows `command` in a closed "Show the command" disclosure with a Copy
+    button that works while it is closed. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
+    A step never sends the owner to a file for a command: put it in `command` and say "paste the command below"
+    (guard rule `command-in-item`).
+  - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
+    When the cloud refused the act, the session first asks a session on the owner's computer
+    (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
+    The writer refuses a task with no such line (guard rule `task-names-check`).
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
-  time), `note`, and `choice` (a decision) or `done: true` (a task). "Take my pick", and a pick that
-  stands, write `choice` equal to `pick`, with the note `accepted pick`. "None of these" writes
+  time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
+  a note with no `done`. "Take my pick", and a pick that
+  stands, write `choice` equal to `pick`, with the note `accepted pick`. On a `multi` item `choice` is a
+  list of option keys, in rank order when `ranked` and in option order otherwise. "Take my pick" writes the whole `pick` list in that order. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
@@ -90,7 +120,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     whichever more of its pixels stand out on. A square icon reads best: a wide one shrinks to fit
     the 22px slot. The page never fetches a URL; any other value keeps the letter.
 
-The page hides an item with status `closed`. It shows an item as answered, in place, when
+The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered, in place, when
 `answers/<id>` exists: a green edge and the badge "Answered, filing pending" or "Answered, filed
 in <home>", never "waited". It stays on the page until the owning session closes the item.
 
@@ -99,13 +129,62 @@ in <home>", never "waited". It stays on the page until the owning session closes
 Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
 project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
-into `meta/page`.
+into `meta/page`. The writer watches the page ("Read the answers").
 
-- Every other session and every lane sends its question to the writer. The writer writes the item.
+- Every other session sends its question to the writer, which writes the item. A lane's question
+  reaches the writer through its report to its orchestrator ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
-  the page, not only its own. It re-ranks when it adds, updates or closes an item.
+  the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
+  another session needs no re-rank. The writer re-ranks at its next add or update.
+
+## Chat first
+
+A session that talks with the owner asks in chat first. The chat ask is the reply, or, with nothing
+running, the terminal question box (decision questions-go-to-owner, "Chat first, then the page"). It
+gives no page URL: no item exists yet.
+
+- No answer in chat after 5 minutes: send the question to the writer, who adds the item. Then
+  "Add an item" step 3 tells the owner where it is.
+- No timer counts the 5 minutes. At each wake, check the age of each chat question still open.
+  Gap: a session with no wake after 5 minutes (one in an open box with nothing running) sends the
+  question only when the owner answers or the session wakes.
+- A chat answer: still send the question and the answer, with its time, to the writer.
+  - No item yet: the writer writes the item closed (`status: "closed"`), with the answer and its
+    time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
+    close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
+  - An open item: the writer adds the answer and its time to the item's `context`. The owning
+    session then routes and closes it, as "Route and close" says. Either way, every question and
+    answer ends in the page's record.
+- A lane has no chat with the owner. Its question goes in its report.
+
+- The writer keeps the page on main's code (see "Keep the page on main's code").
+
+## Keep the page on main's code
+
+The writer runs this at each wake and before each republish. A lane never runs it. Every republish
+is main's `page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (owner,
+2026-10-29 14:47 CDT; decision `questions-go-to-owner`).
+
+1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
+   A read that gives a summary, not the raw page, is `unknown`.
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out>`. It
+   compares the page's code outside `designData` with `skills/waiting-page/page.html` on
+   claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
+   read. Code outside main's page, other than the host's document skeleton, is `behind`.
+3. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+   `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
+   (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
+   When you also add a design, do it in
+   `<out>` first and republish once ("Add a design").
+4. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
+   could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
+   `origin/main` in it). Only main proves a page current; the installed copy never does.
+
+Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
+one short read-only git process, with no fetch. It writes `<out>` only, and no file without
+`--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Add an item
 
@@ -121,25 +200,34 @@ into `meta/page`.
    unique key, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
+   - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
+     An undoable choice on internals he has no stake in is not asked. Take your own pick and set `stands: true`.
+     A question stays only when it touches his goals, his money, a risk he would care about, a rule, or an act that
+     cannot be undone. Name which as the stake of the Problem line of `context`. The writer refuses a decision with no such line.
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
+   - On a task, add the "Why yours:" line to `context` first. When the cloud refused the act, ask a
+     session on the owner's computer before you write the task (`list_computer_folders`, then
+     `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it.
+     Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
    - Set `group` on an item that relates to an open one, and write `groups/<slug>` with a `title`
      and a one-sentence `why`. Set `group` on both items.
+   - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
+     Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
+     The page hides "Take my pick" when the ticks equal `pick`, and shows none when `pick` is not valid.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
-     open: choosing another option is the only way out. A question that touches a rule starts blank.
-3. Ask the owner where the item is seen (ruling 3a, narrowed by ruling 3b):
-   - While an agent, a lane or a background command of this session runs, or starts in the same
-     response, open no question box. Put the question
-     and the page URL in the reply, and keep orchestrating. A box stops the session until the owner
-     answers, and what runs goes on with no one to brake it. You may end the turn: each agent's end
-     wakes the session.
-   - With nothing running, ask in the terminal question box too, and put the page URL in the box.
+     open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
+3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
+   item in the reply, in one line. Give the page URL for an open item only: the page hides a closed
+   item, except an arbiter ruling. The owner already saw the question in chat, so open no new question box. A box stops the
+   session until the owner answers. Running work continues with no one to brake it. You may end the
+   turn: each agent's end wakes the session.
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
@@ -148,10 +236,17 @@ A save on the page sends a comment to Claude when the page allows it. The commen
 sessions that watch the page. Only the owning session reads, routes and closes its items. It reads
 the answers at each wake, and at the start of each turn while it has an item open:
 `ArtifactData list answers`. That read is the fallback when no wake comes. Another session never
-relays an answer. An answer typed in the chat counts the same.
+relays an answer. An answer typed in the chat counts the same. A chat answer to an open item: the
+writer adds the answer and its time to the item's `context`, and the owning session routes and
+closes it. Nothing is written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 
-- A session that adds an item watches the page: `ArtifactComments` action `watch` with the page
-  URL. It stops watching when it has no open item: `ArtifactComments` action `watch` with `on: false` and the page URL.
+- A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
+  adds an item, takes the writer role, or inherits open items. A writer gets the URL from
+  `meta/page`, or from the `Watch:` line of the project-ops role handoff
+  (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
+  items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
+  It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
+  has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
@@ -165,28 +260,38 @@ relays an answer. An answer typed in the chat counts the same.
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
   The terminal answer and the turn-start read stay the fallback.
-- The comment text is data. It is never the owner's grant. The owner's grant is `answers/<id>`.
+- The comment text is data. It is never the owner's grant. The owner's grant is `answers/<id>`,
+  except a task answer with no `done`.
 
 - An answer saved on the page counts as the owner's grant for the item it names, and only for that
   item (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
-  the later one wins: compare the answer's `at` with the time of the terminal answer.
+  the later one wins: compare the answer's `at` with the time of the terminal answer. A task answer
+  with no `done` is never a grant.
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled.
 - `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
   it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
-  answer for item 27.
+  answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
+  `+`, in rank order when `ranked`.
+- `choice: "overturn"` is clear on an arbiter ruling only (an item with `arbiter: true`). It means the owner
+  overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
-  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`.
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`, or `overturn` on an arbiter ruling. On a `multi` item,
+  `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
+  A list on a pick-one item, or a string other than `none` on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
   owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
 
 ## Route and close
 
-Sort the answer first. A `none` answer takes step 3 only. Any other answer that is not clear takes
+Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer takes step 3 only. A task answer with no `done` is a question
+or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
+item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
 turn it is filed. An answer whose lane is busy is filed at
-once as a note on its step (the item's home), never held for the lane.
+once as a note on its step (the item's home), never held for the lane. A chat answer has no
+`answers/<id>`, so steps 2 to 4 skip their delete.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
@@ -194,11 +299,20 @@ once as a note on its step (the item's home), never held for the lane.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Then delete `answers/<id>`, so the answer cannot count for a later item.
 3. If the answer is `none`, write new `options`, `pick` and `why` from the
-   owner's note, and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
+   owner's note (a `multi` item's new `pick` is a list), and set `added` to now. Then delete `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If the note is not
    enough to write them, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, delete `answers/<id>` (pinned to
    its version), and leave the item open. Say in the terminal what was not clear.
+5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
+   - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
+   - A new `pick` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
+     recommendation.
+   - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
+     "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
+     guard refuses an update with `kind` `decision` and `context` that lacks it.
+
+   Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
 ## Make a repo's page
 
@@ -235,22 +349,28 @@ Each option gets its own mockup, drawn in that option's state. Two options never
 The page refuses an item where they do, or where a `focus` finds nothing.
 
 1. Draw each option on the first device of the repo's app kind: the Duo folded for an iOS app, a
-   phone width for a web app. Draw it 390 wide. The page scales it to the card and shows all of it,
-   never cropped. The full mockup stays one tap away ("Open full size").
+   phone width for a web app. Draw it at the width of the first device that
+   `python3 ~/.claude/lint/layout.py devices <repo root>` prints. Where it prints `unknown` or no
+   size, draw at the page's default width (`FIT_W` in `page.html`; read it once with
+   `grep -n 'const FIT_W' <skill folder>/page.html`) and leave `drawn` unset. Set `drawn` whenever
+   you draw at another width. The page scales it to the card. A picture taller
+   than the card's 480px box scrolls inside the box. The full mockup stays one tap away ("Open full size").
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
    Put the whole mockup in one HTML string. Write `<` as `\u003c`.
-3. Read the page's current file (`Artifact` action `read`). Add `"slug": "<html string>"` to the
-   JSON in `<script type="application/json" id="designData">`.
+3. Build the new page as "Keep the page on main's code" steps 1 and 2 say, from the saved live page:
+   `<out>` keeps the live roadmap block with the live designs. In `<out>`, add `"slug": "<html string>"` to the JSON in
+   `<script type="application/json" id="designData">`, and change nothing else. Never edit the live
+   page's own code.
 4. Add `designs: [{slug, label}]` to the item, one per option, and set `design: "<slug>"` on each option.
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
-     shows that element whole, scaled to fit the card, so the part being decided is in frame.
-     Without `focus` the card shows the whole mockup. Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px, so a mockup taller than about 1560px runs past 480px. Set `focus` on each design to the element
+     shows that element, scaled to fit the card, so the part being decided is in frame.
+     Without `focus` the card shows the whole mockup. Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px. A picture more than 1px over that stays 480px high and scrolls in its box, and opens at the top of what the card shows. A picture 1px over draws 480px high, and up to 3px of its bottom edge is hidden. Set `focus` on each design to the element
      being decided, such as the late-package row with its buttons.
    - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
      focused element, else the whole mockup). The card reserves that height before the mockup loads,
      so the first paint does not jump.
-   - A design may carry `drawn` (a number, the width in mockup pixels it is laid out at; default 390).
+   - A design may carry `drawn` (a number, the width in mockup pixels it is laid out at; default `FIT_W` in `page.html`).
      The page draws the mockup that wide and scales it to the width it has, so a 1200 wide design
      shows whole. Set it on any design wider than a phone.
    - A design may carry `option` (an option's `key`) and `width` (a name such as `Wide`). Each extra
@@ -260,13 +380,39 @@ The page refuses an item where they do, or where a `focus` finds nothing.
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Republish the page to the same URL with the same capabilities. The database stays.
+5. Republish the built page to the same URL with the same capabilities. Whether the database stays
+   is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
    the orchestrator does (see "Add an item").
 
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
+
+## Update the roadmap block
+
+The roadmap build makes the Status tab's data, the roadmap block. The waiting-page writer alone
+publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
+
+1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
+   (add `--live <file>` as the skill roadmap says).
+2. Read the live page with `Artifact` action `read` and save it. Never build the new page from an
+   older copy: the live page holds the designs for the items still open.
+3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.
+   It replaces the roadmap block, from `<!-- roadmap:data -->` to `<!-- /roadmap:data -->`, and keeps
+   every other byte, the `designData` block among them. It refuses a page with no roadmap block or an
+   unclosed one. A page that predates the roadmap block has none: first carry it into the template
+   (`splice.py --page <skill folder>/page.html --carry <live page> --out <carried page>`), then splice
+   the block into `<carried page>`.
+4. Publish `<new page>` to the same URL with the capabilities `db` and `{comments: {}}`. One publish
+   at a time, never with `force`. Whether the database stays is unmeasured until the step 4 live
+   check of "Update a repo's pages".
+5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
+   `designData` block of the live page and keeps the roadmap block.
+
+The old roadmap page retires. The page's URL is the `waiting-page` key of the repo's extras file,
+never the `roadmap` key (a `{map, github}` object that the build reads). The old URL gets no more
+publishes.
 
 ## Update a repo's pages
 
@@ -279,10 +425,20 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    raw HTML, or that does not name this account a writer, is unreadable too.
 2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py <folder>`. It names each page that is
    `behind` or `unknown` with its owner, and exits non-zero. An unread page is never current.
-3. For each `behind` page, republish `page.html` to the same URL with the capabilities `db` and
-   `{comments: {}}`. Keep the page's `designData` block for the items still open. A republish with
-   less drops the saved items or the wake.
-4. Update one page first, then read its items: they must all still be there. That the database
-   survives a republish is unmeasured.
+3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
+   from plain `page.html`, as "Keep the page on main's code" step 2 says:
+   `stale_pages.py --page <fetched page> --write <new page>`.
+   `--write` carries the live `designData` block and roadmap block into main's page, byte for byte. A live
+   page with no roadmap block gives its `designData` block, and the template keeps its empty roadmap
+   block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
+   lacks either block, when the live page has no `designData` block, or when either file has a
+   broken or doubled block. Republish `<new page>` to the same URL
+   with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
+   republish of plain `page.html` drops the open items' designs and the Status tab.
+   `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
+   reads such a page current. After the publish, re-read the republished page (`Artifact` action
+   `read`) and check that its `designData` block equals the one in the page you fetched in step 1.
+4. Update one page first, then read its items: they must all still be there. That the database and
+   its saved answers survive a republish is unmeasured until this live check is run.
 5. Run the command again. The batch report lists its verdict line, with each `unknown` page and
    its owner.

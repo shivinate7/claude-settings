@@ -8,6 +8,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { needEnv } from "../../../testing/skip-locally-fail-in-ci.mjs";
@@ -36,8 +37,13 @@ const mk = (id, n, over = {}) => ({ ...DECISION, id, n, title: "Question " + n, 
 const LONG = "A long context that runs past three lines on a phone. ".repeat(8);
 
 // Runs in the page before its script. Collections are maps of id to data; listeners fire on change.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts }) {
-  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: meta ? { page: meta } : {}, groups: { ...groups }, receipts: { ...receipts } };
+// dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
+// meta docs, which the status part must never read. window.__reads lists every read as
+// [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra = {} }) {
+  const { meta: metaExtra, ...otherExtra } = dbExtra;
+  const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
+  window.__reads = []; window.__uses = [];
   const subs = {}, docSubs = {};
   window.__log = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
@@ -47,14 +53,17 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
     (docSubs[name + "/" + id] || []).forEach((cb) => cb(dsnap(name, id)));
   };
   window.__answers = () => data.answers;
+  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
+    doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
     collection: (name) => ({
-      onSnapshot: (cb) => { (subs[name] = subs[name] || []).push(cb); setTimeout(() => cb(snap(name)), 0); return () => {}; },
+      onSnapshot: (cb) => listen(name, cb),
+      orderBy: () => ({ onSnapshot: (cb) => listen(name, cb) }),
       doc: (id) => ({
-        get: async () => dsnap(name, id),
+        get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
         set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
-        onSnapshot: (cb) => { (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
+        onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
     }),
   };
@@ -72,26 +81,28 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
-  window.claude = { use: async (cap) => (cap === "db" ? db : cap === "comments" ? (cm || null) : null) };
+  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? db : cap === "comments" ? (cm || null) : null; } };
 }
 
 let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, viewport = { width: 1280, height: 900 }, scheme = "light" } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
+  // errors: when given, collects each uncaught page error, from the first render on.
+  if (errors) page.on("pageerror", (e) => errors.push(e.message));
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
   t.after(() => page.close());
   await page.emulateMedia({ colorScheme: scheme });
-  const body = designData ? html.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : html;
+  const body = designData ? pageHtml.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : pageHtml;
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
@@ -103,6 +114,20 @@ const answers = (page) => page.evaluate(() => window.__answers());
 // A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
 const takePick = (page, it) => card(page, it).getByRole("button", { name: /Take my pick/ }).click();
+// The keyboard way to take a pick: focus the button and press Enter. Resolves to what holds focus one frame later, so a fix that focuses in a frame still counts.
+// `place` is an optional step that scrolls the page between the focus and the key press.
+const enterTakePick = async (page, it, place) => {
+  await page.locator(`#b-take-${it.id}`).focus();
+  if (place) await place();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  return page.evaluate(() => ({ tag: document.activeElement.tagName, id: document.activeElement.id }));
+};
+// After Take my pick hides, focus belongs on the input of the pick's first key, as the A to C key handler leaves it.
+const assertFocusOnFirstPick = (at, it, key) => {
+  assert.notEqual(at.tag, "BODY", `${it.id}: focus fell to BODY after Enter on Take my pick`);
+  assert.equal(at.id, `o-${it.id}-${key}`, `${it.id}: focus is not on the first key of the pick`);
+};
 const addNote = async (page, it, text) => { await card(page, it).getByRole("button", { name: "Add a note" }).click(); await page.fill(`#n-${it.id}`, text); };
 const send = (page) => page.click("#send");
 const written = (page) => page.waitForFunction(() => window.__log.some((l) => l[0] === "set"));
@@ -375,6 +400,15 @@ test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   assert.equal((await answers(page))[DECISION.id].choice, "b");
 });
 
+// The pick is B, not the first option, so a fix that focuses the first radio of the card fails.
+test("Enter on Take my pick puts focus on the pick's input, on a pick-one card", async (t) => {
+  const it = mk("take-focus", 40, { pick: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const at = await enterTakePick(page, it);
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
+});
+
 // ---------------------------------------------------------------- repo colour
 
 const BRANDS = ["#b45f06", "#3d5af1", "#0a84ff", "#f47820", "#6f5ca6", "#27553f", "#0b5fff", "#ffffff", "#000000", "#ffff00", "#ff0000", "#00ff00", "#808080", "#4b5a6b", "#e6e6e6", "#1a1a1a", "#ff00ff", "#00ffff", "#7f7f00"];
@@ -427,7 +461,7 @@ for (const scheme of ["light", "dark"]) {
       return out.concat(v("--hdr") ? [] : ["--hdr empty"]);
     })()`);
     assert.deepEqual(bad, []);
-    assert.equal(await page.title(), "Agent Q: waiting on you");
+    assert.equal(await page.title(), "Agent Q: Questions"); // one-page notes, choice 6: the title names the open tab
   });
 }
 
@@ -565,7 +599,26 @@ test("a look question with three options, a GitHub folder link and no designs sh
 });
 
 const PICS = { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" };
-const picItem = (id, n) => mk(id, n, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label })) });
+// Option A may take a focus, a declared size or a differing picture. The other options stay plain.
+const picItem = (id, n, { focus, size, differs } = {}) => mk(id, n, {
+  options: LOOK_OPTS.map((o) => (o.key === "a" && differs ? { ...o, differs } : o)), pick: "a",
+  designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, ...(o.key === "a" && focus ? { focus, ...(size ? { size } : {}) } : {}) })),
+});
+// A mockup h px tall, 390 wide: a gradient over a 50px band at the end.
+const TALL_PIC = (h) => `<body style="margin:0"><div style="height:${h - 50}px;background:linear-gradient(#2a6,#26a)"></div><div style="height:50px;background:#a62"></div></body>`;
+const FOCUS_TALL = '<body style="margin:0"><div style="height:300px;background:#ccc"></div><div id="panel" style="width:390px;height:1700px;background:linear-gradient(#a62,#26a)"></div><div style="height:600px;background:#999"></div></body>';
+// Waits until the frame has posted a mockup h px tall.
+const frameSettled = (page, h) => page.waitForFunction((H) => Object.values(FIT).some((c) => c.h === H), h);
+const boxSel = (id, key = "a") => `#item-${id} label.opt[for="o-${id}-${key}"] .dfitwrap`;
+// The box, its scroll, and the frame's place. g is the scrollbar gutter plus any border past 1px.
+const measure = (page, id, key = "a") => page.locator(boxSel(id, key)).evaluate((w) => {
+  const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect();
+  return { w: r.width, h: r.height, top: r.top, cw: w.clientWidth, ch: w.clientHeight, sh: w.scrollHeight, st: w.scrollTop, cls: w.className, fw: f.width, fTop: f.top, fBot: r.bottom - f.bottom, g: w.offsetWidth - w.clientWidth - 2, sizer: (w.querySelector(".dsizer") || w).getBoundingClientRect().height };
+});
+const cueState = (page, id, key = "a") => page.locator(boxSel(id, key)).evaluate((w) => {
+  const c = w.querySelector(".dcue"), t = w.querySelector(".dtop");
+  return { disp: getComputedStyle(c).display, op: +getComputedStyle(c).opacity, text: c.textContent, top: +getComputedStyle(t).opacity, cls: w.className };
+});
 
 test("each option's picture is inside its own option card; a tap on it opens the viewer and a tap on the card picks", async (t) => {
   const it = picItem("with-pictures", 31);
@@ -661,18 +714,22 @@ test("an item with some designs but not every option's design warns in the optio
   assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dwarn`).count(), 0);
 });
 
+// The owner's note on waiting-page item 55 (Oct 28, 17:50 CDT): a picture taller than its box scrolls inside it.
 for (const width of [390, 1440]) {
-  test(`a tall mockup is never cropped, at ${width} wide`, async (t) => {
+  test(`a tall mockup scrolls inside a 480px box, is never drawn taller, and its last row is reachable, at ${width} wide`, async (t) => {
     const it = picItem("tall", 35);
-    const tall = '<body style="margin:0"><div style="height:1200px;background:#2a6">tall</div></body>';
+    const tall = TALL_PIC(2400);
     const page = await open(t, { items: [it], designData: { ...PICS, "price-a": tall }, viewport: { width, height: 900 } }); if (!page) return;
     const wrap = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .dfitwrap`);
     await page.waitForFunction((sel) => document.querySelector(sel).getBoundingClientRect().height > 300, `#item-${it.id} label.opt .dfitwrap`);
     const m = await wrap.evaluate((w) => { const f = w.querySelector("iframe").getBoundingClientRect(), r = w.getBoundingClientRect(); return { wrapW: r.width, wrapH: r.height, frameW: f.width, frameH: f.height }; });
     const scale = m.frameW / 390;
-    assert.ok(Math.abs(m.frameH - 1200 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${1200 * scale}`);
-    assert.ok(m.wrapH >= m.frameH - 1, "the wrapper cuts the bottom of the mockup");
+    assert.ok(Math.abs(m.frameH - 2400 * scale) < 3, `the frame is ${m.frameH} high, the mockup ${2400 * scale}`);
+    assert.ok(m.wrapH <= 480, `the box is ${m.wrapH} high, over 480`);
     assert.ok(m.frameW <= m.wrapW + 1, "the mockup is wider than the card");
+    await wrap.evaluate((w) => { w.scrollTop = w.scrollHeight; });
+    const fBot = await wrap.evaluate((w) => w.getBoundingClientRect().bottom - w.querySelector("iframe").getBoundingClientRect().bottom);
+    assert.ok(Math.abs(fBot - 1) <= 2, `the last row is ${fBot}px from the box bottom after the scroll`);
   });
 
   test(`a long option key stays on one line and never overlaps the title, at ${width} wide`, async (t) => {
@@ -688,6 +745,265 @@ for (const width of [390, 1440]) {
       assert.equal(m.ws, "nowrap", "the chip wraps");
       assert.ok(m.k.right <= m.b.left + 1 || m.k.bottom <= m.b.top + 1, `the chip overlaps the title for ${o.key}`);
     }
+  });
+}
+
+// ---------------------------------------------------------------- a picture taller than its box scrolls inside it
+for (const width of [390, 1440]) {
+  test(`a tall picture's scroll range is over 100px, and the picture fills the card's width, at ${width} wide`, async (t) => {
+    const it = picItem("scroll-range", 52);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width, height: 900 } }); if (!page) return;
+    await frameSettled(page, 2400);
+    const m = await measure(page, it.id);
+    assert.ok(m.sh - m.ch > 100, `the scroll range is ${m.sh - m.ch}px`);
+    assert.ok(Math.abs(m.fw - m.cw) <= 1, `the picture is ${m.fw} wide in a ${m.cw} wide box: the scrollbar took some of it`);
+  });
+}
+
+test("a focus box taller than the card scrolls inside the focus box and opens at its top, at 390 wide", async (t) => {
+  const it = picItem("focus-tall", 51, { focus: "#panel" });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": FOCUS_TALL }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2600);
+  await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+  const m = await measure(page, it.id);
+  const sc = m.fw / 390;
+  assert.ok(m.h <= 480, `the focus box is ${m.h} high, over 480`);
+  assert.ok(m.sh > m.ch, "the focus box does not scroll");
+  assert.ok(Math.abs(m.sh - Math.ceil(1700 * sc)) <= 2, `the scroll range is ${m.sh} high, not the focus box's ${Math.ceil(1700 * sc)}`);
+  assert.equal(m.st, 0, "the box did not open at its top");
+  assert.ok(Math.abs(m.fTop + 300 * sc - m.top) <= 2, "the focus does not start at the top of the box");
+});
+
+test("a resize or a repaint keeps the owner's scroll, the same box, and the scroll hint in the picture's name", async (t) => {
+  const it = picItem("once", 36);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await page.locator(boxSel(it.id)).evaluate((w) => { window.__w = w; w.scrollTop = 150; });
+  assert.equal((await measure(page, it.id)).st, 150, "the owner's scroll did not take");
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.waitForTimeout(300);
+  assert.equal((await measure(page, it.id)).st, 150, "a resize moved the scroll");
+  await choose(page, it, "b");
+  await page.waitForTimeout(300);
+  const after = await page.locator(boxSel(it.id)).evaluate((w) => ({ same: w === window.__w, st: w.scrollTop }));
+  assert.deepEqual(after, { same: true, st: 150 }, "a repaint replaced the box or moved its scroll");
+  const label = await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).getAttribute("aria-label");
+  assert.match(label, /Arrow keys scroll its picture$/, "a repaint dropped the scroll hint from the name");
+});
+
+test("the cue shows before the picture's end, goes at the end, and the shades add no height, at 390 wide", async (t) => {
+  const it = picItem("cue", 37);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const a = await cueState(page, it.id);
+  assert.equal(a.disp, "flex", "the cue is not drawn");
+  assert.equal(a.op, 1, "the cue is not fully shown before the end");
+  assert.equal(a.text, "↓ More");
+  assert.ok(!/at-end/.test(a.cls), "the picture is at its end before any scroll");
+  assert.equal(a.top, 0, "the top shade is shown before any scroll");
+  const m = await measure(page, it.id);
+  assert.ok(Math.abs(m.sh - m.sizer) <= 1, `the scroll height ${m.sh} is not the picture's ${m.sizer}`);
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = 200; });
+  await page.waitForFunction((sel) => +getComputedStyle(document.querySelector(sel + " .dtop")).opacity === 1, boxSel(it.id));
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = w.scrollHeight; });
+  await page.waitForFunction((sel) => +getComputedStyle(document.querySelector(sel + " .dcue")).opacity === 0, boxSel(it.id));
+});
+
+test("a touch drag scrolls the picture and opens nothing, and a tap opens View, at 390 wide", async (t) => {
+  const it = picItem("touch", 42);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const touch = (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
+  await page.locator(boxSel(it.id)).scrollIntoViewIfNeeded();
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  const x = r.x + 40, y = r.y + 380;
+  await touch("touchStart", [{ x, y }]);
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await page.waitForTimeout(16); }
+  await touch("touchEnd", []);
+  await page.waitForTimeout(500);
+  assert.ok((await measure(page, it.id)).st > 0, "the touch drag did not scroll the picture");
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "the touch drag opened View");
+  await page.waitForTimeout(300);
+  const r2 = await page.locator(boxSel(it.id)).boundingBox();
+  await touch("touchStart", [{ x: r2.x + 40, y: r2.y + 200 }]);
+  await touch("touchEnd", []);
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "the tap did not open View");
+});
+
+test("a press on the scrollbar gutter opens nothing and picks nothing, and a press on the picture opens View, at 1280 wide", async (t) => {
+  const it = picItem("press", 41);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  assert.ok((await measure(page, it.id)).g > 0, "this browser draws no scrollbar gutter");
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100);
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the scrollbar opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the scrollbar picked the option");
+  // A drag that starts on the scroll thumb and ends on the picture scrolls it; it is not a press on the picture.
+  await page.mouse.move(r.x + r.width - 4, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 24, r.y + 250, { steps: 15 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a drag from the scrollbar onto the picture opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a drag from the scrollbar onto the picture picked the option");
+  await page.mouse.click(r.x + 20, r.y + 100);
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "a press on the picture did not open View");
+});
+
+test("a right-button press on the scrollbar, then Escape, leaves Enter working on Add a note, at 1280 wide", async (t) => {
+  const it = picItem("stale-right", 43);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "right" });
+  await page.keyboard.press("Escape");
+  await card(page, it).getByRole("button", { name: "Add a note" }).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, "the note did not open: a right press on the scrollbar left a stale state");
+});
+
+test("a middle press on the scrollbar leaves Space working on an option, at 1280 wide", async (t) => {
+  const it = picItem("stale-middle", 44);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "middle" });
+  await page.locator(`#o-${it.id}-b`).focus();
+  await page.keyboard.press("Space");
+  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Space did not pick option b: a middle press on the scrollbar left a stale state");
+});
+
+test("a press on the picture released on the scrollbar gutter opens nothing and picks nothing, at 1280 wide", async (t) => {
+  const it = picItem("press-out", 45);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const r = await page.locator(boxSel(it.id)).boundingBox();
+  await page.mouse.move(r.x + 20, r.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width - 4, r.y + 160, { steps: 10 });
+  await page.mouse.up();
+  assert.equal(await page.locator("#dsheet").isVisible(), false, "a press on the picture released on the gutter opened View");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a press on the picture released on the gutter picked the option");
+});
+
+test("the picture is one tab stop: its arrow, page and end keys scroll it, Home goes back, and Enter opens View, at 390 wide", async (t) => {
+  const it = picItem("keys", 40);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const opic = card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`);
+  const a = await opic.evaluate((o) => ({ label: o.getAttribute("aria-label"), tab: o.querySelector(".dfitwrap").getAttribute("tabindex"), hidden: o.querySelector(".dfitwrap").getAttribute("aria-hidden"), inert: o.querySelector("iframe").inert }));
+  assert.ok(a.tab === "-1" && a.hidden === "true" && a.inert, "the wrap or its frame is a tab stop: " + JSON.stringify(a));
+  assert.match(a.label, /Arrow keys scroll its picture$/, "the name lacks the scroll hint");
+  await opic.focus();
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown");
+  assert.equal((await measure(page, it.id)).st, 80, "two ArrowDown presses did not scroll 80px");
+  await page.keyboard.press("PageDown");
+  const m = await measure(page, it.id);
+  assert.equal(m.st, Math.min(80 + m.ch - 40, m.sh - m.ch), "PageDown did not scroll a page less 40px");
+  await page.keyboard.press("End");
+  const end = await measure(page, it.id);
+  assert.ok(end.st + end.ch >= end.sh - 1, "End did not reach the end");
+  const taken = await opic.evaluate((o) => { const e = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }); o.dispatchEvent(e); return e.defaultPrevented; });
+  assert.equal(taken, false, "at the end, ArrowDown was taken from the page");
+  await page.keyboard.press("Home");
+  assert.equal((await measure(page, it.id)).st, 0, "Home did not go to the top");
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "Enter did not open View");
+});
+
+for (const scheme of ["light", "dark"]) {
+  test(`the cue's pill and its text reach 4.5:1, and the box holds 480px, in the ${scheme} scheme`, async (t) => {
+    const it = picItem("pill", 38);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 }, scheme }); if (!page) return;
+    await frameSettled(page, 2400);
+    const [onFrame, onPill, h] = await page.evaluate(`(() => {${CONTRAST}
+      const rgb = (c) => "#" + c.match(/\\d+/g).slice(0, 3).map((x) => (+x).toString(16).padStart(2, "0")).join("");
+      const w = document.querySelector(${JSON.stringify(boxSel(it.id))}), pill = getComputedStyle(w.querySelector(".dmore"));
+      return [R(rgb(pill.backgroundColor), rgb(getComputedStyle(w).backgroundColor)), R(rgb(pill.color), rgb(pill.backgroundColor)), w.getBoundingClientRect().height];
+    })()`);
+    assert.ok(onFrame >= 4.5, `the pill is ${onFrame.toFixed(2)}:1 on the frame`);
+    assert.ok(onPill >= 4.5, `the text is ${onPill.toFixed(2)}:1 on the pill`);
+    assert.ok(h <= 480, `the box is ${h} high, over 480`);
+  });
+}
+
+// Each row: name, mockup, focus, mockup height, box width and height, the focus's top in the mockup, and a declared size.
+const FIT_CASES = [
+  ["a focus that fits", '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>', "#panel", 1400, 300, 200, 700],
+  ["a 1200px mockup", '<body style="margin:0"><div style="height:1200px;background:#2a6"></div></body>', undefined, 1200, 390, 1200, 0],
+  ["a focus with a declared size", '<body style="margin:0;width:700px"><div style="height:700px"></div><div id="panel" style="width:600px;height:400px;background:#a62"></div></body>', "#panel", 1100, 600, 400, 700, { w: 600, h: 400 }],
+];
+for (const width of [390, 1280, 1440]) {
+  for (const [name, mock, focus, H, bw, bh, ty, size] of FIT_CASES) {
+    test(`${name} is drawn as today, with no scroll and no cue, at ${width} wide`, async (t) => {
+      const it = picItem("fit", 39, { focus, size });
+      const page = await open(t, { items: [it], designData: { ...PICS, "price-a": mock }, viewport: { width, height: 900 } }); if (!page) return;
+      await frameSettled(page, H);
+      if (focus) await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+      const m = await measure(page, it.id);
+      const col = await page.locator(boxSel(it.id)).evaluate((w) => w.parentElement.clientWidth);
+      const sc = Math.min(1, (col - 2) / bw, Math.max(480 / bh, 120 / bw));
+      assert.equal(m.w, Math.ceil(bw * sc) + 2, "the box width");
+      assert.equal(m.h, Math.ceil(bh * sc), "the box height");
+      assert.ok(!/scroll/.test(m.cls), "a picture that fits scrolls");
+      assert.equal(await page.locator(boxSel(it.id)).evaluate((w) => { const c = w.querySelector(".dcue"); return !c || getComputedStyle(c).display === "none"; }), true, "the cue is drawn on a picture that fits");
+      const tf = await page.locator(`${boxSel(it.id)} iframe`).evaluate((f) => f.style.transform);
+      assert.ok(Math.abs(+/scale\(([-\d.e]+)\)/.exec(tf)[1] - sc) < 1e-6, `the scale is not the formula's ${sc}: ${tf}`);
+      if (focus) assert.ok(Math.abs(+/translate\([^,]*,\s*([-\d.e]+)px\)/.exec(tf)[1] + ty * sc) < 0.01, `the focus is not moved to ${-ty * sc}: ${tf}`);
+    });
+  }
+}
+
+test("a 1564px mockup at 390 wide scrolls in its box, and the cue shows", async (t) => {
+  const it = picItem("scroll-edge", 56);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1564) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1564);
+  const m = await measure(page, it.id);
+  assert.ok(m.sh - m.ch > 0, `the picture does not scroll: its scroll range is ${m.sh - m.ch}px`);
+  assert.equal((await cueState(page, it.id)).disp, "flex", "the cue is not drawn on a picture that scrolls");
+});
+
+test("a mockup 1px over the fitted height gives a box of at most 480 and no cue, at 390 wide", async (t) => {
+  const it = picItem("edge", 53);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1561) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1561);
+  const m = await measure(page, it.id);
+  assert.ok(m.h <= 480, `the box is ${m.h} high, over 480`);
+  assert.notEqual((await cueState(page, it.id)).disp, "flex", "the cue shows on a picture 1px over the fit");
+});
+
+test("a picture that differs from its siblings keeps its 3px border inside a 134px box, and still scrolls, at 1280 wide", async (t) => {
+  const it = picItem("dif", 5, { differs: ["picture"] });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  const m = await measure(page, it.id);
+  assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif")), "the picture is not marked as differing");
+  assert.ok(Math.abs(m.w - 134) <= 1, `the box is ${m.w} wide, not 134`);
+  assert.ok(m.sh - m.ch > 100 && Math.abs(m.fw - m.cw) <= 1, "the differing picture does not scroll at the content width");
+});
+
+test("a tall picture adds no sideways scroll to the page at 390 wide, even scrolled to its end", async (t) => {
+  const it = picItem("sideways", 54);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = w.scrollHeight; });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+});
+
+// A 60-character URL has no break point, so the step must wrap inside the card rather than widen it.
+const LONG_URL = "https://waiting.test/" + "a".repeat(60 - "https://waiting.test/".length);
+for (const width of [430, 390, 360]) {
+  test(`a task step with an unbroken 60-character URL stays inside the card and the page, at ${width} wide`, async (t) => {
+    const it = { ...TASK, id: "long-url-task", n: 60, steps: [LONG_URL] };
+    const page = await open(t, { items: [it], viewport: { width, height: 900 } }); if (!page) return;
+    // The card's own box can stay on screen while a step inside it runs past the edge, so take the furthest right of the card and all it holds.
+    const right = await card(page, it).evaluate((c) => Math.max(c.getBoundingClientRect().right, ...[...c.querySelectorAll("*")].map((e) => e.getBoundingClientRect().right)));
+    assert.ok(right <= width, `the card runs to ${right} px, past the ${width} px screen`);
+    const scrollW = await page.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(scrollW <= width, `the page is ${scrollW} px wide on a ${width} px screen`);
   });
 }
 
@@ -906,6 +1222,69 @@ test("a saved none note does not ride along when the owner picks an option", asy
 
 const sent = (page) => page.evaluate(() => window.__sent);
 const told = (page, text) => page.locator("#sentStatus", { hasText: text }).waitFor();
+const NOTE_ONLY = { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", note: "Which cable?" } };
+
+test("a task note with no Mark done makes the card ready, live as the owner types", async (t) => {
+  const page = await open(t); if (!page) return;
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open with nothing answered");
+  await addNote(page, TASK, "Which cable?");
+  assert.equal(await card(page, TASK).locator(".ready").textContent(), "Ready to send: note, not done.");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer");
+  await page.fill(`#n-${TASK.id}`, "   ");
+  assert.equal(await card(page, TASK).locator(".ready").textContent(), "");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on a blank note");
+});
+
+test("a note-only task sends its note with no done; the notice says note, not done and the receipt says Not marked done", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, TASK, "Which cable?");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a note-only task");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], TASK.id);
+  const a = (await answers(page))[TASK.id];
+  assert.deepEqual([a.item, a.n, a.note], [TASK.id, 28, "Which cable?"]);
+  assert.ok(!("done" in a), "a note-only answer carries done");
+  await page.waitForFunction(() => window.__sent.length === 1);
+  assert.match((await sent(page))[0].text, /28 note, not done \(Which cable\?\)/);
+  await card(page, TASK).locator(".receipt").waitFor();
+  assert.match(await card(page, TASK).locator(".receipt").textContent(), /Not marked done/);
+});
+
+test("a saved note-only answer shows Not marked done with its note, and Change keeps the note", async (t) => {
+  const page = await open(t, { answers: NOTE_ONLY }); if (!page) return;
+  const c = card(page, TASK);
+  assert.match(await c.locator(".receipt").textContent(), /Not marked done/);
+  assert.match(await c.locator(".receipt .rnote").textContent(), /^Note: Which cable\?$/);
+  await c.getByRole("button", { name: "Change" }).click();
+  assert.equal(await page.inputValue(`#n-${TASK.id}`), "Which cable?");
+  assert.equal(await c.locator(".ready").textContent(), "Ready to send: note, not done.");
+  await page.fill(`#n-${TASK.id}`, "");
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+});
+
+test("the Copy line names a note-only task as note, not done", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await addNote(page, TASK, "Which cable?");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a note-only task");
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await page.click("#copy");
+  assert.equal(await page.evaluate(() => window.__copied), "28 note, not done (Which cable?)");
+});
+
+test("the Copy line keeps a saved done when a draft under Change would not send", async (t) => {
+  const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
+  await card(page, TASK).getByRole("button", { name: "Change" }).click();
+  await card(page, TASK).getByRole("button", { name: "Mark done" }).click(); // the draft is no longer done
+  await addNote(page, TASK, "   ");
+  await choose(page, DECISION, "a"); // a ready answer, so the failed write opens the Copy line
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await page.click("#copy");
+  assert.equal(await page.evaluate(() => window.__copied), "27 a, 28 done");
+});
 
 test("a send gives one notice that names the item and the choice", async (t) => {
   const page = await open(t); if (!page) return;
@@ -1448,6 +1827,52 @@ test("two designs of one slug with different focus keep their own size, and the 
   assert.ok(hs[0] > hs[1] * 1.6, "the second picture took the first one's size: " + hs);
   await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
   assert.match(await page.locator("#dTitle").textContent(), /^Layout B/);
+});
+
+// ---------------------------------------------------------------- the mockup draw width has one home
+// FIT_W is the width a mockup is laid out at. A CSS rule or a comment that repeats the number goes stale when FIT_W moves.
+const FIT_W_DECL = /const FIT_W = (\d+)/;
+// Each line of `src` that holds `num` as a number of its own, except the FIT_W declaration itself. Strings, comments and
+// templates are read as plain text: a restatement counts wherever it stands. 3900, 1390, a390, 0.390 and #390 (a hex
+// colour) are other values; 390px and "390 wide" are the same one.
+function restatements(src, num) {
+  const decl = FIT_W_DECL.exec(src), own = decl ? decl.index + decl[0].length - decl[1].length : -1;
+  const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g");
+  return [...new Set([...src.matchAll(again)].filter((m) => m.index !== own).map((m) => src.slice(0, m.index).split("\n").length))]
+    .map((n) => `line ${n}: ${lines[n - 1].trim().slice(0, 100)}`);
+}
+
+test("the mockup draw width is written once in the page, in FIT_W", () => {
+  const decl = FIT_W_DECL.exec(html);
+  assert.ok(decl, "page.html has no `const FIT_W = <number>` declaration");
+  const found = restatements(html, decl[1]);
+  assert.deepEqual(found, [], `page.html restates the draw width ${decl[1]} outside FIT_W. Read it from FIT_W or drop it:\n  ${found.join("\n  ")}`);
+});
+
+test("the restatement scan finds a number behind a comment opener in a string, in a template and after a lone quote, and skips other numbers", () => {
+  const src = [
+    "const FIT_W = 390;",
+    "const u = 'http://x/390px';",
+    'const c = "/* 390 */";',
+    'const h = "# 390";',
+    "const t = `a",
+    "b 390 c`;",
+    "<p>Don't</p> 390 wide",
+    "const other = 3900 + 1390 + 0.390 + 390.5 + a390 + #390;",
+  ].join("\n");
+  assert.deepEqual(restatements(src, "390"), [
+    "line 2: const u = 'http://x/390px';", 'line 3: const c = "/* 390 */";', 'line 4: const h = "# 390";', "line 6: b 390 c`;", "line 7: <p>Don't</p> 390 wide",
+  ]);
+});
+
+test("a mockup frame is laid out at the width FIT_W holds", async (t) => {
+  const narrow = Number(FIT_W_DECL.exec(html)[1]) - 30;
+  const pageHtml = html.replace(FIT_W_DECL, `const FIT_W = ${narrow}`);
+  assert.notEqual(pageHtml, html, "FIT_W was not rewritten");
+  const it = picItem("fit-width-q", 71);
+  const page = await open(t, { items: [it], designData: PICS, pageHtml }); if (!page) return;
+  const widths = await card(page, it).locator(".opic iframe.dframe").evaluateAll((fs) => fs.map((f) => getComputedStyle(f).width));
+  assert.deepEqual(widths, LOOK_OPTS.map(() => `${narrow}px`), "a frame keeps a width of its own, not FIT_W");
 });
 
 // ---------------------------------------------------------------- each option's picture shows its own difference
@@ -2116,4 +2541,1117 @@ test("a decision card with no differs mark shows no stray null or undefined text
     return bad;
   }, DECISION.id);
   assert.deepEqual(stray, [], "stray text in the decision card");
+});
+
+// ---------------------------------------------------------------- c190: links on an option card, and a task's command
+// Each link row and command block id follows the item's id, as the option radios do.
+const LINK = { label: "Merge sample-repo#374 on GitHub", url: "https://github.example.test/sample-repo/pull/374" };
+// Option a has a link and option b none, so one card holds the links row and the other a nolinks span.
+const LINKED = mk("linked-pick", 29, {
+  options: [
+    { key: "a", label: "Merge it", how: "Mark it ready and press Merge.", gain: "g", lose: "l", links: [LINK] },
+    { key: "b", label: "Wait", how: "Leave it open.", gain: "g", lose: "l" },
+  ],
+  pick: "a", why: "It lands now.",
+});
+const PLAIN = mk("plain-pick", 30); // no option has a link
+const CMD = "cd ~/sample-repo\n\necho \"a < b & 'c'\"\n  git status --short";
+const CMD_LINES = CMD.split("\n").map((l) => l.trim()).filter(Boolean);
+const RUN = { ...TASK, id: "run-the-command", n: 31, title: "Run the command", steps: ["Open a terminal", "Paste the command and run it"], command: CMD, links: [{ label: "Sample repo on GitHub", url: "https://github.example.test/sample-repo" }] };
+const WIDE_RUN = { ...RUN, id: "wide-command", n: 32, title: "Deploy the release", command: "npm run deploy -- --environment production --region us-east-1 --confirm --message 'a line that runs past the width of a phone and must wrap, not scroll'\n" + CMD };
+const STATUS_REFUSED = "Not copied. The text is selected; copy it by hand.";
+// A missing element fails with its own message, not as a locator timeout.
+const need = async (loc, msg) => assert.equal(await loc.count(), 1, msg);
+const boxHeight = async (loc) => (await loc.boundingBox())?.height ?? 0;
+// Waits up to 3 s for a page condition; a miss returns false, so the assert names it.
+const holds = (page, fn, arg = null) => page.waitForFunction(fn, arg, { timeout: 3000 }).then(() => true, () => false);
+// The clipboard either takes the text into window.__copied or refuses it, as a frame without permission does.
+const stubClipboard = (page, refuse) => page.evaluate((no) => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { if (no) throw new Error("denied"); window.__copied = s; } } }); }, refuse);
+
+test("a decision option's link sits between its how text and its timing rows, names where it opens, and a card with no link keeps its rows", async (t) => {
+  const page = await open(t, { items: [LINKED, PLAIN] }); if (!page) return;
+  const row = card(page, LINKED).locator(`#k-${LINKED.id}-a`);
+  await need(row, "no links row on option a");
+  const place = await row.evaluate((e) => ({ inOpt: !!e.closest("label.opt"), afterHow: !!e.previousElementSibling?.classList.contains("how"), beforeTr: !!e.nextElementSibling?.classList.contains("tr") }));
+  assert.deepEqual(place, { inOpt: true, afterHow: true, beforeTr: true }, "the links row is not between the how text and the timing rows");
+  const link = row.locator("a");
+  await need(link, "the links row holds no link");
+  const got = await link.evaluate((a) => ({ href: a.getAttribute("href"), target: a.getAttribute("target"), rel: a.getAttribute("rel"), text: a.textContent, arrow: a.querySelector('span[aria-hidden="true"]')?.textContent, sr: a.querySelector("span.sr")?.textContent }));
+  assert.equal(got.href, LINK.url);
+  assert.equal(got.target, "_blank");
+  assert.equal(got.rel, "noopener");
+  assert.ok(got.text.startsWith(LINK.label), "the link text is not its label");
+  assert.equal(got.arrow, "↗", "the arrow is not in a span hidden from screen readers");
+  assert.equal(got.sr, ", opens in a new tab", "no screen-reader words say where the link opens");
+  assert.equal(await page.getByRole("link", { name: LINK.label + ", opens in a new tab", exact: true }).count(), 1, "the link is not named for where it opens");
+  assert.equal(await card(page, LINKED).locator(".opts.olinks").count(), 1, "the options do not take the olinks class");
+  assert.equal(await card(page, LINKED).locator(`label[for="o-${LINKED.id}-b"] span.nolinks`).count(), 1, "an option with no link has no nolinks span");
+  assert.equal(await card(page, PLAIN).locator(".opts.olinks").count(), 0, "a card with no link took the olinks class");
+  assert.equal(await card(page, PLAIN).locator(".opts a, .opts .links").count(), 0, "a card with no link shows a link");
+});
+
+test("a tap on an option's link opens it in a new tab and leaves the radio unchecked; a tap on the card still picks", async (t) => {
+  const page = await open(t, { items: [LINKED] }); if (!page) return;
+  const link = card(page, LINKED).locator(`#k-${LINKED.id}-a a`);
+  await need(link, "no link on option a");
+  await page.context().route("**/*", (r) => r.abort()); // the new tab loads nothing
+  const [tab] = await Promise.all([page.context().waitForEvent("page", { timeout: 5000 }), link.click()]);
+  await tab.close();
+  assert.equal(await page.isChecked(`#o-${LINKED.id}-a`), false, "a tap on the link checked the option");
+  assert.equal(await card(page, LINKED).locator(".opt.sel").count(), 0, "a tap on the link selected the card");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a tap on the link made an answer");
+  await card(page, LINKED).locator(`label[for="o-${LINKED.id}-a"] .how`).click();
+  assert.equal(await page.isChecked(`#o-${LINKED.id}-a`), true, "a tap on the card did not pick the option");
+});
+
+test("a task's link has the same screen-reader name as an option's link", async (t) => {
+  const page = await open(t, { items: [RUN] }); if (!page) return;
+  assert.equal(await page.getByRole("link", { name: "Sample repo on GitHub, opens in a new tab", exact: true }).count(), 1, "the task link is not named for where it opens");
+});
+
+test("a task's command sits after its steps, closed behind Show the command, and Copy writes it exactly while it is closed", async (t) => {
+  const page = await open(t, { items: [RUN] }); if (!page) return;
+  const box = card(page, RUN).locator(".cmd");
+  await need(box, "no command block on a task with a command");
+  const place = await box.evaluate((e) => ({ afterSteps: !!e.previousElementSibling?.classList.contains("steps"), beforeLinks: !!e.nextElementSibling?.classList.contains("links") }));
+  assert.deepEqual(place, { afterSteps: true, beforeLinks: true }, "the command block is not between the steps and the links");
+  const more = box.locator("details");
+  await need(more, "the command is not in a closed disclosure");
+  assert.equal(await more.evaluate((d) => d.open), false, "the disclosure starts open");
+  assert.equal((await more.locator("summary").textContent()).trim(), "Show the command");
+  const copy = box.locator("button.cmd-copy");
+  await need(copy, "no Copy button on the command");
+  assert.equal(await copy.getAttribute("aria-label"), "Copy the command for No. 31");
+  assert.equal(await copy.evaluate((b) => !!b.closest("details")), false, "Copy sits inside the disclosure");
+  assert.equal(await copy.innerText(), "Copy", "Copy does not read Copy at first");
+  assert.ok((await box.textContent()).includes(`echo "a < b & 'c'"`), "the command does not show < and & as written");
+  await stubClipboard(page, false);
+  await copy.click();
+  assert.equal(await holds(page, (id) => !!document.querySelector("#item-" + id + " .cmd.copied"), RUN.id), true, "a copy that worked did not mark the block copied");
+  assert.equal(await page.evaluate(() => window.__copied), CMD, "Copy did not write the command exactly");
+  assert.equal(await copy.innerText(), "Copied", "the button does not say Copied");
+});
+
+test("a copy the browser refuses opens the command, selects its text, and says so in words", async (t) => {
+  const page = await open(t, { items: [RUN] }); if (!page) return;
+  const box = card(page, RUN).locator(".cmd");
+  await need(box, "no command block on a task with a command");
+  await stubClipboard(page, true);
+  await box.locator("button.cmd-copy").click();
+  assert.equal(await holds(page, (id) => !!document.querySelector("#item-" + id + " .cmd.failed"), RUN.id), true, "a refused copy did not mark the block failed");
+  assert.equal(await box.locator("details").evaluate((d) => d.open), true, "a refused copy did not open the command");
+  await need(box.locator("[aria-live]"), "no status line in the command block");
+  assert.equal((await box.locator("[aria-live]").textContent()).trim(), STATUS_REFUSED, "the status does not say the copy failed");
+  const sel = await page.evaluate(() => getSelection().toString());
+  for (const line of CMD_LINES) assert.ok(sel.includes(line), "the command text is not selected: " + line);
+  assert.equal(await box.evaluate((e) => e.classList.contains("copied")), false, "a refused copy marked the block copied");
+  assert.equal(await page.evaluate(() => window.__copied), undefined, "a refused copy wrote something");
+});
+
+test("a task with no command shows no command block, and a task with one shows it", async (t) => {
+  const page = await open(t, { items: [RUN, TASK] }); if (!page) return;
+  assert.equal(await card(page, RUN).locator(".cmd").count(), 1, "the task with a command has no command block");
+  assert.equal(await card(page, TASK).locator(".cmd").count(), 0, "a task with no command shows a command block");
+});
+
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
+  test(`links and Copy are 44px tall or more, and a long command wraps without sideways scroll, at ${width} wide, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [LINKED, WIDE_RUN], scheme, viewport: { width, height: 900 } }); if (!page) return;
+    const link = card(page, LINKED).locator(`#k-${LINKED.id}-a a`);
+    await need(link, "no link on option a");
+    assert.ok((await boxHeight(link)) >= 44, "the option link is under 44px tall");
+    const box = card(page, WIDE_RUN).locator(".cmd");
+    await need(box, "no command block on the wide task");
+    await need(box.locator("summary"), "the command has no disclosure to open");
+    await box.locator("summary").click();
+    const copy = box.locator("button.cmd-copy");
+    await need(copy, "no Copy button on the wide task");
+    assert.ok((await boxHeight(copy)) >= 44, "Copy is under 44px tall");
+    await need(box.locator(".cmd-text"), "no command text in the block");
+    assert.equal(await box.locator(".cmd-text").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, "the command runs past its block");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+  });
+}
+
+// A links value that is a string, not a list, must not break the page. The card still renders, with no links row.
+test("an option whose links is a string, not a list, renders with no page error and no links row", async (t) => {
+  const errors = [];
+  const it = mk("string-links", 33, {
+    options: [
+      { key: "a", label: "Merge it", how: "Mark it ready and press Merge.", gain: "g", lose: "l", links: "https://github.example.test/sample-repo/pull/374" },
+      { key: "b", label: "Wait", how: "Leave it open.", gain: "g", lose: "l" },
+    ],
+    pick: "a", why: "It lands now.",
+  });
+  const page = await open(t, { items: [it], errors }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
+  if (!page) { assert.deepEqual(errors, [], "the page threw on a string links value"); return; }
+  await page.waitForTimeout(200); // a page error can land a tick after the card appears
+  assert.deepEqual(errors, [], "the page threw on a string links value");
+  assert.equal(await card(page, it).locator(".opt").count(), 2, "the option cards did not render");
+  assert.equal(await card(page, it).locator(".links").count(), 0, "a string links value shows a links row");
+});
+
+// ---------------------------------------------------------------- one page: the Status tab (lane c136)
+// The roadmap data block is built by skills/roadmap/build.py --block and spliced into PAGE by
+// skills/waiting-page/splice.py, as the writer republishes it (tests/merged_page.py does both).
+// The status panel reads only window.ROADMAP_DATA, never the artifact database.
+
+const MERGED = path.join(HERE, "merged_page.py");
+function mergedPage(...flags) {
+  const r = spawnSync(process.env.PYTHON || "python3", [MERGED, "--page", PAGE, ...flags], { encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(r.status, 0, "the roadmap build or the splice failed: " + (r.stderr || r.error));
+  return r.stdout;
+}
+// Database content the status panel must never show: the roadmap's own collections in the live database.
+const LEAKED_STEP = "Leaked database step", LEAKED_TILE = "Leaked database tile";
+const LEAK = {
+  steps: { leak1: { title: LEAKED_STEP, status: "active", phase: "cleanup", order: 0, note: "n", updatedAt: "2026-10-26T00:00:00Z" } },
+  meta: { phases: { cleanup: { metrics: [{ label: LEAKED_TILE, value: "9 of 9" }] } }, cull: { stopRule: "leak" }, advisor: { text: "leak" } },
+};
+// The waiting part reads items, answers, groups, receipts and meta/page. A read of anything else is the status part's.
+const statusRead = (r) => r[0] === "steps" || r[0] === "topics" || (r[0] === "meta" && r[1] !== "page");
+const statusTab = (page) => page.getByRole("tab", { name: "Status", exact: true });
+async function openStatus(page) {
+  const tab = statusTab(page);
+  assert.equal(await tab.count(), 1, "the page has no Status tab (role=tab, name Status)");
+  const id = await tab.getAttribute("aria-controls");
+  assert.ok(id, "the Status tab does not name its panel with aria-controls");
+  const panel = page.locator("#" + id);
+  assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
+  await tab.click();
+  await panel.waitFor({ state: "visible" });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read would land here
+  return panel;
+}
+// Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
+const shows = async (page, re) => re.test(await page.locator("body").textContent());
+const waitingShape = (page) => page.evaluate(() => ({
+  tiers: [...document.querySelectorAll("section.tier")].map((s) => [s.id, [...s.querySelectorAll("article.card")].map((c) => c.id)]),
+  bar: document.getElementById("barStatus").textContent,
+  send: document.getElementById("send").textContent,
+}));
+// Waits for the title, then returns the real one, so a red run names what the title was.
+const titleOf = async (page, want) => { await page.waitForFunction((w) => document.title === w, want).catch(() => {}); return page.title(); };
+
+test("saved answers survive a rebuild and republish", async (t) => {
+  const page = await open(t, { pageHtml: mergedPage(), items: [DECISION], answers: SAVED_A, dbExtra: LEAK }); if (!page) return;
+  assert.match(await card(page, DECISION).locator(".receipt").textContent(), /You chose A: Red/);
+  assert.match((await card(page, DECISION).locator(".ans").textContent()).trim(), /^Answered, filing pending /);
+  const usesBefore = await page.evaluate(() => window.__uses.length);
+  const panel = await openStatus(page);
+  assert.match(await panel.textContent(), /Baked roadmap step zebra/, "the status panel does not show the baked roadmap");
+  assert.equal(await shows(page, /Leaked database/), false, "the status panel shows database content");
+  assert.deepEqual((await page.evaluate(() => window.__reads)).filter(statusRead), [], "the status part reads the live database");
+  assert.equal(await page.evaluate(() => window.__uses.length), usesBefore, "opening Status calls window.claude.use");
+  assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[1] === "answers"), [], "a document in answers/ was written or deleted");
+  assert.deepEqual(await answers(page), SAVED_A);
+});
+
+test("with no roadmap data the Status tab says unknown with a reason, and the waiting part is unchanged", async (t) => {
+  const items = [DECISION, TASK];
+  const shipped = await open(t, { items, dbExtra: LEAK }); if (!shipped) return; // PAGE as shipped: its roadmap block is empty
+  const built = await open(t, { pageHtml: mergedPage("--no-roadmap"), items, dbExtra: LEAK }); // ROADMAP_DATA = null
+  const before = await waitingShape(shipped);
+  assert.ok(before.tiers.length > 0 && before.send, "the waiting part drew nothing: " + JSON.stringify(before));
+  assert.deepEqual(await waitingShape(built), before, "the roadmap block changed the waiting part");
+  assert.equal(await statusTab(built).count(), 1, "the page has no Status tab (role=tab, name Status)");
+  assert.equal(await statusTab(built).isVisible(), true, "the tab row hides Status when no item has a design");
+  for (const [name, page] of [["as shipped", shipped], ["no record branch", built]]) {
+    const text = await (await openStatus(page)).textContent();
+    assert.match(text, /unknown/i, name + ": the status panel does not say unknown");
+    // The build knows why (no record branch), so its page says so. The shipped page has no build info to quote.
+    if (page === built) assert.match(text, /\bno\b[^.]{0,40}\b(roadmap|record branch)\b/i, name + ": the status panel gives no reason");
+    assert.doesNotMatch(text, /signed in/i, name + ": the status panel tells the owner to sign in, which is false here");
+    assert.equal(await shows(page, /Leaked database/), false, name + ": the status panel shows database content");
+    assert.deepEqual((await page.evaluate(() => window.__reads)).filter(statusRead), [], name + ": the status part reads the live database");
+  }
+});
+
+test("a note typed on an item survives a press of Status and back, because Status hides #qView and never removes it", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "keep this draft");
+  await page.evaluate(() => { window.__qView = document.getElementById("qView"); });
+  const panel = await openStatus(page);
+  assert.equal(await page.locator("#qView").count(), 1, "Status removed #qView");
+  assert.equal(await page.locator("#qView").isHidden(), true, "Questions still shows under Status");
+  await page.click("#tabQ");
+  await page.locator("#qView").waitFor({ state: "visible" });
+  assert.equal(await panel.isHidden(), true, "Status still shows on Questions");
+  assert.equal(await page.evaluate(() => document.getElementById("qView") === window.__qView), true, "#qView was rebuilt");
+  assert.equal(await page.inputValue(`#n-${DECISION.id}`), "keep this draft");
+});
+
+test("the document title names the open tab: <repo>: Questions, then <repo>: Status", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass" } } }); if (!page) return;
+  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+  await openStatus(page);
+  assert.equal(await titleOf(page, "Compass: Status"), "Compass: Status");
+  await page.click("#tabQ");
+  assert.equal(await titleOf(page, "Compass: Questions"), "Compass: Questions");
+});
+
+// ---------------------------------------------------------------- one page: the phase rail at phone widths (lane c136)
+// The rail's current phase carries a dot, so its name has the least room. From 320 to 540px of page
+// width, in light and dark, with each of the five real phases (Clean up, Organize, Design, Roll out,
+// Later) current in turn: no phase name may break inside a word, and the dot may not sit alone on a line
+// below its name (design notes, item 16: 5 columns only while each name with the dot sits on one line).
+// The sweep must cross the rail's change from 3 to 5 columns, or it pins nothing about where that change
+// sits. Each word is measured with a Range: more than one client rect is a word on two lines. The dot is
+// alone when its top is at or below the bottom of its name's last text line. The width is swept on one
+// page with setViewportSize, so the rail re-lays out as it does when a phone turns or a window is dragged.
+// The web fonts are blocked, so the rail is set in whatever fallback font the runner has, and a threshold
+// that holds for that font may fail in a wider one. So each case runs twice: in the runner's own font, and
+// with the page's --body forced to "DejaVu Sans", a wide font that the ubuntu CI images ship. The forced
+// run proves the font applied (installed, set on the rail, measured in the rail), and fails, never skips,
+// when it did not. The range reaches 540px so a threshold that rises for the wide font still shows 5 columns.
+
+const RAIL_WIDTHS = Array.from({ length: 540 - 320 + 1 }, (_, i) => 320 + i);
+const RAIL_FONTS = [{ label: "default", force: null }, { label: "DejaVu Sans", force: "DejaVu Sans" }];
+const RAIL_PHASES = [["cleanup", "Clean up"], ["organize", "Organize"], ["design", "Design"], ["rollout", "Roll out"], ["later", "Later"]];
+// Overrides --body on the page (the rail sets its text with var(--body)); the !important beats the :root rule.
+const forceRailFont = (page, family) => page.addStyleTag({ content: `:root { --body: "${family}", sans-serif !important; }` });
+// Measures "Organize" (a word of the rail) as the rail sets it, and again in a probe span with the same
+// weight and size but a named family. An installed family measures the same with a serif or a monospace
+// fallback; a missing one does not. The "no such font" pair shows the probe tells two fallbacks apart on
+// this runner.
+const railFontProbe = (page, family) => page.evaluate((family) => {
+  const nm = [...document.querySelectorAll(".prail .nm > span:first-child")].find((s) => s.textContent === "Organize");
+  const cs = getComputedStyle(nm);
+  const range = document.createRange();
+  range.selectNodeContents(document.createTreeWalker(nm, NodeFilter.SHOW_TEXT).nextNode());
+  const width = (fam) => {
+    const s = document.createElement("span");
+    s.textContent = "Organize";
+    s.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;letter-spacing:${cs.letterSpacing};font:${cs.fontWeight} ${cs.fontSize} ${fam}`;
+    document.body.append(s);
+    const w = s.getBoundingClientRect().width;
+    s.remove();
+    return w;
+  };
+  return {
+    family: cs.fontFamily, rail: range.getBoundingClientRect().width,
+    namedSerif: width(`"${family}", serif`), namedMono: width(`"${family}", monospace`),
+    noneSerif: width('"No Such Font 7f3a", serif'), noneMono: width('"No Such Font 7f3a", monospace'),
+  };
+}, family);
+const assertRailFont = async (page, family) => {
+  const f = await railFontProbe(page, family);
+  assert.ok(f.family.startsWith(`"${family}"`), `the rail's font-family is ${f.family}, not "${family}": the forced font did not reach the rail`);
+  assert.notEqual(f.noneSerif, f.noneMono, "the font probe cannot tell a serif fallback from a monospace one on this runner");
+  assert.ok(Math.abs(f.namedSerif - f.namedMono) < 0.01, `"${family}" is not installed on this runner (the probe fell back to another font), so this sweep would prove nothing about it`);
+  assert.ok(Math.abs(f.rail - f.namedSerif) < 0.05, `the rail sets "Organize" ${f.rail}px wide, but "${family}" sets it ${f.namedSerif}px: the rail is not rendered in the forced font`);
+};
+const railWords = (page) => page.evaluate(() => {
+  const words = [], split = [];
+  let dotAlone = false;
+  for (const nm of document.querySelectorAll(".prail .nm > span:first-child")) {
+    const walk = document.createTreeWalker(nm, NodeFilter.SHOW_TEXT);
+    let lastBottom = -Infinity;
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      for (const m of n.textContent.matchAll(/\S+/g)) {
+        const r = document.createRange();
+        r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        words.push(m[0]);
+        const rects = r.getClientRects();
+        if (rects.length > 1) split.push(m[0]);
+        for (const q of rects) lastBottom = Math.max(lastBottom, q.bottom);
+      }
+    }
+    const dot = nm.querySelector(".here");
+    if (dot && dot.getBoundingClientRect().top >= lastBottom) dotAlone = true;
+  }
+  const rail = document.querySelector(".prail");
+  return { words, split, dotAlone, cols: getComputedStyle(rail).gridTemplateColumns.split(" ").length, box: Math.round(rail.getBoundingClientRect().width) };
+});
+// "372-380px Organize current: dot alone on a line": the widths of each kind of hit as runs.
+const hitRuns = (hits) => {
+  const byKey = new Map();
+  for (const { w, key } of hits) byKey.set(key, [...(byKey.get(key) || []), w]);
+  return [...byKey].map(([key, ws]) => {
+    const runs = [];
+    for (const w of ws) { const last = runs[runs.length - 1]; if (last && last[1] === w - 1) last[1] = w; else runs.push([w, w]); }
+    return runs.map(([a, b]) => (a === b ? a : a + "-" + b) + "px").join(", ") + " " + key;
+  }).join("; ");
+};
+
+for (const scheme of ["light", "dark"]) {
+  for (const [phase, name] of RAIL_PHASES) {
+    for (const font of RAIL_FONTS) {
+      test(`no phase name breaks inside a word or leaves its dot alone at any page width from 320 to 540px, ${name} current, ${scheme} theme, ${font.label} font`, async (t) => {
+        const page = await open(t, { pageHtml: mergedPage("--current", phase), viewport: { width: RAIL_WIDTHS[0], height: 900 }, scheme }); if (!page) return;
+        if (font.force) await forceRailFont(page, font.force);
+        await openStatus(page);
+        assert.equal(await page.locator(".prail > button").count(), 5, "the rail does not hold the five phases");
+        assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+        assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), name, "the current phase is not " + name);
+        if (font.force) await assertRailFont(page, font.force);
+        const hits = [], cols = new Set();
+        for (const w of RAIL_WIDTHS) {
+          await page.setViewportSize({ width: w, height: 900 });
+          const m = await railWords(page); // the reads force a layout, so the container queries have resolved
+          assert.deepEqual(m.words, ["Clean", "up", "Organize", "Design", "Roll", "out", "Later"], `${w}px: the rail's words`);
+          cols.add(m.cols);
+          for (const word of m.split) hits.push({ w, key: `${name} current, ${font.label} font: "${word}" breaks inside the word`, box: m.box });
+          if (m.dotAlone) hits.push({ w, key: `${name} current, ${font.label} font: dot alone on a line`, box: m.box });
+        }
+        assert.deepEqual([...cols].sort(), [3, 5], "the sweep does not cross the rail's change from 3 to 5 columns, so it pins no threshold; columns seen: " + [...cols]);
+        assert.equal(hits.length, 0, `the rail breaks at ${hits[0] && hits[0].w}px page width (rail box ${hits[0] && hits[0].box}px), ${hits[0] && hits[0].key}; every hit: ${hitRuns(hits)}`);
+      });
+    }
+  }
+}
+
+test("merged_page.py refuses --current with --no-roadmap, since a repo with no roadmap has no current phase", () => {
+  const r = spawnSync(process.env.PYTHON || "python3", [MERGED, "--page", PAGE, "--no-roadmap", "--current", "organize"], { encoding: "utf8" });
+  assert.equal(r.status, 2, "exit status of the refusal: " + r.status);
+  assert.match(r.stderr, /--current needs a roadmap/);
+  assert.equal(r.stdout, "", "the refusal printed a page");
+});
+
+// ---------------------------------------------------------------- c135: a question that takes several answers
+// Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
+
+// The one home of the multi fixtures; a case adds only its own fields. Option keys a to d show as letters A to D.
+const COLOURS = [opt("a", "Red"), opt("b", "Blue"), opt("c", "Green"), opt("d", "Yellow")];
+const multi = (id, n, over = {}) => mk(id, n, { multi: true, options: COLOURS.slice(0, 3), pick: ["a", "c"], why: "Red and Green cover it.", ...over });
+const ranked = (id, n, over = {}) => multi(id, n, { ranked: true, options: COLOURS, pick: ["c", "a", "d"], ...over });
+// Item 31's shape: options that can coexist, which were asked as pick-one.
+const digest = (over = {}) => multi("digest", 31, { title: "Which reminders should the weekly digest send?", options: [opt("a", "Open items older than a week"), opt("b", "Picks that stood"), opt("c", "Answers that failed to save")], why: "Old items and lost answers cost you time.", ...over });
+const boxes = (page, it) => card(page, it).locator(".opts input[type=checkbox]");
+// The keys ticked now, in option order.
+const ticked = (page, it) => page.evaluate((id) => [...document.querySelectorAll(`#item-${id} .opts input`)].filter((i) => i.checked).map((i) => i.value), it.id);
+// Every case starts here, so a page that still draws the item as pick-one fails on this line.
+const needBoxes = async (page, it, n) => assert.equal(await boxes(page, it).count(), n, `item ${it.n} has no ${n} checkboxes: it is drawn as pick-one`);
+// A ranked card's label stretches over the whole card, so a press on its text lands on that label: press the label.
+const tick = (page, it, key) => (it.ranked ? page.locator(`label[for="o-${it.id}-${key}"]`).click() : choose(page, it, key));
+const labelOf = (it, key) => it.options.find((o) => o.key === key).label;
+// Take my pick keeps its place when it does not apply (`.gone`, visibility hidden), so a hidden one is still one element in the card.
+const takeShown = async (page, it) => {
+  const b = page.locator(`#b-take-${it.id}`);
+  assert.equal(await b.count(), 1, `${it.id}: Take my pick left its place in the card`);
+  return b.isVisible();
+};
+const rankText = (page, it, key) => page.locator(`#item-${it.id} .opt:has(#o-${it.id}-${key})`).textContent();
+// "2nd of 3". A card's text runs its spans together with no space, so a digit guard stands in for a word boundary.
+const rank = (ord, n) => new RegExp(`(?<!\\d)${ord} of ${n}(?!\\d)`);
+const moveBtn = (page, it, key, dir) => card(page, it).getByRole("button", { name: `Move ${labelOf(it, key)} ${dir}`, exact: true });
+const sendOne = async (page, it) => { await send(page); await page.waitForFunction((id) => !!window.__answers()[id], it.id); return (await answers(page))[it.id]; };
+
+test("a multi item draws checkboxes in a group, and two ticks send choice as a list of both keys", async (t) => {
+  const it = digest();
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it);
+  await needBoxes(page, it, 3);
+  assert.equal(await c.getByRole("radiogroup").count(), 0, "the options are still a radiogroup");
+  assert.equal(await c.getByRole("group", { name: /Options for No\. 31/ }).count(), 1, "the options are not a group");
+  assert.equal(await c.locator("input[type=radio]").count(), 0, "a radio is left on a multi item");
+  await choose(page, it, "a"); await choose(page, it, "c");
+  assert.deepEqual(await ticked(page, it), ["a", "c"]);
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer");
+  const a = await sendOne(page, it);
+  assert.deepEqual([a.item, a.n, a.choice, a.note], [it.id, 31, ["a", "c"], ""]);
+});
+
+test("a ranked item: three ticks, one Up, and Send writes the list in the order shown", async (t) => {
+  const it = ranked("rk-send", 32);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  for (const k of ["c", "a", "d"]) await tick(page, it, k);
+  assert.deepEqual(await ticked(page, it), ["a", "c", "d"]);
+  for (const [k, r] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), rank(r, 3), `rank of ${k}`);
+  await moveBtn(page, it, "a", "up").click();
+  for (const [k, r] of [["a", "1st"], ["c", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, it, k), rank(r, 3), `rank of ${k} after Up`);
+  const a = await sendOne(page, it);
+  assert.deepEqual([a.choice, a.note], [["a", "c", "d"], ""]);
+});
+
+test("a ranked item: a new tick goes last and an untick closes the gap", async (t) => {
+  const it = ranked("rk-gap", 32);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  await tick(page, it, "c"); await tick(page, it, "a");
+  assert.match(await rankText(page, it, "c"), rank("1st", 2));
+  assert.match(await rankText(page, it, "a"), rank("2nd", 2));
+  await tick(page, it, "d"); await tick(page, it, "b");
+  assert.match(await rankText(page, it, "d"), rank("3rd", 4), "a new tick did not go last");
+  assert.match(await rankText(page, it, "b"), rank("4th", 4));
+  await tick(page, it, "a"); // untick the 2nd
+  for (const [k, r] of [["c", "1st"], ["d", "2nd"], ["b", "3rd"]]) assert.match(await rankText(page, it, k), rank(r, 3), `rank of ${k} after the untick`);
+  assert.match(await rankText(page, it, "a"), /Not in your order/);
+  const a = await sendOne(page, it);
+  assert.deepEqual(a.choice, ["c", "d", "b"]);
+});
+
+// Option a's three text rows are marked as what sets it apart. Each text differs from the others', so the page keeps every mark.
+const MARKED = [{ ...opt("a", "Red"), how: "how A", gain: "gain A", lose: "lose A", differs: ["how", "gain", "lose"] }, opt("b", "Blue"), opt("c", "Green")];
+
+test("a press on a marked row ticks its option, on a ranked card as on a plain multi card", async (t) => {
+  const m = multi("dif-m", 34, { options: MARKED }), r = ranked("dif-r", 35, { options: MARKED });
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 3);
+  // The marked row paints above the ranked card's stretched label, so a real press at its centre must still reach the label. `force` keeps a fix that
+  // lays the label above the row from failing on "intercepts pointer events"; the press itself is still a real one at the row's centre.
+  for (const it of [m, r]) for (const row of ["how", "gain", "lose"]) {
+    const mark = page.locator(`#item-${it.id} .opt:has(#o-${it.id}-a) .${row}.dif`);
+    assert.equal(await mark.count(), 1, `${it.id}: the ${row} row is not marked`);
+    await mark.click({ force: true });
+    assert.deepEqual(await ticked(page, it), ["a"], `${it.id}: a press on the marked ${row} row did not tick its option`);
+    await mark.click({ force: true });
+    assert.deepEqual(await ticked(page, it), [], `${it.id}: a second press on the marked ${row} row did not untick it`);
+  }
+});
+
+test("Take my pick on a multi item writes the whole pick list with the note accepted pick, ranked or not", async (t) => {
+  const m = digest(), r = ranked("rk-take", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  const take = card(page, m).getByRole("button", { name: /Take my pick/ });
+  assert.match(await take.textContent(), /^Take my pick \(.*Open items.*Answers that.*\)$/, "the button does not name both picks by title");
+  await take.click(); await takePick(page, r);
+  assert.deepEqual(await ticked(page, m), ["a", "c"]);
+  assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
+  for (const [k, n] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, r, k), rank(n, 3), `rank of ${k}`);
+  assert.equal(await takeShown(page, m), false, "Take my pick is not hidden after it was taken");
+  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden on a ranked item after it was taken");
+  assert.match(await card(page, m).locator(".ready").textContent(), /, my pick\.$/);
+  assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  const a = await answers(page);
+  assert.deepEqual([a[m.id].choice, a[m.id].note], [["a", "c"], "accepted pick"]);
+  assert.deepEqual([a[r.id].choice, a[r.id].note], [["c", "a", "d"], "accepted pick"]);
+});
+
+test("a note on a multi item with nothing ticked is choice none plus the note; with ticks it rides on the list", async (t) => {
+  const bare = digest(), withTicks = multi("note-ticks", 32);
+  const page = await open(t, { items: [bare, withTicks] }); if (!page) return;
+  await needBoxes(page, bare, 3); await needBoxes(page, withTicks, 3);
+  await addNote(page, bare, "Only the failed ones, as a push");
+  await choose(page, withTicks, "a"); await choose(page, withTicks, "b");
+  await addNote(page, withTicks, "push too");
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  const a = await answers(page);
+  assert.deepEqual([a[bare.id].choice, a[bare.id].note], ["none", "Only the failed ones, as a push"]);
+  assert.deepEqual([a[withTicks.id].choice, a[withTicks.id].note], [["a", "b"], "push too"]);
+});
+
+test("None of these on a multi item clears the ticks, needs a note, and sends the string none", async (t) => {
+  const it = digest();
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  await choose(page, it, "a");
+  await card(page, it).getByRole("button", { name: "None of these" }).click();
+  assert.deepEqual(await ticked(page, it), [], "a tick stayed beside None of these");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on None of these with no note");
+  await page.fill(`#n-${it.id}`, "Only a push");
+  const a = await sendOne(page, it);
+  assert.deepEqual([a.choice, a.note], ["none", "Only a push"]);
+});
+
+test("keys A to C toggle an option on a multi item, ranked or not", async (t) => {
+  const m = digest(), r = ranked("rk-keys", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  await card(page, m).locator(".title").click();
+  await page.keyboard.press("a"); await page.keyboard.press("c");
+  assert.deepEqual(await ticked(page, m), ["a", "c"], "a key did not tick its option");
+  await page.keyboard.press("a");
+  assert.deepEqual(await ticked(page, m), ["c"], "a second press did not untick");
+  await card(page, r).locator(".title").click();
+  await page.keyboard.press("c"); await page.keyboard.press("a");
+  assert.match(await rankText(page, r, "c"), rank("1st", 2));
+  assert.match(await rankText(page, r, "a"), rank("2nd", 2));
+  assert.deepEqual(await ticked(page, m), ["c"], "a key on the ranked card ticked the other card");
+});
+
+test("a saved multi answer lists each pick with its letter and title in order, and Change puts the list back", async (t) => {
+  const m = digest(), r = ranked("rk-saved", 32);
+  const at = "2026-10-26T01:00:00Z";
+  const page = await open(t, { items: [m, r], answers: { [m.id]: { item: m.id, n: 31, at, choice: ["a", "c"], note: "" }, [r.id]: { item: r.id, n: 32, at, choice: ["c", "a", "d"], note: "" } } }); if (!page) return;
+  const rows = async (c, tag) => (await c.locator(`.receipt ${tag} li`).allTextContents()).map((s) => s.replace(/\s+/g, " ").trim());
+  const mr = await rows(card(page, m), "ul"), rr = await rows(card(page, r), "ol");
+  assert.equal(mr.length, 2, "the saved card does not list the picks as a bullet list: " + mr);
+  assert.match(mr[0], /^A\W*Open items older than a week$/); assert.match(mr[1], /^C\W*Answers that failed to save$/);
+  assert.equal(rr.length, 3, "the saved ranked card does not list the picks as a numbered list: " + rr);
+  assert.match(rr[0], /^C\W*Green$/); assert.match(rr[1], /^A\W*Red$/); assert.match(rr[2], /^D\W*Yellow$/);
+  assert.match(await card(page, m).locator(".receipt").textContent(), /You chose:/);
+  assert.match(await card(page, r).locator(".receipt").textContent(), /You chose, in order:/);
+  await card(page, r).getByRole("button", { name: "Change" }).click();
+  assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
+  assert.match(await rankText(page, r, "c"), rank("1st", 3), "Change lost the order");
+  assert.match(await rankText(page, r, "a"), rank("2nd", 3));
+});
+
+test("the ready line names the picks by title, shortened, never by letter, a ranked line gives the order, and Take my pick hides once the ticks equal my pick", async (t) => {
+  const m = multi("rd-m", 41, { options: WORDY, pick: ["value", "watch"] }), r = ranked("rd-r", 42, { options: WORDY, pick: ["nothing", "value"] });
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 3);
+  const ready = (it) => card(page, it).locator(".ready").textContent();
+  assert.equal(await ready(m), "", "a ready line shows before a tick");
+  await tick(page, m, "value"); await tick(page, m, "watch");
+  assert.match(await ready(m), /^Ready to send: Value for the card.*… and Watch, your choice\.$/);
+  await tick(page, m, "nothing");
+  const three = await ready(m);
+  assert.ok(three.indexOf("Value for the card") < three.indexOf("Watch") && three.indexOf("Watch") < three.indexOf("Nothing") && /^Ready to send: /.test(three) && / and /.test(three), "three picks are not named in a list: " + three);
+  // The same two picks in another order than my pick (nothing, then value): the button stays, and it names my pick by title.
+  await tick(page, r, "value"); await tick(page, r, "nothing");
+  assert.match(await ready(r), /^Ready to send: Value for the card.*…, Nothing, your order\.$/);
+  assert.equal(await takeShown(page, r), true, "Take my pick is hidden while the order differs from my pick");
+  assert.match(await card(page, r).getByRole("button", { name: /Take my pick/ }).textContent(), /^Take my pick \(Nothing.*Value for the card.*…\)$/, "Take my pick does not name the picks by title");
+  await takePick(page, r);
+  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, my pick\.$/);
+  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden once the ticks equal my pick");
+  // Ticking exactly my pick by hand hides it too, and the line says the order is the owner's.
+  await tick(page, r, "value"); await tick(page, r, "nothing");
+  await tick(page, r, "nothing");
+  assert.equal(await takeShown(page, r), true, "Take my pick is hidden while only part of my pick is ticked");
+  await tick(page, r, "value");
+  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden after the owner ticked exactly my pick");
+  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, your order\.$/);
+});
+
+// An unranked multi item has no order to keep: its ticks stay in option order, whatever order they were ticked in (ruling of 15:55 CDT, c135 round 3).
+test("an unranked multi item keeps its ticks in option order: C then A equals my pick a+c, hides Take my pick, and the answer and the notice read a+c", async (t) => {
+  const it = multi("un-order", 61, { pick: ["a", "c"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  await tick(page, it, "c");
+  assert.equal(await takeShown(page, it), true, "Take my pick is hidden while only C is ticked");
+  await tick(page, it, "a");
+  assert.deepEqual(await ticked(page, it), ["a", "c"]);
+  assert.equal(await takeShown(page, it), false, "Take my pick is not hidden after C then A, the same set as my pick");
+  assert.match(await card(page, it).locator(".ready").textContent(), /^Ready to send: Red and Green, your choice\.$/, "the ready line does not name the ticks in option order");
+  await send(page);
+  await told(page, "Claude was told");
+  const a = (await answers(page))[it.id];
+  assert.deepEqual([a.choice, a.note], [["a", "c"], ""], "the answer is not in option order");
+  const s = await sent(page);
+  assert.equal(s.length, 1);
+  assert.match(s[0].text, /(?<!\d)61 a\+c(?![+\w])/, "the notice does not read a+c: " + s[0].text);
+});
+
+// An unranked multi pick out of option order must not keep Take my pick: an unranked pick is saved and compared in option order;
+// a ranked pick keeps the order it was ticked or picked in.
+test("a multi item whose pick is out of option order: option-order ticks hide Take my pick, Take my pick saves option order, and a ranked pick keeps its order", async (t) => {
+  const uHand = multi("po-u-hand", 81, { pick: ["c", "a"] }), uTake = multi("po-u-take", 82, { pick: ["c", "a"] });
+  const rHand = ranked("po-r-hand", 83), rTake = ranked("po-r-take", 84);
+  const page = await open(t, { items: [uHand, uTake, rHand, rTake] }); if (!page) return;
+  await needBoxes(page, uHand, 3); await needBoxes(page, uTake, 3); await needBoxes(page, rHand, 4); await needBoxes(page, rTake, 4);
+  for (const k of ["c", "a", "d"]) await tick(page, rHand, k);
+  assert.equal(await takeShown(page, rHand), false, "a ranked item ticked in its pick order: Take my pick is not hidden");
+  await tick(page, uHand, "a"); await tick(page, uHand, "c");
+  const uShown = await takeShown(page, uHand);
+  await takePick(page, uTake); await takePick(page, rTake);
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 4);
+  const a = await answers(page);
+  assert.deepEqual([a[rTake.id].choice, a[rHand.id].choice], [["c", "a", "d"], ["c", "a", "d"]], "a ranked pick is not saved in its pick order");
+  assert.deepEqual(
+    { shown: uShown, take: a[uTake.id].choice, hand: a[uHand.id].choice },
+    { shown: false, take: ["a", "c"], hand: ["a", "c"] },
+    "an unranked pick out of option order: Take my pick must hide once the ticks are A and C, and must save option order"
+  );
+});
+
+const LONGER = [opt("a", "Open items older than a week, listed oldest first"), opt("b", "Picks that stood since the last digest went out"), opt("c", "Answers that failed to save and need a second chance"), opt("d", "A fourth title that is long enough to wrap")];
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 }]) {
+  test(`no card moves when a box is ticked or Up and Down are pressed, at ${viewport.width} wide`, async (t) => {
+    const items = [multi("mv-m", 1, { context: LONG, options: LONGER.slice(0, 3) }), ranked("mv-r", 2, { context: LONG, options: LONGER }), mk("mv-p", 3, { context: LONG })];
+    const page = await open(t, { items, viewport }); if (!page) return;
+    await noAnchor(page);
+    await needBoxes(page, items[0], 3); await needBoxes(page, items[1], 4);
+    const base = await geo(page);
+    const same = async (what) => assert.deepEqual(await geo(page), base, "the page moved on " + what);
+    await tick(page, items[0], "a"); await same("a first tick");
+    await tick(page, items[0], "b"); await same("a second tick");
+    await tick(page, items[0], "a"); await same("an untick");
+    await takePick(page, items[0]); await same("Take my pick on a multi item");
+    for (const k of ["c", "a", "d"]) { await tick(page, items[1], k); await same("a tick on a ranked item"); }
+    await moveBtn(page, items[1], "a", "up").click(); await same("Up");
+    await moveBtn(page, items[1], "d", "up").click(); await same("a second Up");
+    await moveBtn(page, items[1], "d", "down").click(); await same("Down");
+    const first = moveBtn(page, items[1], "a", "up");
+    await first.focus(); await page.keyboard.press("Enter"); await same("Up on the first");
+    await tick(page, items[1], "d"); await same("an untick on a ranked item");
+    await takePick(page, items[1]); await same("Take my pick on a ranked item");
+  });
+}
+
+// The ready line's box against the height its text needs. `need` comes from a probe in the same card with the line's own font and width and no clamp,
+// so it does not depend on how the page reserves the space. `clip` is above 0 when the line cuts its text.
+const readyFit = (page, it) => page.evaluate((id) => {
+  const el = document.querySelector(`#item-${id} .ready`), cs = getComputedStyle(el);
+  const mark = getComputedStyle(el, "::before").content.replace(/^["']|["']$/g, "");
+  const probe = document.createElement("div");
+  for (const p of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing", "wordSpacing", "lineHeight", "wordBreak", "overflowWrap", "hyphens"]) probe.style[p] = cs[p];
+  probe.style.cssText += `;position:absolute;visibility:hidden;white-space:normal;width:${el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)}px`;
+  probe.textContent = (mark === "none" || mark === "normal" ? "" : mark) + el.textContent;
+  el.parentNode.append(probe);
+  const need = probe.getBoundingClientRect().height;
+  probe.remove();
+  return { box: el.getBoundingClientRect().height, need, clip: el.scrollHeight - el.clientHeight, line: parseFloat(cs.lineHeight) || 0, text: el.textContent };
+}, it.id);
+// Titles of exactly 28 characters, the longest a title is named at, so the ready line of n picks is as long as it gets. The first six are plain words.
+const T28 = ["Open items older than a week", "Lost answers waiting a retry", "Picks that stood since a run", "Notes that have no owner yet", "Tasks a lane left undone now", "Questions older than one day", "Reconciliation notifications", "Infrastructure documentation", "Troubleshooting instructions", "Authentication notifications"];
+const titles28 = (n) => T28.slice(0, n).map((l, i) => opt("abcdefghij"[i], l));
+for (const viewport of [{ width: 390, height: 800 }, { width: 1280, height: 900 }]) {
+  test(`a multi item's ready line reserves exactly the height of its longest line, no more and never less, at ${viewport.width} wide`, async (t) => {
+    const it = multi("rl-short", 62, { options: COLOURS.slice(0, 3) });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await noAnchor(page);
+    await needBoxes(page, it, 3);
+    const base = await geo(page), none = await readyFit(page, it);
+    for (const k of ["a", "b", "c"]) await tick(page, it, k);
+    const all = await readyFit(page, it);
+    assert.equal(all.text, "Ready to send: Red, Blue and Green, your choice.");
+    assert.ok(Math.abs(all.box - none.box) <= 1, `the ready line is ${none.box}px with nothing ticked and ${all.box}px with all ticked`);
+    assert.ok(Math.abs(all.box - all.need) <= 1, `the ready line is ${all.box}px, and its longest text needs ${all.need}px`);
+    assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
+  });
+
+  test(`a multi item of six 28-character titles shows the tail of its ready line, your choice or my pick, and no card moves, at ${viewport.width} wide`, async (t) => {
+    assert.ok(T28.every((l) => l.length === 28), "a title is not 28 characters");
+    const six = titles28(6), it = multi("rl-six", 63, { options: six, pick: six.map((o) => o.key) });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await noAnchor(page);
+    await needBoxes(page, it, 6);
+    const base = await geo(page), none = await readyFit(page, it);
+    for (const o of six) await tick(page, it, o.key);
+    const all = await readyFit(page, it);
+    assert.match(all.text, /^Ready to send: .+, your choice\.$/);
+    assert.ok(all.clip <= 0, `the ready line cuts its text: its content is ${all.clip}px taller than its box`);
+    assert.ok(all.need <= all.box + 1, `the ready line is ${all.box}px, and its text needs ${all.need}px, so its tail is cut`);
+    assert.ok(Math.abs(all.box - none.box) <= 1 && Math.abs(all.box - all.need) <= 1, `the ready line is ${none.box}px with nothing ticked, ${all.box}px with all ticked, and needs ${all.need}px`);
+    assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
+    await tick(page, it, "f"); await takePick(page, it);
+    const mine = await readyFit(page, it);
+    assert.match(mine.text, /^Ready to send: .+, my pick\.$/);
+    assert.ok(mine.clip <= 0 && mine.need <= mine.box + 1, `the ready line cuts the tail ", my pick." (box ${mine.box}px, text needs ${mine.need}px)`);
+    assert.deepEqual(await geo(page), base, "a card moved on Take my pick");
+  });
+}
+
+// The ruling has no line clamp: a line of ten long titles grows the box to hold it all, at the width the page has now. Head clamps at 6 lines at 390 wide.
+test("a multi item's ready line is never clamped: ten 28-character titles show their whole line at 390 wide", async (t) => {
+  const ten = titles28(10), it = multi("rl-ten", 64, { options: ten });
+  const page = await open(t, { items: [it], viewport: { width: 390, height: 800 } }); if (!page) return;
+  await noAnchor(page);
+  await needBoxes(page, it, 10);
+  const base = await geo(page);
+  for (const o of ten) await tick(page, it, o.key);
+  const all = await readyFit(page, it);
+  assert.match(all.text, /^Ready to send: .+, your choice\.$/);
+  assert.ok(all.line > 0 && all.need >= 7 * all.line - 1, `the line needs ${all.need}px, under 7 lines of ${all.line}px, so it cannot show a clamp of 6`);
+  assert.ok(all.clip <= 0 && all.need <= all.box + 1, `the ready line is ${all.box}px and cuts its text, which needs ${all.need}px`);
+  assert.ok(Math.abs(all.box - all.need) <= 1, `the ready line is ${all.box}px, and its text needs ${all.need}px`);
+  assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
+});
+
+test("Up and Down are 44px targets on each ticked card, in the Tab order, and work from the keyboard", async (t) => {
+  const it = ranked("rk-keyboard", 32);
+  const page = await open(t, { items: [it], viewport: { width: 390, height: 800 } }); if (!page) return;
+  await needBoxes(page, it, 4);
+  for (const k of ["c", "a", "d"]) await tick(page, it, k);
+  for (const k of ["c", "a", "d"]) for (const dir of ["up", "down"]) {
+    const b = moveBtn(page, it, k, dir);
+    assert.equal(await b.count(), 1, `no Move ${labelOf(it, k)} ${dir} button`);
+    const r = await b.boundingBox();
+    assert.ok(r.width >= 44 && r.height >= 44, `Move ${labelOf(it, k)} ${dir} is ${r.width} by ${r.height}`);
+  }
+  await page.locator(`#o-${it.id}-c`).focus();
+  const stops = [];
+  for (let i = 0; i < 4; i++) { await page.keyboard.press("Tab"); stops.push(await page.evaluate(() => document.activeElement.getAttribute("aria-label"))); }
+  assert.ok(stops.includes("Move Green up") && stops.includes("Move Green down"), "Tab does not reach Up and Down: " + stops);
+  await moveBtn(page, it, "a", "up").focus(); await page.keyboard.press("Enter");
+  assert.match(await rankText(page, it, "a"), rank("1st", 3), "Enter on Up did not move the card up");
+  await moveBtn(page, it, "d", "up").focus(); await page.keyboard.press("Space");
+  assert.match(await rankText(page, it, "d"), rank("2nd", 3), "Space on Up did not move the card up");
+  const a = await sendOne(page, it);
+  assert.deepEqual(a.choice, ["a", "d", "c"]);
+});
+
+test("a pick-one item is unchanged: radios in a radiogroup, and choice is one string", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  const c = card(page, DECISION);
+  assert.equal(await c.getByRole("radiogroup").count(), 1);
+  assert.equal(await c.locator("input[type=radio]").count(), 2);
+  assert.equal(await c.locator("input[type=checkbox]").count(), 0, "a pick-one item drew a checkbox");
+  assert.equal(await page.locator(`label[for="o-${DECISION.id}-a"] .pick`).count(), 1, "the star left the pick-one item's pick");
+  await choose(page, DECISION, "b");
+  const a = await sendOne(page, DECISION);
+  assert.deepEqual([a.choice, typeof a.choice, a.note], ["b", "string", ""]);
+});
+
+test("a pick that stands, as a list, sits in the last section, goes with Send as the list, and a changed list wins", async (t) => {
+  const s1 = multi("stand-m", 7, { stands: true }), s2 = ranked("stand-r", 8, { stands: true });
+  const page = await open(t, { items: [s1, s2] }); if (!page) return;
+  assert.equal(await page.locator("#tier-stands article.card").count(), 2, "a stands item with a list pick is not in the last section");
+  await needBoxes(page, s1, 3); await needBoxes(page, s2, 4);
+  assert.deepEqual(await ticked(page, s1), ["a", "c"], "a stood pick is not shown");
+  assert.deepEqual(await ticked(page, s2), ["a", "c", "d"]);
+  assert.match(await rankText(page, s2, "c"), rank("1st", 3));
+  assert.match(await page.locator("#barStatus").textContent(), /2 where my pick stands/);
+  await choose(page, s1, "a"); // untick: the owner's list now differs from my pick
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  const a = await answers(page);
+  assert.deepEqual([a[s1.id].choice, a[s1.id].note], [["c"], ""]);
+  assert.deepEqual([a[s2.id].choice, a[s2.id].note], [["c", "a", "d"], "accepted pick"]);
+});
+
+test("a pick that is not a valid list shows no star and no Take my pick; a valid list does", async (t) => {
+  const bad = [multi("bad-str", 51, { pick: "a" }), multi("bad-key", 52, { pick: ["a", "zzz"] }), multi("bad-dup", 53, { pick: ["a", "a"] }), multi("bad-empty", 54, { pick: [] }), mk("bad-one", 55, { pick: ["a", "b"] })];
+  const good = multi("good-list", 56);
+  const page = await open(t, { items: [...bad, good] }); if (!page) return;
+  for (const it of [...bad.slice(0, 4), good]) await needBoxes(page, it, 3);
+  assert.equal(await card(page, good).locator(".opt .pick").count(), 2, "a valid list is not starred on each pick");
+  assert.match(await page.locator(`#item-${good.id} .opt:has(#o-${good.id}-a) .pick`).textContent(), /Red and Green cover it\./);
+  assert.equal(await card(page, good).getByRole("button", { name: /Take my pick/ }).count(), 1);
+  for (const it of bad) {
+    assert.equal(await card(page, it).locator(".opt .pick").count(), 0, `${it.id}: a star shows for a bad pick`);
+    assert.equal(await card(page, it).getByRole("button", { name: /Take my pick/ }).count(), 0, `${it.id}: Take my pick shows for a bad pick`);
+  }
+});
+
+test("the notice to Claude writes a list pick as 31 a+c, in rank order when ranked", async (t) => {
+  const m = digest(), r = ranked("rk-notice", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  await tick(page, m, "a"); await tick(page, m, "c"); await addNote(page, m, "bold");
+  await tick(page, r, "c"); await tick(page, r, "a");
+  await send(page);
+  await told(page, "Claude was told");
+  const s = await sent(page);
+  assert.equal(s.length, 1);
+  assert.match(s[0].text, /31 a\+c \(bold\)/);
+  assert.match(s[0].text, /32 c\+a/);
+});
+
+test("Undo puts a list pick back as a draft, in its order", async (t) => {
+  const m = digest(), r = ranked("rk-undo", 32);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 4);
+  await tick(page, m, "a"); await tick(page, m, "c"); await tick(page, r, "c"); await tick(page, r, "a");
+  await send(page);
+  await page.locator("#undoBtn").waitFor();
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  assert.deepEqual(await ticked(page, m), ["a", "c"], "Undo lost the list");
+  assert.deepEqual(await ticked(page, r), ["a", "c"]);
+  assert.match(await rankText(page, r, "c"), rank("1st", 2), "Undo lost the order");
+  assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
+});
+
+// The first option is in no pick, so a fix that focuses the first box of the card fails. An unranked pick shows in option order, so ["c","b"] starts with B: a fix that reads it.pick[0] fails. The ranked pick starts with C, so a fix that reads option order fails.
+test("Enter on Take my pick puts focus on the first key of the pick, on a multi card", async (t) => {
+  const it = multi("take-focus-multi", 41, { pick: ["c", "b"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["b", "c"], "Enter did not take the pick");
+  assertFocusOnFirstPick(at, it, "b");
+});
+
+test("Enter on Take my pick puts focus on the first key of the pick, in rank order, on a ranked card", async (t) => {
+  const it = ranked("take-focus-ranked", 42);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 4);
+  const at = await enterTakePick(page, it);
+  assert.deepEqual(await ticked(page, it), ["a", "c", "d"], "Enter did not take the pick");
+  assert.match(await rankText(page, it, "c"), rank("1st", 3), "the pick's first key is not ranked 1st");
+  assertFocusOnFirstPick(at, it, "c");
+});
+
+// At 390 wide a card is taller than the screen and Take my pick sits below its options, so the focused option can end under the sticky header (.hdr) or the fixed bar (.bar).
+// The pick starts with A in both cards: the option is far above the button, and the page must show it whole.
+const SPOTS = {
+  "just above the bar": (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.bottom - (document.querySelector(".bar").getBoundingClientRect().top - 8)); },
+  centred: (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.top + b.height / 2 - innerHeight / 2); },
+};
+const FILL = [mk("take-fill-1", 50), mk("take-fill-2", 51), mk("take-fill-3", 52)];
+const TAKE_CARDS = {
+  "pick-one": () => mk("take-clear", 43, { options: COLOURS, pick: "a" }),
+  "multi A and D": () => multi("take-clear-multi", 44, { options: COLOURS, pick: ["a", "d"] }),
+};
+for (const [kind, build] of Object.entries(TAKE_CARDS)) for (const [spot, scrollTo] of Object.entries(SPOTS)) {
+  test(`Enter on Take my pick keeps the focused option clear of the header and the bar, ${kind}, button ${spot}, at 390 wide`, async (t) => {
+    const it = build();
+    const page = await open(t, { items: [it, ...FILL], viewport: { width: 390, height: 800 } }); if (!page) return;
+    const at = await enterTakePick(page, it, () => page.evaluate(scrollTo, it.id));
+    assertFocusOnFirstPick(at, it, "a");
+    const m = await page.evaluate(() => {
+      const o = document.activeElement.closest(".opt"), r = o && o.getBoundingClientRect();
+      return { top: r && Math.round(r.top), bottom: r && Math.round(r.bottom), hdr: Math.round(document.querySelector(".hdr").getBoundingClientRect().bottom), bar: Math.round(document.querySelector(".bar").getBoundingClientRect().top) };
+    });
+    assert.ok(m.top !== null && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A is not between the header and the bar: ${JSON.stringify(m)}`);
+  });
+}
+
+// "Nothing on the page moves" (page.html, top comment): an option already between the header and the bar needs no scroll, so Enter on Take my pick leaves scrollY as it was.
+// `gap` is the px from the header's bottom to option A's top. A scroll that moves the page, even by 10px, fails.
+const stillAfterTake = async (t, it, width, gap, buttonInView) => {
+  const page = await open(t, { items: [it, ...FILL], viewport: { width, height: 800 } }); if (!page) return;
+  let m;
+  const at = await enterTakePick(page, it, async () => {
+    m = await page.evaluate(({ id, gap }) => {
+      const hdr = document.querySelector(".hdr").getBoundingClientRect().bottom, bar = document.querySelector(".bar").getBoundingClientRect().top;
+      const o = document.getElementById(`o-${id}-a`).closest(".opt");
+      scrollBy(0, o.getBoundingClientRect().top - (hdr + gap));
+      const r = o.getBoundingClientRect(), b = document.getElementById("b-take-" + id).getBoundingClientRect();
+      return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), btnTop: Math.round(b.top), btnBottom: Math.round(b.bottom), hdr: Math.round(hdr), bar: Math.round(bar) };
+    }, { id: it.id, gap });
+  });
+  assert.ok(m.y > 0 && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A was not placed in view with the page scrolled: ${JSON.stringify(m)}`);
+  if (buttonInView) assert.ok(m.btnTop >= m.hdr && m.btnBottom <= m.bar, `${it.id}: Take my pick was not placed in view: ${JSON.stringify(m)}`);
+  assertFocusOnFirstPick(at, it, "a");
+  assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: Enter on Take my pick scrolled the page`);
+};
+// Option A starts 56px under the 44px header, so 100px from the top of the screen: whole and clear of the 64px scroll margin. A scroll that centres it moves the page.
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(TAKE_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 56, false));
+}
+// Option A is fully visible 10px under the header, inside the 64px scroll margin, and Take my pick is in view too. These cards hold two options, so both fit at 390 wide.
+const NEAR_CARDS = {
+  "pick-one": () => mk("take-near", 45, { pick: "a" }),
+  "multi A and B": () => multi("take-near-multi", 46, { options: COLOURS.slice(0, 2), pick: ["a", "b"] }),
+};
+for (const width of [390, 1280]) for (const [kind, build] of Object.entries(NEAR_CARDS)) {
+  test(`Enter on Take my pick does not scroll the page when the pick's option sits 10px under the header, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 10, true));
+}
+
+test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
+  const it = { ...picItem("multi-pics", 33), multi: true, pick: ["a", "c"] };
+  const page = await open(t, { items: [it], designData: PICS }); if (!page) return;
+  await needBoxes(page, it, 3);
+  for (const o of LOOK_OPTS) assert.equal(await card(page, it).locator(`label.opt[for="o-${it.id}-${o.key}"] .opic iframe.dframe`).count(), 1, "no picture in option " + o.key);
+  await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
+  assert.deepEqual(await ticked(page, it), [], "a tap on the picture ticked the option");
+  assert.equal(await page.locator("#dsheet").isVisible(), true, "the viewer did not open");
+  await page.click("#dClose");
+  await choose(page, it, "b"); await choose(page, it, "c");
+  assert.deepEqual(await ticked(page, it), ["b", "c"]);
+});
+
+// ---------------------------------------------------------------- c190 with c135: option links on a multi card and on a ranked card
+// Option a has a link and a short how; option b has none and a long how, so a missing links row or a missing row track shows as a gap.
+const linkedMulti = (id, n, over = {}) => multi(id, n, { options: [
+  { ...opt("a", "Red"), how: "A short way to put it.", links: [LINK] },
+  { ...opt("b", "Blue"), how: "A longer way to put it, which runs onto a second line at desktop width. ".repeat(2) },
+  opt("c", "Green"),
+], ...over });
+const linkedRanked = (id, n, over = {}) => linkedMulti(id, n, { ranked: true, pick: ["c", "a"], ...over });
+
+// Each card's rows are checked at a phone width, where the cards stack, and at a desktop width, where they sit side by side.
+for (const width of [390, 1280]) for (const [kind, make, pics] of [["multi", linkedMulti, false], ["ranked", linkedRanked, false], ["ranked with pictures", linkedRanked, true]]) {
+  test(`option links on a ${kind} card show after the how text, and the cards' rows line up, at ${width} wide`, async (t) => {
+    const it = make("lk-" + kind.replace(/\W/g, ""), 40);
+    if (pics) it.options = it.options.map((o, i) => (i < 2 ? { ...o, design: "s1" } : o));
+    const page = await open(t, { items: [it], designData: pics ? DESIGNS : null, viewport: { width, height: 900 } }); if (!page) return;
+    await needBoxes(page, it, 3);
+    await need(card(page, it).locator(`#k-${it.id}-a`), "no links row on option a");
+    assert.equal(await page.getByRole("link", { name: LINK.label + ", opens in a new tab", exact: true }).count(), 1, "the link is not named for where it opens");
+    assert.equal(await card(page, it).locator(".opts.olinks").count(), 1, "the options do not take the olinks class");
+    assert.equal(await card(page, it).locator(`.opt:has(#o-${it.id}-b) span.nolinks`).count(), 1, "an option with no link has no nolinks span");
+    if (it.ranked) assert.equal(await card(page, it).locator(".opts.ranked.olinks").count(), 1, "the ranked options lost a class");
+    // Each child box, as offsets from its card: top rows from the top edge, pinned rows (pick, rank) from the bottom edge.
+    // `abs` is the page position, which compares rows across cards that sit side by side.
+    const cards = await page.evaluate((id) => ["a", "b", "c"].map((k) => {
+      const o = document.querySelector(`#item-${id} .opt:has(#o-${id}-${k})`), ob = o.getBoundingClientRect();
+      const child = (sel) => {
+        const e = o.querySelector(sel);
+        if (!e) return null;
+        const b = e.getBoundingClientRect();
+        return { top: b.top - ob.top, bottom: ob.bottom - b.bottom, abs: b.top, box: [b.left, b.top, b.right, b.bottom], inside: b.top >= ob.top - 1 && b.bottom <= ob.bottom + 1 && b.left >= ob.left - 1 && b.right <= ob.right + 1 };
+      };
+      return { top: ob.top, height: ob.height, head: child(".head"), how: child(".how"), links: child(".links, .nolinks"), tr: child(".tr"), pic: child(".opic"), pick: child(".pick, .nopick"), rank: child(".rank") };
+    }), it.id);
+    const near = (x, y) => Math.abs(x - y) <= 1;
+    let sideBySide = 0;
+    cards.forEach((c, i) => {
+      const k = "abc"[i];
+      for (const row of ["how", "links", "tr", "pick"]) assert.ok(c[row], `${kind}: option ${k} has no ${row} box`);
+      if (it.ranked) assert.ok(c.rank, `${kind}: option ${k} has no rank box`);
+      if (pics) assert.ok(c.pic, `${kind}: option ${k} has no picture box`);
+      for (const row of ["head", "how", "links", "tr", "pic", "pick", "rank"]) if (c[row]) assert.ok(c[row].inside, `${kind}: the ${row} box of option ${k} sits outside its own card, at ${width} wide`);
+      // Rows stack without overlap: a row that runs into the next one would put a button over the pick text.
+      const kids = ["head", "how", "links", "tr", "pic", "pick", "rank"].filter((n) => c[n]);
+      for (let x = 0; x < kids.length; x++) for (let y = x + 1; y < kids.length; y++) {
+        const [a, b] = [c[kids[x]].box, c[kids[y]].box];
+        const overlap = a[0] < b[2] - 1 && b[0] < a[2] - 1 && a[1] < b[3] - 1 && b[1] < a[3] - 1;
+        assert.ok(!overlap, `${kind}: the ${kids[x]} and ${kids[y]} boxes of option ${k} overlap, at ${width} wide`);
+      }
+      assert.ok(c.links.top > c.how.top && c.tr.top > c.links.top, `${kind}: option ${k}: the links row is not between the how text and the timing rows`);
+    });
+    for (let i = 0; i < cards.length; i++) for (let j = i + 1; j < cards.length; j++) {
+      const p = cards[i], q = cards[j], pair = `options ${"abc"[i]} and ${"abc"[j]}`;
+      for (const row of ["pick", "rank"]) if (p[row] && q[row]) assert.ok(near(p[row].bottom, q[row].bottom), `${kind}: the ${row} rows of ${pair} are not level, at ${width} wide`);
+      if (!near(p.top, q.top)) continue; // stacked cards each run their own top rows, which follow their own text and pictures
+      sideBySide++;
+      for (const row of ["how", "links", "tr", "pic"]) if (p[row] && q[row]) assert.ok(near(p[row].abs, q[row].abs), `${kind}: the ${row} rows of ${pair} are not level, at ${width} wide`);
+      assert.ok(near(p.height, q.height), `${kind}: the cards of ${pair} differ in height, at ${width} wide`);
+    }
+    if (width === 1280) assert.ok(sideBySide > 0, `${kind}: the cards do not sit side by side at 1280, so the level check compared nothing`);
+  });
+}
+
+test("a press on an option's link opens it and ticks nothing, on a multi card and on a ranked card", async (t) => {
+  const m = linkedMulti("lk-press-m", 41), r = linkedRanked("lk-press-r", 42);
+  const page = await open(t, { items: [m, r] }); if (!page) return;
+  await needBoxes(page, m, 3); await needBoxes(page, r, 3);
+  await page.context().route("**/*", (rt) => rt.abort()); // the new tab loads nothing
+  for (const it of [m, r]) {
+    const link = card(page, it).locator(`#k-${it.id}-a a`);
+    await need(link, `${it.id}: no link on option a`);
+    // A real press at the link's centre: on a ranked card the label's overlay must not take it.
+    const [tab] = await Promise.all([page.context().waitForEvent("page", { timeout: 5000 }).catch(() => assert.fail(`${it.id}: a press on the link did not open it`)), link.click()]);
+    await tab.close();
+    assert.deepEqual(await ticked(page, it), [], `${it.id}: a press on the link ticked the option`);
+    assert.equal(await card(page, it).locator(".opt.sel").count(), 0, `${it.id}: a press on the link selected the card`);
+    await tick(page, it, "a");
+    assert.deepEqual(await ticked(page, it), ["a"], `${it.id}: a press on the label did not tick the option`);
+  }
+});
+
+for (const width of [390, 1280]) test(`a press on the empty part of a ranked option's links row ticks the option, at ${width} wide`, async (t) => {
+  // A short link leaves an empty part of the row to its right at both widths; the long link fills the row at 1280.
+  const r = linkedRanked("lk-empty-r", 43, { options: [{ ...opt("a", "Red"), how: "A short way to put it.", links: [{ label: "Repo", url: LINK.url }] }, opt("b", "Blue"), opt("c", "Green")] });
+  const page = await open(t, { items: [r], viewport: { width, height: 900 } }); if (!page) return;
+  await needBoxes(page, r, 3);
+  const row = card(page, r).locator(`#k-${r.id}-a`), link = row.locator("a");
+  await need(row, `${r.id}: no links row on option a`);
+  const rb = await row.boundingBox(), lb = await link.boundingBox();
+  // 20px in from the row's right edge, past the link: the press must land on the row's empty part, not on the link.
+  const x = rb.x + rb.width - 20, y = rb.y + rb.height / 2;
+  assert.ok(x < lb.x || x > lb.x + lb.width, `${r.id}: the press point is over the link`);
+  await page.mouse.click(x, y);
+  assert.deepEqual(await ticked(page, r), ["a"], `${r.id}: a press on the empty part of the links row did not tick the option, at ${width} wide`);
+});
+
+// An arbiter ruling (decision session-tiers, Arbiter, "On the page"): the writer files it as a closed item with arbiter: true,
+// home = the ruling's record id, pick = the ruled option, why and ruled. Every case keeps DECISION open and first: open() waits
+// for an open card, so a red run fails on the arbiter assertions, not on that wait.
+const ARBITER = mk("arbiter-d901", 901, { status: "closed", arbiter: true, home: "D-901", pick: "a", why: "The arbiter ruled Red.", ruled: "2026-10-30T17:40:00Z" });
+const overturn = (from) => from.getByRole("button", { name: /^Overturn/ });
+
+test("a closed arbiter item shows as one card with its record id, the ruled option and one Overturn button", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.equal(await page.locator('[id^="item-"]').count(), 2, "the arbiter item is not drawn as exactly one card");
+  const text = await card(page, ARBITER).innerText();
+  assert.match(text, /D-901/, "the card does not name the ruling's record");
+  assert.match(text, /Red/, "the card does not name the ruled option");
+  assert.doesNotMatch(text, /Blue/, "the card names an option the arbiter did not rule");
+  assert.equal(await overturn(card(page, ARBITER)).count(), 1, "the card has not exactly one Overturn button");
+});
+
+test("Overturn then Send writes an overturn answer for the item and writes nothing to items", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(overturn(card(page, ARBITER)), "the arbiter card has no Overturn button");
+  await overturn(card(page, ARBITER)).click();
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], ARBITER.id), "Send wrote no answer for the arbiter item");
+  const a = (await answers(page))[ARBITER.id];
+  assert.deepEqual([a.item, a.choice], [ARBITER.id, "overturn"]);
+  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Overturn wrote or deleted an items doc");
+});
+
+test("a closed item with no arbiter flag stays hidden next to a closed arbiter item", async (t) => {
+  const plain = mk("closed-plain", 902, { status: "closed" });
+  const page = await open(t, { items: [DECISION, ARBITER, plain] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.equal(await card(page, plain).count(), 0, "a closed item with no arbiter flag is shown");
+  assert.equal(await page.locator('[id^="item-"]').count(), 2, "the page draws a card for a closed item that is no ruling");
+  assert.equal(await overturn(page).count(), 1, "the page offers Overturn on more than the arbiter item");
+});
+
+// Round 2: an answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
+// may hold an option key ("a"). Only choice "overturn" is an overturn; any other record under a ruling's id is stale.
+const staleAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "a", note: "" } };
+const staleDraft = { "waiting.draft": JSON.stringify({ [ARBITER.id]: { choice: "a" } }) };
+const overturnAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "overturn", note: "" } };
+const pressed = (page) => overturn(card(page, ARBITER)).getAttribute("aria-pressed");
+
+test("a saved answer that is no overturn does not read as an overturn on the ruling card", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], answers: staleAnswer }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "a saved answer with choice a shows as an overturn");
+  assert.equal(await overturn(card(page, ARBITER)).count(), 1, "the ruling card no longer offers Overturn");
+  assert.equal(await pressed(page), "false", "the ruling card shows as overturned");
+});
+
+test("a stale pick draft under a ruling's id is not sent", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], storage: staleDraft }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on a stale pick draft alone");
+  await choose(page, DECISION, "a");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "Send counts the stale draft");
+  await send(page);
+  await holds(page, (id) => !!window.__answers()[id], DECISION.id);
+  assert.equal(ARBITER.id in await answers(page), false, "Send wrote an answer for the ruling from a stale draft");
+});
+
+test("the Copy line leaves out a stale pick draft under a ruling's id", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], storage: staleDraft, failSet: true }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  await choose(page, DECISION, "a"); // a ready answer, so the failed write opens the Copy line
+  await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await stubClipboard(page, false);
+  await page.click("#copy");
+  const copied = await page.evaluate(() => window.__copied);
+  assert.doesNotMatch(copied, /901/, "the Copy line carries the stale pick draft of the ruling: " + copied);
+  assert.equal(copied, "27 a");
+});
+
+test("a ruling is no open question: the counts and the bar count only the open item, and All answered shows with the ruling unpressed", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  const count = async () => (await page.locator("#qCount").textContent()).trim();
+  assert.equal(await count(), "1", "the Questions count includes the ruling");
+  assert.match(await page.locator("#barStatus").innerText(), /\b1 stay open/, "the bar does not count the one open item as staying open");
+  assert.doesNotMatch(await page.locator("#barStatus").innerText(), /All answered/, "All answered shows with an open item");
+  await overturn(card(page, ARBITER)).click();
+  assert.equal(await count(), "1", "a pressed Overturn changes the Questions count");
+  assert.match(await page.locator("#barStatus").innerText(), /\b1 stay open/, "a pressed Overturn changes the stay-open count");
+  await overturn(card(page, ARBITER)).click(); // unpress: the ruling stands unpressed
+  await choose(page, DECISION, "a"); await send(page);
+  await page.locator("#barStatus", { hasText: "All answered." }).waitFor();
+  assert.equal(await count(), "0", "the Questions count still includes the ruling");
+  assert.doesNotMatch(await page.locator("#barStatus").innerText(), /stay open/, "the bar counts the unpressed ruling as staying open");
+  assert.equal(await pressed(page), "false", "answering the open item pressed the Overturn");
+});
+
+test("Undo of a sent overturn removes the answer and the ruling card is back, with no receipt", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(overturn(card(page, ARBITER)), "the arbiter card has no Overturn button");
+  await overturn(card(page, ARBITER)).click();
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], ARBITER.id), "Send wrote no answer for the arbiter item");
+  assert.match(await card(page, ARBITER).innerText(), /You overturned/, "the sent overturn shows no receipt");
+  await page.locator("#undoBtn").click();
+  assert.ok(await holds(page, (id) => !(id in window.__answers()), ARBITER.id), "Undo left the overturn answer");
+  assert.deepEqual(await page.evaluate((id) => window.__log.filter((l) => l[0] === "delete" && l[1] === "answers" && l[2] === id), ARBITER.id), [["delete", "answers", ARBITER.id]], "Undo did not delete answers/<id>");
+  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[1] === "items")), [], "an Undo wrote or deleted an items doc");
+  assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
+  // Undo hands the owner's pick back as a draft, as it does on a decision (undoSend): the Overturn is pressed again but unsent.
+  assert.equal(await pressed(page), "true", "Undo lost the owner's pressed Overturn");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the undone overturn is not ready to send again");
+});
+
+test("Withdraw of a sent overturn removes the answer and the ruling card is back, unpressed", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER], answers: overturnAnswer }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  assert.match(await card(page, ARBITER).innerText(), /You overturned/, "a saved overturn shows no receipt");
+  await card(page, ARBITER).getByRole("button", { name: "Change" }).click();
+  assert.equal(await pressed(page), "true", "Change on a saved overturn does not bring the pressed Overturn back");
+  await overturn(card(page, ARBITER)).click(); // unpress: nothing is left to send
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
+  await send(page);
+  assert.ok(await holds(page, (id) => !(id in window.__answers()), ARBITER.id), "Withdraw left the overturn answer");
+  assert.deepEqual(await page.evaluate(() => window.__log), [["delete", "answers", ARBITER.id]], "Withdraw wrote more than the one delete of answers/<id>");
+  assert.equal(await card(page, ARBITER).locator(".receipt").count(), 0, "the ruling card still shows a receipt");
+  assert.doesNotMatch(await card(page, ARBITER).innerText(), /You overturned/, "the ruling card still says it was overturned");
+  assert.equal(await pressed(page), "false", "the ruling card is not back to its unpressed state");
 });

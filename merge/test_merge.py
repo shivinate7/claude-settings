@@ -14,9 +14,15 @@ import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, sign
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
+sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
+import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
 
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+# CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
+# merge-role check and make a role writer write the live session's role file. A case that needs one sets it (MergeRoleCheck.cloud).
+for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
+    os.environ.pop(_name, None)
 
 def windows_slice(x):
     """Mark a test or a leaf class as Windows-specific. MERGE_TESTS=windows-slice runs only these.
@@ -108,8 +114,10 @@ class FakeHost:
         self.base, self.base_seq = "main", None  # base_seq: one base per pr() read, the last one repeats
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
+        self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
 
     def pr(self, n):
+        self.pr_calls.append(n)
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
@@ -231,8 +239,9 @@ class Env(unittest.TestCase):
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
 
-    def run_merge(self, *args, host=None, lock=None, stdout=None):
-        out, err = stdout or io.StringIO(), io.StringIO()
+    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None):
+        """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards."""
+        out, err = stdout or io.StringIO(), stderr or io.StringIO()
         cwd = os.getcwd()
         os.chdir(self.co)
         try:
@@ -4010,6 +4019,25 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
 
+    def test_a_required_all_jobs_passed_that_only_skipped_reads_pending(self):
+        # A workflow_dispatch run, or a push run in a repo whose push trigger covers branches, skips all-jobs-passed beside a passing scope check. Only a pull_request run passes it, so the head waits; it is not green.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("pass", "")]}, ["all-jobs-passed"])
+        self.assertEqual(red, [])
+        self.assertEqual(pending, ["all-jobs-passed"])
+
+    def test_a_required_all_jobs_passed_with_a_pass_beside_its_skip_reads_green(self):
+        # Two runs of one name: the pass settles it, so the skip is not pending.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", ""), ("pass", "")]}, ["all-jobs-passed"])
+        self.assertEqual((red, pending), ([], []))
+
+    def test_a_skip_only_all_jobs_passed_beside_a_passing_check_does_not_merge(self):
+        # That skip beside a passing scope check, from a dispatch run or a push run in a repo whose push trigger covers branches, must not merge. The wait holds for a pull_request run, then stops at the deadline with the check named.
+        self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "pass", "")]])
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("Still pending: all-jobs-passed", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
     def test_a_head_where_no_check_ran_is_unproven_not_green(self):
         # Every check skipped: the synchronize run skipped as a draft.
         red, pending, _ = merge.Host.classify({"checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
@@ -4017,6 +4045,32 @@ class GhHalf(Env):
         self.assertTrue(any("no check ran on this head" in r for r in red), red)
         self.assertTrue(any("gh workflow run checks.yml --ref" in r for r in red), red)
         self.assertTrue(any("gh pr ready" in r for r in red), red)
+
+    def test_a_draft_head_with_all_jobs_passed_required_is_red_not_pending(self):
+        # A draft run skips every job, scope included, so all-jobs-passed skips too. No run is coming for this head: red wins over pending.
+        red, pending, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
+        self.assertEqual(pending, [])
+        self.assertTrue(any("no check ran on this head" in r for r in red), red)
+
+    def test_a_draft_head_with_all_jobs_passed_required_remedy_names_ready_or_push_not_a_dispatch(self):
+        # A dispatch run skips all-jobs-passed, so a dispatch cannot pass this head. The remedy names gh pr ready or a new push.
+        red, _, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
+        text = " ".join(red)
+        self.assertIn("gh pr ready", text)
+        self.assertIn("push", text)
+        self.assertNotIn("gh workflow run", text)
+
+    def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
+        # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
+        self.set(checks_seq=[[("all-jobs-passed", "skipping", ""), ("scope", "skipping", "")]], runs_seq=[[("checks", "completed", "skipped")]])
+        rc, out = self.go(required=["all-jobs-passed"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no check ran on this head", out)
+        self.assertIn("gh pr ready", out)
+        self.assertNotIn("gh workflow run", out)
+        self.assertNotIn("Still pending", out)
+        self.assertEqual(self.paused, [], out)  # no pause: the first read is the verdict
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_docs_only_head_whose_scope_check_passed_is_not_unproven(self):
         red, pending, _ = merge.Host.classify({"scope": [("pass", "")], "checks": [("skipping", "")], "checks-windows": [("skipping", "")]}, ["checks", "checks-windows"])
@@ -8960,6 +9014,445 @@ class BatchBrake(Env):
         lines = [l for l in out.splitlines() if l.startswith("  batch:")]
         self.assertEqual(len(lines), 1, out)
         self.assertIn("#2", lines[0])
+
+ROLE_SESSION = "cse_role_check_test"
+OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
+
+class MergeRoleCheck(Env):
+    """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is coordinator or batch-runner.
+    The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
+    The role check refuses before any host read and before the lock. Preview, --unlock and a run outside the cloud are not checked.
+    Every case runs with CLAUDE_CONFIG_DIR in this run's folder and a made-up session id, so no case touches the live role file."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.run_dir = _test_temp.run_folder()  # test-temp-standard; lint/test_find_copies.py RunFolderSweepTest proves the sweep once
+        cls.addClassCleanup(shutil.rmtree, cls.run_dir, True)
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = tempfile.mkdtemp(dir=self.run_dir)
+        self.role_file = os.path.join(self.cfg, "state", "merge-role.json")
+        base = unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg, "CLAUDE_CODE_REMOTE_SESSION_ID": ROLE_SESSION})
+        base.start()
+        self.addCleanup(base.stop)
+
+    @contextlib.contextmanager
+    def cloud(self, **env):
+        """A cloud session's environment: remote, a session id and this case's config dir. A keyword is an env name; None unsets it."""
+        values = {"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CODE_REMOTE_SESSION_ID": ROLE_SESSION, "CLAUDE_CONFIG_DIR": self.cfg, **env}
+        with unittest.mock.patch.dict(os.environ):
+            for name, value in values.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            yield
+
+    def put_role(self, role, session=ROLE_SESSION):
+        put(self.role_file, json.dumps({"session": session, "role": role}))
+
+    def put_bytes(self, data):
+        os.makedirs(os.path.dirname(self.role_file), exist_ok=True)
+        with open(self.role_file, "wb") as f:
+            f.write(data)
+
+    def role_files(self):
+        """{path: bytes} of every file under this case's config dir."""
+        found = {}
+        for d, _, names in os.walk(self.cfg):
+            for n in names:
+                with open(os.path.join(d, n), "rb") as f:
+                    found[os.path.join(d, n)] = f.read()
+        return found
+
+    def read_role_file(self):
+        with open(self.role_file, encoding="utf-8") as f:
+            data = json.load(f)
+        return data["session"], data["role"]
+
+    def run_main(self, *argv, **env):
+        """-> (rc, stdout, stderr) of merge.main in a cloud session. A usage error exits through argparse: its code is the rc."""
+        out, err = io.StringIO(), io.StringIO()
+        with self.cloud(**env):
+            try:
+                rc = self.run_merge(*argv, stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def assert_refused(self, **env):
+        """`merge 7 --confirm` stopped at the role check: rc 1, a line on stderr, no host read, no lock or push, no crash."""
+        refs, reads = self.refs(), len(self.host.pr_calls)
+        rc, out, err = self.run_main("7", "--confirm", **env)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(len(self.host.pr_calls), reads, "the run read the host before the role check refused")
+        self.assertEqual(self.refs(), refs, "the run took the lock or pushed before the role check refused")
+        self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+        self.assertNotIn("--confirm", err)
+        self.assertNotIn("Traceback", err)
+
+    def assert_reaches_host(self, *argv, **env):
+        """The run got past any role check to the host read. The PR is closed, so the run then stops with that one line and merges nothing."""
+        self.host.pr_state = "CLOSED"
+        reads = len(self.host.pr_calls)
+        rc, out, err = self.run_main(*argv, **env)
+        self.assertGreater(len(self.host.pr_calls), reads, out + err)
+        self.assertIn("CLOSED", err)
+        self.assertNotRegex(err, r"(?i)batch[ -]runner")
+
+    def assert_writer_refused(self, *argv, rc_is=None, **env):
+        """A `--role` call that failed from the writer: rc not 0, a line on stderr that is no old-parser error, and no file changed."""
+        before = self.role_files()
+        rc, out, err = self.run_main(*argv, **env)
+        self.assertNotEqual(rc, 0, out + err)
+        if rc_is is not None:
+            self.assertEqual(rc, rc_is, out + err)
+        self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+        for old in OLD_PARSER_ERRORS:  # the failure must come from the writer, not from a parser that has never heard of --role
+            self.assertNotIn(old, err)
+        self.assertEqual(self.role_files(), before, "the refused call changed the config dir")
+
+    # ---- the constants and the reader
+    def test_the_merge_roles_are_the_coordinator_and_the_batch_runner(self):
+        self.assertEqual(set(merge.MERGE_ROLES), {"coordinator", "batch-runner"})
+
+    def test_the_role_path_is_the_state_file_under_the_config_dir(self):
+        with self.cloud():
+            self.assertEqual(os.path.normpath(os.fspath(merge.role_path())), os.path.normpath(self.role_file))
+
+    def test_the_role_path_falls_back_to_the_claude_folder_in_the_home_folder(self):
+        want = os.path.normpath(os.path.join(os.path.expanduser("~"), ".claude", "state", "merge-role.json"))
+        for config in (None, ""):
+            with self.subTest(config=config), self.cloud(CLAUDE_CONFIG_DIR=config):
+                self.assertEqual(os.path.normpath(os.fspath(merge.role_path())), want)
+
+    def test_the_reader_gives_the_role_of_this_session(self):
+        for role in ("coordinator", "batch-runner"):
+            with self.subTest(role=role), self.cloud():
+                self.put_role(role)
+                self.assertEqual(merge.read_merge_role(), role)
+
+    def test_the_reader_gives_none_for_a_missing_malformed_or_unreadable_file(self):
+        with self.cloud():
+            self.assertIsNone(merge.read_merge_role())  # no file
+            self.put_bytes(b'{"session": ')
+            self.assertIsNone(merge.read_merge_role())
+            os.remove(self.role_file)
+            os.makedirs(self.role_file)  # a folder at the path: open() fails on every platform, as for an unreadable file (chmod proves nothing as root)
+            self.assertIsNone(merge.read_merge_role())
+
+    # ---- the role check refuses
+    def test_no_role_file_refuses_before_any_host_read_or_lock(self):
+        self.assert_refused()
+
+    def test_an_empty_role_file_refuses(self):
+        self.put_bytes(b"")
+        self.assert_refused()
+
+    def test_malformed_json_refuses(self):
+        self.put_bytes(b'{"session": "' + ROLE_SESSION.encode() + b'", "role": ')
+        self.assert_refused()
+
+    def test_bytes_that_are_no_text_refuse(self):
+        self.put_bytes(b"\xff\xfe\x00{")
+        self.assert_refused()
+
+    def test_a_folder_at_the_role_path_refuses(self):
+        os.makedirs(self.role_file)
+        self.assert_refused()
+
+    def test_json_that_is_no_object_refuses(self):
+        for raw in ("[]", '"coordinator"', "null", "7", '["coordinator"]'):
+            with self.subTest(raw=raw):
+                self.put_bytes(raw.encode())
+                self.assert_refused()
+
+    def test_an_object_with_no_role_or_no_session_refuses(self):
+        for data in ({"session": ROLE_SESSION}, {"role": "coordinator"}, {}):
+            with self.subTest(data=data):
+                self.put_bytes(json.dumps(data).encode())
+                self.assert_refused()
+
+    def test_a_role_outside_the_merge_set_refuses(self):
+        # lane and triage are real tiers. The rest are near misses and values of the wrong type (a list is unhashable: a set lookup would crash).
+        for role in ("lane", "triage", "", "solo", "Coordinator", "coordinator ", "batch_runner", "batch-runner\n", None, ["coordinator"], {"role": "coordinator"}, 1):
+            with self.subTest(role=role):
+                self.put_role(role)
+                self.assert_refused()
+
+    def test_a_role_recorded_for_another_session_refuses(self):
+        for role in ("coordinator", "batch-runner"):
+            with self.subTest(role=role):
+                self.put_role(role, session="cse_another_session")
+                self.assert_refused()
+
+    def test_no_session_id_in_the_environment_refuses(self):
+        # The last three pair an absent or empty id with an equal-looking recorded one: absent never equals absent.
+        for session, recorded in ((None, ROLE_SESSION), ("", ""), (None, None), (None, "")):
+            with self.subTest(session=session, recorded=recorded):
+                self.put_role("coordinator", session=recorded)
+                self.assert_refused(CLAUDE_CODE_REMOTE_SESSION_ID=session)
+
+    def test_the_refusal_goes_to_stderr_and_hands_the_pr_to_the_batch_runner(self):
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, out + err)
+        self.assertRegex(err, r"(?i)batch[ -]runner")
+        self.assertRegex(err, r"(?i)\bnumber\b")
+        self.assertRegex(err, r"(?i)\bhead\b")
+        self.assertNotRegex(out, r"(?i)batch[ -]runner")  # stdout carries no part of the refusal
+        # git-remedy-never-names-target: the text never names the command it refused
+        self.assertNotIn("--confirm", err)
+        self.assertNotRegex(err, r"\bmerge\s+[<\d]")
+        # A session without a role must not learn which role to claim: the text names the batch runner only as the one to hand the PR to.
+        self.assertNotIn("coordinator", err.lower())
+        self.assertNotIn("batch-runner", err.lower())
+
+    # ---- the role check lets through
+    def test_a_coordinator_session_merges(self):
+        self.put_role("coordinator")
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(self.host.merged)
+
+    def test_a_batch_runner_session_merges(self):
+        self.put_role("batch-runner")
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(self.host.merged)
+
+    # ---- not checked: these pass before the role check exists, and stop a check that is too wide
+    def test_a_preview_in_the_cloud_needs_no_role(self):
+        for role in (None, "lane"):
+            with self.subTest(role=role):
+                if role:
+                    self.put_role(role)
+                reads = len(self.host.pr_calls)
+                rc, out, err = self.run_main("7")
+                self.assertEqual(rc, 0, out + err)
+                self.assertIn("PREVIEW", out)
+                self.assertGreater(len(self.host.pr_calls), reads)
+
+    def test_unlock_in_the_cloud_needs_no_role(self):
+        sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "unreadable, not ours")
+        sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
+        rc, out, err = self.run_main("--unlock")
+        self.assertEqual(rc, 0, out + err)
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.host.pr_calls, [])
+
+    def test_a_confirm_outside_the_cloud_needs_no_role(self):
+        # Only the exact value "true" is cloud, as in default_lock and install.sh.
+        for remote in (None, "", "false", "1", "TRUE"):
+            with self.subTest(remote=remote):
+                self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_REMOTE=remote)
+
+    # ---- the writer: merge --role <tier>
+    def test_role_writes_this_sessions_role_and_makes_the_state_folder(self):
+        self.assertEqual(self.role_files(), {})
+        for tier in ("batch-runner", "coordinator"):
+            with self.subTest(tier=tier):
+                rc, out, err = self.run_main("--role", tier)
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(self.read_role_file(), (ROLE_SESSION, tier))
+                with self.cloud():
+                    self.assertEqual(merge.read_merge_role(), tier)
+        self.assertEqual(self.host.pr_calls, [])  # the writer reads no host
+
+    def test_role_replaces_the_role_of_an_earlier_session(self):
+        self.put_role("coordinator", session="cse_an_earlier_session")
+        rc, out, err = self.run_main("--role", "batch-runner")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(self.read_role_file(), (ROLE_SESSION, "batch-runner"))
+
+    def test_a_role_the_writer_recorded_passes_the_check(self):
+        rc, out, err = self.run_main("--role", "coordinator")
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(self.host.merged)
+
+    def test_role_refuses_a_tier_outside_the_merge_set_and_writes_nothing(self):
+        for tier in ("lane", "triage", "", "solo", "Coordinator", "coordinator ", "batch_runner"):
+            with self.subTest(tier=tier):
+                self.assert_writer_refused("--role", tier)
+                self.assertEqual(self.role_files(), {})
+
+    def test_the_refusal_of_a_tier_outside_the_merge_set_does_not_list_the_valid_tiers(self):
+        # A lane that asks for a tier must not learn the two that pass. The tiers below hold neither word, so an echo of the
+        # argument cannot make the assertion fail by itself.
+        for tier in ("lane", "triage", "", "solo"):
+            with self.subTest(tier=tier):
+                rc, out, err = self.run_main("--role", tier)
+                self.assertNotEqual(rc, 0, out + err)
+                self.assertTrue(err.strip(), "the refusal said nothing on stderr")
+                for valid in ("coordinator", "batch-runner"):
+                    self.assertNotIn(valid, err)
+
+    def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
+        self.put_role("coordinator")
+        self.assert_writer_refused("--role", "lane")
+        with self.cloud():
+            self.assertEqual(merge.read_merge_role(), "coordinator")
+
+    def test_role_refuses_outside_the_cloud_and_writes_nothing(self):
+        for remote in (None, "", "false", "1", "TRUE"):
+            with self.subTest(remote=remote):
+                self.assert_writer_refused("--role", "batch-runner", CLAUDE_CODE_REMOTE=remote)
+                self.assertEqual(self.role_files(), {})
+
+    def test_role_refuses_with_no_session_id_and_writes_nothing(self):
+        for session in (None, ""):
+            with self.subTest(session=session):
+                self.assert_writer_refused("--role", "batch-runner", CLAUDE_CODE_REMOTE_SESSION_ID=session)
+                self.assertEqual(self.role_files(), {})
+
+    def test_role_with_a_pr_number_or_confirm_is_a_usage_error(self):
+        for argv in (("--role", "batch-runner", "7"), ("7", "--role", "batch-runner"), ("--role", "batch-runner", "--confirm"),
+                     ("--confirm", "--role", "batch-runner")):
+            with self.subTest(argv=argv):
+                self.assert_writer_refused(*argv, rc_is=2)  # 2 is argparse's usage-error code, as p.error gives today
+                self.assertEqual(self.role_files(), {})
+                self.assertEqual(self.host.pr_calls, [])
+
+REPO_ROOT = os.path.dirname(HERE)
+CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
+# The one shim form, plain and with trailing arguments. Bare `merge` is not on a cloud session's PATH, and `bin/merge` would allow any
+# repo's own bin/merge. No rule runs merge/merge.py by path: that runs the working copy's file, which on an old lane branch has no role check.
+CLOUD_ALLOW_SHIMS = ("~/.claude/bin/merge",)
+CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_ALLOW_SHIMS for tail in ("", " *"))
+# One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
+# comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
+SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
+
+def shell_views(text):
+    """-> (code, masked), each as long as `text`. `code` has every comment blanked. `masked` has every comment and the inside of every quoted
+    string blanked, so a structural word in a multi-line string is not found. Newlines stay."""
+    code, masked = list(text), list(text)
+    def blank(chars, lo, hi):
+        for i in range(lo, hi):
+            if chars[i] != "\n":
+                chars[i] = " "
+    for m in SH_TOKEN.finditer(text):
+        first = m.group()[0]
+        if first == "#":
+            blank(code, m.start(), m.end())
+            blank(masked, m.start(), m.end())
+        elif first in "'\"":
+            blank(masked, m.start() + 1, m.end() - 1)
+    return "".join(code), "".join(masked)
+
+def settings_branches(text):
+    """-> (head, cloud, local): the code of install.sh's settings.json step. head runs from the TARGET_JSON line to the cloud `if`.
+    cloud and local are its two branches, cut at the `else` and `fi` that stand at a line start. Comments are blank."""
+    code, masked = shell_views(text)
+    start = code.index('TARGET_JSON="$CLAUDE_DIR/settings.json"')
+    found = []
+    for pattern, view in ((r'^if \[ "\$CLOUD" = 1 \]; then$', code), (r"^else$", masked), (r"^fi$", masked)):
+        m = re.compile(pattern, re.M).search(view, found[-1].end() if found else start)
+        assert m, f"install.sh's settings step has no line matching {pattern!r}"
+        found.append(m)
+    opener, other, close = found
+    return code[start:opener.start()], code[opener.end():other.start()], code[other.end():close.start()]
+
+class ShellScan(unittest.TestCase):
+    """settings_branches on small scripts: comment openers in strings, a multi-line string and a lone quote must not move a branch edge."""
+    NAME = "merge/cloud_allow.json"
+    SCRIPT = 'TARGET_JSON="$CLAUDE_DIR/settings.json"\n%s\nif [ "$CLOUD" = 1 ]; then\n%s\nelse\n%s\nfi\necho after\n'
+
+    def branches(self, head="", cloud="", local=""):
+        return settings_branches(self.SCRIPT % (head, cloud, local))
+
+    def test_a_comment_that_names_the_file_is_no_reference(self):
+        for where in range(3):
+            with self.subTest(where=where):
+                parts = [""] * 3
+                parts[where] = f"  # {self.NAME} is only named here"
+                self.assertNotIn("cloud_allow", "".join(self.branches(*parts)))
+
+    def test_a_comment_opener_inside_a_string_is_not_a_comment(self):
+        head, cloud, local = self.branches(cloud=f'  x="a # b {self.NAME}"')
+        self.assertIn(self.NAME, cloud)
+        self.assertNotIn(self.NAME, head + local)
+
+    def test_a_multi_line_string_hides_an_else_and_a_fi(self):
+        cloud_body = f"  jq '\nelse\nfi\n# not a comment: {self.NAME}\n' in.json"
+        head, cloud, local = self.branches(cloud=cloud_body, local="  ln -sfn a b")
+        self.assertIn(self.NAME, cloud)
+        self.assertIn("ln -sfn a b", local)
+        self.assertNotIn(self.NAME, head + local)
+        self.assertNotIn("after", cloud + local)
+
+    def test_a_lone_quote_in_a_comment_or_after_a_backslash_opens_no_string(self):
+        head, cloud, local = self.branches(head="# it's the head", cloud=f"  # don't stop\n  echo don\\'t {self.NAME}",
+                                           local="  # isn't this the local branch\n  ln -sfn a b")
+        self.assertIn(self.NAME, cloud)
+        self.assertIn("ln -sfn a b", local)
+        self.assertNotIn(self.NAME, head + local)
+
+class CloudAllow(unittest.TestCase):
+    """merge/cloud_allow.json holds the `merge --confirm` allow rules that only a cloud session's settings.json gets (install.sh's cloud branch).
+    A local settings.json is a link to the repo's settings.json and gets none."""
+
+    def allow(self):
+        with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
+            return json.load(f)["permissions"]["allow"]
+
+    def test_the_rules_file_is_exactly_the_two_confirm_rules_of_the_home_shim(self):
+        with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(set(data), {"permissions"})
+        self.assertEqual(set(data["permissions"]), {"allow"})
+        self.assertEqual(sorted(data["permissions"]["allow"]), sorted(CLOUD_ALLOW_RULES))  # no more, no fewer, no repeat
+
+    def test_no_rule_names_the_script_or_python(self):
+        for rule in self.allow():
+            with self.subTest(rule=rule):
+                self.assertNotIn("merge.py", rule)
+                self.assertNotIn("python", rule)
+
+    def test_each_rules_command_word_is_the_home_shim(self):
+        for rule in self.allow():
+            with self.subTest(rule=rule):
+                self.assertTrue(rule.startswith("Bash(") and rule.endswith(")"), rule)
+                self.assertIn(rule[len("Bash("):-1].split(" ", 1)[0], CLOUD_ALLOW_SHIMS)
+
+    def test_no_rule_has_merge_or_bin_merge_as_its_command_word(self):
+        # `merge` is not on a cloud PATH (measured: `command -v merge` is empty); `bin/merge` is the cwd's file, any repo's own.
+        for rule in self.allow():
+            with self.subTest(rule=rule):
+                self.assertNotIn(rule[len("Bash("):].split(" ", 1)[0], ("merge", "bin/merge"))
+
+    def test_every_rule_names_confirm_and_none_is_broad(self):
+        narrow = re.compile(r"Bash\(~/\.claude/bin/merge \* --confirm( \*)?\)")
+        for rule in self.allow():
+            with self.subTest(rule=rule):
+                self.assertNotEqual(rule, "Bash(*)")
+                # the shim, one `*` for the PR, --confirm, then at most one `*` for trailing arguments
+                self.assertTrue(narrow.fullmatch(rule), f"{rule} is not one of the narrow shapes")
+
+    def test_install_sh_names_the_rules_file_in_its_cloud_branch(self):
+        with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
+            head, cloud, local = settings_branches(f.read())
+        self.assertIn("merge/cloud_allow.json", head + cloud)  # head: a path the branch gets from a variable set above its `if`
+
+    def test_install_sh_names_the_rules_file_nowhere_in_its_local_branch(self):
+        with open(os.path.join(REPO_ROOT, "install.sh"), encoding="utf-8") as f:
+            head, cloud, local = settings_branches(f.read())
+        self.assertNotIn("cloud_allow", local)
+        self.assertTrue(local.strip(), "the local branch of the settings step was not found")
+
+    def test_the_repo_settings_json_has_no_merge_allow_rule(self):
+        # The repo's settings.json is what a local session reads (a link to it). Not matched on a bare "merge": `Bash(gh pr merge:*)` is there.
+        with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as f:
+            allow = json.load(f).get("permissions", {}).get("allow", [])
+        self.assertTrue(allow)
+        for rule in allow:
+            with self.subTest(rule=rule):
+                for needle in ("merge.py", "bin/merge", "--confirm"):
+                    self.assertNotIn(needle, rule)
+                self.assertFalse(rule.startswith("Bash(merge"), rule)
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":

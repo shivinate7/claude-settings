@@ -1209,9 +1209,10 @@ def case_port_finding_is_a_note_with_its_rule():
 # --------------------------------------------------------------------------- c139
 # Uniform ruling (topic t18): a repo that differs from a shared format changes to match, and the
 # shared tool never grows a second form. An option that widens what a shared tool accepts carries
-# "Goes against your uniform ruling (t18)" and is never the recommended option.
+# "Goes against your uniform ruling (t18)" and is never the recommended option. Rule
+# `style-question-form` holds that text (the one question form, hooks/question_form.py).
 
-WIDENS_RULE = "style-option-widens-marked"
+WIDENS_RULE = "style-question-form"
 WIDENS_ASK = (
     "Done: read banchi's record titles.\n"
     "Input Needed: pick A or B. A: let the stamp accept banchi's titles. B: rename banchi's titles. "
@@ -1259,6 +1260,29 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("judge only",), ("options",), ("offers",)), sentences)
     check("prompt: a sentence never flags a reply that describes the rule itself",
           has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
+
+
+# Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
+# flags it and says to ask it as a multi-select item (`multi: true`). Options that exclude each other,
+# such as now or later, stay a pick-one question.
+COMBINE_ASK = (
+    "Done: read the waiting page.\n"
+    "Input Needed: pick A, B or C. A: add rank buttons to the page. B: add picture cards to the page. "
+    "C: add a keyboard shortcut to the page. I recommend A.\n"
+)
+
+
+def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
+    run = run_hook(COMBINE_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, COMBINE_ASK)
+    check("prompt: the prompt carries the reply", COMBINE_ASK in run.prompt(), run.prompt()[:300])
+    check("prompt: a sentence flags a pick-one question whose options could combine and names multi-select",
+          has_pin(sentences, ("flag",), ("pick-one", "pick one"), ("combine",), ("multi: true", "multi-select")),
+          sentences)
+    check("prompt: a sentence never flags options that exclude each other",
+          has_pin(sentences, ("never flag",), ("exclude",)), sentences)
+    check("prompt: the prompt still judges against eight rules",
+          has_pin(sentences, ("against eight rules",)), sentences[:2])
 
 
 def case_widens_finding_logs_its_rule():
@@ -1382,6 +1406,7 @@ CASES = (
     case_prompt_count_matches_judged_rules,
     case_prompt_flags_a_recommended_option_that_widens,
     case_widens_finding_logs_its_rule,
+    case_prompt_flags_a_pick_one_question_whose_options_could_combine,
 )
 
 
