@@ -12241,6 +12241,11 @@ def decide(case):
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
         command = [sys.executable, "-c", LB_PROBE, GUARD, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
+    if case.get("probe_side"):
+        # A case that reads what the guard did, not only what it decided: the probe runs the guard in its own
+        # process and writes its counts to `probe_side` (a spec of `probe_spec`, see LB_PROBE).
+        command = [sys.executable, "-c", LB_PROBE, case.get("guard") or GUARD, case["probe_side"],
+                   json.dumps(case["probe_spec"])]
     started = time.monotonic()
     result = subprocess.run(
         command, input=payload, capture_output=True, text=True, env=env,
@@ -17622,7 +17627,10 @@ def cs_kind_path(kind):
 def cs_label(path):
     if not os.path.isabs(path):
         return path
-    return os.path.relpath(path, GITMAIN) if path.startswith(GITMAIN) else "a path in no repo"
+    for base in (GITMAIN, DIFFROOT):   # DIFFROOT holds the repos the commit and record cases build
+        if path.startswith(base):
+            return os.path.relpath(path, base)
+    return "a path in no repo"
 
 
 def cs(name, expected, role="coordinator", env=None, session=CS_PAYLOAD_SID, **call):
@@ -17697,8 +17705,8 @@ for _command in ("echo x >> docs/todo.md",
 CS_COMMIT_FILES = dict(BASE_FILES, **{"docs/decisions/a.md": "a\n", "docs/todo.md": "- a\n"})
 
 
-def _cs_repo(name, change, stage=True):
-    return diff_repo("cs-" + name, change, files=CS_COMMIT_FILES, stage=stage)
+def _cs_repo(name, change, stage=True, files=None):
+    return diff_repo("cs-" + name, change, files=files or CS_COMMIT_FILES, stage=stage)
 
 
 def _cs_records(w):
@@ -17731,6 +17739,163 @@ for _role, _name in (("lane", "lane_role_file_passes"), ("batch-runner", "batch_
 cs_write("local_passes", "allow", CS_CODE, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None))
 cs_write("remote_false_passes", "allow", CS_CODE, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE="false"))
 cs_write("no_env_session_id_passes", "allow", CS_CODE, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE_SESSION_ID=None))
+
+# ---- scope the rule reads exactly: cp and mv, the record branch, legacy-repos, interpreters, chained adds, cost
+CS_OUT = slash(OUTSIDE_TEMP)   # a path in no repo
+CS_OUT_DIR = slash(os.path.dirname(OUTSIDE_TEMP))
+
+# 1. cp and mv judge the destination only. A cp source is read, so it counts for nothing, whatever it is. An mv source
+# is removed, so it is a write and counts. The scanner stands an empty word in for a read-only source, and that word
+# resolves to the cwd: a repo path whenever the cwd lies below a repo root. So each group runs at a repo root, in a
+# folder of the repo, and at the root of a worktree nested in the repo.
+for _where, _cwd, _root in (("repo root", GITMAIN, GITMAIN), ("repo folder", os.path.join(GITMAIN, "src"), GITMAIN),
+                            ("nested worktree root", AGENTWT, AGENTWT)):
+    def _from(path, _cwd=_cwd, _root=_root):
+        """A path of the checkout, spelled from the cwd."""
+        return slash(os.path.relpath(os.path.join(_root, path), _cwd))
+    for _command in ("cp %s %s" % (_from("docs/decisions/x.md"), CS_OUT),
+                     "cp %s %s" % (_from("src/app.py"), CS_OUT),
+                     "cp -t %s %s" % (CS_OUT_DIR, _from("docs/decisions/x.md")),
+                     "cp %s %s" % (CS_OUT, _from("docs/decisions/y.md")),
+                     "mv %s %s" % (_from("docs/decisions/x.md"), CS_OUT),
+                     "mv %s %s" % (CS_OUT, _from("docs/decisions/y.md"))):
+        cs_shell("cp_mv_source_not_judged (%s)" % _where, "allow", _command, cwd=_cwd)
+    for _command, _target in (("cp %s %s" % (CS_OUT, _from("hooks/a.py")), "a.py"),
+                              ("cp %s %s" % (_from("docs/decisions/x.md"), _from("hooks/a.py")), "a.py"),
+                              ("cp %s %s" % (_from("src/app.py"), _from("hooks/a.py")), "a.py"),
+                              ("cp -t %s %s" % (_from("hooks"), _from("docs/decisions/x.md")), ""),
+                              ("mv %s %s" % (CS_OUT, _from("hooks/a.py")), "a.py"),
+                              ("mv %s %s" % (_from("src/app.py"), CS_OUT), "app.py")):   # an mv removes its source
+        cs_shell("cp_mv_destination_denied (%s)" % _where, "deny", _command, _target, cwd=_cwd)
+
+# 2. The record branch. skills/project-ops (SKILL.md, "The record branch") keeps the coordinator's briefs, hand-off
+# notes and roadmap on an orphan branch `roadmap`, in a worktree beside the repo, laid out by scaffold.py. That
+# checkout is a record home: a write there passes, and so does the commit that files it. The same folder names in a
+# checkout of main stay product paths, and so does any other path of the record checkout. skills/roadmap/build.py
+# (record_source) tells the checkout apart by its branch, `roadmap` by default, and its roadmap/data folder; this
+# fixture has both.
+CS_RECORD_MAIN = os.path.join(DIFFROOT, "cs-record-main")
+CS_RECORD = os.path.join(DIFFROOT, "cs-record")
+CS_SCAFFOLD = os.path.join(REPO, "skills", "project-ops", "scripts", "scaffold.py")
+
+
+def _cs_build_record():
+    """A main checkout that has a briefs folder of its own, and beside it the record branch as the skill makes it. The
+    skeleton is committed; one brief and one hand-off note are staged on top of it."""
+    make_repo(CS_RECORD_MAIN, dict(BASE_FILES, **{"briefs/README.md": "product briefs\n"}))
+    made = run_vcs(CS_RECORD_MAIN, "worktree", "add", "-q", "--orphan", "-b", "roadmap", CS_RECORD)
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: an orphan worktree needs git 2.42 or later: %s" % made.stderr.strip())
+    done = subprocess.run([sys.executable, CS_SCAFFOLD, "--dest", CS_RECORD, "--repo", "owner/name",
+                           "--branch", "roadmap"], capture_output=True, text=True)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: scaffold.py: %s" % done.stderr.strip())
+    run_vcs(CS_RECORD, "add", "-A")
+    committed = run_vcs(CS_RECORD, *IDENT, "commit", "-q", "-m", "skeleton")
+    if committed.returncode != 0:
+        sys.exit("fixture setup failed: the record branch commit: %s" % committed.stderr.strip())
+    write(os.path.join(CS_RECORD, "briefs", "s-slug.md"), "brief\n")
+    write(os.path.join(CS_RECORD, "handoffs", "c-2026-10-31.md"), "note\n")
+    run_vcs(CS_RECORD, "add", "-A")
+
+
+lazy_fixture([CS_RECORD, CS_RECORD_MAIN], _cs_build_record)
+for _rel in ("briefs/s-slug.md", "handoffs/c-2026-10-31.md", "roadmap/data/steps/s-slug.json"):
+    cs_write("record_branch_allowed", "allow", os.path.join(CS_RECORD, *_rel.split("/")), "Write", cwd=CS_RECORD)
+cs_write("record_branch_allowed", "allow", os.path.join(CS_RECORD, "briefs", "s-slug.md"), "Edit", cwd=CS_RECORD)
+cs_shell("record_branch_allowed", "allow", "echo x > briefs/s-slug.md", cwd=CS_RECORD)
+cs("record_branch_commit_allowed: the staged brief and hand-off note", "allow", command=COMMIT, cwd=CS_RECORD)
+cs_write("main_checkout_briefs_denied", "deny", os.path.join(CS_RECORD_MAIN, "briefs", "s-slug.md"), "Write", cwd=CS_RECORD_MAIN)
+cs_write("main_checkout_product_denied", "deny", os.path.join(CS_RECORD_MAIN, "src", "app.py"), "Write", cwd=CS_RECORD_MAIN)
+cs_write("record_checkout_other_path_denied", "deny", os.path.join(CS_RECORD, "src", "app.py"), "Write", cwd=CS_RECORD)
+
+# 3. A kind a repo keeps where the layout's "legacy-repos" says (lint/layout.py, unmoved(): by the repo's origin). The
+# file is the source, so no repo name or path is copied here. The same path in a checkout whose origin is another
+# repo stays a product path: one repo's place is no other repo's.
+CS_LEGACY_REPOS = cs_layout().get("legacy-repos", {})
+
+
+def _cs_legacy_checkout(name):
+    """A checkout whose origin is the GitHub repo `name`, built when a case first names it."""
+    where = os.path.join(DIFFROOT, "cs-legacy-" + name.replace("/", "-"))
+
+    def build_legacy_checkout():
+        make_repo(where, BASE_FILES)
+        run_vcs(where, "remote", "add", "origin", "https://github.com/%s.git" % name)
+    lazy_fixture([where], build_legacy_checkout)
+    return where
+
+
+for _repo, _kept in sorted(CS_LEGACY_REPOS.items()):
+    _checkout = _cs_legacy_checkout(_repo)
+    for _kind, _path in sorted(_kept.items()):
+        if _kind in CS_KINDS:
+            _file = _path.strip("/") if os.path.splitext(_path)[1] else _path.strip("/") + "/x.md"
+            cs_write("legacy_repos_%s_allowed" % _kind, "allow", os.path.join(_checkout, *_file.split("/")), cwd=_checkout)
+            cs_write("legacy_repos_%s_other_repo_denied" % _kind, "deny", os.path.join(GITMAIN, *_file.split("/")))
+    cs_write("legacy_repos_product_denied", "deny", os.path.join(_checkout, "src", "app.py"), cwd=_checkout)
+
+# 4. An interpreter writes a file as a redirect does. A write of python, perl or dd to a product path is refused, and
+# a read is not. The scanner reads python, so a comment opener inside a string, a multi-line string and a lone quote
+# hide no write that follows them, and a write that only sits in a comment or in a printed string runs nothing.
+
+
+def _heredoc(interpreter, *lines):
+    return "%s - <<'EOF'\n%s\nEOF" % (interpreter, "\n".join(lines))
+
+
+for _name, _command in (
+        ("python_heredoc_write_text", _heredoc("python3", "from pathlib import Path", 'Path("hooks/a.py").write_text("x")')),
+        ("python_heredoc_open_w", _heredoc("python3", 'open("hooks/a.py", "w").write("x")')),
+        ("python_c_open_w", "python3 -c \"open('hooks/a.py','w')\""),
+        ("python_c_open_a_single_quoted", "python3 -c 'open(\"hooks/a.py\", \"a\")'"),
+        ("python_c_write_text", "python3 -c \"from pathlib import Path; Path('hooks/a.py').write_text('x')\""),
+        ("perl_in_place", "perl -pi -e 's/a/b/' hooks/a.py"),
+        ("dd_of", "dd if=/dev/zero of=hooks/a.py bs=1 count=1"),
+        ("dd_of_after_a_pipe", "echo x | dd of=hooks/a.py"),
+        ("python_string_with_hash", "python3 -c \"x = 'see # here'; open('hooks/a.py', 'w').write(x)\""),
+        ("python_string_with_slashes", _heredoc("python3", 'url = "http://example.com"; open("hooks/a.py", "w").write(url)')),
+        ("python_multi_line_string", _heredoc("python3", 'text = """first', "# not a comment", "it's here", '"""',
+                                              'open("hooks/a.py", "w").write(text)')),
+        ("python_lone_quote", _heredoc("python3", 'print("it\'s done")', 'open("hooks/a.py", "w").write("x")'))):
+    cs_shell(_name + "_denied", "deny", _command, "a.py")
+for _name, _command in (
+        ("python_c_json_load", "python3 -c \"import json;print(json.load(open('x.json')))\""),
+        ("python_heredoc_read", _heredoc("python3", "import json", 'print(json.load(open("docs/todo.md")))')),
+        ("python_open_read_modes", "python3 -c \"print(open('hooks/a.py', 'r').read(), open('hooks/a.py', 'rb').read())\""),
+        ("python_open_encoding", "python3 -c \"print(open('hooks/a.py', encoding='utf-8').read())\""),
+        ("python_read_text", "python3 -c \"from pathlib import Path; print(Path('hooks/a.py').read_text())\""),
+        ("python_runs_a_script", "python3 hooks/guard.py"),
+        ("python_module", "python3 -m json.tool docs/todo.md"),
+        ("perl_read_only", "perl -ne 'print if /x/' hooks/a.py"),
+        ("dd_reads_into_no_repo", "dd if=hooks/a.py of=" + CS_OUT),
+        ("python_write_to_a_record", "python3 -c \"open('docs/todo.md', 'w')\""),
+        ("python_heredoc_write_to_no_repo", _heredoc("python3", 'open("%s", "w").write("x")' % CS_OUT)),
+        ("python_write_only_in_a_comment", _heredoc("python3", '# open("hooks/a.py", "w").write("x")', "print(1)")),
+        ("python_write_only_in_a_string", _heredoc("python3", "print(\"open('hooks/a.py', 'w')\")"))):
+    cs_shell(_name + "_allowed", "allow", _command)
+
+# 5. A commit holds what the same call adds before it. The index is clean when the guard reads it, so the staged-file
+# read sees nothing: the add before the commit must be read as well. The repo holds code, CLAUDE.md and a record, all
+# changed and none staged.
+CS_CHAIN_FILES = dict(CS_COMMIT_FILES, **{"CLAUDE.md": "rules\n"})
+
+
+def _cs_chain_change(w):
+    _cs_records(w)
+    write(os.path.join(w, "src", "app.py"), "x = 2\n")
+    write(os.path.join(w, "CLAUDE.md"), "rules, changed\n")
+
+
+CS_CHAIN = _cs_repo("chain", _cs_chain_change, stage=False, files=CS_CHAIN_FILES)
+CS_CHAIN_RECORDS = _cs_repo("chain-records", _cs_records, stage=False, files=CS_CHAIN_FILES)
+for _command, _target in ((VCS + " add CLAUDE.md && " + COMMIT, "CLAUDE.md"),
+                          (VCS + " add src/app.py && " + COMMIT, "app.py"),
+                          (VCS + " add -A && " + COMMIT, "app.py"),
+                          (VCS + " add . ; " + COMMIT, "app.py")):
+    cs_shell("chained_add_commit_denied", "deny", _command, _target, cwd=CS_CHAIN)
+cs_shell("chained_add_record_commit_allowed", "allow", VCS + " add docs/todo.md && " + COMMIT, cwd=CS_CHAIN)
+cs_shell("chained_add_all_of_records_commit_allowed", "allow", VCS + " add -A && " + COMMIT, cwd=CS_CHAIN_RECORDS)
 
 # ---- what needs more than one verdict runs as a check
 # Each refused input is a row: (what, tool, tool input, cwd, text its refusal must not name).
@@ -17844,6 +18009,75 @@ def cs_override_call(config, session, seconds):
     return ov_call("Edit", {"file_path": CS_CODE, "new_string": "x"}, GITMAIN, config, session, seconds, env=CS_REMOTE)
 
 
+# 6. Cost (rule outcomes-mechanize-rules). The rule opens the role file, at most once, and nothing else on a call that is
+# not a coordinator's, and on a coordinator's call that names no repo path. It never opens lint/layout.json or the config
+# folder's CLAUDE.md there: those are read to judge a repo path, so they are not read to find that there is none. The
+# probe's `opens` seam counts the opens (LB_PROBE). The rule's own opens are the call's less those of the same call with
+# CLAUDE_CODE_REMOTE "false", where the rule leaves at its first gate and no other rule reads that variable; other rules'
+# own opens (the session record, say) cancel out. The layout and the config CLAUDE.md are also asserted unopened among
+# the call's whole opens, so a rule that read them before its gates cannot hide in the difference. The control row
+# shows the spy sees a read, so a pass is no blind spy's.
+CS_OPENS_DIR = os.path.join(ROOT, "cs-opens")
+
+
+def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None):
+    """(decision, reason, the absolute path of each open) of one guard call, made as `cs` makes one."""
+    os.makedirs(CS_OPENS_DIR, exist_ok=True)
+    handle, side = tempfile.mkstemp(dir=CS_OPENS_DIR, suffix=".json")
+    os.close(handle)
+    got, reason = decide({"raw": None, "tool": tool, "cwd": cwd, "session": CS_PAYLOAD_SID, "env_path": None,
+                          "config": config, "agent_id": agent_id, "agent_type": "builder" if agent_id else None,
+                          "env": dict(CS_REMOTE if env is None else env), "tool_input": tool_input,
+                          "probe_side": side, "probe_spec": {"mode": "judge", "opens": True}})
+    try:
+        with open(side, encoding="utf-8") as done:
+            return got, reason, json.load(done)["opens"]
+    except (OSError, ValueError, KeyError):
+        return "error", "the probe wrote no opens: %s" % reason[:90], []
+
+
+def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None):
+    """(decision, reason, every open, the opens only the rule makes) of one call."""
+    env = dict(CS_REMOTE if env is None else env)
+    got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env, agent_id)
+    _, _, off = cs_opens_of(config, tool, tool_input, cwd, dict(env, CLAUDE_CODE_REMOTE="false"), agent_id)
+    return got, reason, opened, [path for path in dict.fromkeys(opened) if path not in off]
+
+
+def cs_cost_check(config_role, tool, tool_input, cwd, env=None, agent_id=None):
+    """A check that the call is allowed, and that the rule opened no layout and no config CLAUDE.md, and nothing but the
+    role file, which it opened at most once."""
+    def check():
+        config = CS_CONFIG[config_role]
+        got, reason, opened, rule_opens = cs_rule_opens(config, tool, tool_input, cwd, env, agent_id)
+        if got != "allow":
+            return False, "the call was %s, want allow: %s" % (got, reason[:90])
+        role = os.path.abspath(os.path.join(config, "state", "merge-role.json"))
+        pointer = os.path.abspath(os.path.join(config, "CLAUDE.md"))
+        problems = []
+        if [path for path in opened if slash(path).endswith("lint/layout.json")]:
+            problems.append("it opened lint/layout.json")
+        if pointer in opened:
+            problems.append("it opened the config folder's CLAUDE.md")
+        if opened.count(role) > 1:
+            problems.append("it opened the role file %d times" % opened.count(role))
+        named = [os.path.basename(path) for path in rule_opens if path != role]
+        if named:
+            problems.append("the rule opened %s besides the role file" % named)
+        return not problems, "; ".join(problems) or "no layout, no config CLAUDE.md, the role file at most once"
+    return check
+
+
+def cs_cost_control_check():
+    """The refused Write of product code shows the layout among the call's opens, so the checks above can see a read."""
+    got, reason, opened = cs_opens_of(CS_CONFIG["coordinator"], "Write", {"file_path": CS_CODE, "content": "x"}, GITMAIN)
+    if got != "deny":
+        return False, "the control Write was %s, want deny: %s" % (got, reason[:90])
+    if not [path for path in opened if slash(path).endswith("lint/layout.json")]:
+        return False, "the rule's own read of the layout did not show: the spy is blind, so a pass above proves nothing"
+    return True, "the refused Write shows the layout among the opens"
+
+
 CS_OVERRIDE_ACT = ("coordinator-scope", "a coordinator's Edit of product code", cs_override_call, GITMAIN, "deny", CS_RULE, None)
 CS_CHECKS = [
     ("coordinator-scope constants: COORDINATOR_KINDS names nine layout kinds and the mode is deny", cs_constants_check),
@@ -17856,6 +18090,27 @@ for _cs_timed in (False, True):
         "a timed override lets through an Edit of product code until it ends" if _cs_timed else
         "a one-act override lets through an Edit of product code once, then it is refused again"),
         ov_act_check(CS_OVERRIDE_ACT, _cs_timed)))
+CS_COST_CODE = {"file_path": CS_CODE, "content": "x"}
+for _who, _role, _call in (   # a call that is not a coordinator's: the same Write of product code, one gate shut each time
+        ("no role file", "none", {}),
+        ("another session's role file", "other-session", {}),
+        ("a lane role file", "lane", {}),
+        ("a batch-runner role file", "batch-runner", {}),
+        ("an agent's own call", "coordinator", {"agent_id": "bld1"}),
+        ("a local session", "coordinator", {"env": dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None)})):
+    CS_CHECKS.append(("coordinator-scope cost: %s, so the rule opens no layout and no config CLAUDE.md" % _who,
+                      cs_cost_check(_role, "Write", CS_COST_CODE, GITMAIN, **_call)))
+for _what, _tool, _input, _cwd in (   # a coordinator's call that names no repo path
+        ("a Write to a path in no repo", "Write", {"file_path": OUTSIDE_TEMP, "content": "x"}, GITMAIN),
+        ("a redirect into no repo, from a folder in no repo", "Bash", {"command": "echo x > " + CS_OUT}, NOGIT),
+        ("a redirect into no repo, from a repo", "Bash", {"command": "echo x > " + CS_OUT}, GITMAIN),
+        ("git status in a repo", "Bash", {"command": VCS + " status"}, GITMAIN),
+        ("git log in a repo", "Bash", {"command": VCS + " log --oneline -3"}, GITMAIN),
+        ("echo in a repo", "Bash", {"command": "echo hi"}, GITMAIN)):
+    CS_CHECKS.append(("coordinator-scope cost: a coordinator call that names no repo path (%s) opens only the role file" % _what,
+                      cs_cost_check("coordinator", _tool, _input, _cwd)))
+CS_CHECKS.append(("coordinator-scope cost: the control, a coordinator's refused Write of product code shows the layout open",
+                  cs_cost_control_check))
 for _label, _check in CS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
@@ -17909,8 +18164,11 @@ FAMILY = "load-brake"
 # A fake case must start no child process; the probe counts them and the case checks the count.
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
+# With spec "opens" the probe also records, around main() only, each path the call opens through
+# builtins.open or io.open (pathlib reads through io.open), as an absolute path in `opens`: the one seam
+# for a cost case that counts file opens (rule coordinator-scope, cs_opens_of). A failed open counts too.
 LB_PROBE = r"""
-import importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
+import builtins, importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
 from unittest import mock
 guard_path, side, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 children = []
@@ -18063,10 +18321,22 @@ try:
             g.floor_hit = lambda tool, tool_input: "haiku"
         elif spec.get("patch_floor") == "read":
             g.floor_hit = lambda tool, tool_input: g.read_load() and ""
+        if spec.get("opens"):
+            out["opens"] = opened = []
+            real_open = io.open
+
+            def spy_open(file, *args, **kwargs):
+                if isinstance(file, (str, bytes, os.PathLike)):
+                    opened.append(os.path.abspath(os.fsdecode(file)))
+                return real_open(file, *args, **kwargs)
+            builtins.open = io.open = spy_open
         try:
             g.main()
         except SystemExit:
             pass
+        finally:
+            if spec.get("opens"):
+                builtins.open = io.open = real_open   # the probe's own write of `side` is no open of the call
     out["files"] = [p for p in listing() if p not in before]
 except Exception as exc:
     out["probe_error"] = type(exc).__name__ + ": " + str(exc)[:200]
