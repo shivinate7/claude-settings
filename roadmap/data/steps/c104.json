@@ -1,9 +1,9 @@
 {
   "title": "A notes box on the waiting page feeds your feedback inbox",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.397,
   "why": "Your ruling, Oct 26 20:57 CDT: option C of the feedback overhaul comes later.",
-  "note": "A notes box on the waiting page writes into the same inbox as c103. Due after: c99 (a save wakes the session) runs on a real page, and each repo's page roll-out. Port: yes, with the waiting page. Placed after c100 (triage, Oct 27): it needs the page's final look first. Lane started Oct 30 16:13 CDT.",
-  "updatedAt": "2026-10-30T21:25:00Z"
+  "note": "A notes box on the waiting page writes into the same inbox as c103. Due after: c99 (a save wakes the session) runs on a real page, and each repo's page roll-out. Port: yes, with the waiting page. Placed after c100 (triage, Oct 27): it needs the page's final look first. Lane started Oct 30 16:13 CDT. Done: #889 in batch 38 #911, main 13e97305 (coordinator, Oct 31 18:09 CDT).",
+  "updatedAt": "2026-10-31T23:09:00Z"
 }

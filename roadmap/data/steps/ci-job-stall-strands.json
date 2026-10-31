@@ -1,9 +1,9 @@
 {
   "title": "A quiet ci-job step does not trip the stall watch and strand its jobs",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.30492,
   "why": "Batch runner, batch 37 (#900), Oct 31 (via coordinator): a ci-job step quiet for over 300 s trips the stall watch; the stall exit leaves its jobs running, and the guard then refuses to stop them. Cost real time today.",
-  "note": "Built Oct 31: draft PR #906 (with step ci-job-code-check-path), queued for batch 38 (coordinator, 16:41 CDT). The duplicate lane ci-job-stall-strands was stopped. Done check: a test with a step quiet past the stall limit ends with no process left running, red on main and green on the fix. Files: bin/ci-job, hooks/stall_watch.py.",
-  "updatedAt": "2026-10-31T21:41:00Z"
+  "note": "Built Oct 31: draft PR #906 (with step ci-job-code-check-path), queued for batch 38 (coordinator, 16:41 CDT). The duplicate lane ci-job-stall-strands was stopped. Done check: a test with a step quiet past the stall limit ends with no process left running, red on main and green on the fix. Files: bin/ci-job, hooks/stall_watch.py. Done: #906 in batch 38 #911, main 13e97305 (coordinator, Oct 31 18:09 CDT).",
+  "updatedAt": "2026-10-31T23:09:00Z"
 }

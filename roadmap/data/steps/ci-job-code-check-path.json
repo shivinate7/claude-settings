@@ -1,9 +1,9 @@
 {
   "title": "bin/ci-job finds the code check where install puts it",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.30491,
   "why": "Batch runner, batch 37 (#900), Oct 31 (via coordinator): ci-job's code-check step looks for ~/.claude/actions/code-check/code_check.py, which install does not place, so the step FAILs locally in 0 s on every run.",
-  "note": "Built Oct 31: draft PR #906, queued for batch 38 (coordinator, 16:41 CDT). Done check: a local ci-job run reaches the code check and gives its real verdict, red on main and green on the fix. Files: bin/ci-job, hooks/session_start.sh or the install list.",
-  "updatedAt": "2026-10-31T21:41:00Z"
+  "note": "Built Oct 31: draft PR #906, queued for batch 38 (coordinator, 16:41 CDT). Done check: a local ci-job run reaches the code check and gives its real verdict, red on main and green on the fix. Files: bin/ci-job, hooks/session_start.sh or the install list. Done: #906 in batch 38 #911, main 13e97305 (coordinator, Oct 31 18:09 CDT).",
+  "updatedAt": "2026-10-31T23:09:00Z"
 }

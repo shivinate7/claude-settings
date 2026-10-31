@@ -1,9 +1,9 @@
 {
   "title": "The batch runner merges with no owner step per session; the merge tool refuses lanes",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33761,
   "why": "Ruling, Oct 29 16:54 CDT (shiv, chat, via coordinator): the batch runner must merge with no per-session owner step and no widening.",
-  "note": "Fix (coordinator's brief): a narrow allow rule for the merge tool's confirm form, plus a role check inside the merge tool that refuses a lane session. Home: decision session-tiers. Lane merge-role-allow started Oct 29 16:55 CDT (coordinator). Red first: the batch runner's confirm form is stopped today, and a lane's is still refused after. Needs no answer. Port: yes, the merge tool is shared. Placed after coordinator-merge-grant (triage 12, Oct 29). Done: batch 22c #836 merged Oct 29 21:52 CDT as main 53536ea7. Reopened Oct 30 15:07 CDT: item 92 b lets the batch runner's merge --role through the cloud allow list, for the coordinator and batch-runner tiers only, bending t18; closes todo fb-0303-1 (#845). #878 joins batch 37 (coordinator 2, 17:18 CDT); batch runner 3 builds it without merge --role (refused) and coordinator 2 runs the merge. #878 dropped from batch 37 to batch 38 (coordinator, Oct 31 17:09 CDT).",
-  "updatedAt": "2026-10-31T22:09:00Z"
+  "note": "Fix (coordinator's brief): a narrow allow rule for the merge tool's confirm form, plus a role check inside the merge tool that refuses a lane session. Home: decision session-tiers. Lane merge-role-allow started Oct 29 16:55 CDT (coordinator). Red first: the batch runner's confirm form is stopped today, and a lane's is still refused after. Needs no answer. Port: yes, the merge tool is shared. Placed after coordinator-merge-grant (triage 12, Oct 29). Done: batch 22c #836 merged Oct 29 21:52 CDT as main 53536ea7. Reopened Oct 30 15:07 CDT: item 92 b lets the batch runner's merge --role through the cloud allow list, for the coordinator and batch-runner tiers only, bending t18; closes todo fb-0303-1 (#845). #878 joins batch 37 (coordinator 2, 17:18 CDT); batch runner 3 builds it without merge --role (refused) and coordinator 2 runs the merge. #878 dropped from batch 37 to batch 38 (coordinator, Oct 31 17:09 CDT). Done: #878 in batch 38 #911, main 13e97305 (coordinator, Oct 31 18:09 CDT). The batch runner may now run merges itself.",
+  "updatedAt": "2026-10-31T23:09:00Z"
 }
