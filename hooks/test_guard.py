@@ -299,7 +299,6 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "no_root": no_root,
         # A case that must be judged within this many seconds. A slower verdict fails the case.
         "max_seconds": max_seconds,
-        "env": env,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
