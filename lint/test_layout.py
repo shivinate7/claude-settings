@@ -248,8 +248,8 @@ class WaitingPage(Tree):
 
 
 class RecordBranch(Tree):
-    """A fork worktree names its own record branch in its extras file (owner ruling Oct 31 15:00 CDT,
-    option a). A repo with no key reads the main record branch, "roadmap"."""
+    """A fork worktree names its own record branch in its extras file (decision session-tiers).
+    A repo with no key reads the main record branch, "roadmap"."""
 
     def setUp(self):
         super().setUp()
@@ -279,7 +279,7 @@ class RecordBranch(Tree):
 
 
 class SetWaitingPage(Tree):
-    """Triage makes a repo's waiting page when the repo has none (owner ruling Oct 31 15:02 CDT). It writes
+    """Triage makes a repo's waiting page when the repo has none (decision session-tiers). It writes
     only the "waiting-page" key, never marks the repo rolled out, and never overwrites a key already set."""
     URL = "https://claude.ai/artifact/abc123"
     OTHER = "https://claude.ai/artifact/zzz999"

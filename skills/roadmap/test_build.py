@@ -598,7 +598,7 @@ class BlockOnly(Fixture):
 
 class ForkRecord(Fixture):
     """A fork worktree keeps its own waiting page and its own record branch, named in its extras file
-    (owner ruling Oct 31 15:00 CDT, option a). Both record branches sit on one bare origin."""
+    (decision session-tiers). Both record branches sit on one bare origin."""
     STEPS = {"c1": dict(STEP, title="Main record step")}
     MAIN_URL = "https://claude.ai/artifact/MAINPAGE111"
     FORK_URL = "https://claude.ai/artifact/FORKPAGE222"
