@@ -3075,6 +3075,8 @@ TEMP_DIR = None   # back to the system temp for the sections below
 
 # THE REFUSAL TEXT and THE POINTER REMEDY, judged on the printed reason (see the two checks below).
 HM_REFUSED_PATH = "hm-text-lane"
+# The call shape every EnterWorktree remedy names. A `path` makes Claude Code ask the owner to approve the worktree.
+ENTER_WORKTREE_SHAPE = "with a `name` and no `path`"
 
 
 def hand_made_refusal_text_case():
@@ -3087,7 +3089,7 @@ def hand_made_refusal_text_case():
         return False, "expected deny, got %s: %s" % (got, reason[:90])
     if "Rule (hand-made worktree)" not in reason:
         return False, "the reason does not hold 'Rule (hand-made worktree)': %s" % reason[:90]
-    for want in ("isolation", "EnterWorktree"):
+    for want in ("isolation", "EnterWorktree", ENTER_WORKTREE_SHAPE):
         if want not in reason:
             return False, "the reason does not name %r: %s" % (want, reason[:90])
     if not re.search(r"which layer", reason):
@@ -3095,7 +3097,7 @@ def hand_made_refusal_text_case():
     for bad in (HM_REFUSED_PATH, "worktree add"):
         if bad in reason:
             return False, "the reason holds %r, which it must not" % bad
-    return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree and the layer"
+    return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
 def pointer_remedy_names_enter_worktree_case():
@@ -3109,7 +3111,9 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy still names 'worktree add'"
     if "EnterWorktree" not in reason:
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
-    return True, "the pointer remedy names EnterWorktree and no 'worktree add'"
+    if ENTER_WORKTREE_SHAPE not in reason:
+        return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
+    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -14767,7 +14771,8 @@ def sh_refusal_problems(label, got, reason, primary, lost):
 def session_home_lost_refuses_case():
     """Rule session-home: a session whose worktree is gone is refused a write into the primary
     checkout, by Write, Edit, MultiEdit, NotebookEdit and a shell write. The refusal names
-    EnterWorktree and no path. The lane call that makes the record is checked first."""
+    EnterWorktree with a `name` and no `path`, and names no file path. The lane call that makes
+    the record is checked first."""
     primary = sh_new_primary("lost")
     lane, branch = sh_add_lane(primary, "lane-lost")
     session = sh_session()
@@ -14790,9 +14795,12 @@ def session_home_lost_refuses_case():
     for index, (tool, tool_input) in enumerate(rows):
         got, reason = _decide_full(tool, primary, session=session, **tool_input)
         problems += sh_refusal_problems("row %d, %s" % (index, tool), got, reason, primary, lane)
+        if ENTER_WORKTREE_SHAPE not in reason:
+            problems.append("row %d, %s: the refusal does not say %s"
+                            % (index, tool, ENTER_WORKTREE_SHAPE))
     if problems:
         return False, "; ".join(problems)
-    return True, "every write tool and shell write is refused, naming session-home and EnterWorktree"
+    return True, "every write tool and shell write is refused, naming session-home, EnterWorktree and its shape"
 
 
 def session_home_present_folder_passes_case():

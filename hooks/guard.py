@@ -720,7 +720,8 @@ WORKTREE_HAND_MADE_REASON = (
     "Rule (hand-made worktree): a lane tree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
     "A hand-made tree sends a lane to work in the main clone and loses the isolation. "
-    "Remedy: start the lane with one of those two tools. If the tool's isolation was refused, "
+    "Remedy: start the lane with one of those two tools. Call EnterWorktree with a `name` and no "
+    "`path`. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
@@ -2837,8 +2838,8 @@ SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "reba
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
-    "Remedy: call the EnterWorktree tool first. It branches from origin's default branch. Then "
-    "write inside that worktree."
+    "Remedy: call the EnterWorktree tool first. Call it with a `name` and no `path`. It branches "
+    "from origin's default branch. Then write inside that worktree."
 )
 
 
