@@ -12001,6 +12001,9 @@ FAMILY = "command-in-item"
 
 CI_DOC = "c152-stale-branch-deletes"
 CI_STEPS = ["Open plans/c152-stale-branch-deletes.md", "Run its command"]
+CI_TERMINAL = ["Open Terminal", "Paste the command below and run it"]
+# A task's `command` is {powershell, mac}, one string per shell (decision act-in-place).
+CMD_BOTH_SHELLS = {"powershell": "git push origin --delete old-a", "mac": "git push origin --delete old-a"}
 
 
 def ci_task(steps, **over):
@@ -12026,7 +12029,7 @@ ci("a copy-the-command-from-file step is denied", "deny",
 ci("a file opened and its command run in one step is denied", "deny",
    ci_task(["Open plans/c152-stale-branch-deletes.md and run its command"]))
 ci("a terminal step with the command on the item is allowed", "allow",
-   ci_task(["Open Terminal", "Paste the command below and run it"], command="git push origin --delete old-a"))
+   ci_task(CI_TERMINAL, command=CMD_BOTH_SHELLS))
 ci("a decision that opens a file and runs its command is not judged", "allow",
    {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
     "context": OJ_FORM + "\nThe plan file lists them.",
@@ -12036,9 +12039,74 @@ ci("a decision that opens a file and runs its command is not judged", "allow",
 
 
 ci("a file step with the command set is denied", "deny",
-   ci_task(CI_STEPS, command="git push origin --delete old-a"))
+   ci_task(CI_STEPS, command=CMD_BOTH_SHELLS))
 ci("a run-the-command-in-file step with the command set is denied", "deny",
-   ci_task(["Run the command in plans/c152.md"], command="git push origin --delete old-a"))
+   ci_task(["Run the command in plans/c152.md"], command=CMD_BOTH_SHELLS))
+
+# The command is {powershell, mac}: a bash-only string is refused, and so is a dict missing a shell or
+# holding a blank string. The refusal names both shells.
+ci("a bash-only command string on a set is denied", "deny",
+   ci_task(CI_TERMINAL, command="git push origin --delete old-a"), carries=("powershell", "mac"))
+ci("an update that sets a bash-only command string is denied", "deny", {"command": "git push"}, action="update")
+ci("a command with no mac is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "git push origin --delete old-a"}))
+ci("a command with no powershell is denied", "deny",
+   ci_task(CI_TERMINAL, command={"mac": "git push origin --delete old-a"}))
+ci("a command whose mac string is empty is denied", "deny",
+   ci_task(CI_TERMINAL, command=dict(CMD_BOTH_SHELLS, mac="")))
+ci("a command whose powershell string is blank is denied", "deny",
+   ci_task(CI_TERMINAL, command=dict(CMD_BOTH_SHELLS, powershell="   ")))
+
+# PowerShell 5.1 has none of these operators (item 78 failed on && and <<<). The same text under mac is allowed.
+PS_OPERATOR_LINES = [("&&", "cd repo && git push origin --delete old-a"),
+                     ("||", "git push origin --delete old-a || echo failed"),
+                     ("<<<", "cat <<< old-a"),
+                     ("<<", "cat <<EOF")]
+for op, line in PS_OPERATOR_LINES:
+    ci("a powershell line with %s is denied" % op, "deny",
+       ci_task(CI_TERMINAL, command={"powershell": line, "mac": CMD_BOTH_SHELLS["mac"]}))
+    ci("a mac line with %s and a clean powershell line is allowed" % op, "allow",
+       ci_task(CI_TERMINAL, command={"powershell": CMD_BOTH_SHELLS["powershell"], "mac": line}))
+
+# A shell line in a step's backtick span or fence is a command in the step. It belongs in the item's command field.
+ci("a step that runs a git line in backticks is denied", "deny", ci_task(["Run `git push origin --delete old-a`"]))
+ci("a step that runs a cd and && line in backticks is denied", "deny", ci_task(["Run `cd repo && npm test`"]))
+ci("a step that runs a PowerShell cmdlet in backticks is denied", "deny", ci_task(["Run `Get-ChildItem -Recurse`"]))
+ci("a step with a shell line in a fence is denied", "deny", ci_task(["Run this:\n```\ngit push origin --delete old-a\n```"]))
+ci("a step with a backticked file name and no command verb is allowed", "allow",
+   ci_task(["Check `README.md` reads well"]))
+ci("a step that mentions git in prose is allowed", "allow", ci_task(["Look at the git branch list on the page"]))
+ci("a step with a backticked word that is not a command is allowed", "allow", ci_task(["Pick `main`"]))
+ci("an update with no command key and plain steps is allowed", "allow",
+   {"steps": ["Read the summary on the page."]}, action="update")
+
+# A command on the item excuses the loose verb match, as on main (decision act-in-place).
+ci("a file step and a run-the-command step with a command on the item are allowed", "allow",
+   ci_task(["Open plans/c152.md", "Run the command"], command=CMD_BOTH_SHELLS))
+ci("a backticked file to read and a paste-in-PowerShell step with a command on the item are allowed", "allow",
+   ci_task(["Open `plans/x.md` to read the plan", "Paste the command in PowerShell and run it"],
+           command=CMD_BOTH_SHELLS))
+ci("a paste-from-the-box step and a result-file step with a command on the item are allowed", "allow",
+   ci_task(["Paste the command from the box below", "Check the result in `out.log`"], command=CMD_BOTH_SHELLS))
+ci("a backticked ./ doc path to open is allowed", "allow", ci_task(["Open `./docs/a.md`"]))
+ci("a backticked ./ source path with a line number to edit is allowed", "allow",
+   ci_task(["Edit `./hooks/guard.py` line 3"]))
+# A PowerShell string holds PowerShell only: a 2>/dev/null redirect or an export statement is bash.
+ci("a powershell line with a 2>/dev/null redirect is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "git push origin --delete a 2>/dev/null",
+                                 "mac": CMD_BOTH_SHELLS["mac"]}))
+ci("a powershell line that starts with export is denied", "deny",
+   ci_task(CI_TERMINAL, command={"powershell": "export A=1; git push origin --delete a",
+                                 "mac": CMD_BOTH_SHELLS["mac"]}))
+# A known program with an argument in backticks is a shell line. A known program alone is prose.
+BACKTICK_RUNS = ["Run `make test`", "Run `pytest -q`", "Run `docker compose up`", "Run `mkdir out`",
+                 "Run `gcloud auth login`", "Run `bq ls`", "Run `winget install Tool.Id`", "Run `./cleanup.sh`",
+                 "Run `./build --release`"]
+for step in BACKTICK_RUNS:
+    ci("a step with a backticked command and an argument is denied: " + step, "deny", ci_task([step]))
+BACKTICK_PROSE = ["Check `git` is installed", "Confirm `node` is 20 or later", "Read the `npm` section"]
+for step in BACKTICK_PROSE:
+    ci("a step with a known program alone in backticks is allowed: " + step, "allow", ci_task([step]))
 
 
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
@@ -12052,7 +12120,7 @@ FAMILY = "task-names-check"
 
 TN_CTX = "The cloud proxy refused the branch deletes (403)."
 TN_STEPS = ["Open Terminal", "Paste the command below and run it"]
-TN_COMMAND = "git push origin --delete old-a"
+TN_COMMAND = CMD_BOTH_SHELLS  # the {powershell, mac} command of the 14:47 ruling
 
 
 def tn_task(**over):
