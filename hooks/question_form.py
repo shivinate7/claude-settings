@@ -470,12 +470,13 @@ def item_hit(op, entry):
 # String.fromCharCode(65 + i % 26) (skills/waiting-page/page.html, symbol letterOf); the key is that letter
 # in lowercase. The page reads the key "none" (symbol NONE, same file) as "none of these".
 OPTION_NONE_KEY = "none"
-# An option named in item text by a letter-and-digit key, as in "option e2": the word (any case), then a
-# lowercase key, which is the only case a key takes. An uppercase id such as D12 or A1 is not key-shaped,
-# and t18 is the owner's uniform-ruling topic id. No shared constant lists record ids: lint/report_guard.py
-# CITE_ID_RE holds D-ids only, and roadmap step ids such as c188 live on the roadmap branch, so a lowercase
-# id like c188 or a key like d4 still reads as a key.
-KEY_NAMED = re.compile(r"\b(?i:options?|picks?|keys?)[\s:(*_\"'`\u201c\u2018]+(?!t\d)[a-z]\d+\b")
+# An option named in item text by a letter-and-digit key, as in "option e2": the word, then the key, both in
+# any case, since the page shows the key's letter in capitals and Claude can write "Option E2". Only D12, a
+# decision id, and t18, the owner's uniform-ruling topic id, are exempt, each in its own case. No shared
+# constant lists record ids: lint/report_guard.py CITE_ID_RE holds D-ids only, and roadmap step ids such as
+# c188 live on the roadmap branch, so a cell like A1, a lowercase id like c188 or a key like d4 reads as a key.
+KEY_NAMED = re.compile(
+    r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
 LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
                       "item's text by that letter (option A, pick b), never by any other key.")
