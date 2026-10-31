@@ -751,3 +751,8 @@
 - cloud-setup-zombie-step: before its group kill, cloud-setup.sh first sends TERM to each child of the install, then waits 1 s. The step is there for test c2 only, because this sandbox's pid 1 never clears dead children, so a dead child still looks alive. The better fix is for c2 to count a dead child (state Z) as gone, and then drop the step (lane setup-script-install, review round 2). Decision: agent-model-cap.
 - command-file-backticked: a `command` with both shells excuses "Run the command in `plans/c152.md`", because the file name sits in backticks (lane command-per-os). Decision: act-in-place.
 - command-run-verb-script-path: a run verb earlier in the sentence makes a script path such as `./hooks/guard.py` read as a shell line, as in "Run the tests and open `./hooks/guard.py`" (lane command-per-os). Decision: act-in-place.
+- holder-slash-unpinned: nothing pins "no / in HOLDER" (janitor/test_session_end_sweep.py); a later "/" breaks Windows only, under MSYS path rewriting, while Linux stays green. Decision: c95.
+- sweep-no-pipes-kwargs-only: SweepGetsNoPipes pins the DEVNULL kwargs; no case has a grandchild holding a pipe, so a hang by another route passes unseen. A Windows-only grandchild case would make it red-capable. Decision: c95.
+- heartbeat-starved-reads-stopped: a live holder starved 1 s or more reads as stopped, a false green only when the kill also failed. Decision: c95.
+- kill-holder-rekills-dead-pids: kill_holder and the atexit stop_holders kill each pid again, dead or not; a recycled pid inside that seconds-wide window could be killed. Decision: c95.
+- scratchpad-reap-reads-ps: ScratchpadReap reads liveness with ps, not the heartbeat; the reap is POSIX-only and needs ps to find orphans. Decision: c95.
