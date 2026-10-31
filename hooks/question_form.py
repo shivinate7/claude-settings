@@ -20,8 +20,8 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
 chat `Gain:` and `Lose:` in the option's description. Only a line at a line start counts.
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
-`port-question`, `uniform-pick`, `press-link`, `command-in-item`, `task-names-check` (page items), then
-the form. A missing Goal, Problem or Based on line, a Based on count outside 1-3, a kind outside
+`port-question`, `uniform-pick`, `press-link`, `command-in-item`, `gh-login-switch`, `task-names-check`
+(page items), then the form. A missing Goal, Problem or Based on line, a Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`.
 
@@ -38,6 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
 
 PASS = ("", "")
 FORM_RULE, STAKE_RULE = "question-form", "owner-judge"
@@ -327,6 +328,67 @@ def command_in_item_hit(data) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ a gh command switches login first
+#
+# docs/decisions/act-in-place.md, rule `gh-login-switch`, built against a named incident (incident in
+# the record): a task's `command` runs on the owner's computer as whichever gh login is active there.
+GH_LOGINS = (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN)
+GH_LOGIN_REASON = ("A gh command handed to the owner runs as whichever gh login is active on his computer. "
+                   "Put `gh auth switch -u %s` in the item's `command` before its first gh command. "
+                   "Switch to %s instead only for a repo %s cannot reach."
+                   % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
+GH_WORD = re.compile(r"(?<![\w-])gh(?![\w-])")
+
+
+def _switch_login(args) -> str:
+    """The login a `gh auth switch` names with -u, --user or --user=, else ""."""
+    for i, arg in enumerate(args):
+        if arg in ("-u", "--user") and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith("--user="):
+            return arg[len("--user="):]
+    return ""
+
+
+def gh_login_hit(data) -> str:
+    """The matched text when a task's `command` runs a gh command other than `gh auth ...` with no
+    `gh auth switch -u <a login in GH_LOGINS>` before it, or runs one as GH_FALLBACK_LOGIN while the
+    command names a GH_DEFAULT_LOGIN repo. A segment the shell reader cannot parse counts as a gh
+    command when the word gh is in it, and never as a switch: the check fails closed there."""
+    if not isinstance(data, dict) or data.get("kind", "task") != "task":
+        return ""
+    command = data.get("command")
+    if not isinstance(command, str) or not GH_WORD.search(command):
+        return ""
+    # guard_core holds the one quote-aware shell reader. It loads here, so the chat-box path loads nothing more.
+    import guard_core
+    # The owner pastes the command into Git Bash, so bash's rules read it, whatever tool this call came from.
+    script = guard_core.PosixScript(command)
+    names_default_repo = (GH_DEFAULT_LOGIN + "/").lower() in command.lower()
+    login = ""
+    for segment in guard_core.split_segments(script):
+        tokens = guard_core.segment_tokens(segment)
+        if tokens is None:
+            if not GH_WORD.search(segment):
+                continue
+            calls = [None]   # unreadable text that names gh: a gh command, never a switch
+        else:
+            calls = [tokens[i:] for i in guard_core.command_indexes(tokens)
+                     if guard_core.basename(tokens[i]) in ("gh", "gh.exe")]
+        for call in calls:
+            if call is not None and list(call[1:2]) == ["auth"]:
+                if list(call[2:3]) == ["switch"]:
+                    login = _switch_login(list(call[3:]))
+                continue
+            if login not in GH_LOGINS:
+                if login:
+                    return "gh command after a switch to %s, a login outside the pair" % login
+                return "gh command with no gh auth switch before it"
+            if login == GH_FALLBACK_LOGIN and names_default_repo:
+                return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+    return ""
+
+
 # ------------------------------------------------------------------ a task names why only the owner can do it
 #
 # docs/decisions/task-names-its-check.md, rule `task-names-check`, built against a named incident
@@ -434,6 +496,9 @@ def item_hit(op, entry):
     hit = command_in_item_hit(data)
     if hit:
         return "command-in-item", hit
+    hit = gh_login_hit(data)
+    if hit:
+        return "gh-login-switch", hit
     hit = task_check_hit(op, data)
     if hit:
         return "task-names-check", hit
@@ -484,7 +549,8 @@ def _chat_question_hit(question, options):
 # ------------------------------------------------------------------ the reasons, one table per surface
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
-                "command-in-item": COMMAND_REASON, "task-names-check": TASK_REASON,
+                "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
+                "task-names-check": TASK_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."

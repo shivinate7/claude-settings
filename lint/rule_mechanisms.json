@@ -651,7 +651,7 @@
     "output-never-hand-off-doable-step": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check)."
+        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place)."
       }
     },
     "style-table-gold-column": {
