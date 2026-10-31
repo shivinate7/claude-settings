@@ -580,15 +580,20 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False)
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words = []
+        words, shown = [], []
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
+                shown.append('""')
             elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
-                continue   # the raw word is unquoted: a quoted "&1" is a file and is judged
+                # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
+                # The raw word is unquoted: a quoted "&1" is a file and is judged.
+                shown.append("dup")
             else:
-                words.extend(_words_of(word) if "'" in word or '"' in word else [word])
-        text = " ".join(words)
+                pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                words.extend(pieces)
+                shown.extend(pieces)
+        text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
