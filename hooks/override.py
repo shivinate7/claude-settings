@@ -246,12 +246,17 @@ def _take_opus(session_id, spawn_role, at):
     return OPUS_LIFTED
 
 
+def remote_session_id():
+    """The session record id (session_<x>) the env names as cse_<x>, or None when the env is unset or of another shape."""
+    remote = os.environ.get(LANE_ENV) or ""
+    rest = remote[len(LANE_ENV_PREFIX):] if remote.startswith(LANE_ENV_PREFIX) else ""
+    return LANE_PREFIX + rest if rest else None
+
+
 def _lane_id(session_id):
     """The lane's id as a step's `lane` field names it, or None. A set env value of another shape is no id."""
-    remote = os.environ.get(LANE_ENV)
-    if remote:
-        rest = remote[len(LANE_ENV_PREFIX):] if remote.startswith(LANE_ENV_PREFIX) else ""
-        lane = LANE_PREFIX + rest if rest else None
+    if os.environ.get(LANE_ENV):
+        lane = remote_session_id()
     else:
         lane = session_id
     if not isinstance(lane, str) or not SESSION_ID.fullmatch(lane) or lane[0] == ".":
