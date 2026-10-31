@@ -722,3 +722,7 @@
 - question-form-goal-not-first: prose before the Goal line passes, because only the order of the three form lines is checked (hooks/question_form.py). Decision: question-form.
 - ci-scope-question-form-unpinned: lint/test_ci_scope.py pins git_reads.py in the guard arm, but not question_form.py or precompact_handoff.py. Decision: question-form.
 - question-form-import-fails-open: an import defect in hooks/question_form.py or hooks/precompact_handoff.py turns off the six page rules (guard-crash) and the whole chat judge. Decision: question-form.
+- owner-message-grant-variant: the classifier reads "already granted" by wording, so a misread task can ask an owner session for a variant of a granted act. The target keeps its own permissions. Decision: auto-mode-owner-acts.
+- owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
+- owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
+- auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
