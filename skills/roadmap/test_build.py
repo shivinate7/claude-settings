@@ -21,6 +21,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parent.parent / "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import build  # noqa: E402
+import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
 RUN_FOLDER = None
@@ -129,9 +130,11 @@ def tearDownModule():
 
 
 class Fixture(unittest.TestCase):
+    STEPS = None  # extra or replacement step files for make_repo, {stem: step}
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
-        self.repo = make_repo(self.tmp.name)
+        self.repo = make_repo(self.tmp.name, steps=self.STEPS)
         self.data = self.repo / "roadmap" / "data"
         self.out = pathlib.Path(self.tmp.name) / "page.html"
 
@@ -586,6 +589,63 @@ class BlockOnly(Fixture):
         self.assertEqual(block.count("</script>"), 1)
         self.assertEqual(block.count("<!--"), 2, "a comment opener from the data reached the block")
         self.assertEqual(baked(block, "window.ROADMAP_DATA = ")["steps"]["c1"]["note"], note)
+
+
+class ForkRecord(Fixture):
+    """A fork worktree keeps its own waiting page and its own record branch, named in its extras file
+    (owner ruling Oct 31 15:00 CDT, option a). Both record branches sit on one bare origin."""
+    STEPS = {"c1": dict(STEP, title="Main record step")}
+    MAIN_URL = "https://claude.ai/artifact/MAINPAGE111"
+    FORK_URL = "https://claude.ai/artifact/FORKPAGE222"
+    MAIN_TITLE = "Main record step"
+    FORK_TITLE = "Fork record step"
+
+    def setUp(self):
+        super().setUp()
+        self.on_main()
+        self.write_extras(self.repo, self.MAIN_URL)
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "main extras")
+        origin = pathlib.Path(self.tmp.name) / "origin.git"
+        git(self.tmp.name, "init", "-q", "--bare", str(origin))
+        git(self.repo, "remote", "add", "origin", str(origin))
+        git(self.repo, "branch", "-q", "roadmap-fork", "roadmap")
+        git(self.repo, "checkout", "-q", "roadmap-fork")
+        (self.data / "steps" / "c1.json").write_text(json.dumps(dict(STEP, title=self.FORK_TITLE)), encoding="utf-8")
+        git(self.repo, "commit", "-qam", "fork record")
+        self.on_main()
+        git(self.repo, "push", "-q", "origin", "main", "roadmap", "roadmap-fork")
+        git(self.repo, "fetch", "-q", "origin")
+        self.fork = pathlib.Path(self.tmp.name) / "fork"
+        git(self.repo, "worktree", "add", "-q", "-b", "fork-own-page", str(self.fork), "main")
+        self.write_extras(self.fork, self.FORK_URL, **{"record-branch": "roadmap-fork"})
+        git(self.fork, "commit", "-qam", "fork extras")
+
+    def write_extras(self, root, url, **keys):
+        path = pathlib.Path(root) / ".claude" / "layout-extras.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict({"kinds": {}, "waiting-page": url}, **keys)), encoding="utf-8")
+
+    def page_from(self, root, *extra):
+        code, out = run_build("--repo", str(root), "--out", str(self.out), *extra)
+        self.assertIn(code, (0, None), out)
+        return self.out.read_text(encoding="utf-8")
+
+    def test_fork_worktree_with_no_flag_reads_its_own_record_branch(self):
+        page = self.page_from(self.fork)
+        self.assertIn(self.FORK_TITLE, page)
+        self.assertNotIn(self.MAIN_TITLE, page)
+        panels = {p["name"]: p for p in build_info(page)["panels"]}
+        self.assertEqual(panels["Steps"]["read"], git(self.repo, "rev-parse", "--short", "origin/roadmap-fork").strip())
+
+    def test_explicit_record_branch_still_reads_mains(self):
+        page = self.page_from(self.fork, "--record-branch", "roadmap")
+        self.assertIn(self.MAIN_TITLE, page)
+        self.assertNotIn(self.FORK_TITLE, page)
+
+    def test_waiting_page_is_the_forks_in_its_worktree_and_mains_on_the_checkout(self):
+        self.assertEqual(layout.waiting_page(str(self.fork)), self.FORK_URL)
+        self.assertEqual(layout.waiting_page(str(self.repo)), self.MAIN_URL)
 
 
 if __name__ == "__main__":
