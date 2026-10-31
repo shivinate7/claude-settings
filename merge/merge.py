@@ -5,9 +5,10 @@
                           nothing. A draft is previewed too; a dropped line prints one `BLOCKED:` line and exits 1.
                           A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
+  merge <pr> --prepare    a draft only, before ready: rebuild the records page on the head and push it. No lock, no claim.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
-                          runs only when that role is recorded for the session (read_merge_role).
+                          runs only when that role is recorded for the session (read_merge_role). So does `--prepare`.
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
@@ -2131,6 +2132,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
                 resumed = own_claim(wt, sc, f"origin/{base}")
                 trailer = None if resumed else do_claim(wt, sc, f"origin/{base}")
             records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
+            if info["draft"] and records != "current" and not (trailer or resumed):  # a claim commits at confirm anyway, so --prepare would save no run
+                records += f". Run merge {n} --prepare before ready, so the ready run is the merge run"
     finally:
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
@@ -2152,6 +2155,32 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
         f"  then:   push HEAD:{info['branch']}, wait for the checks, PUT pulls/<n>/merge with merge_method={m.get('method', '?')} and the head sha as the guard,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch and the batch's lane branches." if m.get("deleteBranch") else "."))
+
+def prepare(root, cfg, n, info):
+    """`merge <pr> --prepare`: rebuild the records page on a draft's head and push it, so the branch is final at ready and
+    confirm pushes nothing (decision records-index-at-merge). Takes no lock and claims no number: a claim stays at confirm."""
+    if not info["draft"]:
+        raise Stop(f"#{n} is not a draft. A push to a ready pull request restarts its checks, so --prepare runs before ready only. Nothing was pushed.")
+    base = info["base"]
+    if base != cfg["defaultBranch"]:
+        say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
+        return 0
+    tmp, wt = open_worktree(root, info, base)
+    try:
+        stale, stands = holds_base(wt, f"origin/{base}", info["head"])  # before the rebuild: a small-move proof resets the tree
+        if stale or stands:
+            tip = git(wt, "rev-parse", "--short=9", f"origin/{base}")[1]
+            raise Stop("BEHIND: " + (stale or f"{info['head'][:9]} does not hold origin/{base} at {tip}.")
+                       + f" --prepare needs the head to hold the base tip. Merge {base} into {info['branch']}, push, and run again. Nothing was pushed.")
+        if not rebuild_records(wt):
+            say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
+            return 0
+        sha = commit_claim(wt, None)
+        push_branch(wt, info["branch"])
+        say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}. Mark #{n} ready now; confirm finds the page current.")
+        return 0
+    finally:
+        drop_worktree(root, tmp, wt)
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
@@ -2391,6 +2420,7 @@ def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", type=int)
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--prepare", action="store_true", help="a draft only: rebuild the records page on the head and push it, before ready")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (coordinator or batch-runner)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -2400,16 +2430,18 @@ def main(argv, host=None, lock=None):
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if a.role is not None:
-        if a.pr is not None or a.confirm or a.unlock is not None:
+        if a.pr is not None or a.confirm or a.prepare or a.unlock is not None:
             p.error("--role stands alone")
-    elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
+    elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and (a.confirm or a.prepare)):
         p.error("give a pull request number, --unlock, or --role TIER")
+    elif a.confirm and a.prepare:
+        p.error("--prepare runs before ready and --confirm after it: give one")
     try:
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
-        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
+        if (a.confirm or a.prepare) and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock; --prepare too, so a lane cannot commit the page
             raise Stop("this session may not merge. Hand the pull request number and its head to the batch runner.")
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
@@ -2430,6 +2462,8 @@ def main(argv, host=None, lock=None):
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
+        if a.prepare:
+            return prepare(root, cfg, a.pr, info)
         if a.confirm:
             with release_on_signals():
                 return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
