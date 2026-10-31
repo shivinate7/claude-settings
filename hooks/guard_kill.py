@@ -160,6 +160,38 @@ def pid_is_owned(pid: int, root: int):
     return None
 
 
+def pid_is_session_job(pid: int, session_id: str) -> bool:
+    """True when `pid` is this session's to wait on (`bin/wait-pid`, the one caller). It never
+    signals: waiting is no kill, so the kill verdict (`foreign_pid_kill`) is unchanged.
+
+    Owned: the pid is dead or descends from the session root (as `pid_is_owned`). A job stranded
+    after a stall is not a descendant: its stub shell is under init. So a pid is also this
+    session's when its parent walk reaches init and the pid, or any ancestor below init, holds
+    `CLAUDE_CODE_SESSION_ID=<session_id>` (`proc_env.holds_session_tag`). On Linux the forked stub
+    holds no tag and the exec'd job under it does, so the walk reads each step. Unknown (no root,
+    `ps` fails) answers True, as `foreign_pid_kill` does. Pid 0, 1 and -1 are never this session's.
+    """
+    if pid <= 1:
+        return False
+    root = session_root_pid()
+    if not root:
+        return True
+    owned = pid_is_owned(pid, root)
+    if owned is not False:
+        return True   # descends from the root, dead, or unknown
+    current = pid
+    for _ in range(64):
+        if holds_session_tag(current, session_id):
+            return True
+        parent = _ps_ppid(current)
+        if parent is None or parent == 0:
+            return True   # unknown, or it ended during the walk
+        if parent <= 1:
+            return False
+        current = parent
+    return True
+
+
 AGENT_WORKTREE_RE = re.compile(r"/\.claude/worktrees/agent-([A-Za-z0-9_-]{1,64})(?:/|$)")
 
 

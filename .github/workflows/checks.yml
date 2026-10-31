@@ -218,6 +218,9 @@ jobs:
       - name: Verdict runner fixture suite
         run: python3 lint/test_verdict.py
 
+      - name: Wait-pid helper fixture suite
+        run: python3 lint/test_wait_pid.py
+
       - name: Fixture copy helper suite
         run: python3 lint/test_tracked_tree.py
 
@@ -786,6 +789,10 @@ jobs:
       - name: Verdict runner fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_verdict.py
+
+      - name: Wait-pid helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_wait_pid.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
