@@ -64,7 +64,7 @@ import mutate_shared  # noqa: E402  module_files: every module a copied guard ma
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
 VCS = "g" + "it"
-# The settings file sets the subagent model to sonnet (decision agent-model-cap), and every guard run in
+# The settings file sets the agent model to sonnet (decision agent-model-cap), and every guard run in
 # this suite inherits that. A case that tests the unset or empty default names its own `env`.
 os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 
@@ -18965,7 +18965,7 @@ def role_spawn(config, spawn, tool="Agent", env=None):
                    "max_seconds": None, "temp": None, "process_cwd": None})
 
 
-def role_deny(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, carries=(ROLE_REMEDY,), env=None):
+def role_model_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, carries=(ROLE_REMEDY,), env=None):
     add(name, "deny", ROLE_RULE, tool=tool, config=config, env=env, carries=carries, lacks=ROLE_LACKS,
         **role_input(role, model, prompt))
 
@@ -18980,32 +18980,32 @@ def role_ask(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
 
 
 # ---- B: a model above its role's row is denied. The reason holds the remedy and no other target.
-role_deny("role-model: test-author on sonnet is denied", "test-author", "sonnet",
+role_model_refuse("role-model: test-author on sonnet is denied", "test-author", "sonnet",
           "Write the failing cases.")
-role_deny("role-model: the same spawn as a Task is denied", "test-author", "sonnet",
+role_model_refuse("role-model: the same spawn as a Task is denied", "test-author", "sonnet",
           "Write the failing cases.", tool="Task")
-role_deny("role-model: reviewer on sonnet with no round line is denied", "reviewer", "sonnet",
+role_model_refuse("role-model: reviewer on sonnet with no round line is denied", "reviewer", "sonnet",
           "Check the diff for typos.")
-role_deny("role-model: reviewer on sonnet with a Round 1 of 3 line is denied (round 1 runs on the row)",
+role_model_refuse("role-model: reviewer on sonnet with a Round 1 of 3 line is denied (round 1 runs on the row)",
           "reviewer", "sonnet", "Round 1 of 3. Check the diff for typos.")
-role_deny("role-model: record-writer on sonnet is denied", "record-writer", "sonnet", "Record the decision.")
-role_deny("role-model: claude-code-guide on sonnet is denied", "claude-code-guide", "sonnet",
+role_model_refuse("role-model: record-writer on sonnet is denied", "record-writer", "sonnet", "Record the decision.")
+role_model_refuse("role-model: claude-code-guide on sonnet is denied", "claude-code-guide", "sonnet",
           "How do the hooks load?")
-role_deny("role-model: test-author on the full sonnet id is denied", "test-author", "claude-sonnet-5-5",
+role_model_refuse("role-model: test-author on the full sonnet id is denied", "test-author", "claude-sonnet-5-5",
           "Write the failing cases.")
 # A model the table does not rank is above any row below opus: fail closed. Its rank is unruled, so none is guessed.
-role_deny("role-model: fable on builder is denied, a model the table does not rank fails closed",
+role_model_refuse("role-model: fable on builder is denied, a model the table does not rank fails closed",
           "builder", "fable", "Fix the failing case.")
-role_deny("role-model: fable on test-author is denied, a model the table does not rank fails closed",
+role_model_refuse("role-model: fable on test-author is denied, a model the table does not rank fails closed",
           "test-author", "fable", "Write the failing cases.")
-role_deny("role-model: claude-fable-5-1 on reviewer with no round line is denied, fails closed",
+role_model_refuse("role-model: claude-fable-5-1 on reviewer with no round line is denied, fails closed",
           "reviewer", "claude-fable-5-1", "Check the diff for typos.")
 # A role written with a capital letter or a trailing space is the same role, so it takes its row.
-role_deny("role-model: role Test-author on sonnet is denied, matched to its row",
+role_model_refuse("role-model: role Test-author on sonnet is denied, matched to its row",
           "Test-author", "sonnet", "Write the failing cases.")
-role_deny("role-model: role with a trailing space on sonnet is denied, matched to its row",
+role_model_refuse("role-model: role with a trailing space on sonnet is denied, matched to its row",
           "test-author ", "sonnet", "Write the failing cases.")
-role_deny("role-model: role Reviewer on sonnet with no round line is denied, matched to its row",
+role_model_refuse("role-model: role Reviewer on sonnet with no round line is denied, matched to its row",
           "Reviewer", "sonnet", "Check the diff for typos.")
 
 # ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
@@ -19037,18 +19037,18 @@ role_ask("role-model: test-author on opus asks, and is not this rule's deny",
          "test-author", "opus", "Write the failing cases.")
 
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
-role_deny("role-model: builder with no model is denied when the default is unset",
+role_model_refuse("role-model: builder with no model is denied when the default is unset",
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
-role_deny("role-model: general-purpose with no model is denied when the default is unset",
+role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",
           "general-purpose", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
-role_deny("role-model: claude with no model is denied when the default is unset",
+role_model_refuse("role-model: claude with no model is denied when the default is unset",
           "claude", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
-role_deny("role-model: a spawn with no role and no model is denied when the default is unset",
+role_model_refuse("role-model: a spawn with no role and no model is denied when the default is unset",
           None, None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
-role_deny("role-model: a Task builder with no model is denied when the default is unset",
+role_model_refuse("role-model: a Task builder with no model is denied when the default is unset",
           "builder", None, "Fix the failing case.", tool="Task", carries=(ROLE_DEFAULT_REMEDY,),
           env=UNSET_DEFAULT)
-role_deny("role-model: builder with no model is denied when the default is empty",
+role_model_refuse("role-model: builder with no model is denied when the default is empty",
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
 role_allow("role-model: builder with no model is allowed when the default is sonnet",
            "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
