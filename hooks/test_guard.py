@@ -7992,7 +7992,7 @@ def write_role_transcripts():
 lazy_fixture([role_path(name) for name in ROLE_LINES] + [role_path("unreadable")], write_role_transcripts)
 
 
-def role_deny(name, command, transcript, env=ROLE_ENV, **kw):
+def role_refuse(name, command, transcript, env=ROLE_ENV, **kw):
     """A `merge --role` the guard refuses. The reason names its rule, and never the role flag."""
     sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG,
        transcript=transcript, env=env, cwd=NOGIT, **kw)
@@ -8007,26 +8007,26 @@ def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
 # A record's own tier is allowed. Any other tier is refused, both ways round.
 role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
 role_allow("a coordinator records coordinator", MERGE_SHIM + " --role coordinator", role_path("coordinator"))
-role_deny("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
+role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
           role_path("runner"))
-role_deny("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
+role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
           role_path("coordinator"))
 # A lane is refused, and the reason steers it to hand off: get_session first, then list_sessions for the runner.
-role_deny("a lane that records batch-runner is refused, and the refusal steers it to hand off",
+role_refuse("a lane that records batch-runner is refused, and the refusal steers it to hand off",
           MERGE_SHIM + " --role batch-runner", role_path("lane"),
           carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch"))
 # Only the own record's tags count. A title, a foreign record, a list, a near miss and a quote do not.
-role_deny("a lane whose title holds cs-build:batch-runner is refused", MERGE_SHIM + " --role batch-runner",
+role_refuse("a lane whose title holds cs-build:batch-runner is refused", MERGE_SHIM + " --role batch-runner",
           role_path("lane-title"))
-role_deny("a record of another session is ignored, so a runner record of another id is refused",
+role_refuse("a record of another session is ignored, so a runner record of another id is refused",
           MERGE_SHIM + " --role batch-runner", role_path("other-session"))
-role_deny("with no session id in the env, no record matches, so a runner record is refused",
+role_refuse("with no session id in the env, no record matches, so a runner record is refused",
           MERGE_SHIM + " --role batch-runner", role_path("runner"), env=None)
-role_deny("a list_sessions result that holds the runner tags is ignored", MERGE_SHIM + " --role batch-runner",
+role_refuse("a list_sessions result that holds the runner tags is ignored", MERGE_SHIM + " --role batch-runner",
           role_path("list-runner"))
-role_deny("a near-miss tag cs-build:batch-runner-old does not allow the runner role",
+role_refuse("a near-miss tag cs-build:batch-runner-old does not allow the runner role",
           MERGE_SHIM + " --role batch-runner", role_path("near-miss"))
-role_deny("a user message that quotes cs-build:batch-runner is ignored", MERGE_SHIM + " --role batch-runner",
+role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE_SHIM + " --role batch-runner",
           role_path("quoted"))
 # The other command forms, bare and after `cd somewhere &&`, judge as the shim does.
 for _role_prefix in ("", "cd somewhere && "):
@@ -8034,23 +8034,23 @@ for _role_prefix in ("", "cd somewhere && "):
         for _role_tier, _role_own in (("batch-runner", "runner"), ("coordinator", "coordinator")):
             _role_cmd = _role_prefix + _role_form + " --role " + _role_tier
             role_allow(_role_cmd + " allows its own record", _role_cmd, role_path(_role_own))
-            role_deny(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
+            role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
 # Nothing the guard cannot read as an own record allows.
-role_deny("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
+role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))
-role_deny("a get_session result whose text is not JSON is refused", MERGE_SHIM + " --role batch-runner",
+role_refuse("a get_session result whose text is not JSON is refused", MERGE_SHIM + " --role batch-runner",
           role_path("not-json"))
-role_deny("a transcript_path that names no file is refused", MERGE_SHIM + " --role batch-runner",
+role_refuse("a transcript_path that names no file is refused", MERGE_SHIM + " --role batch-runner",
           role_path("missing"))
-role_deny("a transcript_path that cannot be read is refused", MERGE_SHIM + " --role batch-runner",
+role_refuse("a transcript_path that cannot be read is refused", MERGE_SHIM + " --role batch-runner",
           role_path("unreadable"))
-role_deny("a payload with no transcript_path is refused", MERGE_SHIM + " --role batch-runner", None)
-role_deny("a transcript of junk lines is refused, and a record cut short never allows",
+role_refuse("a payload with no transcript_path is refused", MERGE_SHIM + " --role batch-runner", None)
+role_refuse("a transcript of junk lines is refused, and a record cut short never allows",
           MERGE_SHIM + " --role batch-runner", role_path("junk-only"))
 role_allow("junk lines are skipped: a runner record after them allows the runner role",
            MERGE_SHIM + " --role batch-runner", role_path("junk-then-runner"))
 # The newest own record counts. A newer foreign record, or a call with no result yet, does not.
-role_deny("the newest own record wins: an older runner record, then a newer lane record, is refused",
+role_refuse("the newest own record wins: an older runner record, then a newer lane record, is refused",
           MERGE_SHIM + " --role batch-runner", role_path("newest-wins"))
 role_allow("a newer get_session call with no result is skipped, so the older runner record allows",
            MERGE_SHIM + " --role batch-runner", role_path("pending-newest"))
@@ -8072,13 +8072,13 @@ role_allow("quoted text that names the role form is text", "echo '" + MERGE_SHIM
 role_allow("a multi-line quoted string that names the role form is text",
            'echo "first line\n' + MERGE_SHIM + ' --role batch-runner"', role_path("lane"))
 # The scanner respects strings and comments: a `#`, a quote or a newline in text never hides the real call.
-role_deny("a comment opener inside a string does not hide the real call",
+role_refuse("a comment opener inside a string does not hide the real call",
           'echo "# note" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
-role_deny("a multi-line quoted string does not hide the real call after it",
+role_refuse("a multi-line quoted string does not hide the real call after it",
           'echo "first\nline" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
-role_deny("a lone quote inside a string does not hide the real call",
+role_refuse("a lone quote inside a string does not hide the real call",
           'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
-role_deny("a lone quote in a comment does not hide the call on the next line",
+role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 
 
