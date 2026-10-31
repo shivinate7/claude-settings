@@ -6737,6 +6737,19 @@ class RecordsEnv(Env):
         self.host.draft = True  # a draft, whatever the last step left
         return self.run_merge("7", "--confirm", lock=lock)
 
+    def preview_line(self, out, label):
+        """The one preview line that starts `  <label>:`."""
+        lines = [l for l in out.splitlines() if l.startswith(f"  {label}:")]
+        self.assertEqual(len(lines), 1, out)
+        return lines[0]
+
+    def draft_preview(self):
+        """The preview of the pull request while it is a draft. -> its output. Presses nothing."""
+        self.host.draft = True
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        return out
+
     def spy_merge(self):
         """Replace the host's merge with a recorder. -> the list of shas it was asked to merge."""
         asked = []
@@ -7176,6 +7189,65 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(seen, [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
         self.assertFalse(self.lock_ref(), "the lock was not released")
         self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_the_draft_preview_hints_the_push_when_the_head_holds_the_base_tip(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # a stale page; the head holds the base tip, so --confirm on the draft pushes it
+        before = self.refs()
+        out = self.draft_preview()
+        self.assertIn("--confirm on the draft", self.preview_line(out, "records"), out)
+        self.assertEqual(self.refs(), before)
+
+    def assert_refused_draft_preview_hints_no_push(self, out, state):
+        base = self.preview_line(out, "base")
+        self.assertIn(state, base, out)
+        self.assertIn("refuses", base, out)
+        self.assertIn("rebuild", self.preview_line(out, "records"), f"precondition: the page is stale\n{out}")
+        self.assertNotIn("--confirm on the draft", self.preview_line(out, "records"), f"hints a push that --confirm refuses\n{out}")
+
+    def test_the_draft_preview_hints_no_push_when_the_head_is_behind(self):
+        # The draft step refuses a head that does not hold the base tip, so there is no push to promise.
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        self.assert_refused_draft_preview_hints_no_push(self.draft_preview(), "BEHIND")
+
+    def test_the_draft_preview_hints_no_push_when_the_base_cannot_be_read(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        why = "cannot read whether 0123456789 holds origin/main, so the run cannot be proved current: boom"
+        with unittest.mock.patch.object(merge, "holds_base", return_value=(why, None)):
+            out = self.draft_preview()
+        self.assert_refused_draft_preview_hints_no_push(out, "UNKNOWN")
+
+    def test_the_draft_preview_says_confirm_refuses_a_head_that_holds_a_claim(self):
+        # The ready preview says a run resumes at the wait. On a draft, --confirm refuses that head, and the preview must agree.
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put_lf(os.path.join(o, "docs/decisions/second.md"), record("D-002", "second"))
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "Claim record numbers", "-m", "Record-claim: D-002")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        out = self.draft_preview()
+        claim = self.preview_line(out, "claim")
+        self.assertIn("already claimed (D-002)", claim, out)  # precondition: the head holds the claim
+        self.assertIn("refuses", claim, out)
+        before = self.head()
+        rc, out = self.draft_confirm()
+        self.assertNotEqual(rc, 0, out)
+        self.assertEqual(self.head(), before, "pushed on a refusal")
+
+    def test_prepare_a_pushed_page_with_a_refused_ready_does_not_read_as_a_failure(self):
+        # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.host.ready_refuse = "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
+        before = self.head()
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertNotEqual(self.head(), before, "precondition: the page was pushed")
+        self.assertEqual(self.host.readies, [7])
+        self.assertNotIn("could not", out)
 
 class RecordsRebuildReal(RecordsEnv):
     """The same seam with the real generator, lint/hook_catalog.py, as merge.RECORDS defaults to it."""
