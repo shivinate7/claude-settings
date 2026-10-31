@@ -6,10 +6,13 @@ Each repo that keeps records has one generated index page, `docs/records.md`. It
 debt with a one-line gist. Only the merge tool rebuilds the page. A branch never edits the page by hand.
 
 The tool rebuilds the page on the integration branch before the branch goes ready. `merge <pr> --confirm`
-on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip. It
-commits the page alone, pushes it, and stops with one line: mark the PR ready, then run `--confirm` again.
-The tool sends no GraphQL (a cloud session's `gh` gets 403 on it), so the batch runner marks it ready. So the branch is final
-at ready, and the ready run is the merge run. The step claims no record numbers and takes no merge lock.
+on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip, as
+`--confirm` does, and a head that carries a claim. It commits the page alone, pushes it, and stops: mark
+the PR ready, then run `--confirm` again. The tool sends no GraphQL (a cloud session's `gh` gets 403 on
+it), so the batch runner marks the PR ready, after the draft run of the pushed head shows (skill
+ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
+record numbers. It takes no merge lock, except when a PR turns draft after the first read: then it runs
+under the lock that confirm already took, and releases it.
 The same two allow rules cover both steps, so no new rule is needed.
 
 `--confirm` on a ready PR rebuilds the page and claims record numbers under the merge lock. A page that is
