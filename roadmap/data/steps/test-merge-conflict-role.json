@@ -1,0 +1,9 @@
+{
+  "title": "The builder-test record says who resolves a merge conflict in a test file",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3049,
+  "why": "Lane merge-role-allow (session_013NEJL3YLj1SufL8oacJVjF, #878), Oct 31 about 14:20 CDT: the guard refused a builder's Edit resolving a merge conflict in hooks/test_install_src.sh (case M1). The record builders-cannot-edit-tests pins as a false alarm that a builder may 'keep test changes that main brought in a merge', which reads as if the refusal were wrong. A test-author did it (c6afda5), and a reviewer passed it.",
+  "note": "Triage's judgment (Oct 31): the refusal was right. Keeping main's test change needs no edit. Resolving a conflict chooses what the test checks (here, M1's count), and that is test authoring. The gap is the record's wording only. Fix: one sentence in docs/decisions/builders-cannot-edit-tests.md, False alarms pinned: keeping a test change from a merge needs no edit; resolving a conflict in a test file is a test-author's task. No guard change. Done check: the record has the sentence, and the guard's refusal text (guard.py BUILDER_TEST_REASON) names the test-author route for a conflict. Needs no answer. Files: docs/decisions/builders-cannot-edit-tests.md, hooks/guard.py (reason text only).",
+  "updatedAt": "2026-10-31T20:24:00Z"
+}
