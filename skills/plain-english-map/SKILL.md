@@ -76,4 +76,4 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 
 A host may register the 9 check bodies with its own check, and it may bind its own readers. The model-call
 readers go in through `bindConfig` and `bindSeamReader`, and the page readers go in through `bindReaders`.
-With no model-call reader bound, the AI calls tab is empty. A host may also pin a copy of this folder.
+With no model-call reader bound, the AI calls tab is empty. A host pins the install link, never a copy of this folder.
