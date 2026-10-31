@@ -66,8 +66,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
-    recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
-    with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+    Never use the key `none`. The page adds its own "None of these" option
+    with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
       `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
       On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
@@ -210,8 +211,8 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
    and make it equal to the key. After the `set`, read the item back (`ArtifactData get
-   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
-   unique key, and no key `none`. On a look question, check that each option has its own mockup
+   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each keyed
+   `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
    - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
@@ -270,7 +271,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" step 3 (new options) or step 4 (context) says. With no answer, there is no
+  Do it as "Route and close" step 3 (new options, or a close when they are not ready) or step 4 (context) says. With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -317,11 +318,14 @@ item and leaves it open until the lane takes the answer. Then it closes the item
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
-3. If the answer is `none`, write new `options`, `pick` and `why` from the
-   owner's note (a `multi` item's new `pick` is a list), and set `added` to now. Write `lastAnswer` from the answer
-   in the same update, without `choice`, because the new `options` replace the old keys. Then delete `answers/<id>` (pinned to its version), and
-   leave the item open. Say in the terminal that the item has new options. If the note is not
-   enough to write them, ask in the terminal what the owner wants.
+3. If the answer is `none` and you write the new `options`, `pick` and `why` from the
+   owner's note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
+   the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
+   `answers/<id>` (pinned to its version), and
+   leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
+   close the item (step 2) with a home that names the rework, and add a fresh item when the options are
+   ready. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
+   enough to write the options, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
