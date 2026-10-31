@@ -1405,6 +1405,7 @@ def disables_tests(new_lines, old_lines) -> bool:
 BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
+    " A merge conflict in a test file takes the same route."
 )
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
