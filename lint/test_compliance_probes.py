@@ -52,7 +52,7 @@ class Repo:
 
     def git(self, *args):
         subprocess.run(["git", "-C", self.root, "-c", "user.name=test", "-c", "user.email=test@example.com",
-                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+                        *args], check=True, capture_output=True)
         return self
 
     def publish(self):

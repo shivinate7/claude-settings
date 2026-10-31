@@ -76,7 +76,7 @@ class Case(unittest.TestCase):
 
     def git(self, *args):
         subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.com",
-                        "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", *args],
+                        "-c", "core.autocrlf=false", *args],
                        check=True, capture_output=True, text=True, env=GIT_ENV)
 
     def commit(self, msg, files):

@@ -58,7 +58,7 @@ class HookStubsTests(unittest.TestCase):
         if date:
             env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date
         r = subprocess.run(["git", "-C", cwd or self.repo, "-c", "user.name=test",
-                            "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", *args],
+                            "-c", "user.email=test@example.com", *args],
                            check=True, capture_output=True, text=True, env=env)
         return r.stdout
 

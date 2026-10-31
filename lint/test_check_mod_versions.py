@@ -98,7 +98,7 @@ class ModVersionTests(unittest.TestCase):
 
     def git(self, *args):
         subprocess.run(["git", "-C", self.tree, "-c", "user.name=test",
-                        "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", *args],
+                        "-c", "user.email=test@example.com", *args],
                        check=True, capture_output=True, text=True)
 
     def rev(self, ref):

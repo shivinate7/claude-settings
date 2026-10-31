@@ -76,7 +76,7 @@ class RecordsDirInput(unittest.TestCase):
         self.assertRegex(read(CHECK_SH), r"%s=\"\$\(python3 \S*lint/layout\.py\" path " % re.escape(name))
 
 
-GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"]
+GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com"]
 BASH = shutil.which("bash")
 
 

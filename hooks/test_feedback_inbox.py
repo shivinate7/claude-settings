@@ -208,7 +208,7 @@ def guard(cfg, sid, stop_active=False, cwd=None):
 
 
 GIT_ID = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
-          "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main")
+          "-c", "init.defaultBranch=main")
 
 
 def git(where, *args):
