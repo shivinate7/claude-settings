@@ -1,0 +1,9 @@
+{
+  "title": "The frozen-path rule does not refuse a branch delete through the GitHub API",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.30499,
+  "why": "Guard false alarm, measured twice on Oct 31 (coordinator, 18:11 CDT): the frozen-path rule (hooks/guard_frozen.py) refuses `gh api -X DELETE repos/shivinate7/claude-settings/git/refs/heads/<branch>` as a change to configuration, even from /home/user. The proxy also cuts `git push --delete`, so merged and archived branches stay on origin: batch-37 (archived as archive/batch-37-b), batch-38 (archive/batch-38) and claude/loving-curie-27u5bl (merged).",
+  "note": "Likely in normal work: every batch leaves its branch to delete. A guard that cries wolf on a legal act is spent (rule verification-cry-wolf-guard-is-spent). The likely cause is the repo name claude-settings in the API path read as the frozen settings path; unmeasured. Fix the cause: the frozen-path rule judges file paths, never a GitHub API path. Rule shared-trees-archive-then-delete still needs the archive push first. Meanwhile the standing grant in .claude/CLAUDE.md ('Acts the cloud refuses', owner, Oct 30 16:20 CDT) lets a session on shiv's computer delete merged branches when the coordinator asks. Done check: a guard case allows the REST delete of a merged branch's ref and still refuses a write to ~/.claude/settings.json, red on main and green on the fix. If the lane finds the refusal right, it lands one notes line in docs/debts/notes.md instead. Needs no answer. Files: hooks/guard_frozen.py, hooks/test_guard.py.",
+  "updatedAt": "2026-10-31T23:11:00Z"
+}
