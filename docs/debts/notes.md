@@ -726,3 +726,6 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- set-waiting-page-usage-exit: `layout.py set-waiting-page` with the wrong number of arguments exits 1, the code that also means "already set". Decision: session-tiers.
+- set-waiting-page-new-root: a mistyped root makes `<root>/.claude/layout-extras.json` in a new folder and exits 0. Decision: session-tiers.
+- record-branch-null-stops: `record-branch: null` stops the roadmap build, while `waiting-page: null` counts as unset. Decision: session-tiers.
