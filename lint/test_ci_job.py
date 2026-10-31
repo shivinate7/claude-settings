@@ -510,6 +510,14 @@ class LintTools(Job):
     CLEAN = "on: push\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
     ACTION = "name: a\ndescription: a\nruns:\n  using: composite\n  steps:\n    - run: echo hi\n      shell: bash\n"
 
+    def setUp(self):
+        super().setUp()
+        # CI's checkout has actions/code-check and the root ruff.toml that sets its ruff rules. A local uses: runs the
+        # repo under test's own copy. The base carries both (lane commits them), so the diff under test has neither.
+        shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
+                        os.path.join(self.root, "actions", "code-check"))
+        shutil.copyfile(os.path.join(CHECKOUT, "ruff.toml"), os.path.join(self.root, "ruff.toml"))
+
     def git(self, *a):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
@@ -533,6 +541,9 @@ class LintTools(Job):
         rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
         self.assertIn("Code check", lines[0])
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertRegex(log, r"(?m)^F541 ", out + log)  # ruff's reason, so a missing file cannot pass this case
 
     @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: code_check.py runs its pinned ruff through pipx")
     def test_clean_python_passes_the_code_check(self):
