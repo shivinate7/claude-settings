@@ -9077,6 +9077,39 @@ add("frozen: Write of X-live beside a clone with both markers and no install scr
 add("frozen: Write of X-live beside a clone that holds merge/install_from_main.sh is frozen",
     "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
+
+# --------------------------------------------------------------------------- frozen dup: a descriptor dup
+#
+# `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
+# `&1`, `&2` or `&-` as a path. From a cwd inside a frozen place, that read makes a plain `git fetch
+# 2>&1 | tail -1` a frozen write, and the guard refuses it with rule frozen-path. The ALLOW cases
+# are the false alarm. The DENY cases after them stay refused: a quoted `&1` is a real file, a dup
+# beside a real write still writes that file, and `&>` onto a frozen file is a write.
+# Run only this block: MUTATE_ONLY="frozen dup:" python3 hooks/test_guard.py (the name filter).
+DUP_HOOKS_CWD = slash(os.path.join(CFG, "hooks"))   # the config directory's hooks folder, as a cwd
+# ALLOW: a descriptor dup, from the live pin and from the config directory's hooks folder.
+sh("frozen dup: the REST branch delete from the live pin, a 2>&1 tail, is allowed",
+   'cd /home/user && for b in batch-38 batch-37; do gh api -X DELETE "repos/shivinate7/claude-settings/git/refs/heads/$b" 2>&1 | tail -1; echo "$b exit $?"; done',
+   "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the live pin's clone is allowed",
+   "cd /home/user/claude-settings && git fetch origin main 2>&1 | tail -1", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls >&2 from the live pin is allowed", "ls >&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 1>&2 from the live pin is allowed", "ls 1>&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 2>&- from the live pin is allowed", "ls 2>&-", "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the config directory's hooks folder is allowed",
+   "git fetch 2>&1 | tail -1", "allow", cwd=DUP_HOOKS_CWD)
+# DENY: each one still writes a file, so each stays refused as frozen-path.
+sh("frozen dup: a quoted \"&1\" is a real file in the live pin and stays frozen",
+   'ls > "&1"', "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a dup beside a real write to a frozen file stays frozen",
+   "ls 2>&1 > " + CFG_SETTINGS, "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: &> onto a frozen file stays frozen", "ls &> " + CFG_SETTINGS, "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a relative redirect inside the live pin stays frozen", "echo x > f", "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a redirect onto a frozen file from a plain folder stays frozen",
+   "echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
