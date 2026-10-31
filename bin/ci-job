@@ -10,10 +10,11 @@
 # (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. Two `uses:` it runs in place, each
 # by its one home and only with a base: actions/ste-lint as `bin/ste-changed <base>` (shared with the action through
 # actions/ste-lint/run.sh), and actions/code-check as its action.yml's command, `python3 code_check.py --base <base>`
-# from this repo, else from the checkout the global rules file names (a copied install has no actions/); with
-# neither, the step is unknown and names the file it looked for. When every failure code_check.py reports is a
-# pinned tool that could not start, the step is unknown; any other failure makes it FAIL, its reason naming the
-# tools that could not start.
+# from this repo. A copied install outside the repo under test has no actions/: it takes code_check.py from the
+# checkout the global rules file names, and with neither the step is unknown and names the file it looked for. A run
+# from the repo under test never borrows: a lane that drops code_check.py FAILs here as in CI. The step's line names
+# the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
+# step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips. A lane runs `bin/ci-job checks --lint --base origin/main` before it
@@ -151,9 +152,13 @@ LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a chec
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
 
 
-def code_check():
-    """(path, None) to code_check.py beside this file, else in the pointer checkout; (None, looked-for) with neither."""
+def code_check(top):
+    """(path, None) to code_check.py beside this file, else in the pointer checkout; (None, looked-for) with neither.
+    In the repo under test (top) it is always the sibling, even when missing, so the step fails there as in CI."""
     roots = [os.path.dirname(BIN)]
+    same = lambda a, b: os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+    if same(top, roots[0]):
+        return os.path.join(roots[0], CODE_CHECK), None
     try:
         from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
         roots.append(pointer_checkout())
@@ -199,7 +204,7 @@ def could_not_start(log, start):
     return unstarted, bool(errors) and len(unstarted) == len(set(errors))
 
 
-def plan(step, pr, values):
+def plan(step, pr, values, top):
     """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
@@ -210,7 +215,7 @@ def plan(step, pr, values):
         if not shutil.which("bash") or not shutil.which("python3"):
             return "unknown", "tool missing: bash and python3", None, None, None
         if action == "code-check":  # the action.yml's own command
-            path, looked = code_check()
+            path, looked = code_check(top)
             if not path:
                 return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
             return "run", 'python3 "%s" --base "%s"' % (path, values["base"]), SHELLS[None], {}, None
@@ -286,7 +291,7 @@ def main(argv):
         else:
             idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": ""}
             unread = [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(step_blocks(block), 1)
-                      if is_lint(st) and plan(st, False, idle)[0] == "skipped"]
+                      if is_lint(st) and plan(st, False, idle, top)[0] == "skipped"]
             if unread:
                 print("unknown         no base resolved (origin/main is absent; pass --base), so these pull-request "
                       "steps are skipped: %s" % ", ".join(unread))
@@ -306,7 +311,7 @@ def main(argv):
                 tally["unknown"] += 1
                 print("%-15s %s: --lint cannot run this repo's action %s" % ("unknown", name, uses(step)))
             continue
-        state, detail, shell, env, cwd = plan(step, bool(base), values)
+        state, detail, shell, env, cwd = plan(step, bool(base), values, top)
         if state != "run":
             print("%-15s %s: %s" % (state, name, detail))
             tally["unknown"] += state == "unknown"
@@ -342,6 +347,8 @@ def main(argv):
             os.remove(script)
         first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "FAIL "))),
                      "(verdict printed no verdict line)")
+        if known_action(step) == "code-check":
+            first += " (code_check.py: %s)" % code_check(top)[0]
         if rc == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
