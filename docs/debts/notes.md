@@ -726,3 +726,9 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- ci-job-no-pointer-unknown: a copied install with no pointer checkout reads a remote code-check step unknown, not FAIL; exit 2 still blocks a pass (bin/ci-job code_check).
+- ci-job-interrupt-leaves-verdict: Ctrl-C during a step leaves bin/verdict and the step's shell running; the step's children outlived it on main too (bin/ci-job heartbeat relay).
+- ci-job-relay-locale-decode: the heartbeat relay reads verdict's UTF-8 output in the locale's text mode, so a non-cp1252 byte on Windows can raise mid-step (bin/ci-job).
+- ci-job-local-action-other-path: LOCAL_ACTION matches only `$/actions/` and `./actions/`, so a local action at another path reads as remote and borrows a copy; same on main (bin/ci-job).
+- test-ci-job-pipx-probe-windows: the pipx probe's 60 s timeout on Windows can wait on a pipx child that holds the pipe (lint/test_ci_job.py).
+- test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so uncommitted bin/ci-job edits are not under test locally (lint/test_ci_job.py).
