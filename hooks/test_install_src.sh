@@ -3333,6 +3333,8 @@ move_install() {
   rc=$?
 }
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
+# The count main's merge/cloud_allow.json holds, read from the fixture's main (move_fixture set fx): install must write that many.
+want_merge_count() { git -C "$fx/src" show HEAD:merge/cloud_allow.json | jq '.permissions.allow | length'; }
 
 caseM1() {
   name="caseM1: a clean, detached checkout on an old main commit moves to main and gets the merge allow rules"
@@ -3343,8 +3345,8 @@ caseM1() {
     bad "$name" "install.sh exited $rc: $(install_problems)"
   elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
     bad "$name" "the checkout is not detached at main [$want]: $(git -C "$co" rev-parse HEAD) $(install_problems)"
-  elif [ "$(merge_rule_count)" != 2 ]; then
-    bad "$name" "settings.json has $(merge_rule_count) merge allow rules, not 2"
+  elif [ "$(merge_rule_count)" != "$(want_merge_count)" ]; then
+    bad "$name" "settings.json has $(merge_rule_count) merge allow rules, not $(want_merge_count) from main's merge/cloud_allow.json"
   elif [ "$(git -C "$co" rev-parse --is-shallow-repository)" != false ]; then
     bad "$name" "the fetch made the checkout shallow"
   else
