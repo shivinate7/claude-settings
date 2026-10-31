@@ -733,3 +733,5 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- command-file-backticked: a `command` with both shells excuses "Run the command in `plans/c152.md`", because the file name sits in backticks (lane command-per-os). Decision: act-in-place.
+- command-run-verb-script-path: a run verb earlier in the sentence makes a script path such as `./hooks/guard.py` read as a shell line, as in "Run the tests and open `./hooks/guard.py`" (lane command-per-os). Decision: act-in-place.
