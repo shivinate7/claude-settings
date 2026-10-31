@@ -35,6 +35,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
+from shared_names import MERGE_ROLES, read_merge_role, role_path  # noqa: E402,F401  the one home of the role reader; the guard's coordinator-scope rule reads it too
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -2346,26 +2347,6 @@ def default_lock(root):
     """A Claude Code cloud session (CLAUDE_CODE_REMOTE=true) gets GitLock: its proxy refuses the REST writes GhLock makes (HTTP 403 on
     POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
     return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
-
-MERGE_ROLES = {"coordinator", "batch-runner"}  # the tiers that may run `merge <pr> --confirm` in a cloud session
-
-def role_path():
-    return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
-
-def read_merge_role():
-    """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
-    Every failure is None, so the gate fails closed. An absent id never equals an absent record."""
-    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
-    if not sid:
-        return None
-    try:
-        data = json.loads(role_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
-        return None
-    if not isinstance(data, dict) or data.get("session") != sid:
-        return None
-    role = data.get("role")
-    return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
 
 def write_merge_role(tier):
     """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""

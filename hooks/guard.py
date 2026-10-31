@@ -107,6 +107,15 @@ Other tools, in `judge` order:
                        session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
                        `.git`, a target outside the clone, reads and non-writing shell pass. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
+  coordinator-scope    deny. A cloud coordinator's own write (no `agent_id`, CLAUDE_CODE_REMOTE true,
+                       merge role `coordinator` for the environment's session id) to a repository path
+                       outside the layout kinds of COORDINATOR_KINDS and its scratchpad. A path in no
+                       repository passes. The shell form reads the targets frozen-path reads, after a
+                       leading `cd`. A `git commit` is judged on its pathspecs, else its staged files
+                       (`-a`: the modified tracked files too). A git read that fails judges nothing.
+                       The reason says to brief a lane session. An override lifts it.
+                       COORDINATOR_SCOPE_MODE "ask" turns the deny into an ask.
+                       (session-tiers, roles-orchestrator-never-builds)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -230,6 +239,7 @@ while True:
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
+        from shared_names import read_merge_role  # the one reader of the role file, for rule coordinator-scope
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
@@ -253,7 +263,7 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, gh_call_of, git_call_of,
+            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, _commit_shape, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, records_page_hit, settings_roots,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3003,6 +3013,132 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
+# Rule coordinator-scope (records session-tiers and roles-orchestrator-never-builds; incident: a cloud
+# coordinator edited another repo's instructions file itself, 2026-10-31). A cloud coordinator briefs lane
+# sessions and writes records. Its own write goes only to a layout kind of COORDINATOR_KINDS, its own
+# scratchpad, or a path in no repository. The rule acts only on a call with no agent, in a cloud session
+# (CLAUDE_CODE_REMOTE true), whose merge role is `coordinator`: read_merge_role matches the role file to
+# the environment's session id, never to the payload's. The kinds' paths are read from lint/layout.json
+# (RECORD_LAYOUT_FILE), the layout's legacy map included, so no path is copied here. An owner override
+# lifts the rule: it is not in never_lifted. Cost: one small file read per write or shell call of a cloud
+# session, one `git diff --cached` per coordinator `git commit` (plus `git diff` for `-a`). A git read that
+# fails judges nothing.
+COORDINATOR_KINDS = ("decisions", "debts", "debt-notes", "plans", "specs", "todo", "records-index",
+                     "design", "scorecard")
+COORDINATOR_SCOPE_MODE = "deny"
+COORDINATOR_SCOPE_REASON = (
+    "Rule (Roles): a coordinator briefs lanes and writes records. It does not change a repository's code, "
+    "settings or instructions itself. "
+    "Remedy: brief a lane session to make this change, with the files and the check that proves it. "
+    "Write records and your scratchpad yourself."
+)
+_COORDINATOR_PATHS = []
+
+
+def coordinator_paths():
+    """[(path, is_file)] for each kind of COORDINATOR_KINDS, at its layout path and its legacy path, lower
+    case with no edge slash. [] when no settings clone holds a readable layout: then no repository path passes."""
+    if _COORDINATOR_PATHS:
+        return _COORDINATOR_PATHS[0]
+    for root in settings_roots():
+        try:
+            with open(os.path.join(root, RECORD_LAYOUT_FILE), encoding="utf-8") as handle:
+                data = json.load(handle)
+            legacy = data.get("legacy") or {}
+            found = []
+            for kind in COORDINATOR_KINDS:
+                path = data["kinds"][kind]["path"]
+                for spelled in (path, legacy.get(path, path)):
+                    spelled = norm(spelled).strip("/").lower()
+                    entry = (spelled, bool(os.path.splitext(spelled)[1]))
+                    if spelled and entry not in found:
+                        found.append(entry)
+        except Exception:
+            continue
+        _COORDINATOR_PATHS.append(found)
+        return found
+    return []
+
+
+def coordinator_rel_ok(rel: str) -> bool:
+    """True when a repository-relative path is a kind's file, or a file inside a kind's folder. The case is
+    folded, because the folder is one folder on a case-insensitive disk."""
+    parts = [part for part in norm(rel).lower().split("/") if part]
+    if ".." in parts:
+        return False
+    joined = "/".join(parts)
+    return any(joined == path or (not is_file and joined.startswith(path + "/"))
+               for path, is_file in coordinator_paths())
+
+
+def coordinator_path_outside(target: str, where: str, session_id: str) -> bool:
+    """True when `target` sits in a repository, is no coordinator kind and is not this session's scratchpad."""
+    try:
+        rel = repo_rel(target, where, outside=False)
+        return (rel is not None and not coordinator_rel_ok(rel)
+                and not under_session_scratchpad(_expanded(target, where), session_id))
+    except Exception:
+        return False
+
+
+def coordinator_commit_hit(stripped: str, cwd: str) -> str:
+    """The first path a `git commit` of this command would hold that is no coordinator kind, else ''. The
+    paths are the pathspecs on the commit line when it has any (a commit with paths ignores the index), else
+    the staged files, and with `-a` the modified tracked files too."""
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is None or call[0] != "commit":
+            continue
+        c_target = _segment_git_c_target(segment_tokens(segment) or [])
+        root = command_root(stripped, cwd)
+        where = _absolute(c_target, root) if c_target is not None else root
+        if not where or not os.path.isdir(where):
+            continue
+        all_flag, specs = _commit_shape(call[1])
+        names = []
+        if specs:
+            done = guard_core._git(where, "rev-parse", "--show-toplevel")
+            if done is None or done.returncode != 0 or not done.stdout.strip():
+                continue
+            top = os.path.realpath(done.stdout.strip())
+            for spec in specs:
+                rel = norm(os.path.relpath(os.path.realpath(os.path.join(where, spec)), top))
+                if not rel.startswith("../") and rel != "..":
+                    names.append(rel)
+        else:
+            for extra in ([("diff", "--cached")] + ([("diff",)] if all_flag else [])):
+                done = guard_core._git(where, *extra, "--name-only", "-z", "--no-renames")
+                if done is not None and done.returncode == 0:
+                    names.extend(name for name in done.stdout.split("\0") if name)
+        for rel in names:
+            if not coordinator_rel_ok(rel):
+                return "git commit " + rel
+    return ""
+
+
+def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule coordinator-scope: the log detail when a cloud coordinator's own call writes a repository path
+    outside COORDINATOR_KINDS and its scratchpad, or commits one, else ''."""
+    if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS:
+        return ""
+    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
+        return ""
+    if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):
+        return ""
+    if read_merge_role() != "coordinator":
+        return ""
+    session_id = session_id_of(payload)
+    if tool in WRITE_TOOLS:
+        for target in write_targets(tool_input):
+            if coordinator_path_outside(target, cwd, session_id):
+                return target
+        return ""
+    stripped = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
+    hit = _shell_write_hit(stripped, cwd, lambda word, where: coordinator_path_outside(word, where, session_id),
+                           follow_cd=True)
+    return "shell write: " + hit if hit else coordinator_commit_hit(stripped, cwd)
+
+
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
@@ -3057,6 +3193,11 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+    # 0, coordinator-scope. A cloud coordinator's own write goes only to records, its scratchpad or a path in
+    # no repository. An override lifts it, and it is not in never_lifted: the owner may mean the write.
+    scope_hit = coordinator_scope_hit(payload, tool, tool_input, cwd)
+    if scope_hit:
+        refuse(tool, COORDINATOR_SCOPE_MODE, "coordinator-scope", COORDINATOR_SCOPE_REASON, scope_hit)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
