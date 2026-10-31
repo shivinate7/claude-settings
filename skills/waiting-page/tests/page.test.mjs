@@ -4026,8 +4026,8 @@ test("a card with none of lastAnswer, reply and lane draws as today, and so does
   const emptyD = mk("em-d", 3, { reply: "", lane: "", lastAnswer: null }), emptyT = { ...TASK, id: "em-t", n: 4, reply: "", lane: "", lastAnswer: null };
   const page = await open(t, { items: [plainD, plainT, emptyD, emptyT] }); if (!page) return;
   const shape = (it) => card(page, it).evaluate((c) => ({ kids: [...c.children].map((e) => e.tagName + "." + e.className), top: c.querySelector(".top").innerText.replace(/No\. \d+/, "").replace(/\s+/g, " ").trim() }));
-  // The children of a plain open card, read from page.html at 2b66f6a3: a build that adds a wrapper or a row to a card with nothing to show fails here.
-  const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.opts", "P.ready", "DIV.alts", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "P.dest"] };
+  // The children of a plain open card, read from page.html at 2b66f6a3 plus the always-open note box (step note-always-open): a build that adds a wrapper or a row to a card with nothing to show fails here.
+  const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.opts", "P.ready", "DIV.alts", "DIV.note", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "DIV.note", "P.dest"] };
   for (const [plain, empty] of [[plainD, emptyD], [plainT, emptyT]]) {
     assert.equal(await laPanel(page, plain).count() + await laPanel(page, empty).count(), 0, `${plain.id}: a panel is drawn with nothing to show`);
     assert.doesNotMatch(await card(page, plain).innerText() + await card(page, empty).innerText(), /Your last answer|Reply:|waits on lane/i);
