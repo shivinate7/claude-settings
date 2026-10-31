@@ -279,6 +279,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `gitignore-skips-map-tests` | `ci-scope.sh` turns on only `code` for a `.gitignore` change. | [`docs/debts/gitignore-skips-map-tests.md`](../docs/debts/gitignore-skips-map-tests.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
+| `inbox-saves-agent-reports` | A subagent's hand-back reaches the session as a prompt that starts with `<agent-message`. | [`docs/debts/inbox-saves-agent-reports.md`](../docs/debts/inbox-saves-agent-reports.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
 | `install-checkout-flake` | On Windows CI two session-start freshness cases failed, then passed on rerun, twice on 2026-10-20: caseF1 in the morning (#527), and caseG1 at 23:00 (#533, run 39528566602; "expected ... | [`docs/debts/install-checkout-flake.md`](../docs/debts/install-checkout-flake.md) |
 | `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`docs/debts/install-set-reads-held-file.md`](../docs/debts/install-set-reads-held-file.md) |
