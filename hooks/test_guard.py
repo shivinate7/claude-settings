@@ -12336,7 +12336,8 @@ os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
 
 def if_item(**over):
     """A decision that every other waiting-page rule passes, with `over` on top. A None value drops a key."""
-    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None, **over})
+    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None,
+                      "departs": True, **over})
 
 
 def if_page(slug, body):
