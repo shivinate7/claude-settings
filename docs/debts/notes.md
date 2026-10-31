@@ -726,3 +726,6 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- role-model-late-round-line: in guard rule agent-role-model, any line that starts `Round 2 of 3` or `Round 3 of 3` lets a reviewer run Sonnet, even inside a round 1 brief that quotes a later round. Decision: agent-model-cap.
+- role-model-env-any-value: a spawn with no model passes when `CLAUDE_CODE_SUBAGENT_MODEL` holds any value, opus too. An env write already asks. Decision: agent-model-cap.
+- role-model-qualifier-copies: `ROLE_ABOVE_ROW_ROLES` and `ROLE_REVIEWER_FREE_ROUNDS` in hooks/guard.py copy the meaning of the audit-Explore and reviewer round 2-3 table rows; they are not read from the table. Decision: agent-model-cap.
