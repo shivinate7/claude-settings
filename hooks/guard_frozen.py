@@ -315,6 +315,9 @@ _PARAM_OPERATOR = re.compile(r"\$\{[^}]*@")
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
 _REDIRECT_CHARS = frozenset("0123456789<>&|")
 _NULL_TARGETS = ("/dev/null", "nul", "$null")
+# A descriptor dup or close after a redirect (`&1`, `&2-`, `&-`) names a descriptor, not a file.
+# Digits only: `>&name` writes the file `name`.
+_DESCRIPTOR = r"&(?:\d+-?|-)"
 
 
 def _scan(segment: str):
@@ -370,7 +373,7 @@ def _writes_a_file(words) -> bool:
     for index, word in enumerate(words):
         if ">" in word and _is_redirect(word) and not word.endswith("&"):
             target = words[index + 1].strip("'\"").lower() if index + 1 < len(words) else ""
-            if target not in _NULL_TARGETS and not target.startswith("&"):
+            if target not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target):
                 return True
     return False
 
@@ -441,7 +444,7 @@ _CP_FLAGS = re.compile(r"-[RrfiaHLPpnvuxTS]+|--[a-z][a-z-]*(?:=.*)?|--")
 _CP_TARGET = re.compile(r"-[RrfiaHLPpnvuxTS]*t|--target-directory")
 _CP_LINK_LONG = ("link", "symbolic-link")
 # A redirect to the null device or onto another descriptor writes no file.
-_NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>&\d+-?", re.IGNORECASE)
+_NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>" + _DESCRIPTOR, re.IGNORECASE)
 _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 
@@ -459,7 +462,7 @@ def _copy_reads(raw, predicate, cwd):
             index += 1
             continue
         if _OPEN_REDIRECT.fullmatch(word) and words[index + 1:index + 2] and \
-                (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(r"&\d+-?", words[index + 1])):
+                (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(_DESCRIPTOR, words[index + 1])):
             index += 2
             continue
         if word != "--" and word.startswith("--") and any(
@@ -581,6 +584,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False)
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
+            elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
+                continue   # the raw word is unquoted: a quoted "&1" is a file and is judged
             else:
                 words.extend(_words_of(word) if "'" in word or '"' in word else [word])
         text = " ".join(words)
