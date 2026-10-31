@@ -4,22 +4,42 @@
 Red cases: a multi-line step whose last line fails, a missing tool (named, behind xargs, or exit 127),
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
 None of them may read PASS. The last class plans the real checks job: every step gets one line.
+The Background class runs ci-job as a background call under the real stall watch: a quiet step must not stall it.
+Temp files: the run folder of lint/_test_temp.py (decision test-temp-standard).
 Run: python3 lint/test_ci_job.py
 """
+import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
+STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 ENV.pop("VERDICT_LOG", None)
+RUN_FOLDER = None  # made in setUpModule
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 def workflow(*steps):
@@ -45,21 +65,62 @@ def step(name, run=None, **keys):
 
 class Job(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="cijob_")
+        self.root = tempfile.mkdtemp(prefix="cijob_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
         self.log = os.path.join(self.root, "verdict.log")
 
-    def run_job(self, *steps, args=(), env=None):
+    def run_job(self, *steps, args=(), env=None, quiet=None):
+        """Run the job; (exit code, output lines without log=, all output). With `quiet` (seconds), run it as a
+        background Bash call under the real stall watch, which stops watching after that many quiet seconds."""
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
-        env = dict(ENV, VERDICT_LOG=self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
-                   **(env or {}))
-        done = subprocess.run([sys.executable, CI_JOB, "lane", "--workflow", path, *args], cwd=self.root,
-                              capture_output=True, text=True, env=env, timeout=120)
+        env = {**ENV, "VERDICT_LOG": self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
+               **(env or {})}
+        argv = [sys.executable, CI_JOB, "lane", "--workflow", path, *args]
+        if quiet is not None:
+            return self.run_watched(argv, env, quiet)
+        done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
+
+    def run_watched(self, argv, env, quiet):
+        """argv as the harness runs a background Bash call: the real hook (hooks/stall_watch.py --hook) rewrites the
+        call, sh runs the rewrite, and the real watcher reads its log. The hook takes STALL_WATCH_QUIET from its own
+        env. It is no import of hooks/test_stall_watch.py: that module makes a scratch folder and an exit hook on import."""
+        tmp = tempfile.mkdtemp(prefix="cijob_tmp_", dir=RUN_FOLDER)  # the wrapper's log and ci-job's step scripts land here
+        self.addCleanup(shutil.rmtree, tmp, True)
+        # PYTHONUNBUFFERED=1 would line-buffer ci-job's stdout and hide the block buffering of a file log.
+        env = {**{k: v for k, v in env.items() if k != "PYTHONUNBUFFERED"}, "STALL_WATCH_QUIET": str(quiet), "TMPDIR": tmp}
+        call = {"tool_name": "Bash", "tool_input": {"command": shlex.join(argv), "run_in_background": True}}
+        hook = subprocess.run([sys.executable, STALL_WATCH, "--hook"], input=json.dumps(call), capture_output=True,
+                              text=True, env=env, timeout=20)
+        try:
+            wrapped = json.loads(hook.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
+        except (ValueError, KeyError):
+            self.fail("the stall-watch hook returned no updatedInput.command: %r %r" % (hook.stdout, hook.stderr))
+        out_path = os.path.join(tmp, "harness.out")
+        with open(out_path, "wb") as sink:
+            proc = subprocess.Popen(["sh", "-c", wrapped], cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=sink,
+                                    stderr=subprocess.STDOUT, start_new_session=True)  # one group: a stalled job is ours to end
+        self.addCleanup(self.end_group, proc.pid)
+        try:
+            rc = proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.end_group(proc.pid)
+            self.fail("the wrapped job ran over 60 s")
+        with open(out_path, encoding="utf-8", errors="replace") as f:
+            out = f.read()
+        return rc, [ln for ln in out.splitlines() if not ln.startswith("log=")], out
+
+    @staticmethod
+    def end_group(pgid):
+        """Kill the process group a watched run started: a stall leaves the job running, and a red run must leave none."""
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            pass
 
     def verdicts(self, lines):
         return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines]
@@ -108,6 +169,59 @@ class Steps(Job):
         rc, lines, out = self.run_job(step("write", "echo x > planned.txt"), args=("--plan",))
         self.assertEqual(lines, ["would run       write"], out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "planned.txt")))
+
+
+def unique_sleep(base):
+    """A sleep length, such as 5.0 plus five digits, that no other process carries: ps finds this test's sleep only."""
+    return "%s%05d" % (base, uuid.uuid4().int % 10 ** 5)
+
+
+def sleeping(lengths):
+    """Each ps line of a process that runs `sleep <one of these lengths>`."""
+    table = subprocess.run(["ps", "-axo", "pid=,args="], capture_output=True, text=True).stdout.splitlines()
+    return [ln.strip() for ln in table if any(re.search(r"\bsleep %s$" % re.escape(n), ln.strip()) for n in lengths)]
+
+
+def reap(lengths):
+    """Kill each sleep of these lengths still running, so a red run leaves none."""
+    for line in sleeping(lengths):
+        try:
+            os.kill(int(line.split()[0]), signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("ps"), "the stall watch is posix only and reads ps")
+class Background(Job):
+    """A ci-job run in the background must not draw a stall report while its steps run (roadmap step
+    ci-job-stall-strands). ci-job loses the heartbeats of bin/verdict and block-buffers its own lines into the
+    wrapper's log file; the watch then reports a stall, leaves the job running, and the caller loses the verdicts."""
+
+    def background(self, lengths, quiet, beat):
+        """One `sleep` step per length, run under the real stall watch with `beat` seconds between heartbeats."""
+        self.addCleanup(reap, lengths)  # runs before the folder goes: a failed case leaves no sleep behind
+        steps = [step("nap %d" % n, "sleep " + length) for n, length in enumerate(lengths, 1)]
+        rc, lines, out = self.run_job(*steps, quiet=quiet, env={"VERDICT_HEARTBEAT": str(beat)})
+        problems = []
+        if rc == 3 or "STALL:" in out:
+            problems.append("the stall watch reported a stall (exit %s)" % rc)
+        elif rc != 0:
+            problems.append("exit %s, want 0" % rc)
+        passed = [ln for ln in lines if ln.startswith("PASS ")]
+        if len(passed) != len(lengths):
+            problems.append("%d PASS lines, want %d" % (len(passed), len(lengths)))
+        if sleeping(lengths):
+            problems.append("a step's sleep still ran after the wrapper returned: %s" % sleeping(lengths))
+        self.assertEqual(problems, [], out)
+
+    def test_a_quiet_step_with_a_heartbeat_does_not_stall(self):
+        # verdict prints a heartbeat each second, so the log is never quiet for the 2 s limit
+        self.background([unique_sleep("5.0")], quiet=2, beat=1)
+
+    def test_step_lines_reach_the_log_while_ci_job_runs(self):
+        # No heartbeat inside 60 s: only each step's own verdict line, printed as the step ends, keeps the log moving.
+        # Three 1 s steps: a line each ~1.1 s (limit 2 s), and the whole job outlasts the limit, so it cannot end first.
+        self.background([unique_sleep("1.0") for _ in range(3)], quiet=2, beat=60)
 
 
 class Unknowns(Job):
@@ -365,7 +479,7 @@ def plan_lint(root, wf_text, extra=()):
 
 class LintMode(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="cijob_")
+        self.root = tempfile.mkdtemp(prefix="cijob_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
 
