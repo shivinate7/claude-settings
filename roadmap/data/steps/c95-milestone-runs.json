@@ -1,0 +1,9 @@
+{
+  "title": "Full CI runs at milestones, once enough has landed, not on every merge",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3031,
+  "why": "Step 3 of shiv's ruling on c95, Oct 27 12:07 CDT (item 31, e): trust first, then cut in steps, each only past its measured bar, stepping back on a miss; step 3 is milestone runs. Split out of c95 on Oct 31 (coordinator, 18:12 CDT): no PR covers it.",
+  "note": "Starts after c95 part 2 (#896) lands and the bar for step 3 is measured. Rulings that bound it: item 38 a (Oct 28 13:23 CDT), no Actions minutes are billed in claude-settings ($0); item 34 b (13:40 CDT), step 2 stays off here and ports to repos that pay for minutes. So step 3 may also be off here and port to paying repos; the lane reads the escapes plan (plans/c95-step2-escapes.md) and names its bar before any build. A cut that needs a pick the rulings do not give goes to the waiting page. Done check: the lane names the measured bar and either builds the milestone trigger (a full run once N lanes or a named milestone has landed, red on a fixture where it skips too long) or records that step 3 stays off here, with the reason. Port: to repos that pay for minutes.",
+  "updatedAt": "2026-10-31T23:12:00Z"
+}
