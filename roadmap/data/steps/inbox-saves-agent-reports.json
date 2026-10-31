@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.33755,
   "why": "Coordinator 2, Oct 30 17:18 CDT: seen in lanes page-answer-send (10 blocks), c104 (6) and roadmap-matches-lanes. Seen twice more in the coordinator, Oct 31 15:10 CDT.",
-  "note": "Lane started Oct 31 15:12 CDT (coordinator); it promotes note feedback-guard-agent-burst (docs/debts/notes.md) to a debt record and fixes the cause. Debt: hooks/local_time.py saves each subagent hand-back (an agent-message block) to the feedback inbox as an owner message, so feedback_guard blocks each Stop until it is jotted. Fix: the inbox records only the owner's own messages. Done check: a turn that receives a subagent hand-back adds no inbox entry. Needs no answer.",
-  "updatedAt": "2026-10-31T20:13:00Z"
+  "note": "Ruled Oct 31 15:44 CDT (shiv, waiting item 108, d): add the agent-message block tag to the inbox's skip list in hooks/local_time.py. It matches decision owner-feedback-inbox (agent text is never captured); no brief marker, no source tags. Lane (started Oct 31 15:12 CDT, coordinator) resumes on this pick; it promotes note feedback-guard-agent-burst (docs/debts/notes.md) to a debt record and cites the ruling in owner-feedback-inbox. Done check: a turn that receives a subagent hand-back adds no inbox entry, red on main and green on the fix.",
+  "updatedAt": "2026-10-31T20:46:00Z"
 }
