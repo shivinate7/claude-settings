@@ -11929,6 +11929,24 @@ gl("a continued gh api after the switch is allowed", "allow",
 gl("a multi-line quoted argument after the switch is allowed", "allow",
    GL_SWITCH + '\ngh pr comment 5 --body "first\nsecond"')
 
+# Round 2 (review findings): PowerShell paths, gh text in a quoted body, a lone quote, sudo and env
+# wrappers, and a bare fallback switch. The PowerShell lines are raw strings, so each backslash is literal.
+gl("a PowerShell Set-Location to a path with a trailing backslash in quotes, then the switch, then gh, is allowed",
+   "allow", r'Set-Location "C:\repo\"' + "\n" + GL_SWITCH + "\ngh pr view 5")
+gl("a PowerShell cd to a backslash path, then the switch, then gh, is allowed", "allow",
+   r"cd C:\Users\me\repo" + "\n" + GL_SWITCH + "\ngh pr view 5")
+gl("a PowerShell Set-Location to a path with a trailing backslash, then gh with no switch, is denied", "deny",
+   r'Set-Location "C:\repo\"' + "\ngh pr view 5")
+gl("a multi-line quoted body that holds gh text, after the switch, is allowed", "allow",
+   GL_SWITCH + '\ngh pr comment 5 --body "first\ngh pr merge 5\nsecond"')
+gl("a lone quote in text after the switch is allowed", "allow", GL_SWITCH + "\necho Don't\ngh pr ready 5")
+gl("sudo gh after the switch is allowed", "allow", GL_SWITCH + " && sudo gh pr ready 5")
+gl("sudo gh with no switch is denied", "deny", "sudo gh pr ready 5")
+gl("env GH_HOST=x gh after the switch is allowed", "allow", GL_SWITCH + " && env GH_HOST=x gh pr ready 5")
+gl("env GH_HOST=x gh with no switch is denied", "deny", "env GH_HOST=x gh pr ready 5")
+gl("a bare switch to ssemwal-cdc, then gh api on a shivinate7 repo, one per line, is denied", "deny",
+   "gh auth switch -u ssemwal-cdc\ngh api repos/shivinate7/x")
+
 # A decision is not judged: it carries the command, with the form lines and gain and lose, and no switch.
 wp_write("gh login switch: a decision that holds a gh command with no switch is not judged", "allow", "gh-login-switch",
          {"id": GL_DOC, "kind": "decision", "status": "open", "title": "Protect main on claude-settings?",
@@ -11938,6 +11956,17 @@ wp_write("gh login switch: a decision that holds a gh command with no switch is 
                        "gain": "g", "lose": "l"},
                       {"key": "b", "label": "Keep it", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]},
          doc_id=GL_DOC)
+
+# Round 2: a str_replace on the task's `command` is judged on the text that replaces old_str.
+wp_write("gh login switch: a str_replace that adds a gh command with no switch to command is denied", "deny",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="step one", new_str="step one\ngh pr merge 5")
+wp_write("gh login switch: a str_replace on command that adds a switch, then gh, is allowed", "allow",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="step one", new_str=GL_SWITCH + "\ngh pr merge 5")
+wp_write("gh login switch: a str_replace on command with no gh text is allowed", "allow",
+         "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
+         old_str="step one", new_str="step two")
 
 
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it

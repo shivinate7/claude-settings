@@ -606,6 +606,26 @@ def case_gh_login_hit_direct():
            gh_task("# Don't forget\ngh auth switch -u shivinate7\ngh pr ready 5"), False)
     gh_hit("gh login switch: a decision holding a gh command is not judged",
            gh_task(GH_PATCH, kind="decision"), False)
+    # Round 2 (review findings): PowerShell paths, gh text in a quoted body, a lone quote, sudo and env.
+    gh_hit("gh login switch: a PowerShell Set-Location with a trailing backslash, then the switch, then gh, is allowed",
+           gh_task(r'Set-Location "C:\repo\"' + "\n" + "gh auth switch -u shivinate7" + "\ngh pr view 5"), False)
+    gh_hit("gh login switch: a PowerShell cd to a backslash path, then the switch, then gh, is allowed",
+           gh_task(r"cd C:\Users\me\repo" + "\n" + "gh auth switch -u shivinate7" + "\ngh pr view 5"), False)
+    gh_hit("gh login switch: a PowerShell Set-Location with a trailing backslash, then gh with no switch, is denied",
+           gh_task(r'Set-Location "C:\repo\"' + "\ngh pr view 5"), True)
+    gh_hit("gh login switch: a multi-line quoted body that holds gh text, after the switch, is allowed",
+           gh_task('gh auth switch -u shivinate7\ngh pr comment 5 --body "first\ngh pr merge 5\nsecond"'), False)
+    gh_hit("gh login switch: a lone quote in text after the switch is allowed",
+           gh_task("gh auth switch -u shivinate7\necho Don't\ngh pr ready 5"), False)
+    gh_hit("gh login switch: sudo gh after the switch is allowed",
+           gh_task("gh auth switch -u shivinate7 && sudo gh pr ready 5"), False)
+    gh_hit("gh login switch: sudo gh with no switch is denied", gh_task("sudo gh pr ready 5"), True)
+    gh_hit("gh login switch: env GH_HOST=x gh after the switch is allowed",
+           gh_task("gh auth switch -u shivinate7 && env GH_HOST=x gh pr ready 5"), False)
+    gh_hit("gh login switch: env GH_HOST=x gh with no switch is denied",
+           gh_task("env GH_HOST=x gh pr ready 5"), True)
+    gh_hit("gh login switch: a bare switch to ssemwal-cdc, then gh api on a shivinate7 repo, is denied",
+           gh_task("gh auth switch -u ssemwal-cdc\ngh api repos/shivinate7/x"), True)
 
 
 def case_gh_login_switch_on_the_page():
@@ -615,6 +635,16 @@ def case_gh_login_switch_on_the_page():
          entry_of(gh_task(GH_PATCH, steps=["Open plans/gh.md", "Run its command"])), ("command-in-item", None))
     page("gh login switch: a switch first is allowed on the page", "set",
          entry_of(gh_task("gh auth switch -u shivinate7 && " + GH_PATCH)), None)
+    # Round 2: a str_replace on the task's command is judged on the text that replaces old_str.
+    page("gh login switch: a str_replace that adds a gh command with no switch to command is refused", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
+          "new_str": "step one\ngh pr merge 5"}, ("gh-login-switch", None))
+    page("gh login switch: a str_replace on command that adds a switch, then gh, is allowed", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
+          "new_str": "gh auth switch -u shivinate7\ngh pr merge 5"}, None)
+    page("gh login switch: a str_replace on command with no gh text is allowed", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
+          "new_str": "step two"}, None)
 
 
 # ------------------------------------------------------------------ call_judge
