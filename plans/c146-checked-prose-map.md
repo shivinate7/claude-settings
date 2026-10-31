@@ -17,7 +17,7 @@ The map is the first thing shiv and the AI read before they answer "how does X w
 
 ## 2. What exists today (main, e0f9e2d9)
 
-- **The skill.** `skills/plain-english-map/` is the one home of the map skill (record `docs/decisions/map-skill-lives-here.md`). That record also lets a host "pin a copy" that "need not stay byte-equal". q_max still vendors its own copy, which differs in SKILL.md and four scripts (step o6 note).
+- **The skill.** `skills/plain-english-map/` is the one home of the map skill (record `docs/decisions/map-skill-lives-here.md`). On main that record still lets a host "pin a copy" that "need not stay byte-equal". Step 11 rewrites it on lane branch c146-checked-map (commit 92de87c, not on main yet): a host pins the install link, never a copy. q_max still vendors its own copy, which differs in SKILL.md and four scripts (step o6 note).
 - **The checks.** `scripts/map-check.mjs` → `mapChecks` holds 8 check bodies, MAP1 to MAP8. `runMapChecks` prints `[PASS|FAIL|SKIP] MAPn` lines and exits 1 on a FAIL.
   - MAP1/MAP2: every tracked code file has a map line, and every map line names a tracked file.
   - MAP3: migration tables. MAP4: screen keys. MAP5: trace step form. MAP6: trace pages against screen keys. MAP8: an earlier step reaches each step.
@@ -152,7 +152,7 @@ Each step lands with its red run recorded first (`rule:roles-each-layer-proves-o
     - Red run: on a scratch copy, change `MIN_LINES` to 10. The step exits 1 with the MAP9 line. Record it.
 11. **Records.**
     - New `docs/decisions/map-facts-are-checked.md`, with kind, home, cost and the stated limits (the regex reader, in-repo copies).
-    - Fix `docs/decisions/map-skill-lives-here.md`: a host pins the install link, never a copy, as t18 rules. This waits on shiv's own grant; the Oct 30 16:09 CDT ruling does not cover it.
+    - Fix `docs/decisions/map-skill-lives-here.md`: a host pins the install link, never a copy, as t18 rules. Done Oct 31 on lane branch c146-checked-map, commit 92de87c (not on main yet), under ruling 29a (Oct 28 02:40 CDT: fix map-skill-lives-here.md, no pinned copies).
     - Add a `CLAUDE.md` sentence with an anchor (question 2, pick b) and a `lint/rule_mechanisms.json` row of kind `ci` naming "Map check". Keep `UNMECHANIZED_EXPECTED` unchanged, because the new row is of kind `ci`.
 
 ## 5. Cost
