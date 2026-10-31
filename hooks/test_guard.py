@@ -18535,6 +18535,20 @@ role_deny("role-model: claude-code-guide on sonnet is denied", "claude-code-guid
           "How do the hooks load?")
 role_deny("role-model: test-author on the full sonnet id is denied", "test-author", "claude-sonnet-5-5",
           "Write the failing cases.")
+# A model the table does not rank is above any row below opus: fail closed. Its rank is unruled, so none is guessed.
+role_deny("role-model: fable on builder is denied, a model the table does not rank fails closed",
+          "builder", "fable", "Fix the failing case.")
+role_deny("role-model: fable on test-author is denied, a model the table does not rank fails closed",
+          "test-author", "fable", "Write the failing cases.")
+role_deny("role-model: claude-fable-5-1 on reviewer with no round line is denied, fails closed",
+          "reviewer", "claude-fable-5-1", "Check the diff for typos.")
+# A role written with a capital letter or a trailing space is the same role, so it takes its row.
+role_deny("role-model: role Test-author on sonnet is denied, matched to its row",
+          "Test-author", "sonnet", "Write the failing cases.")
+role_deny("role-model: role with a trailing space on sonnet is denied, matched to its row",
+          "test-author ", "sonnet", "Write the failing cases.")
+role_deny("role-model: role Reviewer on sonnet with no round line is denied, matched to its row",
+          "Reviewer", "sonnet", "Check the diff for typos.")
 
 # ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
 role_allow("role-model: Explore on sonnet is allowed (an audit Explore)", "Explore", "sonnet",
