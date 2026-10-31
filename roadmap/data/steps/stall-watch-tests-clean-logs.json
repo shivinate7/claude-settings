@@ -1,0 +1,9 @@
+{
+  "title": "The hooks tests clean up their stall-watch logs",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.30498,
+  "why": "Lane wait-for-pid-form (coordinator, 18:06 CDT, Oct 31): the hooks test suite leaves /tmp/stall-watch-*.log files behind; 139 seen in one container.",
+  "note": "Likely in normal work: every hooks test run adds files, and a long-lived machine fills its temp folder. Fix: the stall-watch tests write their logs under the test's own temp dir, or remove them at teardown. Done check: a hooks test run leaves no new /tmp/stall-watch-*.log, red on main and green on the fix. Needs no answer. Files: hooks/test_stall_watch.py, hooks/test_stall_watch_stop.py.",
+  "updatedAt": "2026-10-31T23:08:00Z"
+}
