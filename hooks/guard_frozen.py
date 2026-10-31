@@ -577,20 +577,23 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False)
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words = []
+        words, stood_in = [], set()
         for index, word in enumerate(raw):
             if index in data:
+                stood_in.add(len(words))
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
             else:
                 words.extend(_words_of(word) if "'" in word or '"' in word else [word])
         text = " ".join(words)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        for word in words:
+        for place, word in enumerate(words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
-            if not word or word in (">", ">>"):
-                continue
-            if predicate(word, at) and writes_to(word, text):
+            if not word or word in (">", ">>") or place in stood_in:
+                continue   # a stand-in names no path: judged, it would resolve to the cwd
+            # writes_to first: it is a regex, and `predicate` may read files (a layout, a config). A word
+            # that is no write target never reaches it.
+            if writes_to(word, text) and predicate(word, at):
                 return word
     return ""
 
