@@ -471,6 +471,16 @@ def report_names_pid_and_asks_owner_to_stop():
 
 
 @posix_case
+def report_names_the_wait_helper():
+    """6b. the report names bin/wait-pid, the one allowed way to wait on the stranded job (roadmap step wait-for-pid-form)"""
+    rc, text, secs, _cmd = run_rewritten("sleep 30")
+    problems = expect(rc == 3, f"exit {rc}, want 3")
+    problems += expect("wait-pid" in text, "report does not name wait-pid, the way to wait on the job")
+    reap()
+    return problems
+
+
+@posix_case
 def report_lists_the_job_pid_parent_first():
     """12. a single command: the STALL line lists the job's own pid, parent first, so stopping the line ends the job"""
     problems = []
