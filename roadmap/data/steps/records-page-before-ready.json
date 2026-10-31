@@ -1,9 +1,9 @@
 {
   "title": "One CI run per merge: the merge tool rebuilds the records page before the ready run",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.05,
   "why": "shiv, Oct 31 14:12 CDT owner ask (via coordinator session_013NEJL2pASwRjgJDnsvnpNe): second in work order. Owner figure: 25 of 80 merges in the week to Oct 31 needed a second CI run (not measured by triage). One second run measured at about 28 min (#882, Oct 30 20:10 CDT).",
-  "note": "Placed ahead of c52 and every other open step but trust-card-guard: owner ask, Oct 31 14:12 CDT. Cause: merge/merge.py (commit_claim) adds a 'Claim record numbers' commit and a 'Rebuild the records page' commit after the PR's ready run, and the push starts CI again. Fix: claim the numbers and rebuild docs/records.md before the PR goes ready, so the ready run is the only run. Guard rule records-page still keeps lanes from committing docs/records.md; the merge tool does it. Done check: merge/test_merge.py cases show no push after the ready run on a PR that changes a record summary, red on main and green on the fix. Needs no answer. Files: merge/merge.py, merge/test_merge.py.",
+  "note": "Placed ahead of c52 and every other open step but trust-card-guard: owner ask, Oct 31 14:12 CDT. Lane open, draft #895; it waits on batch 37, which also edits merge/merge.py. Cause: merge/merge.py (commit_claim) adds a 'Claim record numbers' commit and a 'Rebuild the records page' commit after the PR's ready run, and the push starts CI again. Fix: claim the numbers and rebuild docs/records.md before the PR goes ready, so the ready run is the only run. Guard rule records-page still keeps lanes from committing docs/records.md; the merge tool does it. Done check: merge/test_merge.py cases show no push after the ready run on a PR that changes a record summary, red on main and green on the fix. Needs no answer. Files: merge/merge.py, merge/test_merge.py.",
   "updatedAt": "2026-10-31T19:55:00Z"
 }
