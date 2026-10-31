@@ -1,0 +1,9 @@
+{
+  "title": "After a resume, the setup hook does not leave the shell in the live pin",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.304995,
+  "why": "Coordinator, Oct 31 18:47 CDT: after each resume, the session-start hook (cloud setup) leaves the coordinator's shell in the live pin, /home/user/claude-settings-live-<sha>. Seen 4 times today. Ruling 1 of decision merge-reinstalls-from-main: no lane, review or merge work runs in the pin. It also fed the frozen-path false alarm (step frozen-path-ref-delete).",
+  "note": "Likely in normal work: every resumed cloud session starts there. Fix in one home, the setup hook, not in each session: it ends with the shell in the session's own checkout, or never changes the shell's folder into the pin. Done check: a hook test resumes a session and reads the shell's folder after the hook, red on main (the pin) and green on the fix (the session checkout); the pin still gets installed. Needs no answer. Files: hooks/session_start.sh, the cloud setup script, hooks/test_session_start.py or hooks/test_cloud_setup.sh.",
+  "updatedAt": "2026-10-31T23:47:00Z"
+}
