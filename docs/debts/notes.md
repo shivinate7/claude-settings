@@ -747,3 +747,9 @@
 - heartbeat-starved-reads-stopped: a live holder starved 1 s or more reads as stopped, a false green only when the kill also failed. Decision: c95.
 - kill-holder-rekills-dead-pids: kill_holder and the atexit stop_holders kill each pid again, dead or not; a recycled pid inside that seconds-wide window could be killed. Decision: c95.
 - scratchpad-reap-reads-ps: ScratchpadReap reads liveness with ps, not the heartbeat; the reap is POSIX-only and needs ps to find orphans. Decision: c95.
+- ci-job-no-pointer-unknown: a copied install with no pointer checkout reads a remote code-check step unknown, not FAIL; exit 2 still blocks a pass (bin/ci-job code_check).
+- ci-job-interrupt-leaves-verdict: Ctrl-C during a step leaves bin/verdict and the step's shell running; the step's children outlived it on main too (bin/ci-job heartbeat relay).
+- ci-job-relay-locale-decode: the heartbeat relay reads verdict's UTF-8 output in the locale's text mode, so a non-cp1252 byte on Windows can raise mid-step (bin/ci-job).
+- ci-job-local-action-other-path: LOCAL_ACTION matches only `$/actions/` and `./actions/`, so a local action at another path reads as remote and borrows a copy; same on main (bin/ci-job).
+- test-ci-job-pipx-probe-windows: the pipx probe's 60 s timeout on Windows can wait on a pipx child that holds the pipe (lint/test_ci_job.py).
+- test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so a local run tests only committed bin/ci-job edits (lint/test_ci_job.py).
