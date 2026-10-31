@@ -9,17 +9,18 @@ The waiting page shows an option by its position, as a letter: the first option 
   - repeats another option's key;
   - has the key `none` (the page's `NONE`, which it reads as "none of these"); or
   - has a key that is not the lowercase letter of its position.
-  - It also refuses an item whose text (title, context, why, an option's text or a step) names an option by a letter-and-digit key, such as "option e2". The words that start the match are option, pick and key, in any case. "Option A", "pick b" and "option 2" pass.
+  - It also refuses an item whose text (title, context, why, an option's text or a step) names an option by a letter-and-digit key, such as "option e2". The words that start the match are option, pick and key, in any case. A colon, a bracket, a quote or markdown emphasis may stand between the word and the key, as in "Option: e2" and "Pick **e2**". The key is lowercase, so "Option A", "pick b", "option 2", "Option D12" and "Pick A1" pass, and so does the topic id "t18".
+  - It judges a `str_replace` on the text it adds (`new_str`), in any field, by this text rule only. The stored options are unseen.
   - It reads each write in a batch and data read from `file_path`. It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
-  - It passes a task, a note, an update that carries no `options` and no matching text, and a call to another artifact.
+  - It passes a task, a note, a closed item, an update that carries no `options` and no matching text, and a call to another artifact.
   - It reads last, after the form rules (`question-form`, `owner-judge`). Each older rule keeps naming its own refusals.
   - The reason says: key the options a, b, c in the order shown, each once, never none, and name an option by its letter. It names no target.
   - It is built against a named incident, below. It landed 2026-10-30.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.
-  - Known limit: the guard copies the page's letters. A test reads the page's `letterOf` and `NONE` lines and fails when they differ from the copy.
+  - Known limit: the guard copies the page's letters in `_letter_of` and `OPTION_NONE_KEY`. A test reads the page's `letterOf` and `NONE` lines and fails when they are not `String.fromCharCode(65 + i % 26)` and `"none"`. It compares the page to those two forms, not to the guard's copy.
   - Known limit: more than 26 options always refuse, because the page repeats letters after Z and the key then repeats.
   - Known limit: an option named in text by a word, such as "the lint option", or by a key the page never shows that is not letter-and-digit, passes.
-  - Known limit: a whole-item write of a closed item with old keys is refused. A status-only update closes it.
+  - Known limit: a lowercase id with a key's shape, such as the step id "c188" or "key d4", is refused after option, pick or key.
   - Known limit: an update that carries `options` but no `kind` is judged as a decision, so a task update that carries options is refused only if its keys are wrong. The writer carries `kind: task` again on such an update.
 
 Incident:

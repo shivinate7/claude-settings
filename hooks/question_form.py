@@ -422,7 +422,18 @@ def item_hit(op, entry):
         hit = task_str_replace_hit(entry)
         if hit:
             return "task-names-check", hit
-        return form_str_replace_hit(entry)
+        hit = form_str_replace_hit(entry)
+        if hit[0]:
+            return hit
+        # The stored item is unseen, so the two text rules judge the text this edit adds, in any field.
+        new = [str(entry.get("new_str") or "")]
+        hit = key_named_hit(new)
+        if hit:
+            return "option-letter-keys", hit
+        hit = reworked_hit(new)
+        if hit:
+            return "rework-off-page", hit
+        return PASS
     data = _write_data(entry)
     hit = port_item_hit(op, data)
     if hit:
@@ -459,8 +470,12 @@ def item_hit(op, entry):
 # String.fromCharCode(65 + i % 26) (skills/waiting-page/page.html, symbol letterOf); the key is that letter
 # in lowercase. The page reads the key "none" (symbol NONE, same file) as "none of these".
 OPTION_NONE_KEY = "none"
-# An option named in item text by a letter-and-digit key, as in "option e2": the word, then the key.
-KEY_NAMED = re.compile(r"\b(?:options?|picks?|keys?)\s+[\"'`\u201c\u2018]?[a-z]\d+\b", re.I)
+# An option named in item text by a letter-and-digit key, as in "option e2": the word (any case), then a
+# lowercase key, which is the only case a key takes. An uppercase id such as D12 or A1 is not key-shaped,
+# and t18 is the owner's uniform-ruling topic id. No shared constant lists record ids: lint/report_guard.py
+# CITE_ID_RE holds D-ids only, and roadmap step ids such as c188 live on the roadmap branch, so a lowercase
+# id like c188 or a key like d4 still reads as a key.
+KEY_NAMED = re.compile(r"\b(?i:options?|picks?|keys?)[\s:(*_\"'`\u201c\u2018]+(?!t\d)[a-z]\d+\b")
 LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
                       "options a, b, c in the order shown, each once, never none, and name an option in the "
                       "item's text by that letter (option A, pick b), never by any other key.")
@@ -481,11 +496,22 @@ def _item_text_fields(data):
     return [t for t in out if isinstance(t, str)]
 
 
+def key_named_hit(texts) -> str:
+    """The matched text when one of `texts` names an option by a letter-and-digit key, else ""."""
+    for text in texts:
+        m = KEY_NAMED.search(text)
+        if m:
+            return "item text names an option by a key: " + m.group(0)
+    return ""
+
+
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
-    position's letter, or names an option in its text by a letter-and-digit key. A task and a note pass;
-    an update that carries no `options` has no keys to judge."""
+    position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
+    closed item pass; an update that carries no `options` has no keys to judge."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
+        return ""
+    if data.get("status") == "closed":
         return ""
     options = data.get("options")
     if isinstance(options, list):
@@ -501,31 +527,34 @@ def option_letter_hit(op: str, data) -> str:
             seen.add(key)
             if key != _letter_of(i):
                 return "option key that is not its position's letter"
-    for text in _item_text_fields(data):
-        m = KEY_NAMED.search(text)
-        if m:
-            return "item text names an option by a key: " + m.group(0)
-    return ""
+    return key_named_hit(_item_text_fields(data))
 
 
 # ------------------------------------------------------------------ a reworked item is not answered on the page
 #
 # docs/decisions/rework-leaves-page.md, rule `rework-off-page`, built against a named incident (incident in
 # the record): an item whose options were being reworked stayed open, so the owner could answer options about
-# to change. A str_replace on context carries no status and is not judged.
-REWORKED = re.compile(r"\bbeing\s+reworked\b", re.I)
+# to change. Any item text counts, and a str_replace is judged on the text it adds.
+REWORKED = re.compile(r"\b(?:being\s+re-?worked|under\s+re-?work)\b", re.I)
 REWORK_REASON = ("An open item is for the owner to answer now, so it never says its options are being "
                  "reworked. Close the item with a home that names the rework, and add a fresh item when the "
                  "options are ready.")
 
 
+def reworked_hit(texts) -> str:
+    """The matched text when one of `texts` says the item is being reworked, else ""."""
+    for text in texts:
+        m = REWORKED.search(text)
+        if m:
+            return "item text says it is being reworked: " + m.group(0)
+    return ""
+
+
 def rework_off_page_hit(data) -> str:
-    """The matched text when this write puts "being reworked" in `context` with no status closed."""
+    """The matched text when this write puts "being reworked" in the item's text with no status closed."""
     if not isinstance(data, dict) or data.get("status") == "closed":
         return ""
-    if REWORKED.search(str(data.get("context") or "")):
-        return "context says the item is being reworked"
-    return ""
+    return reworked_hit(_item_text_fields(data))
 
 
 # ------------------------------------------------------------------ the chat question box

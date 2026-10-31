@@ -658,9 +658,8 @@
 - owner-judge-stands-unchecked: `stands: true` passes with no `pick` or with a `group`; the page then shows it as an ordinary question (page.html standsOk) (hooks/question_form.py decision_form_hit; decision owner-judge-test)
 - option-letter-keys-limit-26: more than 26 options always refuse, since the page repeats its letters after Z and the key then repeats (hooks/question_form.py option_letter_hit; decision option-keys-are-letters)
 - option-letter-keys-text-by-shape: item text names an option by a letter-and-digit key after option, pick or key; an option named by a word or another shape passes (hooks/question_form.py KEY_NAMED; decision option-keys-are-letters)
-- option-letter-keys-closed-old-keys: a whole-item write of a closed item with old keys is refused; a status-only update closes it (hooks/question_form.py option_letter_hit; decision option-keys-are-letters)
-- rework-off-page-str-replace: a str_replace on `context` carries no status and is not judged, so it can add "being reworked" to an open item (hooks/question_form.py rework_off_page_hit; decision rework-leaves-page)
-- rework-off-page-phrase-only: only the words "being reworked" are read; "under revision" and the like pass (hooks/question_form.py REWORKED; decision rework-leaves-page)
+- rework-off-page-phrase-only: only "being reworked", "being re-worked" and "under rework" are read; "under revision" and the like pass (hooks/question_form.py REWORKED; decision rework-leaves-page)
+- rework-off-page-history-text: "was being reworked" history text is refused; accepted (hooks/question_form.py REWORKED; decision rework-leaves-page)
 - cloud-tarball-curl-no-cap: after a cloud clone fails at its 40 s cap, the tarball fallback's `curl -fsSL` has no `--max-time`. The run can then pass the hook's 60 s cap. Files land whole, so the old install stays (install.sh tarball fallback).
 - cloud-mirror-sha-write-fails: if the `claude-settings.mirrorSha` write fails after a good checkout, the log says "could not refresh" though main moved, and later resumes warn of local commits and keep main (install.sh cloud resume).
 - checkout-at-raw-origin: `checkout_at` reads the raw origin URL, so an alias origin such as `gh:owner/repo` with insteadOf no longer matches in a piped local install, which then fetches the tarball (install.sh checkout_at).
