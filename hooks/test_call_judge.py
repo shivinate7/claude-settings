@@ -26,6 +26,9 @@ Interface the hook must match:
 - Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus.
   Every other refusal is liftable.
 - Any model error, or malformed input, fails open: no deny, exit 0, one stderr line.
+- AskUserQuestion: a box that fails the code check (hooks/question_form.py chat_hit) is refused before
+  any model call, with the rule chat_hit names. The model sees only a box that passes it, and judges only
+  what code cannot (the cases are in hooks/test_question_form.py, which reuses run_hook below).
 - settings.json: one command hook on `Agent|AskUserQuestion` runs call_judge.py with a timeout above
   the longest model call (60 s). No `prompt` or `agent` hook is left on either tool.
 """
@@ -36,14 +39,15 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 HOOK = os.environ.get("CALL_JUDGE_UNDER_TEST") or os.path.join(HERE, "call_judge.py")
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings.json")
 sys.path.insert(0, HERE)
-ROOT = tempfile.mkdtemp(prefix="call_judge_cases_")
+sys.path.insert(0, os.path.join(REPO, "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
@@ -158,10 +162,31 @@ def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=
     return json.dumps(payload)
 
 
-def question_input(session=SID_A, agent=None):
-    options = [{"label": "Yes", "description": "go " + MARK}, {"label": "No", "description": "stop"}]
-    payload = {"session_id": session, "tool_name": "AskUserQuestion",
-               "tool_input": {"questions": [{"question": "Ship it?", "header": "Ship", "options": options}]}}
+# The question form (hooks/question_form.py): a box with 2+ options carries these lines in `question`, and
+# each option a `Gain:` and a `Lose:` in its description. hooks/test_question_form.py builds its variants
+# from good_box(), so the box has one home.
+GOAL_LINE = "Goal: ship the change today"
+PROBLEM_LINE = "Problem (risk): the change touches the guard, so it needs your word"
+BASED_LINES = ("Based on (read): the diff changes one rule",)
+
+
+def good_options():
+    return [{"label": "Ship it (Recommended)",
+             "description": "Gain: the change lands today. Lose: nobody reads it first. " + MARK},
+            {"label": "Hold it",
+             "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]
+
+
+def good_box(goal=GOAL_LINE, problem=PROBLEM_LINE, based=BASED_LINES, options=None):
+    """An AskUserQuestion input that meets the form. A form line passed as None or empty is left out,
+    so a case drops one line and keeps the rest."""
+    text = "\n".join(line for line in (goal, problem, *based) if line)
+    return {"questions": [{"question": text, "header": "Ship", "multiSelect": False,
+                           "options": options or good_options()}]}
+
+
+def question_input(session=SID_A, agent=None, box=None):
+    payload = {"session_id": session, "tool_name": "AskUserQuestion", "tool_input": box or good_box()}
     if agent:
         payload["agent_id"] = agent
     return json.dumps(payload)
@@ -267,7 +292,15 @@ def case_question():
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("question: the prompt is the question prompt with the call's JSON",
           prompt.startswith("Review this AskUserQuestion call:") and MARK in prompt
-          and "$ARGUMENTS" not in prompt and "premise-format" in prompt, prompt[:160])
+          and "$ARGUMENTS" not in prompt, prompt[:160])
+    # Code reads the form lines (chat_hit), so the model prompt no longer asks for them. The call's own JSON
+    # holds those lines, so it is cut out before the words are read.
+    asks = prompt.replace(json.dumps(good_box(), ensure_ascii=False), "")
+    check("question: the prompt leaves the Goal, Problem and Based on lines to the code check",
+          MARK not in asks and not any(t in asks for t in ("Goal:", "Problem:", "Based on", "premise-format")), asks[:400])
+    kept = ("gain", "lose", "unexplained", "outside the box", "recommend")
+    check("question: the prompt keeps what code cannot decide (gain and lose, ids, outside the box, a recommendation)",
+          all(word in asks.lower() for word in kept), [w for w in kept if w not in asks.lower()])
     check("question: the refusal ends with the override line",
           override is not None and hasattr(override, "offer")
           and r.reason().rstrip().endswith(override.offer("question-judge").strip()), r.reason()[-160:])
