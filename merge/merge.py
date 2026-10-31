@@ -2173,11 +2173,16 @@ def draft_step(root, cfg, n, host, info):
     else:
         tmp, wt = open_worktree(root, info, base)
         try:
-            stale, stands = holds_base(wt, f"origin/{base}", info["head"])  # before the rebuild: a small-move proof resets the tree
-            if stale or stands:
-                tip = git(wt, "rev-parse", "--short=9", f"origin/{base}")[1]
-                raise Stop("BEHIND: " + (stale or f"{info['head'][:9]} does not hold origin/{base} at {tip}.")
-                           + f" The draft step needs the head to hold the base tip. Merge {base} into {info['branch']}, push, and run again. Nothing was pushed.")
+            claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
+            if claim:
+                raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
+                           f"Mark #{n} ready by hand, then run --confirm again. Nothing was pushed.")
+            # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
+            stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
+            if stale:  # holds_base ends with the remedy
+                raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
+            if stands:
+                say(f"merge: {stands}. The green run stands.")
             if rebuild_records(wt):
                 sha = commit_claim(wt, None)
                 push_branch(wt, info["branch"])
