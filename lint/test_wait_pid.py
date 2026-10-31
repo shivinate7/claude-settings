@@ -305,6 +305,10 @@ class T(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != TAG}
         job = "env %s=%s sleep %s; echo done" % (TAG, SESSION, LIFE)   # `; echo` keeps a stub shell above the job
         rc, text, _secs, _cmd = stall.run_rewritten(job, shell="/bin/sh", env=env)
+        for line in text.splitlines():   # the wrapper exits on a stall, before its own `rm -f LOG`
+            log = stall.LOG_RE.search(line) if line.startswith("Log: ") else None
+            if log:
+                self.addCleanup(lambda path=log.group(1): os.path.exists(path) and os.remove(path))
         self.assertEqual(rc, 3, text)
         line = next((l for l in text.splitlines() if l.startswith("STALL:")), "")
         named = re.search(r"\bpid=(\d+(?:,\d+)*)", line)
@@ -344,6 +348,16 @@ class T(unittest.TestCase):
 
     def test_untagged_stub_with_another_sessions_child_is_refused(self):
         self.assertRefusedAtOnce(self.stranded_pair(None, OTHER_SESSION).stub)
+
+    def test_the_helpers_own_ppid_1_ancestor_is_refused(self):
+        """The helper holds the session tag, so it must not count as the tagged descendant of its own
+        ancestors: waiting on the top of its own parent chain would never end."""
+        parents, top = ps_parents(), os.getpid()
+        while parents.get(top, 1) > 1:
+            top = parents[top]
+        if top == os.getpid() or parents.get(top) != 1:
+            self.skipTest("no ancestor of this test sits directly under init")
+        self.assertRefusedAtOnce(top)
 
     # Pids that are not running.
     def test_pid_not_running_at_start_exits_0_and_says_so(self):
