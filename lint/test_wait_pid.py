@@ -14,8 +14,8 @@ the exec'd job under it does.
 Each case that waits ends its target with SIGKILL at a set time and checks that the helper returned
 after that time, so an early return fails without a timing guess. No case here writes a file.
 """
+import ast
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -181,12 +181,30 @@ class T(unittest.TestCase):
             first = handle.readline()
         self.assertTrue(first.startswith("#!") and "python" in first, first)
 
-    def test_ownership_comes_from_guard_kill_not_a_second_walk(self):
-        """One home for ownership (hooks/guard_kill.py). The helper calls it and reads no /proc itself."""
+    def test_ownership_lives_in_guard_kill_and_the_helper_reads_no_tag(self):
+        """One home for ownership (hooks/guard_kill.py, beside pid_is_owned). The helper imports it
+        and never reads the tag itself: no proc_env import, and no use of holds_session_tag in any
+        form. A liveness poll may still use guard_kill's own helpers."""
+        self.assertTrue(os.path.isfile(WP), WP)
         with open(WP, encoding="utf-8") as handle:
-            src = handle.read()
-        self.assertRegex(src, r"(?m)^\s*(?:from|import)\s+guard_kill\b")
-        self.assertNotIn("/proc/", src)
+            tree = ast.parse(handle.read())
+        imported, names = set(), set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
+            elif isinstance(node, ast.alias):
+                names.update(n for n in (node.name, node.asname) if n)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                names.add(node.value)   # a name given to importlib or getattr
+        self.assertIn("guard_kill", imported)
+        self.assertNotIn("proc_env", imported | names)
+        self.assertNotIn("holds_session_tag", names)
 
     # Owned pids.
     def test_owned_child_exits_after_two_seconds(self):
