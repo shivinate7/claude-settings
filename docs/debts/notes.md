@@ -759,3 +759,6 @@
 - ci-job-local-action-other-path: LOCAL_ACTION matches only `$/actions/` and `./actions/`, so a local action at another path reads as remote and borrows a copy; same on main (bin/ci-job).
 - test-ci-job-pipx-probe-windows: the pipx probe's 60 s timeout on Windows can wait on a pipx child that holds the pipe (lint/test_ci_job.py).
 - test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so a local run tests only committed bin/ci-job edits (lint/test_ci_job.py).
+- draft-step-any-session: outside the cloud no merge-role check runs, so any session may run `merge <pr> --confirm` on a draft PR. That pushes a page-only commit to the draft branch, and no merge follows (review round 1 of PR #895). Decision: records-index-at-merge.
+- draft-hint-claim-no-kinds: on a repo whose stamp config has no kinds, a draft head with a hand-written Record-claim trailer gets the preview hint "--confirm on the draft pushes it", but the draft step refuses that head (merge/merge.py, preview and draft_step; review round 3 of PR #895, probed). Decision: records-index-at-merge.
+- draft-step-stands-wording: the draft step prints "The green run stands." on a draft, where CI skipped the run. Wording only (review round 3 of PR #895). Decision: records-index-at-merge.
