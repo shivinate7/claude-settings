@@ -10,8 +10,10 @@
 # (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. Two `uses:` it runs in place, each
 # by its one home and only with a base: actions/ste-lint as `bin/ste-changed <base>` (shared with the action through
 # actions/ste-lint/run.sh), and actions/code-check as its action.yml's command, `python3 code_check.py --base <base>`
-# from this repo. When every failure code_check.py reports is a pinned tool that could not start, the step is
-# unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
+# from this repo, else from the checkout the global rules file names (a copied install has no actions/); with
+# neither, the step is unknown and names the file it looked for. When every failure code_check.py reports is a
+# pinned tool that could not start, the step is unknown; any other failure makes it FAIL, its reason naming the
+# tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips. A lane runs `bin/ci-job checks --lint --base origin/main` before it
@@ -143,7 +145,20 @@ LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN"}  # absent from a runner step's env unless its env: maps them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check)(?:@\S*)?")
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
-CODE_CHECK = os.path.join(os.path.dirname(BIN), "actions", "code-check", "code_check.py")
+CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
+
+
+def code_check():
+    """(path, None) to code_check.py beside this file, else in the pointer checkout; (None, looked-for) with neither."""
+    roots = [os.path.dirname(BIN)]
+    try:
+        from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
+        roots.append(pointer_checkout())
+    except ImportError:
+        pass
+    paths = [os.path.join(root, CODE_CHECK) for root in roots if root]
+    found = next((p for p in paths if os.path.isfile(p)), None)
+    return found, None if found else " or ".join(paths)
 
 
 def uses(step):
@@ -192,7 +207,10 @@ def plan(step, pr, values):
         if not shutil.which("bash") or not shutil.which("python3"):
             return "unknown", "tool missing: bash and python3", None, None, None
         if action == "code-check":  # the action.yml's own command
-            return "run", 'python3 "%s" --base "%s"' % (CODE_CHECK, values["base"]), SHELLS[None], {}, None
+            path, looked = code_check()
+            if not path:
+                return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
+            return "run", 'python3 "%s" --base "%s"' % (path, values["base"]), SHELLS[None], {}, None
         return "run", '"%s" "%s"' % (os.path.join(BIN, "ste-changed"), values["base"]), SHELLS[None], {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
