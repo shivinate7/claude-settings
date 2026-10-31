@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-31 15:04 CDT (waiting-page item 104, a question on the waiting page): when a claude-settings rule and a child repo's text answer the same question, the claude-settings rule wins, unless the child's text names that rule as a known exemption.
+Owner, 2026-10-31 15:04 CDT, waiting-page item 104: a claude-settings rule wins over a child repo's text on the same question, unless that text names the rule as a known exemption.
 
 - Child text is any guard, hook, `CLAUDE.md` line or other text in a child repo.
 - Child text that conflicts with how repos inherit from claude-settings, and cites no known exemption, is wrong. It is stale prose for the compliance check to find.
