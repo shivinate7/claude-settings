@@ -12762,14 +12762,23 @@ ol("a context that says option 2 is allowed", "allow", ol_item(context="Option 2
 ol("a context that says Option: e2 is denied", "deny", ol_item(context="Option: e2 is the safer pick."))
 ol("a context that says Option (e2) is denied", "deny", ol_item(context="Option (e2) is the safer pick."))
 ol("a context that says Pick **e2** is denied", "deny", ol_item(context="Pick **e2** to keep the check."))
+ol("a context that says Option [e2] is denied", "deny", ol_item(context="Option [e2] is the safer pick."))
 ol("a why that says key: e2 is denied", "deny", ol_item(why="The key: e2 keeps the lint job."))
 
-# Ids this repo cites are not keys. D12 is a decision id, t18 is the owner's topic id for the uniform ruling,
-# and A1 is a cell. A lowercase d-and-digit word after "key" has a key's shape, so it is refused like "key e2":
-# the exempt ids are D<digits> and t<digits>, not every letter that an id could start with.
+# The page shows an option's letter in capitals, so Claude can write "Option E2" for key e2. That is the incident
+# form (waiting item 77), so a key takes either case after the word (round 2 review finding 1).
+ol("a context that says Option E2 with a capital key is denied", "deny",
+   ol_item(context="Option E2 is safer for the stamp check."))
+ol("a context that says Pick **E2** with a capital key is denied", "deny",
+   ol_item(context="Pick **E2** to keep the check."))
+
+# Ids this repo cites are not keys. D12 is a decision id and t18 is the owner's topic id for the uniform ruling.
+# A lowercase d-and-digit word after "key" has a key's shape, so it is refused like "key e2": the exempt ids are
+# D<digits> and t<digits>, not every letter that an id could start with. A1 is not exempt: folding case on the key
+# refuses A1 too, and that cost is accepted (round 2 review finding 1), so "Pick A1" flips from allow to deny.
 ol("a context that says Option D12 is allowed", "allow", ol_item(context="Option D12 is the short-titles ruling."))
 ol("a context that says Option t18 is allowed", "allow", ol_item(context="Option t18 is the uniform ruling."))
-ol("a context that says Pick A1 is allowed", "allow", ol_item(context="Pick A1 on the sheet."))
+ol("a context that says Pick A1 is denied, since a key folds case", "deny", ol_item(context="Pick A1 on the sheet."))
 ol("a context that says key d4 is denied, since it has a key's shape", "deny", ol_item(context="The key d4 stays."))
 
 # A closed item records what was decided, so its old keys and its text are not judged, as in decision_form_hit.
@@ -12877,8 +12886,8 @@ FAMILY = "rework-off-page"
 # 15:40 CDT. Item 97 was being reworked while still open and answerable, so the owner could answer options that
 # were about to change. An item whose text (title, context, why, an option or a step) says "being reworked", in
 # any case, is refused unless the same write has status closed. A str_replace carries no status and its stored
-# item is unseen, so it is refused when its new_str adds the phrase: a str_replace is no exemption (step
-# rework-leaves-page, done check, Oct 30 20:42 UTC).
+# item is unseen, so it is refused when its new_str adds the phrase. The str_replace cases are class (b): round 1
+# finding 1 was a defect, and these cases pin its fix.
 
 RW_DOC = "rework-stamp-check"
 RW_TEXT = "Options being reworked."
