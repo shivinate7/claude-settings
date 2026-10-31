@@ -517,9 +517,10 @@ def role_call_of(segment: str):
     return None
 
 
-def _own_get_session_tags(transcript: str, own_id: str):
-    """The tags of the newest get_session result whose ccr.id is own_id, else None."""
-    uses, newest = set(), None
+def _own_session_read(transcript: str, own_id: str):
+    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
+    None, and whether a set_session_tags call follows that result."""
+    uses, newest, tagged_after = set(), None, False
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -533,6 +534,8 @@ def _own_get_session_tags(transcript: str, own_id: str):
                     continue
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
+                elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
+                    tagged_after = True
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
                     body = block.get("content")
                     if isinstance(body, list):
@@ -540,10 +543,15 @@ def _own_get_session_tags(transcript: str, own_id: str):
                     try:
                         ccr = json.loads(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest = ccr["tags"]
+                            newest, tagged_after = ccr["tags"], False
                     except (ValueError, KeyError, TypeError):
                         continue
-    return newest
+    return newest, tagged_after
+
+
+def _own_get_session_tags(transcript: str, own_id: str):
+    """The tags of the newest get_session result whose ccr.id is own_id, else None."""
+    return _own_session_read(transcript, own_id)[0]
 
 
 def role_proof_hit(stripped: str, transcript: str) -> str:
@@ -586,8 +594,8 @@ def trust_card_hit(tool: str, transcript: str) -> str:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
-            tags = _own_get_session_tags(transcript, own_id)
-            if tags is not None and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            if tags is not None and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
                 return ""
     except Exception:
         pass

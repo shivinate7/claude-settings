@@ -78,6 +78,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
 - **Trust card** (rule `trust-card-in-build`, guard rule that denies the two owner-card calls in a `cs-build:` session). Risk kind: incident. The coordinator took the trusted-device card on 2026-10-30, 16:19-17:06 CDT, and it blocked every message into that session. Landed 2026-10-31.
   - The guard allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag. It reads the tags as `merge-role-proof` does. No record, no transcript or no env id is a denial.
   - Steer: a `cs-build` session hands the act to the owner or to an untagged bridge session. A session with no record runs `get_session` alone in its own turn, then retries.
+  - A `set_session_tags` call after the newest record read is a denial, until `get_session` runs again. Window that stays open: a tag another session adds after the newest read is not seen. Batch runners and lanes get their tags at `create_session`, so the window is unused today.
 
 ## How it works
 
