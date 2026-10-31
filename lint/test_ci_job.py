@@ -608,14 +608,18 @@ def pipx_runs_pinned_ruff():
 
 
 class CodeCheckFromCopiedInstall(Job):
-    """A cloud install copies bin/ci-job into ~/.claude/bin, with no symlink and no actions/ beside it. Its
-    code-check step must still reach code_check.py, from the checkout the global rules file names, or read unknown.
-    In the repo under test, with no actions/code-check, the step must FAIL and never borrow that other checkout."""
+    """A cloud install copies bin/ci-job into ~/.claude/bin, with no symlink and no actions/ beside it. A remote uses:
+    reaches code_check.py through the checkout the global rules file names, or reads unknown. A local uses: runs the
+    repo under test's own code_check.py: from a copy it never borrows another checkout's, and in the repo under test
+    with no actions/code-check it must FAIL."""
 
     # The branch builder and the git helper are LintTools' (one home): this class calls them, it does not copy them.
     git = LintTools.git
     lane = LintTools.lane
-    CODE = step("Code check", uses="./actions/code-check")
+    # The remote form is the copied-install route; the local forms run the repo under test's own action.
+    CODE = step("Code check", uses="shivinate7/claude-settings/actions/code-check@main")
+    LOCAL_DOT = step("Code check", uses="./actions/code-check")
+    LOCAL_DOLLAR = step("Code check", uses="$/actions/code-check")  # local: the form checks.yml writes
     LINT = ("--lint", "--base", "origin/main")
     # The in-repo run's tree: what ci-job imports, plus the root ruff.toml that sets ruff's rules. No actions/ and no
     # shell files, so code_check's run over the tree stays small.
@@ -659,18 +663,28 @@ class CodeCheckFromCopiedInstall(Job):
         tar = self.root + ".tar"
         subprocess.run(["git", "archive", "--format=tar", "-o", tar, "HEAD", "--", *self.IN_REPO], cwd=CHECKOUT,
                        check=True, env=ENV)
-        shutil.unpack_archive(tar, self.root)  # the repo under test: ci-job's own checkout, with no actions/ in it
+        subprocess.run(["tar", "-xf", tar, "-C", self.root], check=True)  # the repo under test: no actions/ in it
         self.lane({"a.py": 'print("fine")\n'})
         cfg = tempfile.mkdtemp(prefix="cfg-", dir=RUN_FOLDER)
         with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as f:
             f.write("@%s/CLAUDE.md\n" % CHECKOUT)  # a checkout that does have actions/code-check
-        rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=os.path.join(self.root, "bin", "ci-job"),
+        rc, lines, out = self.run_job(self.LOCAL_DOT, args=self.LINT, script=os.path.join(self.root, "bin", "ci-job"),
                                       env={"CLAUDE_CONFIG_DIR": cfg})
         with open(self.log, encoding="utf-8") as f:
             log = f.read()
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out + log)
         self.assertNotRegex(log, r"(?m)^code-check: ", out + log)  # the pointer copy's code_check never ran
         self.assertIn("code_check.py", log, out + log)  # main's reason: the in-repo file is not there
+
+    def test_a_local_uses_from_a_copy_fails_on_the_repos_own_failing_code_check(self):
+        self.lane({"actions/code-check/code_check.py": "raise SystemExit(1)\n", "a.py": 'print("fine")\n'})
+        ci_job, cfg = self.install(CHECKOUT)  # a copy outside the repo; the rules file names a good checkout
+        rc, lines, out = self.run_job(self.LOCAL_DOLLAR, args=self.LINT, script=ci_job,
+                                      env={"CLAUDE_CONFIG_DIR": cfg})
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out + log)
+        self.assertNotRegex(log, r"(?m)^code-check: ", out + log)  # the good copy's code_check never ran
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
