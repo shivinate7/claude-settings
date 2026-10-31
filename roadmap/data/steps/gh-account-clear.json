@@ -1,0 +1,9 @@
+{
+  "title": "An owner step that runs gh names the account it needs, and shows the active one first",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.304,
+  "why": "shiv, Oct 31 14:53 CDT owner chat (via coordinator session_013NEJL2pASwRjgJDnsvnpNe). Incident: shiv's PC holds two gh logins, ssemwal-cdc and shivinate7. He did not know which was active until gh auth switch printed it, during the protection switch (waiting item 101, 14:52 CDT). The PC is now on shivinate7.",
+  "note": "Fix: a waiting-page task or report block that runs gh names the login it needs, and its first line prints the active login (gh auth status) before the act, so shiv sees it before he pastes. Open question: which login stays active on the PC by default (waiting item 102, owner coordinator). Done check: the page guard or a lint refuses an owner gh command with no account line, red on main and green on the fix. Files: hooks/question_form.py (or the waiting-page writer's check), skills/waiting-page/SKILL.md.",
+  "updatedAt": "2026-10-31T19:58:00Z"
+}
