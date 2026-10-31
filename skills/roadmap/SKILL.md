@@ -14,7 +14,9 @@ no copy: each panel prints the commit it read, or "unknown" and why.
 
 Run from any folder:
 
-    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch roadmap] --block --out FILE
+    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch <branch>] --block --out FILE
+
+`--record-branch` defaults to the extras key `record-branch` in `.claude/layout-extras.json`, else `roadmap`.
 
 `--block` writes only the roadmap block, the text between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->`. It holds
 `window.ROADMAP_DATA` and `window.ROADMAP_BUILD`, and never a database stand-in. With no record branch,
