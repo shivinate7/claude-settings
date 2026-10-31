@@ -103,8 +103,8 @@ FAMILIES = {
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
-    "option-letter-keys": "the waiting-page writer: a decision's option keys are the lowercase letter of their position, unique, never none, and item text names no option by a letter-and-digit key; the page's letters are read from its own source",
-    "rework-off-page": "the waiting-page writer: an item whose context says being reworked is not written unless its status is closed",
+    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
+    "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -12681,7 +12681,8 @@ FAMILY = "option-letter-keys"
 # letter (skills/waiting-page/page.html, letterOf), so an option keyed a showed as B and the owner's "A" was
 # misread. An option at index i takes the lowercase letter of the page's letter for i. The writer also refuses
 # a key that is missing or not a string, a key that repeats, and the key none, which the page reads as "none of
-# these". A task and a note are not judged. Item text names no option by a letter-and-digit key, as in "option e2".
+# these". A task, a note and a closed item are not judged. An open item's text names no option by a
+# letter-and-digit key, as in "option e2".
 
 OL_DOC = "letter-keys"
 OL_CTX = "The stamp check runs in the lint job today. The test job could run it too."
@@ -12756,6 +12757,34 @@ ol("a context that says the option to merge is allowed", "allow", ol_item(contex
 ol("a context that says option A is allowed", "allow", ol_item(context="Option A is the safer pick."))
 ol("a context that says pick b is allowed", "allow", ol_item(context="Pick b for the lint job."))
 ol("a context that says option 2 is allowed", "allow", ol_item(context="Option 2 is the safer pick."))
+
+# The forms a session writes between the word and the key: a colon, a bracket, markdown emphasis.
+ol("a context that says Option: e2 is denied", "deny", ol_item(context="Option: e2 is the safer pick."))
+ol("a context that says Option (e2) is denied", "deny", ol_item(context="Option (e2) is the safer pick."))
+ol("a context that says Pick **e2** is denied", "deny", ol_item(context="Pick **e2** to keep the check."))
+ol("a why that says key: e2 is denied", "deny", ol_item(why="The key: e2 keeps the lint job."))
+
+# Ids this repo cites are not keys. D12 is a decision id, t18 is the owner's topic id for the uniform ruling,
+# and A1 is a cell. A lowercase d-and-digit word after "key" has a key's shape, so it is refused like "key e2":
+# the exempt ids are D<digits> and t<digits>, not every letter that an id could start with.
+ol("a context that says Option D12 is allowed", "allow", ol_item(context="Option D12 is the short-titles ruling."))
+ol("a context that says Option t18 is allowed", "allow", ol_item(context="Option t18 is the uniform ruling."))
+ol("a context that says Pick A1 is allowed", "allow", ol_item(context="Pick A1 on the sheet."))
+ol("a context that says key d4 is denied, since it has a key's shape", "deny", ol_item(context="The key d4 stays."))
+
+# A closed item records what was decided, so its old keys and its text are not judged, as in decision_form_hit.
+ol("a whole-item set of a closed item keyed e2, a and c is allowed", "allow",
+   ol_item(status="closed", options=ol_keyed("e2", "a", "c")))
+ol("a whole-item set of a closed item whose context says option e2 won is allowed", "allow",
+   ol_item(status="closed", context="Option e2 won."))
+
+# A str_replace carries no status, so it is judged on the text it adds: new_str, never old_str.
+ol("a str_replace that adds Option e2 wins. to context is denied", "deny", None, action="str_replace",
+   field="context", old_str="The test job could run it too.", new_str="Option e2 wins.")
+ol("a str_replace that adds Option b wins. to context is allowed", "allow", None, action="str_replace",
+   field="context", old_str="The test job could run it too.", new_str="Option b wins.")
+ol("a str_replace that takes option e2 out of context is allowed", "allow", None, action="str_replace",
+   field="context", old_str="Option e2 wins.", new_str="Option a wins.")
 
 # Kind: an item with no kind is a decision. A task and a note are not judged.
 ol("an item with no kind is judged as a decision and denied", "deny",
@@ -12846,8 +12875,10 @@ FAMILY = "rework-off-page"
 #
 # Rule rework-off-page (decision rework-leaves-page), built against a named incident: waiting item 97, Oct 30
 # 15:40 CDT. Item 97 was being reworked while still open and answerable, so the owner could answer options that
-# were about to change. An item whose context says "being reworked", in any case, is refused unless the same
-# write has status closed. A str_replace on context is not judged: a known limit.
+# were about to change. An item whose text (title, context, why, an option or a step) says "being reworked", in
+# any case, is refused unless the same write has status closed. A str_replace carries no status and its stored
+# item is unseen, so it is refused when its new_str adds the phrase: a str_replace is no exemption (step
+# rework-leaves-page, done check, Oct 30 20:42 UTC).
 
 RW_DOC = "rework-stamp-check"
 RW_TEXT = "Options being reworked."
@@ -12875,9 +12906,33 @@ rw("an update that carries status closed and that context is allowed", "allow",
    {"status": "closed", "context": RW_TEXT}, action="update")
 rw("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 rw("an item set to another artifact is allowed", "allow", rw_item(), url="https://claude.ai/artifact/other")
-add("rework off page: a str_replace that adds the phrase to context is not judged and is allowed", "allow",
+add("rework off page: a str_replace that adds the phrase to context is denied", "deny", "rework-off-page",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items", doc_id=RW_DOC,
     field="context", old_str="Options are open.", new_str=RW_TEXT)
+rw("a str_replace that adds the phrase in capitals is denied", "deny", None, action="str_replace",
+   field="context", old_str="Options are open.", new_str="Options BEING REWORKED.")
+rw("a str_replace that takes the phrase out of context is allowed", "allow", None, action="str_replace",
+   field="context", old_str=RW_TEXT, new_str="Options are ready.")
+
+# Item text other than context: title, why and an option's own text. The same write with status closed is allowed.
+RW_QUIET = "The options are open."
+rw("a title that says Options being reworked is denied", "deny", rw_item(context=RW_QUIET, title=RW_TEXT))
+rw("a why that says Options being reworked is denied", "deny", rw_item(context=RW_QUIET, why=RW_TEXT))
+rw("an option's how that says being reworked is denied", "deny",
+   rw_item(context=RW_QUIET, options=ol_opt(0, how="This option is being reworked.")))
+rw("an update that carries only a title with the phrase is denied", "deny", {"title": RW_TEXT}, action="update")
+rw("a str_replace that adds the phrase to a title is denied", "deny", None, action="str_replace",
+   field="title", old_str="Which CI job runs the stamp check?", new_str=RW_TEXT)
+rw("a closed item whose title says Options being reworked is allowed", "allow",
+   rw_item(status="closed", context=RW_QUIET, title=RW_TEXT))
+
+# Other spellings of the same state. A bare past-tense re-worked or the noun rework is not the state.
+rw("the phrase with a hyphen, being re-worked, is denied", "deny", rw_item(context="Options being re-worked."))
+rw("the phrase under rework is denied", "deny", rw_item(context="Options under rework."))
+rw("a context that says the options were re-worked last week is allowed", "allow",
+   rw_item(context="The options were re-worked last week."))
+rw("a context that says the rework landed last week is allowed", "allow",
+   rw_item(context="The rework landed last week."))
 add("rework off page: a batch with an open reworked item is denied", "deny", "rework-off-page",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": RW_DOC, "data": rw_item()}])
