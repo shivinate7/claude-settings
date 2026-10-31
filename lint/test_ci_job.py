@@ -4,19 +4,28 @@
 Red cases: a multi-line step whose last line fails, a missing tool (named, behind xargs, or exit 127),
 a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-request step with no base.
 None of them may read PASS. The last class plans the real checks job: every step gets one line.
+The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 Run: python3 lint/test_ci_job.py
 """
+import functools
+import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
+RUN_FOLDER = _test_temp.run_folder()
+CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
 CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 ENV.pop("VERDICT_LOG", None)
@@ -45,19 +54,23 @@ def step(name, run=None, **keys):
 
 class Job(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="cijob_")
+        self.root = tempfile.mkdtemp(prefix="cijob_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.root, True)
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
         self.log = os.path.join(self.root, "verdict.log")
 
-    def run_job(self, *steps, args=(), env=None):
+    def job_call(self, *steps, args=(), env=None, script=CI_JOB):
+        """argv and env of one run of the job: its workflow is written into the throwaway repo."""
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
         env = dict(ENV, VERDICT_LOG=self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
                    **(env or {}))
-        done = subprocess.run([sys.executable, CI_JOB, "lane", "--workflow", path, *args], cwd=self.root,
-                              capture_output=True, text=True, env=env, timeout=120)
+        return [sys.executable, script, "lane", "--workflow", path, *args], env
+
+    def run_job(self, *steps, args=(), env=None, script=CI_JOB):
+        argv, env = self.job_call(*steps, args=args, env=env, script=script)
+        done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
@@ -497,6 +510,14 @@ class LintTools(Job):
     CLEAN = "on: push\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
     ACTION = "name: a\ndescription: a\nruns:\n  using: composite\n  steps:\n    - run: echo hi\n      shell: bash\n"
 
+    def setUp(self):
+        super().setUp()
+        # CI's checkout has actions/code-check and the root ruff.toml that sets its ruff rules. A local uses: runs the
+        # repo under test's own copy. The base carries both (lane commits them), so the diff under test has neither.
+        shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
+                        os.path.join(self.root, "actions", "code-check"))
+        shutil.copyfile(os.path.join(CHECKOUT, "ruff.toml"), os.path.join(self.root, "ruff.toml"))
+
     def git(self, *a):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
@@ -520,6 +541,9 @@ class LintTools(Job):
         rc, lines, out = self.run_job(self.CODE, args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
         self.assertIn("Code check", lines[0])
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertRegex(log, r"(?m)^F541 ", out + log)  # ruff's reason, so a missing file cannot pass this case
 
     @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: code_check.py runs its pinned ruff through pipx")
     def test_clean_python_passes_the_code_check(self):
@@ -579,5 +603,149 @@ class LintTools(Job):
         self.assertIn("New check", lines[0])
 
 
+@functools.lru_cache(maxsize=None)
+def pipx_runs_pinned_ruff():
+    """True when pipx can run code_check's pinned ruff. The probe is `pipx run ruff==<pin> --version`, the pin read from
+    standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
+    if not shutil.which("pipx"):
+        return False
+    with open(os.path.join(CHECKOUT, "actions", "code-check", "standard.json"), encoding="utf-8") as f:
+        pin = json.load(f)["tools"]["ruff"]
+    try:
+        return subprocess.run(["pipx", "run", "ruff==" + pin, "--version"], capture_output=True,
+                              timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+class CodeCheckFromCopiedInstall(Job):
+    """A cloud install copies bin/ci-job into ~/.claude/bin, with no symlink and no actions/ beside it. A remote uses:
+    reaches code_check.py through the checkout the global rules file names, or reads unknown. A local uses: runs the
+    repo under test's own code_check.py: from a copy it never borrows another checkout's, and in the repo under test
+    with no actions/code-check it must FAIL."""
+
+    # The branch builder and the git helper are LintTools' (one home): this class calls them, it does not copy them.
+    git = LintTools.git
+    lane = LintTools.lane
+    # The remote form is the copied-install route; the local forms run the repo under test's own action.
+    CODE = step("Code check", uses="shivinate7/claude-settings/actions/code-check@main")
+    LOCAL_DOT = step("Code check", uses="./actions/code-check")
+    LOCAL_DOLLAR = step("Code check", uses="$/actions/code-check")  # local: the form checks.yml writes
+    LINT = ("--lint", "--base", "origin/main")
+    # The in-repo run's tree: what ci-job imports, plus the root ruff.toml that sets ruff's rules. No actions/ and no
+    # shell files, so code_check's run over the tree stays small.
+    IN_REPO = ("bin/ci-job", "bin/verdict", "hooks/*.py", "lint/workflow_steps.py", "ruff.toml")
+
+    def install(self, claude_md_checkout):
+        """A copied install: ci-job and verdict as plain files, hooks/ and lint/ beside them, and a global rules file
+        whose @-line names claude_md_checkout. Returns the copied ci-job and the config dir."""
+        cfg = os.path.join(self.root, "cfg")
+        os.makedirs(os.path.join(cfg, "bin"))
+        for name in ("ci-job", "verdict"):
+            shutil.copyfile(os.path.join(HERE, "..", "bin", name), os.path.join(cfg, "bin", name))
+        for name in ("hooks", "lint"):
+            shutil.copytree(os.path.join(CHECKOUT, name), os.path.join(cfg, name),
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("@%s/CLAUDE.md\n" % claude_md_checkout)
+        return os.path.join(cfg, "bin", "ci-job"), cfg
+
+    def test_the_code_check_step_reaches_code_check_py(self):
+        if not pipx_runs_pinned_ruff():
+            self.skipTest("pipx cannot run code_check's pinned ruff here: no pipx, or offline with no cached copy")
+        self.lane({"a.py": 'print("fine")\n'})
+        ci_job, cfg = self.install(CHECKOUT)
+        rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertRegex(log, r"(?m)^code-check: PASS$", out + log)  # code_check.py ran and passed the clean diff
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
+    def test_a_checkout_with_no_code_check_reads_unknown_not_fail(self):
+        self.lane({"a.py": 'print("fine")\n'})
+        empty = os.path.join(self.root, "empty-checkout")
+        os.makedirs(empty)
+        ci_job, cfg = self.install(empty)
+        rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("code_check.py", lines[0], out)
+
+    def test_an_in_repo_run_with_no_code_check_fails_and_never_borrows_a_pointer_copy(self):
+        tar = self.root + ".tar"
+        subprocess.run(["git", "archive", "--format=tar", "-o", tar, "HEAD", "--", *self.IN_REPO], cwd=CHECKOUT,
+                       check=True, env=ENV)
+        subprocess.run(["tar", "-xf", tar, "-C", self.root], check=True)  # the repo under test: no actions/ in it
+        self.lane({"a.py": 'print("fine")\n'})
+        cfg = tempfile.mkdtemp(prefix="cfg-", dir=RUN_FOLDER)
+        with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("@%s/CLAUDE.md\n" % CHECKOUT)  # a checkout that does have actions/code-check
+        rc, lines, out = self.run_job(self.LOCAL_DOT, args=self.LINT, script=os.path.join(self.root, "bin", "ci-job"),
+                                      env={"CLAUDE_CONFIG_DIR": cfg})
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out + log)
+        self.assertNotRegex(log, r"(?m)^code-check: ", out + log)  # the pointer copy's code_check never ran
+        self.assertIn("code_check.py", log, out + log)  # main's reason: the in-repo file is not there
+
+    def test_a_local_uses_from_a_copy_fails_on_the_repos_own_failing_code_check(self):
+        self.lane({"actions/code-check/code_check.py": "raise SystemExit(1)\n", "a.py": 'print("fine")\n'})
+        ci_job, cfg = self.install(CHECKOUT)  # a copy outside the repo; the rules file names a good checkout
+        rc, lines, out = self.run_job(self.LOCAL_DOLLAR, args=self.LINT, script=ci_job,
+                                      env={"CLAUDE_CONFIG_DIR": cfg})
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out + log)
+        self.assertNotRegex(log, r"(?m)^code-check: ", out + log)  # the good copy's code_check never ran
+
+
+@unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
+class QuietStepKeepsTheStallWatchFed(Job):
+    """A step quiet past the stall limit must not strand its job. verdict's heartbeat has to reach ci-job's own
+    output, so the stall watch sees the job alive. The job then ends on its own, with no process of it left."""
+
+    QUIET = step("quiet", "sleep 6")
+    SLOW = step("slow", "sleep 2.5")
+
+    def start_job(self, *steps, env):
+        """Start ci-job, stdout and stderr to one file, in its own process group that cleanup alone kills."""
+        argv, env = self.job_call(*steps, env=env)
+        handle = open(os.path.join(self.root, "job.out"), "wb")
+        self.addCleanup(handle.close)
+        proc = subprocess.Popen(argv, cwd=self.root, env=env, stdout=handle, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+        self.addCleanup(self.kill_group, proc)
+        return proc, handle.name
+
+    @staticmethod
+    def kill_group(proc):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # the group ci-job started: its own jobs and nothing else
+        except ProcessLookupError:
+            pass
+        proc.wait()
+
+    def test_a_quiet_step_does_not_trip_the_stall_watch(self):
+        proc, out = self.start_job(self.QUIET, env={"VERDICT_HEARTBEAT": "1"})
+        watch = subprocess.run([sys.executable, STALL_WATCH, "--watch-pid", str(proc.pid), "--log", out,
+                                "--quiet", "3"], capture_output=True, text=True, timeout=60)
+        with open(out, encoding="utf-8", errors="replace") as f:
+            job_out = f.read()
+        self.assertEqual(watch.returncode, 0, watch.stdout + watch.stderr + job_out)
+        proc.wait(timeout=60)  # reap the job: it has ended on its own
+        with self.assertRaises(ProcessLookupError, msg="a process of the job is still running"):
+            os.killpg(proc.pid, 0)
+
+    def test_stdout_keeps_one_verdict_line_and_stderr_gets_the_heartbeat(self):
+        argv, env = self.job_call(self.SLOW, env={"VERDICT_HEARTBEAT": "1"})
+        done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
+        self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS"]), done.stdout + done.stderr)
+        self.assertNotIn("still running", done.stdout)
+        self.assertIn("still running", done.stderr, done.stdout + done.stderr)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    try:
+        unittest.main()
+    finally:
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)
