@@ -83,7 +83,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     button that works while it is closed. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
     A step never sends the owner to a file for a command: put it in `command` and say "paste the command below"
     (guard rule `command-in-item`). A `gh` command in `command` opens with `gh auth switch -u shivinate7`, or
-    `-u ssemwal-cdc` where shivinate7 has no access, before any other gh line (guard rule `gh-login-switch`, not built yet).
+    `-u ssemwal-cdc` where shivinate7 has no access, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.

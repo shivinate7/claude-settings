@@ -350,24 +350,37 @@ def _switch_login(args) -> str:
     return ""
 
 
+def _shell_reading(guard_core, script):
+    """[(segment, its tokens or None when the reader cannot parse it)] for one script type."""
+    return [(segment, guard_core.segment_tokens(segment)) for segment in guard_core.split_segments(script)]
+
+
 def gh_login_hit(data) -> str:
     """The matched text when a task's `command` runs a gh command other than `gh auth ...` with no
     `gh auth switch -u <a login in GH_LOGINS>` before it, or runs one as GH_FALLBACK_LOGIN while the
     command names a GH_DEFAULT_LOGIN repo. A segment the shell reader cannot parse counts as a gh
-    command when the word gh is in it, and never as a switch: the check fails closed there."""
+    command when the word gh is in it, and never as a switch: the check fails closed there.
+
+    Bash's rules read the command. When bash cannot read some segment and PowerShell's rules read
+    every one, the command is a PowerShell block and PowerShell's reading is judged: there `\\` is a
+    path character, so `Set-Location "C:\\repo\\"` closes its quote."""
     if not isinstance(data, dict) or data.get("kind", "task") != "task":
         return ""
     command = data.get("command")
     if not isinstance(command, str) or not GH_WORD.search(command):
         return ""
-    # guard_core holds the one quote-aware shell reader. It loads here, so the chat-box path loads nothing more.
+    # guard_core holds the one quote-aware shell reader, for bash and PowerShell. It loads here, so the
+    # chat-box path loads nothing more.
     import guard_core
-    # The owner pastes the command into Git Bash, so bash's rules read it, whatever tool this call came from.
-    script = guard_core.PosixScript(command)
+    # The script type picks the rules, never the tool this call came from.
+    reading = _shell_reading(guard_core, guard_core.PosixScript(command))
+    if any(tokens is None for _, tokens in reading):
+        powershell = _shell_reading(guard_core, guard_core.PowerShellScript(command))
+        if all(tokens is not None for _, tokens in powershell):
+            reading = powershell
     names_default_repo = (GH_DEFAULT_LOGIN + "/").lower() in command.lower()
     login = ""
-    for segment in guard_core.split_segments(script):
-        tokens = guard_core.segment_tokens(segment)
+    for segment, tokens in reading:
         if tokens is None:
             if not GH_WORD.search(segment):
                 continue
@@ -482,6 +495,11 @@ def item_hit(op, entry):
         hit = task_str_replace_hit(entry)
         if hit:
             return "task-names-check", hit
+        if entry.get("field") == "command":
+            # The stored command is unseen, so new_str is judged as the whole command.
+            hit = gh_login_hit({"command": entry.get("new_str")})
+            if hit:
+                return "gh-login-switch", hit
         return form_str_replace_hit(entry)
     data = _write_data(entry)
     hit = port_item_hit(op, data)
