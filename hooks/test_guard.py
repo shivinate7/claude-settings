@@ -49,6 +49,7 @@ import time
 import uuid
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -57,6 +58,7 @@ REPO = os.path.dirname(HERE)
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
+from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
@@ -101,7 +103,8 @@ FAMILIES = {
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
-    "owner-judge": "the waiting-page writer: a decision carries a Your stake line (goal, money, risk, rule or cannot undo), or is a stood pick, a port or a closed decision",
+    "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
+    "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -251,8 +254,11 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, **tool_input):
+        max_seconds=None, env=None, **tool_input):
     """Register one case.
+
+    `env` is the environment the guard run gets on top of the runner's own, for the cases that name a
+    session id (see decide, which drops the runner's id first).
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
     approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
@@ -289,6 +295,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "no_root": no_root,
         # A case that must be judged within this many seconds. A slower verdict fails the case.
         "max_seconds": max_seconds,
+        "env": env,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
@@ -304,10 +311,10 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
        carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
-       agent_type=None, transcript=None):
+       agent_type=None, transcript=None, env=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
-        carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
+        carries=carries, lacks=lacks, config=config, transcript=transcript, env=env, command=command)
 
 
 # ASK ALONE. A shell call that holds a command
@@ -3072,6 +3079,8 @@ TEMP_DIR = None   # back to the system temp for the sections below
 
 # THE REFUSAL TEXT and THE POINTER REMEDY, judged on the printed reason (see the two checks below).
 HM_REFUSED_PATH = "hm-text-lane"
+# The call shape every EnterWorktree remedy names. A `path` makes Claude Code ask the owner to approve the worktree.
+ENTER_WORKTREE_SHAPE = "with a `name` and no `path`"
 
 
 def hand_made_refusal_text_case():
@@ -3084,7 +3093,7 @@ def hand_made_refusal_text_case():
         return False, "expected deny, got %s: %s" % (got, reason[:90])
     if "Rule (hand-made worktree)" not in reason:
         return False, "the reason does not hold 'Rule (hand-made worktree)': %s" % reason[:90]
-    for want in ("isolation", "EnterWorktree"):
+    for want in ("isolation", "EnterWorktree", ENTER_WORKTREE_SHAPE):
         if want not in reason:
             return False, "the reason does not name %r: %s" % (want, reason[:90])
     if not re.search(r"which layer", reason):
@@ -3092,7 +3101,7 @@ def hand_made_refusal_text_case():
     for bad in (HM_REFUSED_PATH, "worktree add"):
         if bad in reason:
             return False, "the reason holds %r, which it must not" % bad
-    return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree and the layer"
+    return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
 def pointer_remedy_names_enter_worktree_case():
@@ -3106,7 +3115,9 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy still names 'worktree add'"
     if "EnterWorktree" not in reason:
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
-    return True, "the pointer remedy names EnterWorktree and no 'worktree add'"
+    if ENTER_WORKTREE_SHAPE not in reason:
+        return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
+    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -7894,6 +7905,185 @@ sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 
    silent=True, cwd=STAMPREPO)
 
 
+# =========================================================================== 5e. the merge role record
+#
+# Rule merge-role-proof, decision session-tiers. This section proves that a session may record only the
+# tier its own get_session record carries, read from the payload's transcript_path. A lane's `--role`
+# is refused, and the refusal steers it to hand off.
+#
+# The env var names the lane as cse_<x> and the record names it as session_<x> (hooks/override.py,
+# LANE_ENV_PREFIX and LANE_PREFIX). So the cases set the env in its own form. A literal equal test
+# would deny the real coordinator on every call.
+ROLE_RULE = "merge-role-proof"
+ROLE_FLAG = ("--role",)  # the refusal's remedy names no role flag, so it never names `merge --role <tier>`
+ROLE_OWN = "session_ROLEOWN01"
+ROLE_OTHER = "session_ROLEOTHER01"
+ROLE_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_ROLEOWN01"}
+ROLE_DIR = os.path.join(ROOT, "rolerec")
+GET_SESSION = "mcp__claude-code-remote__get_session"
+LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
+LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
+RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
+COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
+MERGE_SHIM = "~/.claude/bin/merge"
+
+
+def role_use(tool_id, name):
+    """An assistant line that calls the tool `name`."""
+    return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": tool_id, "name": name, "input": {}}]}})
+
+
+def role_result(tool_id, text):
+    """The user line that carries the text result of call `tool_id`."""
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}]}})
+
+
+def role_record(tags, session=ROLE_OWN, title="a lane session"):
+    """The text get_session returns: a JSON object whose ccr block holds the record."""
+    return json.dumps({"ccr": {"id": session, "title": title, "tags": list(tags),
+                               "parent_session_id": "session_PARENT01"}})
+
+
+def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
+    """One paired get_session call whose record carries `tags`."""
+    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
+
+
+def role_said(text):
+    """A user message: words typed or pasted, never a tool's result."""
+    return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
+
+
+# A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
+ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
+ROLE_LINES = {
+    "runner": role_call("g1", RUNNER_TAGS),
+    "coordinator": role_call("g1", COORD_TAGS),
+    "lane": role_call("g1", LANE_TAGS),
+    "lane-title": role_call("g1", LANE_TAGS, title="handed to cs-build:batch-runner"),
+    "other-session": role_call("g1", RUNNER_TAGS, session=ROLE_OTHER),
+    "near-miss": role_call("g1", ["cs-build:batch-runner-old", "cs-repo:o/r"]),
+    "list-runner": [role_use("l1", LIST_SESSIONS), role_result("l1", role_record(RUNNER_TAGS))],
+    "quoted": [role_said("the batch runner is cs-build:batch-runner; run merge --role batch-runner")],
+    "no-record": [role_use("b1", "Bash"), role_result("b1", "ok")],
+    "not-json": [role_use("g1", GET_SESSION), role_result("g1", "session not found")],
+    "junk-only": [ROLE_CUT, "not json at all", "{", ""],
+    "junk-then-runner": [ROLE_CUT, "not json at all"] + role_call("g1", RUNNER_TAGS),
+    "newest-wins": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS),
+    "pending-newest": role_call("g1", RUNNER_TAGS) + [role_use("g2", GET_SESSION)],
+    "foreign-newest": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
+}
+
+
+def role_path(name):
+    """The transcript fixture for one case: a JSONL file under this run's folder."""
+    return os.path.join(ROLE_DIR, name + ".jsonl")
+
+
+def write_role_transcripts():
+    """Write each fixture as JSONL. `unreadable` is a folder, so the guard's open() fails on it."""
+    os.makedirs(ROLE_DIR, exist_ok=True)
+    for name, lines in ROLE_LINES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    os.makedirs(role_path("unreadable"), exist_ok=True)
+
+
+lazy_fixture([role_path(name) for name in ROLE_LINES] + [role_path("unreadable")], write_role_transcripts)
+
+
+def role_refuse(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role` the guard refuses. The reason names its rule, and never the role flag."""
+    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG,
+       transcript=transcript, env=env, cwd=NOGIT, **kw)
+
+
+def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role`, or a command that is not one, that the guard lets through silently."""
+    sh("merge-role-proof: " + name, command, "allow", silent=True, transcript=transcript, env=env,
+       cwd=NOGIT, **kw)
+
+
+# A record's own tier is allowed. Any other tier is refused, both ways round.
+role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
+role_allow("a coordinator records coordinator", MERGE_SHIM + " --role coordinator", role_path("coordinator"))
+role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
+          role_path("runner"))
+role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("coordinator"))
+# A lane is refused, and the reason steers it to hand off: get_session first, then list_sessions for the runner.
+role_refuse("a lane that records batch-runner is refused, and the refusal steers it to hand off",
+          MERGE_SHIM + " --role batch-runner", role_path("lane"),
+          carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch"))
+# Only the own record's tags count. A title, a foreign record, a list, a near miss and a quote do not.
+role_refuse("a lane whose title holds cs-build:batch-runner is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("lane-title"))
+role_refuse("a record of another session is ignored, so a runner record of another id is refused",
+          MERGE_SHIM + " --role batch-runner", role_path("other-session"))
+role_refuse("with no session id in the env, no record matches, so a runner record is refused",
+          MERGE_SHIM + " --role batch-runner", role_path("runner"), env=None)
+role_refuse("a list_sessions result that holds the runner tags is ignored", MERGE_SHIM + " --role batch-runner",
+          role_path("list-runner"))
+role_refuse("a near-miss tag cs-build:batch-runner-old does not allow the runner role",
+          MERGE_SHIM + " --role batch-runner", role_path("near-miss"))
+role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE_SHIM + " --role batch-runner",
+          role_path("quoted"))
+# The other command forms, bare and after `cd somewhere &&`, judge as the shim does.
+for _role_prefix in ("", "cd somewhere && "):
+    for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        for _role_tier, _role_own in (("batch-runner", "runner"), ("coordinator", "coordinator")):
+            _role_cmd = _role_prefix + _role_form + " --role " + _role_tier
+            role_allow(_role_cmd + " allows its own record", _role_cmd, role_path(_role_own))
+            role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
+# Nothing the guard cannot read as an own record allows.
+role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("no-record"))
+role_refuse("a get_session result whose text is not JSON is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("not-json"))
+role_refuse("a transcript_path that names no file is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("missing"))
+role_refuse("a transcript_path that cannot be read is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("unreadable"))
+role_refuse("a payload with no transcript_path is refused", MERGE_SHIM + " --role batch-runner", None)
+role_refuse("a transcript of junk lines is refused, and a record cut short never allows",
+          MERGE_SHIM + " --role batch-runner", role_path("junk-only"))
+role_allow("junk lines are skipped: a runner record after them allows the runner role",
+           MERGE_SHIM + " --role batch-runner", role_path("junk-then-runner"))
+# The newest own record counts. A newer foreign record, or a call with no result yet, does not.
+role_refuse("the newest own record wins: an older runner record, then a newer lane record, is refused",
+          MERGE_SHIM + " --role batch-runner", role_path("newest-wins"))
+role_allow("a newer get_session call with no result is skipped, so the older runner record allows",
+           MERGE_SHIM + " --role batch-runner", role_path("pending-newest"))
+role_allow("a newer record of another session is ignored, so the older own runner record allows",
+           MERGE_SHIM + " --role batch-runner", role_path("foreign-newest"))
+# The clause fires only on `merge --role`. Other merge commands, and text that names one, pass.
+role_allow("merge 12 --confirm does not fire the role clause, beside a lane record", "merge 12 --confirm",
+           role_path("lane"))
+role_allow("merge --unlock does not fire the role clause, beside a lane record", "merge --unlock",
+           role_path("lane"))
+role_allow("a grep that names the role form is text", "grep -n 'merge --role batch-runner' notes.md",
+           role_path("lane"))
+role_allow("a comment that names the role form is text", "echo done # " + MERGE_SHIM + " --role batch-runner",
+           role_path("lane"))
+role_allow("a heredoc body that names the role form is data",
+           "cat > notes.txt <<'EOF'\n" + MERGE_SHIM + " --role batch-runner\nEOF", role_path("lane"))
+role_allow("quoted text that names the role form is text", "echo '" + MERGE_SHIM + " --role batch-runner'",
+           role_path("lane"))
+role_allow("a multi-line quoted string that names the role form is text",
+           'echo "first line\n' + MERGE_SHIM + ' --role batch-runner"', role_path("lane"))
+# The scanner respects strings and comments: a `#`, a quote or a newline in text never hides the real call.
+role_refuse("a comment opener inside a string does not hide the real call",
+          'echo "# note" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+role_refuse("a multi-line quoted string does not hide the real call after it",
+          'echo "first\nline" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+role_refuse("a lone quote inside a string does not hide the real call",
+          'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+role_refuse("a lone quote in a comment does not hide the call on the next line",
+          "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
@@ -11385,15 +11575,24 @@ with open(os.path.join(PQ_REPO, ".claude", "layout-extras.json"), "w", encoding=
     json.dump({"kinds": {}, "waiting-page": PQ_URL}, _f)
 
 
-# The line a waiting-page decision carries (rule owner-judge, its cases in the owner-judge section). Each
-# decision fixture below ends its context with it, so a case stays on its own rule, as TN_WHY does for a task.
-OJ_STAKE = "Your stake: risk — a wrong pick here changes what the guard lets through"
+# The lines a waiting-page decision carries (rule question-form, its cases in the owner-judge section: the
+# one form of hooks/question_form.py). Each decision fixture below starts its context with them and gives
+# each option a gain and a lose, so a case stays on its own rule, as TN_WHY does for a task. The lines hold
+# no port word and no press word.
+OJ_GOAL = "Goal: keep the CI checks fast, and keep every check"
+OJ_STAKE = "Problem (risk): a wrong pick here changes what the guard lets through, so it needs your word"
+OJ_BASED = "Based on (read): the stamp check runs in the lint job today"
+OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
 
 
 def with_stake(item):
-    """The item with OJ_STAKE on a line after its context. An item with no context stays as it is."""
+    """The item with OJ_FORM on the lines before its context, and a gain and a lose on each option that
+    lacks one. An item with no context, or no options, stays as it is."""
     if isinstance(item.get("context"), str):
-        item["context"] += "\n" + OJ_STAKE
+        item["context"] = OJ_FORM + "\n" + item["context"]
+    if isinstance(item.get("options"), list):
+        item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
+                           for o in item["options"]]
     return item
 
 
@@ -11830,7 +12029,7 @@ ci("a terminal step with the command on the item is allowed", "allow",
    ci_task(["Open Terminal", "Paste the command below and run it"], command="git push origin --delete old-a"))
 ci("a decision that opens a file and runs its command is not judged", "allow",
    {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
-    "context": "The plan file lists them.\n" + OJ_STAKE,
+    "context": OJ_FORM + "\nThe plan file lists them.",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
@@ -11882,8 +12081,8 @@ tn("an update that carries kind task, context and a Why yours line is allowed", 
    {"kind": "task", "context": TN_CTX + "\n" + TN_WHY}, action="update")
 tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
-# The Your stake line keeps this case on the task rule; owner-judge reads it (OJ_STAKE).
-tn("a decision is not judged", "allow", tn_task(kind="decision", context=TN_CTX + "\n" + OJ_STAKE))
+# The form lines keep this case on the task rule; the question form reads them (OJ_FORM).
+tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + TN_CTX))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
 add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -11912,23 +12111,28 @@ tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "al
            TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
 
 
-# --------------------------------------------------------------------------- a decision names what it costs the owner
+# --------------------------------------------------------------------------- a decision states the question form
 FAMILY = "owner-judge"
 #
-# Rule owner-judge (roadmap step c198), built against a named incident: waiting item 34, Oct 28 13:40
-# CDT. A decision about CI internals, which CI job runs a check, reached the owner with options, a
-# pick and a why. He saved b with "i really can't figure out how to decide". A decision carries a line
-# in `context`, at a line start, in any case: "Your stake: <kind> <text>". <kind> is one of goal,
-# money, risk, rule, cannot undo, and text follows it. Only that line counts: the same words in the
-# title, an option, why or elsewhere in context never do. `stands: true` (a stood pick) and
-# `port: true` (its Departs from line is the stake) pass, as do a task, a status-only or rank-only
-# update, another artifact's page, and a decision with status closed (the chat-answer flow writes one
-# already answered). The rule is read last, so each older rule keeps naming its own refusals.
+# Rules question-form and owner-judge: one form for a waiting-page decision, judged by hooks/question_form.py.
+# These cases run the real guard; the module's own cases, with item 92's shape, are in
+# hooks/test_question_form.py. Built against a named incident: waiting item 34, Oct 28 13:40 CDT. A decision
+# about CI internals, which CI job runs a check, reached the owner with options, a pick and a why. He saved b
+# with "i really can't figure out how to decide". A decision carries these lines in `context`, each at a line
+# start, in any case: `Goal: <goal>`, `Problem (<stake>): <text>`, and one to three
+# `Based on (<kind>): <premise>`. <stake> is one of goal, money, risk, rule, cannot undo; <kind> is one of
+# PREMISE_KINDS. Each option has a non-empty gain and lose. Only those lines count: the same words in the
+# title, an option, why or elsewhere in context never do. A stood pick (`stands: true`) may write
+# `Problem: <text>` with no stake. A task, a status-only or rank-only update, another artifact's page and a
+# decision with status closed (the chat-answer flow writes one already answered) pass.
+# A missing line is refused by `question-form`. The contract does not say whether `question-form` or
+# `owner-judge` names a bare Problem line or a stake outside the set, so those cases accept either id.
 
 OJ_KINDS = ("goal", "money", "risk", "rule", "cannot undo")
 OJ_DOC = "ci-check-job"
 OJ_CTX = "The stamp check runs in the lint job today. The test job could run it too."
-OJ_GOOD = OJ_CTX + "\n" + OJ_STAKE
+OJ_RULE = "question-form"
+OJ_PROBLEM_RULES = ("question-form", "owner-judge")
 OJ_OPTIONS = [
     {"key": "a", "label": "Keep the check in the lint job", "how": "Leave the workflow as it is.",
      "gain": "No change to review.", "lose": "The lint job stays the slow one."},
@@ -11936,8 +12140,16 @@ OJ_OPTIONS = [
      "gain": "The lint job gets faster.", "lose": "The test job runs longer."}]
 
 
+def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX):
+    """The context of a decision: the form lines, then the prose. A line passed as None or empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, tail) if line)
+
+
+OJ_GOOD = oj_ctx()
+
+
 def oj_item(**over):
-    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no Your stake line."""
+    """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
     item = {"id": OJ_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
             "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
             "why": "The lint job already holds the other format checks."}
@@ -11945,13 +12157,19 @@ def oj_item(**over):
     return {k: v for k, v in item.items() if v is not None}
 
 
-def oj(name, expected, item, **extra):
-    wp_write("owner judge: " + name, expected, "owner-judge", item, doc_id=OJ_DOC, **extra)
+def oj(name, expected, item, rule=OJ_RULE, **extra):
+    """One write of the item. `rule` names the refusal on a deny. A tuple of ids is any-of, and the
+    refusal must name the Problem line either way."""
+    if isinstance(rule, tuple):
+        extra["carries"] = (*extra.get("carries", ()), "Problem", rule)
+        rule = None
+    wp_write("owner judge: " + name, expected, rule, item, doc_id=OJ_DOC, **extra)
 
 
-def oj_replace(name, expected, field, old, new):
-    """One str_replace on a field of the decision. The rule judges a context edit that takes the line out."""
-    oj("a str_replace " + name, expected, None, action="str_replace", field=field, old_str=old, new_str=new)
+def oj_replace(name, expected, field, old, new, rule=OJ_RULE):
+    """One str_replace on a field of the decision. The rule judges a context edit that takes a form line out."""
+    oj("a str_replace " + name, expected, None, rule=rule, action="str_replace", field=field, old_str=old,
+       new_str=new)
 
 
 def oj_write(data, op="set", collection="items"):
@@ -11959,59 +12177,92 @@ def oj_write(data, op="set", collection="items"):
 
 
 def oj_batch(name, expected, writes, **extra):
-    add("owner judge: a batch " + name, expected, "owner-judge" if expected == "deny" else None,
+    add("owner judge: a batch " + name, expected, OJ_RULE if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", writes=writes, **extra)
 
 
-oj("item 34's shape (a CI job choice with options, a pick, a why and no Your stake line) is denied", "deny",
+oj("item 34's shape (a CI job choice with options, a pick, a why and no form lines) is denied", "deny",
    oj_item())
-oj("the refusal names the line, the five kinds and stands: true", "deny", oj_item(),
-   carries=("Your stake", "stands: true", *OJ_KINDS))
-# Wrong-field class: the words are there, the line is not.
-oj("risk and rule words in the title, the options and why, with no Your stake line, are denied", "deny",
+oj("the refusal names the three lines, the five stakes and stands: true", "deny", oj_item(),
+   carries=("Goal", "Problem", "Based on", "stands: true", *OJ_KINDS))
+# Wrong-field class: the words are there, the lines are not.
+oj("risk and rule words in the title, the options and why, with no form lines, are denied", "deny",
    oj_item(title="Which CI job runs the stamp check? A risk, a rule",
            options=[dict(OJ_OPTIONS[0], label="Keep it in the lint job (a rule, no risk)",
                          how="Goal: leave the workflow. Money: none. Cannot undo: nothing."), OJ_OPTIONS[1]],
            why="Small stake: a risk and a rule, no goal, no money, nothing that cannot undo."))
-oj("risk and rule words in context, away from a Your stake line, are denied", "deny",
+oj("risk and rule words in context, away from the form lines, are denied", "deny",
    oj_item(context=OJ_CTX + "\nThis is a rule change and a risk to the goal."))
-oj("a Your stake line in the title is denied", "deny",
-   oj_item(title="Your stake: risk — which CI job runs the stamp check?"))
-oj("a Your stake line in why is denied", "deny",
-   oj_item(why="The lint job already holds the other format checks.\n" + OJ_STAKE))
-oj("a Your stake line in an option is denied", "deny",
-   oj_item(options=[dict(OJ_OPTIONS[0], how=OJ_STAKE), OJ_OPTIONS[1]]))
-oj("a kind outside the set (internals) is denied", "deny",
-   oj_item(context=OJ_CTX + "\nYour stake: internals — which job runs the check"))
-oj("a bare Your stake line with nothing after the colon is denied", "deny",
-   oj_item(context=OJ_CTX + "\nYour stake:   "))
-oj("a kind with no text after it is denied", "deny", oj_item(context=OJ_CTX + "\nYour stake: risk"))
-oj("a Your stake phrase mid-line does not count", "deny", oj_item(context="Reason. " + OJ_STAKE))
+oj("a Problem line in the title, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), title=OJ_STAKE))
+oj("a Problem line in why, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), why="The lint job already holds the other format checks.\n" + OJ_STAKE))
+oj("a Problem line in an option, not in context, is denied", "deny",
+   oj_item(context=oj_ctx(problem=None), options=[dict(OJ_OPTIONS[0], how=OJ_STAKE), OJ_OPTIONS[1]]))
+
+# Missing and malformed lines.
+oj("no Goal line is denied", "deny", oj_item(context=oj_ctx(goal=None)))
+oj("a Goal phrase mid-line does not count", "deny", oj_item(context=oj_ctx(goal="Aim. " + OJ_GOAL)))
+oj("no Problem line is denied", "deny", oj_item(context=oj_ctx(problem=None)))
+oj("a Problem phrase mid-line does not count", "deny", oj_item(context=oj_ctx(problem="Reason. " + OJ_STAKE)))
+oj("a stake outside the set (internals) is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (internals): which job runs the check")), rule=OJ_PROBLEM_RULES)
+oj("a bare Problem line with nothing after the colon is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (risk):   ")), rule=OJ_PROBLEM_RULES)
+oj("a stake with no colon and no text is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem (risk)")), rule=OJ_PROBLEM_RULES)
+oj("a Problem line with no stake, on a decision that is not a stood pick, is denied", "deny",
+   oj_item(context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")),
+   rule=OJ_PROBLEM_RULES)
+oj("no Based on line is denied", "deny", oj_item(context=oj_ctx(based=())))
+oj("four Based on lines are denied", "deny",
+   oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (notes): three",
+                                 "Based on (notes): four"))))
+oj("a Based on kind outside the set is denied", "deny",
+   oj_item(context=oj_ctx(based=("Based on (guess): the lint job is slow.",))))
+oj("a Based on line with no kind is denied", "deny",
+   oj_item(context=oj_ctx(based=("Based on: the lint job is slow.",))))
+oj("an option with no lose is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], {k: v for k, v in OJ_OPTIONS[1].items() if k != "lose"}]))
+oj("an option with no gain is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[{k: v for k, v in OJ_OPTIONS[0].items() if k != "gain"}, OJ_OPTIONS[1]]))
+oj("an option with an empty lose is denied", "deny",
+   oj_item(context=OJ_GOOD, options=[OJ_OPTIONS[0], dict(OJ_OPTIONS[1], lose="")]))
 oj("a decision with no context is denied", "deny", oj_item(context=None))
 oj("an item with no kind is judged as a decision and denied", "deny", oj_item(kind=None))
-oj("stands false with no Your stake line is denied", "deny", oj_item(stands=False))
-oj("port false with no Your stake line is denied", "deny", oj_item(port=False))
+oj("stands false with no form lines is denied", "deny", oj_item(stands=False))
+oj("port false with no form lines is denied", "deny", oj_item(port=False))
 
-# False-alarm class: a stake line of any kind, in any case, anywhere at a line start, is a stake.
+# False-alarm class: a stake of any kind, a premise of any kind, in any case, at a line start, is the form.
 for _kind in OJ_KINDS:
-    oj("a Your stake line of kind %s is allowed" % _kind, "allow",
-       oj_item(context=OJ_CTX + "\nYour stake: %s — the pick changes what ships" % _kind))
-oj("a Your stake line with no dash is allowed", "allow",
-   oj_item(context=OJ_CTX + "\nYour stake: money about $40 a month of runner time"))
-oj("the Your stake label is read in lower case", "allow",
-   oj_item(context=OJ_CTX + "\nyour stake: risk — the pick changes what ships"))
-oj("the Your stake line is read in upper case", "allow",
-   oj_item(context=OJ_CTX + "\nYOUR STAKE: RISK — the pick changes what ships"))
-oj("a Your stake line that opens the context is allowed", "allow", oj_item(context=OJ_STAKE))
-oj("a Your stake line with more lines after it is allowed", "allow",
-   oj_item(context=OJ_CTX + "\n" + OJ_STAKE + "\nThe test job runs longer."))
-oj("a decision with a Your stake line is allowed", "allow", oj_item(context=OJ_GOOD))
+    oj("a Problem line of stake %s is allowed" % _kind, "allow",
+       oj_item(context=oj_ctx(problem="Problem (%s): the pick changes what ships" % _kind)))
+for _premise in PREMISE_KINDS:
+    oj("a Based on line of kind %s is allowed" % _premise, "allow",
+       oj_item(context=oj_ctx(based=("Based on (%s): the lint job is slow." % _premise,))))
+oj("three Based on lines are allowed", "allow",
+   oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (assumed): three"))))
+oj("a Problem line with no dash is allowed", "allow",
+   oj_item(context=oj_ctx(problem="Problem (money): about $40 a month of runner time")))
+oj("the Problem label is read in lower case", "allow",
+   oj_item(context=oj_ctx(problem="problem (risk): the pick changes what ships")))
+oj("the Problem line is read in upper case", "allow",
+   oj_item(context=oj_ctx(problem="PROBLEM (RISK): the pick changes what ships")))
+oj("comment openers and an apostrophe in the form lines are plain text", "allow",
+   oj_item(context=oj_ctx(goal="Goal: keep the stamp check's job, with //path, /* glob and # tags, working.",
+                          problem="Problem (risk): don't parse # or // here, so it needs your word")))
+oj("a context that holds only the form lines is allowed", "allow", oj_item(context=oj_ctx(tail=None)))
+oj("form lines with more lines after them are allowed", "allow",
+   oj_item(context=oj_ctx(tail=OJ_CTX + "\nThe test job runs longer.")))
+oj("a decision with the form is allowed", "allow", oj_item(context=OJ_GOOD))
 
-# Stood-pick class: the session's own pick stands, so the owner has no stake to weigh.
-oj("a stood pick with no Your stake line is allowed", "allow", oj_item(stands=True))
-oj("a port with a Departs from line and no Your stake line is allowed", "allow",
-   oj_item(port=True, context=OJ_CTX + "\n" + PQ_DEPARTS))
-oj("a task with a Why yours line and no Your stake line is not judged", "allow",
+# Stood-pick class: the session's own pick stands, so the stake needs no kind.
+oj("a stood pick with `Problem:` and no stake is allowed", "allow",
+   oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")))
+oj("a stood pick with a stake is allowed", "allow", oj_item(stands=True, context=OJ_GOOD))
+oj("a port with a Departs from line and the form is allowed", "allow",
+   oj_item(port=True, context=oj_ctx(tail=OJ_CTX + "\n" + PQ_DEPARTS)))
+oj("a task with a Why yours line and no form lines is not judged", "allow",
    tn_task(context=TN_CTX + "\n" + TN_WHY))
 oj("a record that is neither a decision nor a task is not judged", "allow", oj_item(kind="note"))
 oj("an items set to another artifact is allowed", "allow", oj_item(), url="https://claude.ai/artifact/other")
@@ -12019,65 +12270,75 @@ oj("a set to another collection is allowed", "allow", oj_item(), collection="ans
 add("owner judge: a repo with no waiting page allows item 34's shape", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=OJ_DOC, data=oj_item())
 
-# Updates: judged only when they carry kind decision and context.
-oj("an update that carries kind decision and context with no Your stake line is denied", "deny",
+# Updates: judged only for the fields they carry (context, options), and only with kind decision.
+oj("an update that carries kind decision and context with no form lines is denied", "deny",
    {"kind": "decision", "context": OJ_CTX}, action="update")
-oj("an update that carries kind decision, context and a Your stake line is allowed", "allow",
+oj("an update that carries kind decision and a context with the form is allowed", "allow",
    {"kind": "decision", "context": OJ_GOOD}, action="update")
-oj("an update that carries kind decision, context and stands true is allowed", "allow",
-   {"kind": "decision", "context": OJ_CTX, "stands": True}, action="update")
+oj("an update that carries kind decision, a stood pick and `Problem:` with no stake is allowed", "allow",
+   {"kind": "decision", "context": oj_ctx(problem="Problem: which job runs the check"), "stands": True},
+   action="update")
 oj("an update that carries kind decision and no context is allowed", "allow",
    {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
+oj("an update that carries kind decision and options with an option that has no lose is denied", "deny",
+   {"kind": "decision", "options": [OJ_OPTIONS[0], {k: v for k, v in OJ_OPTIONS[1].items() if k != "lose"}]},
+   action="update")
+oj("an update that carries kind decision and options with a gain and a lose each is allowed", "allow",
+   {"kind": "decision", "options": OJ_OPTIONS}, action="update")
 oj("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 oj("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 
 # A closed decision asks the owner nothing. The writer's chat-answer flow (skills/waiting-page) writes a
-# decision already answered: status closed, the answer and its time in context, no Your stake line. An
-# open decision with the same context is still judged.
+# decision already answered: status closed, the answer and its time in context, no form lines. An open
+# decision with the same context is still judged.
 OJ_ANSWERED = OJ_CTX + "\nAnswer from chat, 10:42: keep the check in the lint job."
-oj("a closed decision with the chat answer in context and no Your stake line is allowed", "allow",
+oj("a closed decision with the chat answer in context and no form lines is allowed", "allow",
    oj_item(status="closed", context=OJ_ANSWERED))
-oj("a closed decision with no options and no Your stake line is allowed", "allow",
+oj("a closed decision with no options and no form lines is allowed", "allow",
    {"id": OJ_DOC, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
     "context": OJ_ANSWERED})
-oj("an update that carries kind decision, status closed and context, no Your stake line, is allowed", "allow",
+oj("an update that carries kind decision, status closed and context, no form lines, is allowed", "allow",
    {"kind": "decision", "status": "closed", "context": OJ_ANSWERED}, action="update")
-oj("an open decision with the chat answer in context and no Your stake line is denied", "deny",
+oj("an open decision with the chat answer in context and no form lines is denied", "deny",
    oj_item(status="open", context=OJ_ANSWERED))
-oj("an update that carries kind decision, status open and context, no Your stake line, is denied", "deny",
+oj("an update that carries kind decision, status open and context, no form lines, is denied", "deny",
    {"kind": "decision", "status": "open", "context": OJ_ANSWERED}, action="update")
 
-# A str_replace on context is judged when old_str holds the line and new_str does not.
-oj_replace("that drops the Your stake line from context is denied", "deny", "context", OJ_GOOD, OJ_CTX)
-oj_replace("that swaps the Your stake line for a kind outside the set is denied", "deny", "context",
-           OJ_STAKE, "Your stake: internals — which job runs the check")
-oj_replace("that keeps the Your stake line in context is allowed", "allow", "context", OJ_GOOD,
-           "The stamp check runs in the test job today.\n" + OJ_STAKE)
-oj_replace("that swaps the Your stake line for another kind is allowed", "allow", "context", OJ_STAKE,
-           "Your stake: money — the test job costs more runner time")
-oj_replace("whose old_str holds no Your stake line is allowed", "allow", "context", OJ_CTX,
+# A str_replace on context is judged when old_str holds a form line and new_str does not.
+oj_replace("that drops the Problem line from context is denied", "deny", "context", OJ_GOOD,
+           oj_ctx(problem=None))
+oj_replace("that drops the Goal line from context is denied", "deny", "context", OJ_GOOD, oj_ctx(goal=None))
+oj_replace("that drops the only Based on line from context is denied", "deny", "context", OJ_GOOD,
+           oj_ctx(based=()))
+oj_replace("that swaps the Problem line for a stake outside the set is denied", "deny", "context", OJ_STAKE,
+           "Problem (internals): which job runs the check", rule=OJ_PROBLEM_RULES)
+oj_replace("that keeps every form line in context is allowed", "allow", "context", OJ_GOOD,
+           oj_ctx(tail="The stamp check runs in the test job today."))
+oj_replace("that swaps the Problem line for another stake is allowed", "allow", "context", OJ_STAKE,
+           "Problem (money): the test job costs more runner time, so it needs your word")
+oj_replace("whose old_str holds no form line is allowed", "allow", "context", OJ_CTX,
            "The stamp check runs in the test job today.")
 oj_replace("on the title is allowed", "allow", "title", "Which CI job runs the stamp check?",
            "Which CI job runs the format check?")
 oj_replace("on why is not judged", "allow", "why", OJ_STAKE, "The lint job is shorter.")
 
 # A batch judges each write.
-oj_batch("with an item that has no Your stake line among the sets is denied", "deny",
+oj_batch("with an item that has no form lines among the sets is denied", "deny",
          [oj_write({"note": "x"}, collection="answers"), oj_write(oj_item())])
-oj_batch("whose second write has no Your stake line is denied", "deny",
+oj_batch("whose second write has no form lines is denied", "deny",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second"))])
-oj_batch("with an update that carries kind decision and context, no line, is denied", "deny",
+oj_batch("with an update that carries kind decision and context, no form lines, is denied", "deny",
          [oj_write({"kind": "decision", "context": OJ_CTX}, op="update")])
-oj_batch("with a str_replace that drops the Your stake line is denied", "deny",
+oj_batch("with a str_replace that drops the Problem line is denied", "deny",
          [{"op": "str_replace", "collection": "items", "doc_id": OJ_DOC, "field": "context",
-           "old_str": OJ_GOOD, "new_str": OJ_CTX}])
-oj_batch("of decisions that each carry the Your stake line is allowed", "allow",
+           "old_str": OJ_GOOD, "new_str": oj_ctx(problem=None)}])
+oj_batch("of decisions that each carry the form is allowed", "allow",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second", context=OJ_GOOD))])
-oj_batch("with a stood pick and no Your stake line is allowed", "allow",
-         [oj_write(oj_item(stands=True))])
-oj_batch("with a closed decision and no Your stake line is allowed", "allow",
+oj_batch("with a stood pick that writes `Problem:` with no stake is allowed", "allow",
+         [oj_write(oj_item(stands=True, context=oj_ctx(problem="Problem: which job runs the check")))])
+oj_batch("with a closed decision and no form lines is allowed", "allow",
          [oj_write(oj_item(status="closed", context=OJ_ANSWERED))])
-oj_batch("with a closed decision, then an open one with no Your stake line, is denied", "deny",
+oj_batch("with a closed decision, then an open one with no form lines, is denied", "deny",
          [oj_write(oj_item(status="closed", context=OJ_ANSWERED)), oj_write(oj_item(id="second"))])
 
 # file_path data is read as `data` is.
@@ -12088,16 +12349,289 @@ with open(OJ_FILE_BAD, "w", encoding="utf-8") as _f:
     json.dump(oj_item(), _f)
 with open(OJ_FILE_GOOD, "w", encoding="utf-8") as _f:
     json.dump(oj_item(context=OJ_GOOD), _f)
-oj("file_path data with no Your stake line is denied", "deny", None, file_path=OJ_FILE_BAD)
-oj("file_path data with a Your stake line is allowed", "allow", None, file_path=OJ_FILE_GOOD)
+oj("file_path data with no form lines is denied", "deny", None, file_path=OJ_FILE_BAD)
+oj("file_path data with the form is allowed", "allow", None, file_path=OJ_FILE_GOOD)
 
-# An older rule keeps its own refusal on an item that also has no Your stake line (owner-judge is read last).
-wp_write("owner judge: a widening pick with no Your stake line is refused by uniform-pick", "deny",
-         "uniform-pick", oj_item(options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
-wp_write("owner judge: a port with no Departs from line and no Your stake line is refused by port-question",
-         "deny", "port-question", oj_item(context=PQ_CTX), doc_id=OJ_DOC)
-wp_write("owner judge: a press with no link and no Your stake line is refused by press-link", "deny",
-         "press-link", oj_item(options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
+# An older rule keeps its own id when the form is there (which rule names an item that breaks both is not fixed).
+wp_write("owner judge: a widening pick with the form lines is refused by uniform-pick", "deny",
+         "uniform-pick", oj_item(context=OJ_GOOD, options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
+wp_write("owner judge: a port with no Departs from line and the form lines is refused by port-question",
+         "deny", "port-question", oj_item(context=oj_ctx(tail=PQ_CTX)), doc_id=OJ_DOC)
+wp_write("owner judge: a press with no link and the form lines is refused by press-link", "deny",
+         "press-link", oj_item(context=OJ_GOOD, options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
+
+
+# --------------------------------------------------------------------------- an item field the page renders
+FAMILY = "item-field-rendered"
+#
+# docs/decisions/item-field-rendered.md, rule item-field-rendered, built against a named incident
+# (incident in the record): live items carried `reply`, and page.html never showed it. A write of a waiting item is refused when it names a
+# top-level field the page does not render. The page lists those fields in one block,
+# <script type="application/json" id="itemFields">[...]</script>. The page and the guard both read that
+# block, so no copy of the list lives anywhere else. An update may remove a field with
+# {"__delete__": true}, which passes. A key inside options or steps is not judged. A page with no block,
+# a block that is no JSON list of strings, or an empty list reads as unknown and the write passes. IF_SEAM names the
+# page.html the guard reads in place of the repo's own, so a case can hand the guard any page.
+
+IF_SEAM = "GUARD_ITEM_FIELDS_PAGE"
+IF_PAGE = os.path.join(REPO, "skills", "waiting-page", "page.html")
+IF_DOC = "logo-colour"
+IF_BOGUS = "zzUnrenderedField"
+# The fields the real page must list: the incident's three, the ten the guard's own rules read, and every
+# other top-level key an item case in this file writes. A field dropped from the page goes red by name.
+IF_REQUIRED = ("reply", "lastAnswer", "lane",
+               "port", "stands", "kind", "holds", "group", "rank", "by", "pick", "options", "context",
+               "id", "status", "title", "why", "steps", "links", "command", "multi", "ranked")
+# lastAnswer is an object, as the writer stores it.
+IF_LAST = {"choice": "b", "note": "n", "at": "2026-10-29T19:05:00Z"}
+IF_VALUE = {"port": False, "stands": True, "rank": 3, "multi": True, "ranked": True, "kind": "decision",
+            "status": "open", "options": [{"key": "a", "label": "Keep the blue"}], "pick": "a",
+            "steps": ["Open the page."], "links": [{"label": "Page", "url": "https://example.com/p"}],
+            "lastAnswer": IF_LAST}
+IF_OWN = '["id", "kind", "status", "title", "context", "zzCustom"]'   # a block of a page of its own
+os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
+
+
+def if_item(**over):
+    """A decision that every other waiting-page rule passes, with `over` on top. A None value drops a key."""
+    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None, **over})
+
+
+def if_page(slug, body):
+    """The path of a page.html of its own, in this run's folder. A body of None writes no file."""
+    path = os.path.join(ROOT, "ifr", slug + ".html")
+    if body is not None:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("<!doctype html>\n<html><head><title>Waiting</title></head><body>\n" + body + "\n</body></html>\n")
+    return path
+
+
+def if_block(text):
+    return '<script type="application/json" id="itemFields">' + text + "</script>"
+
+
+def ifr(name, expected, item, action="set", doc_id=IF_DOC, **extra):
+    """One write of an item to the waiting page of the fixture repo, judged against the real page.html."""
+    wp_write("item field: " + name, expected, "item-field-rendered", item, action=action, doc_id=doc_id, **extra)
+
+
+def ifr_seam(name, expected, page, item, action="set", **extra):
+    """ifr, with the guard reading `page` through IF_SEAM in place of the real page.html."""
+    ifr(name, expected, item, action=action, **extra)
+    CASES[-1]["env"] = {IF_SEAM: page}
+
+
+def ifr_replace(name, expected, field):
+    ifr("a str_replace " + name, expected, None, action="str_replace", field=field, old_str="blue", new_str="green")
+
+
+def ifr_batch(name, expected, writes):
+    add("item field: " + name, expected, "item-field-rendered" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", writes=writes)
+
+
+def ifr_write(data, op="set", collection="items"):
+    return {"op": op, "collection": collection, "doc_id": IF_DOC, "data": data}
+
+
+# The real page.html: a field the block lists is allowed, and one it omits is refused.
+ifr("a set with a field the page does not render is denied", "deny", if_item(**{IF_BOGUS: "x"}))
+ifr("the refusal names the list to add the field to", "deny", if_item(**{IF_BOGUS: "x"}), carries=("itemFields",))
+ifr("an update with a field the page does not render is denied", "deny", {IF_BOGUS: "x"}, action="update")
+ifr("an update with one unlisted field among listed ones is denied", "deny", {"rank": 3, IF_BOGUS: "x"},
+    action="update")
+ifr("a field that differs from a listed one only in case is denied", "deny", {"Reply": "x"}, action="update")
+ifr("a set of listed fields only is allowed", "allow", if_item())
+ifr("a set that carries reply, lastAnswer and lane is allowed", "allow",
+    if_item(reply="Use the blue.", lastAnswer=IF_LAST, lane="page-shows-last-answer", group="logo", rank=2, by="owner"))
+for _field in IF_REQUIRED:
+    ifr("an update of %s is allowed once the page lists it" % _field, "allow", {_field: IF_VALUE.get(_field, "x")},
+        action="update")
+
+# __delete__ removes a field, so it passes on an update, and only there.
+ifr("an update that deletes an unlisted field is allowed", "allow", {IF_BOGUS: {"__delete__": True}}, action="update")
+ifr("an update that deletes an unlisted field and sets a listed one is allowed", "allow",
+    {IF_BOGUS: {"__delete__": True}, "reply": "x"}, action="update")
+ifr("an update that deletes one unlisted field and sets another is denied", "deny",
+    {IF_BOGUS: {"__delete__": True}, "zzOtherField": "x"}, action="update")
+ifr("an update whose delete marker is false is denied", "deny", {IF_BOGUS: {"__delete__": False}}, action="update")
+ifr("a set that carries a delete marker on an unlisted field is denied", "deny",
+    if_item(**{IF_BOGUS: {"__delete__": True}}))
+
+# Only a top-level key is judged.
+ifr("an unlisted key inside an option is not judged", "allow",
+    {"options": [{"key": "a", "label": "Keep the blue", IF_BOGUS: 1}]}, action="update")
+ifr("an unlisted key inside a step is not judged", "allow",
+    {"steps": [{"text": "Open the page.", IF_BOGUS: 1}]}, action="update")
+ifr("an unlisted key inside a listed field is not judged", "allow", {"reply": {IF_BOGUS: 1}}, action="update")
+
+ifr_replace("on a field the page does not render is denied", "deny", IF_BOGUS)
+ifr_replace("on reply is allowed once the page lists it", "allow", "reply")
+ifr_replace("on context is allowed", "allow", "context")
+ifr_replace("on the title is allowed", "allow", "title")
+
+# A batch is judged entry by entry, whatever the entry's position or op.
+ifr_batch("a batch with an unlisted field in its last write is denied", "deny",
+          [ifr_write(if_item()), ifr_write({"rank": 3}, "update"), ifr_write({IF_BOGUS: "x"}, "update")])
+ifr_batch("a batch with an unlisted field in its first write is denied", "deny",
+          [ifr_write(if_item(**{IF_BOGUS: "x"})), ifr_write({"rank": 3}, "update")])
+ifr_batch("a batch with a str_replace on an unlisted field is denied", "deny",
+          [ifr_write(if_item()),
+           {"op": "str_replace", "collection": "items", "doc_id": IF_DOC, "field": IF_BOGUS,
+            "old_str": "blue", "new_str": "green"}])
+ifr_batch("a batch of listed fields and a delete of an unlisted one is allowed", "allow",
+          [ifr_write(if_item(reply="x")), ifr_write({IF_BOGUS: {"__delete__": True}, "lane": "x"}, "update")])
+ifr_batch("a batch with an unlisted field in another collection is allowed", "allow",
+          [ifr_write({IF_BOGUS: "x"}, collection="answers"), ifr_write(if_item())])
+
+# file_path data is read as the data of the write.
+IF_FILE_BAD = os.path.join(ROOT, "ifr", "bad.json")
+IF_FILE_GOOD = os.path.join(ROOT, "ifr", "good.json")
+with open(IF_FILE_BAD, "w", encoding="utf-8") as _f:
+    json.dump(if_item(**{IF_BOGUS: "x"}), _f)
+with open(IF_FILE_GOOD, "w", encoding="utf-8") as _f:
+    json.dump(if_item(reply="x"), _f)
+ifr("file_path data with an unlisted field is denied", "deny", None, file_path=IF_FILE_BAD)
+ifr("file_path data of listed fields is allowed", "allow", None, file_path=IF_FILE_GOOD)
+ifr("an unreadable file_path is not judged", "allow", None, file_path=os.path.join(ROOT, "ifr", "missing.json"))
+
+# Only a write of an item to this repo's waiting page is judged.
+ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="answers")
+ifr("a set to another artifact is not judged", "allow", if_item(**{IF_BOGUS: "x"}),
+    url="https://claude.ai/artifact/other")
+add("item field: a repo with no waiting page is not judged", "allow", tool="ArtifactData", cwd=NOGIT, url=PQ_URL,
+    action="set", collection="items", doc_id=IF_DOC, data=if_item(**{IF_BOGUS: "x"}))
+add("item field: a read is not judged", "allow", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="get",
+    collection="items", doc_id=IF_DOC)
+
+# The guard reads the block of the page it is handed, so no copy of the list sits in the guard. The
+# block spans lines here, as a hand-edited page may.
+IF_PRETTY = if_page("pretty", if_block('[\n  "id",\n  "kind",\n  "status",\n  "title",\n  "context",\n  "zzCustom"\n]'))
+ifr_seam("a page of its own lists zzCustom, so a set that carries it is allowed", "allow", IF_PRETTY,
+         if_item(zzCustom="x"))
+ifr_seam("a page of its own omits reply, so a set that carries it is denied", "deny", IF_PRETTY,
+         if_item(reply="x"))
+
+# A page with no block, a block that is no JSON list of strings, or an empty list reads as unknown: the write passes.
+for _slug, _body in (("no-block", "<p>No list here.</p>"),
+                     ("object-block", if_block('{"id": true}')),
+                     ("number-member", if_block('["id", 3]')),
+                     ("broken-json", if_block('["id", ')),
+                     ("empty-list", if_block("[]")),
+                     ("no-file", None)):
+    ifr_seam("a page with %s is not judged" % _slug.replace("-", " "), "allow", if_page(_slug, _body),
+             if_item(**{IF_BOGUS: "x"}))
+
+# An empty block lists no field, so it reads as unknown for every op, as the set above does for a set. The
+# update, the str_replace and the batch each pass on it.
+IF_EMPTY = if_page("empty-list-ops", if_block("[]"))
+ifr_seam("an empty itemFields block is not judged: an update with an unlisted field is allowed", "allow",
+         IF_EMPTY, {IF_BOGUS: "x"}, action="update")
+ifr_seam("an empty itemFields block is not judged: a str_replace on an unlisted field is allowed", "allow",
+         IF_EMPTY, None, action="str_replace", field=IF_BOGUS, old_str="blue", new_str="green")
+add("item field: an empty itemFields block is not judged: a batch with an unlisted field is allowed", "allow",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[ifr_write({IF_BOGUS: "x"}, "update"), ifr_write(if_item(**{IF_BOGUS: "x"}))])
+CASES[-1]["env"] = {IF_SEAM: IF_EMPTY}
+
+# The scanner cases: the block is found, and its list read, whatever text sits around it.
+# Comment openers sit inside strings, and their closers come after the block.
+IF_SCAN_PAGES = {
+    "comment openers in strings": '<script>var a = "<!--", b = "//", c = "/*";</script>\n'
+                                  + if_block(IF_OWN) + '\n<p>end --> and */</p>',
+    # A decoy block inside a multi-line template literal comes first, and is no block of the page.
+    "a multi-line template literal": '<script>\nconst tpl = `\n  <script type="application/json" id="itemFields">'
+                                     '["reply", "zzCustom"]<\\/script>\n`;\n</script>\n' + if_block(IF_OWN),
+    "a lone quote in text": "<p>Don't forget the list.</p>\n" + if_block(IF_OWN) + "\n<p>It's the list.</p>",
+}
+for _what, _body in IF_SCAN_PAGES.items():
+    _page = if_page("scan-" + _what.replace(" ", "-"), _body)
+    ifr_seam("a block after " + _what + " is read: reply is denied", "deny", _page, if_item(reply="x"))
+    ifr_seam("a block after " + _what + " is read: zzCustom is allowed", "allow", _page, if_item(zzCustom="x"))
+
+
+def item_fields_page_case():
+    """The real page.html holds one itemFields block: type application/json, a JSON list of strings with
+    no repeats, naming every field in IF_REQUIRED. An HTML parser finds it, as a browser does."""
+    class Blocks(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=False)
+            self.found, self.open = [], None
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script" and dict(attrs).get("id") == "itemFields":
+                self.open = (dict(attrs).get("type"), [])
+
+        def handle_data(self, data):
+            if self.open:
+                self.open[1].append(data)
+
+        def handle_endtag(self, tag):
+            if tag == "script" and self.open:
+                self.found.append((self.open[0], "".join(self.open[1])))
+                self.open = None
+
+    try:
+        with open(IF_PAGE, encoding="utf-8") as f:
+            blocks = Blocks()
+            blocks.feed(f.read())
+            blocks.close()
+    except OSError as err:
+        return False, "page.html does not read: %s" % err
+    if len(blocks.found) != 1:
+        return False, "page.html holds %d itemFields blocks, want 1" % len(blocks.found)
+    kind, text = blocks.found[0]
+    if kind != "application/json":
+        return False, "the itemFields block has type %r, want application/json" % kind
+    try:
+        fields = json.loads(text)
+    except ValueError as err:
+        return False, "the itemFields block is no JSON: %s" % err
+    if not isinstance(fields, list) or not all(isinstance(f, str) for f in fields):
+        return False, "the itemFields block is no list of strings"
+    if len(set(fields)) != len(fields):
+        return False, "the itemFields block repeats a field"
+    missing = [f for f in IF_REQUIRED if f not in fields]
+    if missing:
+        return False, "the itemFields block does not list %s" % ", ".join(missing)
+    return True, "one block of %d fields, and it lists every field a write needs" % len(fields)
+
+
+def item_field_hit_case():
+    """question_form.item_field_hit(op, entry, data) answers truthy for a write it refuses and falsy for one it
+    passes, on a page of its own (IF_SEAM). The four shapes: set, update, a delete, a str_replace."""
+    page = if_page("unit", if_block('["id", "reply", "context"]'))
+    code = ("import json, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import question_form\n"
+            "hit, bogus = question_form.item_field_hit, sys.argv[2]\n"
+            "entry = {'collection': 'items', 'doc_id': 'd'}\n"
+            "swap = dict(entry, field=bogus, old_str='a', new_str='b')\n"
+            "print(json.dumps([bool(x) for x in (\n"
+            "    hit('set', entry, {bogus: 1}), hit('set', entry, {'context': 'x', 'reply': 'x'}),\n"
+            "    hit('update', entry, {bogus: 1}), hit('update', entry, {bogus: {'__delete__': True}}),\n"
+            "    hit('update', entry, None), hit('str_replace', swap, None),\n"
+            "    hit('str_replace', dict(swap, field='reply'), None))]))\n")
+    env = dict(os.environ, **{IF_SEAM: page})
+    run = subprocess.run([sys.executable, "-c", code, os.path.dirname(GUARD), IF_BOGUS],
+                         capture_output=True, text=True, env=env, timeout=60)
+    if run.returncode != 0:
+        return False, "question_form.item_field_hit does not run: %s" % run.stderr.strip()[-120:]
+    got = json.loads(run.stdout.strip().splitlines()[-1])
+    want = [True, False, True, False, False, True, False]
+    if got != want:
+        names = ("set, unlisted", "set, listed", "update, unlisted", "update, delete", "update, no data",
+                 "str_replace, unlisted", "str_replace, listed")
+        return False, "item_field_hit is wrong for: " + ", ".join(n for n, g, w in zip(names, got, want) if g != w)
+    return True, "item_field_hit refuses an unlisted field and passes a listed one, a delete and no data"
+
+
+LOG_CHECKS_EXTRA.append(("item field: the real page.html holds one itemFields block that lists every field a "
+                         "write needs", item_fields_page_case))
+LOG_CHECKS_EXTRA.append(("item field: question_form.item_field_hit refuses an unlisted field and passes the rest",
+                         item_field_hit_case))
+FIXTURELESS_CHECKS.update((item_fields_page_case, item_field_hit_case))
+FAMILY = "owner-judge"   # the family the cases after this section have always run in
 
 
 # --------------------------------------------------------------------------- the runner
@@ -14474,7 +15008,8 @@ def sh_refusal_problems(label, got, reason, primary, lost):
 def session_home_lost_refuses_case():
     """Rule session-home: a session whose worktree is gone is refused a write into the primary
     checkout, by Write, Edit, MultiEdit, NotebookEdit and a shell write. The refusal names
-    EnterWorktree and no path. The lane call that makes the record is checked first."""
+    EnterWorktree with a `name` and no `path`, and names no file path. The lane call that makes
+    the record is checked first."""
     primary = sh_new_primary("lost")
     lane, branch = sh_add_lane(primary, "lane-lost")
     session = sh_session()
@@ -14497,9 +15032,12 @@ def session_home_lost_refuses_case():
     for index, (tool, tool_input) in enumerate(rows):
         got, reason = _decide_full(tool, primary, session=session, **tool_input)
         problems += sh_refusal_problems("row %d, %s" % (index, tool), got, reason, primary, lane)
+        if ENTER_WORKTREE_SHAPE not in reason:
+            problems.append("row %d, %s: the refusal does not say %s"
+                            % (index, tool, ENTER_WORKTREE_SHAPE))
     if problems:
         return False, "; ".join(problems)
-    return True, "every write tool and shell write is refused, naming session-home and EnterWorktree"
+    return True, "every write tool and shell write is refused, naming session-home, EnterWorktree and its shape"
 
 
 def session_home_present_folder_passes_case():
