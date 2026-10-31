@@ -24,6 +24,8 @@ THE OLDER RULES keep their ids and run first, in this order, then the form:
 the form. A missing Goal, Problem or Based on line, a Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`.
+The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
+position's letter) and `rework-off-page` (an open item never says it is being reworked).
 
 An update is judged only for the fields it carries. A closed item passes the form: it asks the owner
 nothing, and the chat-answer flow writes one. A str_replace on `context` that removes a form line is
@@ -420,7 +422,18 @@ def item_hit(op, entry):
         hit = task_str_replace_hit(entry)
         if hit:
             return "task-names-check", hit
-        return form_str_replace_hit(entry)
+        hit = form_str_replace_hit(entry)
+        if hit[0]:
+            return hit
+        # The stored item is unseen, so the two text rules judge the text this edit adds, in any field.
+        new = [str(entry.get("new_str") or "")]
+        hit = key_named_hit(new)
+        if hit:
+            return "option-letter-keys", hit
+        hit = reworked_hit(new)
+        if hit:
+            return "rework-off-page", hit
+        return PASS
     data = _write_data(entry)
     hit = port_item_hit(op, data)
     if hit:
@@ -437,7 +450,112 @@ def item_hit(op, entry):
     hit = task_check_hit(op, data)
     if hit:
         return "task-names-check", hit
-    return decision_form_hit(op, data)
+    hit = decision_form_hit(op, data)
+    if hit[0]:
+        return hit
+    hit = option_letter_hit(op, data)
+    if hit:
+        return "option-letter-keys", hit
+    hit = rework_off_page_hit(data)
+    if hit:
+        return "rework-off-page", hit
+    return PASS
+
+
+# ------------------------------------------------------------------ an option's key is its position's letter
+#
+# docs/decisions/option-keys-are-letters.md, rule `option-letter-keys`, built against a named incident
+# (incident in the record): the page shows an option by its position, so an option keyed a that sat second
+# showed as B and the owner's answer was misread. The page's letter for index i is
+# String.fromCharCode(65 + i % 26) (skills/waiting-page/page.html, symbol letterOf); the key is that letter
+# in lowercase. The page reads the key "none" (symbol NONE, same file) as "none of these".
+OPTION_NONE_KEY = "none"
+# An option named in item text by a letter-and-digit key, as in "option e2": the word, then the key, both in
+# any case, since the page shows the key's letter in capitals and Claude can write "Option E2". Only D12, a
+# decision id, and t18, the owner's uniform-ruling topic id, are exempt, each in its own case. No shared
+# constant lists record ids: lint/report_guard.py CITE_ID_RE holds D-ids only, and roadmap step ids such as
+# c188 live on the roadmap branch, so a cell like A1, a lowercase id like c188 or a key like d4 reads as a key.
+KEY_NAMED = re.compile(
+    r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
+LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
+                      "options a, b, c in the order shown, each once, never none, and name an option in the "
+                      "item's text by that letter (option A, pick b), never by any other key.")
+
+
+def _letter_of(index: int) -> str:
+    """The lowercase form of the page's letterOf for position `index`."""
+    return chr(97 + index % 26)
+
+
+def _item_text_fields(data):
+    """The item's own text: title, context, why, each option's fields and each step."""
+    out = [data.get(k) for k in ("title", "context", "why")]
+    for o in data.get("options") if isinstance(data.get("options"), list) else []:
+        out.append(_flat_text(o))
+    for st in data.get("steps") if isinstance(data.get("steps"), list) else []:
+        out.append(_flat_text(st))
+    return [t for t in out if isinstance(t, str)]
+
+
+def key_named_hit(texts) -> str:
+    """The matched text when one of `texts` names an option by a letter-and-digit key, else ""."""
+    for text in texts:
+        m = KEY_NAMED.search(text)
+        if m:
+            return "item text names an option by a key: " + m.group(0)
+    return ""
+
+
+def option_letter_hit(op: str, data) -> str:
+    """The matched text when this write of a waiting-page decision keys an option by anything but its
+    position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
+    closed item pass; an update that carries no `options` has no keys to judge."""
+    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
+        return ""
+    if data.get("status") == "closed":
+        return ""
+    options = data.get("options")
+    if isinstance(options, list):
+        seen = set()
+        for i, o in enumerate(options):
+            key = o.get("key") if isinstance(o, dict) else None
+            if not isinstance(key, str):
+                return "option with no string key"
+            if key == OPTION_NONE_KEY:
+                return "option keyed none"
+            if key in seen:
+                return "option key that repeats"
+            seen.add(key)
+            if key != _letter_of(i):
+                return "option key that is not its position's letter"
+    return key_named_hit(_item_text_fields(data))
+
+
+# ------------------------------------------------------------------ a reworked item is not answered on the page
+#
+# docs/decisions/rework-leaves-page.md, rule `rework-off-page`, built against a named incident (incident in
+# the record): an item whose options were being reworked stayed open, so the owner could answer options about
+# to change. Any item text counts, and a str_replace is judged on the text it adds.
+REWORKED = re.compile(r"\b(?:being\s+re-?worked|under\s+re-?work)\b", re.I)
+REWORK_REASON = ("An open item is for the owner to answer now, so it never says its options are being "
+                 "reworked. Close the item with a home that names the rework, and add a fresh item when the "
+                 "options are ready.")
+
+
+def reworked_hit(texts) -> str:
+    """The matched text when one of `texts` says the item is being reworked, else ""."""
+    for text in texts:
+        m = REWORKED.search(text)
+        if m:
+            return "item text says it is being reworked: " + m.group(0)
+    return ""
+
+
+def rework_off_page_hit(data) -> str:
+    """The matched text when this write puts "being reworked" in the item's text with no status closed."""
+    if not isinstance(data, dict) or data.get("status") == "closed":
+        return ""
+    return reworked_hit(_item_text_fields(data))
 
 
 # ------------------------------------------------------------------ the chat question box
@@ -485,7 +603,8 @@ def _chat_question_hit(question, options):
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "task-names-check": TASK_REASON,
-                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON}
+                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON,
+                "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
                      % ", ".join(OWNER_STAKES))

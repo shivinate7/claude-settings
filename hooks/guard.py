@@ -3122,6 +3122,10 @@ def judge(payload) -> None:
             refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
+        if rule == "option-letter-keys":
+            refuse(tool, "deny", "option-letter-keys", question_form.PAGE_REASONS["option-letter-keys"], matched)
+        if rule == "rework-off-page":
+            refuse(tool, "deny", "rework-off-page", question_form.PAGE_REASONS["rework-off-page"], matched)
         if rule == "question-form":
             refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
         return
