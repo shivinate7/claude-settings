@@ -6,10 +6,12 @@ extra kind may not replace a layout kind. The mark that the repo has rolled out 
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
 ("waiting-page", "waiting-page-colour", "waiting-page-icon", "kind", "caution", "visibility",
-"devices", "shared-resources", "roadmap") read whenever the file exists (`has_extras()`). The
+"devices", "shared-resources", "roadmap", "record-branch") read whenever the file exists (`has_extras()`). The
 "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page);
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
-branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py).
+branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). The "record-branch" key
+names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
+`set_waiting_page()` writes the "waiting-page" key once, for triage; it never writes "rolled-out".
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
 layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. A kind
@@ -195,6 +197,13 @@ WAITING_PAGE = "waiting-page"  # the extras key that holds the repo's waiting pa
 ARTIFACT_LINK = ("https://claude.ai/artifact/", "https://claude.ai/code/artifact/")
 
 
+def _artifact_link(found, where):
+    """`found` when it is a claude.ai artifact link, else LayoutError."""
+    if not isinstance(found, str) or not found.startswith(ARTIFACT_LINK):
+        raise LayoutError("%s: %s is not a claude.ai artifact link" % (where, WAITING_PAGE))
+    return found
+
+
 def waiting_page(root):
     """The URL of the waiting page of `root` (skill waiting-page), from its extras file, mark or not.
     "unknown" when the repo has no extras file or no key: a repo with no page is not an error."""
@@ -203,8 +212,42 @@ def waiting_page(root):
     found = _read(_extras(root)).get(WAITING_PAGE)
     if found is None:
         return "unknown"
-    if not isinstance(found, str) or not found.startswith(ARTIFACT_LINK):
-        raise LayoutError("%s: %s is not a claude.ai artifact link" % (_extras(root), WAITING_PAGE))
+    return _artifact_link(found, _extras(root))
+
+
+def set_waiting_page(root, url):
+    """Write the "waiting-page" key of `root`'s extras file, creating the file when missing. True when it
+    wrote; False when the key is already set, with the file left byte-identical. LayoutError when `url`
+    is not an artifact link. No other key is written, "rolled-out" least of all."""
+    _artifact_link(url, _extras(root))
+    if has_extras(root):
+        data = _read(_extras(root))
+        if WAITING_PAGE in data:
+            return False
+    else:
+        data = {"kinds": {}}
+    data[WAITING_PAGE] = url
+    os.makedirs(os.path.dirname(_extras(root)), exist_ok=True)
+    with open(_extras(root), "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    return True
+
+
+RECORD_BRANCH = "record-branch"  # the extras key: the branch that holds this worktree's record
+DEFAULT_RECORD_BRANCH = "roadmap"
+
+
+def record_branch(root):
+    """The record branch of `root` from its extras file: the "record-branch" key, else "roadmap". A fork
+    worktree sets its own. LayoutError when the key is not a plain git branch name."""
+    keys = _repo_keys(root)
+    if RECORD_BRANCH not in keys:
+        return DEFAULT_RECORD_BRANCH
+    found = keys[RECORD_BRANCH]
+    if (not isinstance(found, str) or not re.fullmatch(r"[A-Za-z0-9._][A-Za-z0-9._/-]*", found)
+            or ".." in found or "//" in found or found.endswith(("/", ".lock"))):
+        raise LayoutError("%s: %s %r is not a branch name" % (_extras(root), RECORD_BRANCH, found))
     return found
 
 
@@ -363,9 +406,21 @@ if __name__ == "__main__":
     # python3 lint/layout.py devices <root>: the repo's devices, first drawn first, or "unknown".
     # python3 lint/layout.py caution <root>: the repo's caution level with its facts and acts.
     # python3 lint/layout.py shared-resources <root>: the repo's shared machines as JSON, [] when none.
+    # python3 lint/layout.py set-waiting-page <url>: write the key once into the current folder's extras
+    # file. Exit 0 wrote it; 1 already set (prints the URL); 2 bad URL or unreadable file.
     ROOT_VERBS = (WAITING_PAGE, "devices", "caution", SHARED_RESOURCES)
+    if len(sys.argv) == 3 and sys.argv[1] == "set-waiting-page":
+        try:
+            here = os.getcwd()
+            if set_waiting_page(here, sys.argv[2]):
+                sys.exit(0)
+            print(waiting_page(here))
+            sys.exit(1)
+        except LayoutError as err:
+            print("layout: %s" % err, file=sys.stderr)
+            sys.exit(2)
     if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] in ROOT_VERBS):
-        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources <root>")
+        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources <root> | layout.py set-waiting-page <url>")
     try:
         here = os.path.abspath(sys.argv[2])
         if sys.argv[1] == WAITING_PAGE:
