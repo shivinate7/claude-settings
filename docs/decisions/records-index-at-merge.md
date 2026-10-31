@@ -11,7 +11,7 @@ on a draft PR is that step, and it never merges. It refuses a head that does not
 the PR ready, then run `--confirm` again. The tool sends no GraphQL (a cloud session's `gh` gets 403 on
 it), so the batch runner marks the PR ready, after the draft run of the pushed head shows (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
-record numbers. It takes no merge lock, except when a PR turns draft after the first read: then it runs
+record numbers. It takes no merge lock. A PR that turns draft after the first read is the one case: the step runs
 under the lock that confirm already took, and releases it.
 The same two allow rules cover both steps, so no new rule is needed.
 
