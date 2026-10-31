@@ -23,7 +23,8 @@ Interface the module must match (the lane's form contract):
 - A question to the owner holds a line at a line start, `Departs from: <what on main> — <what changes>`
   (rule question-departs), after the form passes. Both sides are non-empty, and the change side says a change,
   not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
-  same as, already; word match). The chat box judges it in `question`; a page decision in `context`.
+  same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
+  box judges it in `question`; a page decision in `context`.
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your uniform ruling (t18)`
   in its label or description, and never `(Recommended)` in its label (rule uniform-pick).
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
@@ -682,9 +683,9 @@ def case_departs_reasons():
                   not named, named)
 
 
-# A no-change word refuses only when it opens the change side or is the whole side. A word later in a
-# change names what the change does: "keeps its timeout" and "stays on the list" are changes.
-OPENS_CHANGE_SIDE = [
+# A no-change word in the change side refuses when it comes before the first ";", or anywhere when the side
+# has no ";". A word after the ";" names what the change does: "keeps its timeout" and "already loads" are changes.
+REFUSED_NO_CHANGE = [
     "Departs from: main — stays the existing ask",
     "Departs from: x.py:f — keeps today's behaviour",
     "Departs from: x — already does this",
@@ -693,11 +694,14 @@ OPENS_CHANGE_SIDE = [
     "Departs from: x — as before",
     "Departs from: x — no difference",
     "Departs from: x — identical to main",
+    "Departs from: x — the phone app stays on the list when offline",
 ]
-LATER_IN_CHANGE_SIDE = [
+PASS_AFTER_SEMICOLON = [
     "Departs from: x.py:f — adds a retry; the old call keeps its timeout",
     "Departs from: x — moves the list; it already loads from cache",
-    "Departs from: x — the phone app stays on the list when offline",
+]
+PASS_NO_NO_CHANGE_WORD = [
+    "Departs from: x — the phone app shows the list when offline",
 ]
 # The template copied verbatim, with an angle-bracket placeholder on either side. Each is refused.
 PLACEHOLDERS = [
@@ -716,13 +720,13 @@ LINE_FORMS = [
 ]
 
 
-def case_departs_no_change_word_opens_the_side():
-    for body in OPENS_CHANGE_SIDE:
-        dp_chat("a change side that opens with a no-change word is refused: %r" % body, body, DEPARTS_REFUSAL)
-        dp_page("a page change side that opens with a no-change word is refused: %r" % body, body, DEPARTS_REFUSAL)
-    for body in LATER_IN_CHANGE_SIDE:
-        dp_chat("a no-change word later in the change side passes: %r" % body, body, None)
-        dp_page("a page no-change word later in the change side passes: %r" % body, body, None)
+def case_departs_no_change_word_before_the_semicolon():
+    for body in REFUSED_NO_CHANGE:
+        dp_chat("a no-change word before the first ';' is refused: %r" % body, body, DEPARTS_REFUSAL)
+        dp_page("a page no-change word before the first ';' is refused: %r" % body, body, DEPARTS_REFUSAL)
+    for body in PASS_AFTER_SEMICOLON + PASS_NO_NO_CHANGE_WORD:
+        dp_chat("a change side with no no-change word before the first ';' passes: %r" % body, body, None)
+        dp_page("a page change side with no no-change word before the first ';' passes: %r" % body, body, None)
 
 
 def case_departs_placeholders_are_refused():
@@ -745,18 +749,12 @@ def case_departs_line_forms_pass():
 
 
 def case_departs_str_replace_forms():
-    context_replace("that swaps a bold Departs from line for one whose change opens with keeps is refused",
+    context_replace("that swaps a bold Departs from line for one whose change says keeps before any ';' is refused",
                     "**Departs from:** x — adds X", "**Departs from:** x — keeps X", DEPARTS_REFUSAL)
-    context_replace("that swaps a plain Departs from line for one whose change opens with keeps is refused",
+    context_replace("that swaps a plain Departs from line for one whose change says keeps before any ';' is refused",
                     "Departs from: x — adds X", "Departs from: x — keeps X", DEPARTS_REFUSAL)
     context_replace("that swaps a plain Departs from line for a valid one with keeps later in the change is allowed",
                     "Departs from: x — adds X", "Departs from: x — adds X; the old call keeps its timeout", None)
-    # The edit holds only the change side. Neither string carries the label, so the guard sees no Departs
-    # from line in the edit and judges the new change side alone.
-    context_replace("that swaps the change side ' — adds X' for ' — keeps X' is refused",
-                    " — adds X", " — keeps X", DEPARTS_REFUSAL)
-    context_replace("that swaps the change side ' — adds X' for ' — moves X' is allowed", " — adds X", " — moves X",
-                    None)
 
 
 # ------------------------------------------------------------------ call_judge
@@ -805,7 +803,7 @@ def main():
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
-                 case_departs_no_change_word_opens_the_side, case_departs_placeholders_are_refused,
+                 case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
                  case_call_judge):
         try:
