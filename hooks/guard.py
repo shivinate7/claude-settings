@@ -1905,7 +1905,7 @@ def step_up_reason(prompt: str, role, model) -> str:
 # for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
 # `agent-role-model-unread` log line when a read fails.
 ROLE_MODEL_RANK = ("haiku", "sonnet", "opus")
-ROLE_TABLE_PATH = os.path.join("docs", "decisions", "agent-model-cap.md")
+ROLE_TABLE_FILE = "agent-model-cap.md"   # inside the record folder that lint/layout.py names
 ROLE_TABLE_MAX = 256 * 1024
 ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
@@ -1932,10 +1932,15 @@ def role_model_table(pointer_root):
     record is missing, not text, or holds no row. The one reader of the table."""
     if not pointer_root:
         return None
+    lint = os.path.join(_HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
     try:
-        with open(os.path.join(pointer_root, ROLE_TABLE_PATH), encoding="utf-8") as handle:
+        folder = layout.layout()["kinds"]["decisions"]["path"].strip("/")
+        with open(os.path.join(pointer_root, *folder.split("/"), ROLE_TABLE_FILE), encoding="utf-8") as handle:
             text = handle.read(ROLE_TABLE_MAX)
-    except (OSError, ValueError):
+    except (OSError, ValueError, layout.LayoutError):
         return None
     table = {}
     for line in text.splitlines():
