@@ -22,7 +22,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;

@@ -4,7 +4,9 @@ settings.json `prompt` hook on Agent and the `agent` hook on AskUserQuestion: a 
 sees only the call's JSON and cannot read the override file, so no owner override reached it
 (decision owner-override).
 
-Each call gets one model verdict through decision_watch.invoke_model, the one model caller.
+An AskUserQuestion box runs hooks/question_form.py chat_hit first. A hit refuses with the rule it
+names, through the same refuse(), and makes no model call; the model sees only a box that passes.
+Each call that passes gets one model verdict through decision_watch.invoke_model, the one model caller.
 A verdict {"ok": false, "reason": R} refuses through guard_core.refuse(), the one home of the override
 check, the override line and the guard.log line. The rules are `spawn-judge` and `question-judge`.
 
@@ -45,16 +47,16 @@ SPAWN_PROMPT = (
 )
 QUESTION_PROMPT = (
     "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
-    "or none. Otherwise judge the question box alone. Block only on a clear miss; when unsure answer "
+    "or none. Otherwise judge the question box alone. Code has already checked the form lines and the "
+    "marks on each option, so judge only these. Block only on a clear miss; when unsure answer "
     "{\"ok\": true}.\n"
-    "1. A Goal: line first, in the owner's terms.\n"
-    "2. A Problem: line next: the problem in one plain sentence, and why it needs the owner's grant.\n"
-    "3. One to three Based on: lines for the premises, each with its source kind: ruling, measured, read, "
-    "notes or assumed (the kinds of premise-format).\n"
-    "4. Each option says what the owner would gain and lose, as a change for the owner, not for a record.\n"
-    "5. A recommendation that names one option.\n"
-    "6. No unexplained ids: explain every decision id, branch, sha, key or rule name in plain words.\n"
-    "7. Nothing points outside the box, such as an earlier message or an item number.\n"
+    "1. The Goal is in the owner's terms.\n"
+    "2. The Problem is one plain sentence that says why it needs his word.\n"
+    "3. Each premise is in plain words.\n"
+    "4. Each option's gain and lose are plain effects on the owner, not on a record.\n"
+    "5. No unexplained ids: explain every decision id, branch, sha, key or rule name in plain words.\n"
+    "6. Nothing points outside the box, such as an earlier message or an item number.\n"
+    "7. One option is recommended.\n"
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
     "one line>\"}."
 )
@@ -110,6 +112,12 @@ def main():
         if not isinstance(args, dict):
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
+        if tool == "AskUserQuestion":
+            import question_form
+            code_rule, matched = question_form.chat_hit(args)
+            if code_rule:
+                reason = "%s (%s)" % (question_form.CHAT_REASONS[code_rule], matched)
+                return refuse(payload, tool, args, code_rule, reason)
         shown = json.dumps(args, ensure_ascii=False)
         verdict, error = invoke_model(prompt % shown, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
