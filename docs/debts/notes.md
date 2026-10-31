@@ -722,7 +722,16 @@
 - question-form-goal-not-first: prose before the Goal line passes, because only the order of the three form lines is checked (hooks/question_form.py). Decision: question-form.
 - ci-scope-question-form-unpinned: lint/test_ci_scope.py pins git_reads.py in the guard arm, but not question_form.py or precompact_handoff.py. Decision: question-form.
 - question-form-import-fails-open: an import defect in hooks/question_form.py or hooks/precompact_handoff.py turns off the six page rules (guard-crash) and the whole chat judge. Decision: question-form.
+- command-in-item-str-replace: an `ArtifactData` str_replace on a task skips guard rule `command-in-item`, so a one-string `command` can still be written that way (lane command-per-os). Decision: act-in-place.
+- command-scan-lone-backtick: a lone backtick earlier in a step pairs with the opening backtick of a real span, so the command in that span passes (lane command-per-os). Decision: act-in-place.
+- command-scan-plain-text: a command in plain step text, a `$ ` prompt span, an indented block or a `~~~` fence passes the step scan (lane command-per-os). Decision: act-in-place.
+- command-scan-false-alarms: a backticked `Read-Only`, `Actions | Workflows` or `ok; ship it` reads as a shell line. A reword clears each (lane command-per-os). Decision: act-in-place.
+- command-null-refused: `command: null` on an update is refused, so a session clears a command by writing both shells again (lane command-per-os). Decision: act-in-place.
+- command-steps-one-string: task `steps` given as one string skip the step scan, as on main, and the page cannot draw them (lane command-per-os). Decision: act-in-place.
+- mac-holds-powershell: a `mac` string that holds a PowerShell cmdlet passes (lane command-per-os). Decision: act-in-place.
 - owner-message-grant-variant: the classifier reads "already granted" by wording, so a misread task can ask an owner session for a variant of a granted act. The target keeps its own permissions. Decision: auto-mode-owner-acts.
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- command-file-backticked: a `command` with both shells excuses "Run the command in `plans/c152.md`", because the file name sits in backticks (lane command-per-os). Decision: act-in-place.
+- command-run-verb-script-path: a run verb earlier in the sentence makes a script path such as `./hooks/guard.py` read as a shell line, as in "Run the tests and open `./hooks/guard.py`" (lane command-per-os). Decision: act-in-place.
