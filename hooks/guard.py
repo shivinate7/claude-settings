@@ -3394,7 +3394,7 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
     raw = str(tool_input.get("command", "") or "")
     stripped = strip_heredoc_bodies(raw)
     hit = _shell_write_hit(stripped, cwd, lambda word, where: coordinator_path_outside(word, where, session_id),
-                           follow_cd=True)
+                           follow_cd=True, writes_first=True)
     if hit:
         return "shell write: " + hit
     hit = coordinator_commit_hit(stripped, cwd)

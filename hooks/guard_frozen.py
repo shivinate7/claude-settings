@@ -548,11 +548,14 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
-def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False) -> str:
+def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False, writes_first=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
-    when that folder cannot be told."""
+    when that folder cannot be told. `writes_first` asks `writes_to` before `predicate`, for a `predicate` that
+    reads files: a word that is no write target never reaches it. The default keeps the cheap `predicate`
+    first, because `writes_to` scans the whole text for each word and a command of thousands of words scales
+    with the square of its length."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -591,9 +594,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False)
                 continue
             if not word or word in (">", ">>") or place in stood_in:
                 continue   # a stand-in names no path: judged, it would resolve to the cwd
-            # writes_to first: it is a regex, and `predicate` may read files (a layout, a config). A word
-            # that is no write target never reaches it.
-            if writes_to(word, text) and predicate(word, at):
+            if writes_first:
+                if writes_to(word, text) and predicate(word, at):
+                    return word
+            elif predicate(word, at) and writes_to(word, text):
                 return word
     return ""
 
