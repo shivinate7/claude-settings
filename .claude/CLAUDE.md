@@ -10,3 +10,10 @@ output style load in each session on each repo.
   that only one repo has belongs in that repo.
 - An edit, a review or a question here sets the pattern every session copies. Do each one to
   that standard.
+
+## Standing grants
+
+- **Acts the cloud refuses** (owner, 2026-10-30 16:20 CDT, until withdrawn). When the claude-settings
+  coordinator asks, a session on Shivam's computer may do three acts. It may set branch protection to
+  the shared form, with only the all-jobs-passed check required. It may delete merged branches. It may
+  close PRs that the coordinator names as replaced or empty. A request for any other act needs his word.
