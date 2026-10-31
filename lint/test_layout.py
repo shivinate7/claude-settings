@@ -284,10 +284,23 @@ class SetWaitingPage(Tree):
     URL = "https://claude.ai/artifact/abc123"
     OTHER = "https://claude.ai/artifact/zzz999"
 
+    # Ids are letters, digits, `_` and `-`. A page with no id, or an id with any other character, is no link.
+    BAD_LINKS = ("https://example.com/x", "", "claude.ai/artifact/abc", "https://claude.ai/artifact/",
+                 "https://claude.ai/code/artifact/", "https://claude.ai/artifact/ab c",
+                 "https://claude.ai/artifact/abc!", "https://claude.ai/artifact/abc\n",
+                 "https://claude.ai/artifact/abcé", "https://claude.ai/artifact/abc/items",
+                 "https://claude.ai/artifact/abc?x=1")
+    REAL_LINKS = ("https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx", "https://claude.ai/artifact/waitpage1",
+                  "https://claude.ai/code/artifact/example-two",
+                  "https://claude.ai/code/artifact/3f2a9c1e-7b4d-4e8a-9c2b-1d5e6f7a8b9c",
+                  "https://claude.ai/artifact/a_b-9")
+
     def setUp(self):
         super().setUp()
         self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
         self.extras = os.path.join(self.tree, *EXTRAS.split("/"))
+        self.sub = os.path.join(self.tree, "sub")  # a folder under the repo root, the CLI's working folder
+        os.makedirs(self.sub)
 
     def read_bytes(self):
         with open(self.extras, "rb") as handle:
@@ -336,20 +349,52 @@ class SetWaitingPage(Tree):
         self.assertFalse(self.layout.rolled_out(self.tree))
 
     def test_a_url_that_is_not_an_artifact_link_is_an_error_and_writes_nothing(self):
-        for bad in ("https://example.com/x", "", "claude.ai/artifact/abc"):
+        for bad in self.BAD_LINKS:
             with self.subTest(bad=bad):
+                if os.path.exists(self.extras):
+                    os.remove(self.extras)
                 with self.assertRaises(self.layout.LayoutError):
                     self.layout.set_waiting_page(self.tree, bad)
                 self.assertFalse(os.path.exists(self.extras))
 
-    def cli(self, url=None):
-        """The CLI run with the repo root as the working folder, as the brief names it."""
-        return run([os.path.join(LINT, "layout.py"), "set-waiting-page", url or self.URL], self.tree)
+    def test_a_real_artifact_link_in_either_form_is_accepted(self):
+        for url in self.REAL_LINKS:
+            with self.subTest(url=url):
+                if os.path.exists(self.extras):
+                    os.remove(self.extras)
+                self.assertTrue(self.layout.set_waiting_page(self.tree, url))
+                self.assertEqual(self.layout.waiting_page(self.tree), url)
+
+    def test_a_null_key_counts_as_unset_and_is_written(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": None, "visibility": "public"}))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        found = json.loads(self.read_bytes())
+        self.assertEqual(found["waiting-page"], self.URL)
+        self.assertEqual(found["visibility"], "public")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def cli(self, url=None, root=None, cwd=None):
+        """The CLI, `set-waiting-page <root> <url>`, run from `cwd`. The default cwd is a subfolder of the
+        tree, so a run that writes into its working folder shows up there as a stray file."""
+        return run([os.path.join(LINT, "layout.py"), "set-waiting-page", root or self.tree, url or self.URL],
+                   cwd or self.sub)
 
     def test_cli_writes_the_key_and_exits_0(self):
         code, out = self.cli()
         self.assertEqual(code, 0, out)
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def test_cli_from_a_subfolder_writes_the_root_extras_and_no_other(self):
+        code, out = self.cli()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+        self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the subfolder got a .claude folder")
+
+    def test_the_old_form_with_no_root_is_refused_and_writes_nowhere(self):
+        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL], self.sub)
+        self.assertNotEqual(code, 0, out)
+        self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the old form wrote into the working folder")
+        self.assertFalse(os.path.exists(self.extras))
 
     def test_cli_second_run_exits_1_prints_the_existing_url_and_writes_nothing(self):
         code, out = self.cli()
@@ -360,11 +405,28 @@ class SetWaitingPage(Tree):
         self.assertIn(self.URL, out)
         self.assertEqual(self.read_bytes(), before)
 
-    def test_cli_bad_url_exits_nonzero_without_a_traceback(self):
-        code, out = self.cli("https://example.com/x")
-        self.assertNotEqual(code, 0, out)
+    def test_cli_bad_url_exits_2_without_a_traceback(self):
+        for bad in ("https://example.com/x", "https://claude.ai/artifact/", "https://claude.ai/artifact/ab c"):
+            with self.subTest(bad=bad):
+                code, out = self.cli(bad)
+                self.assertEqual(code, 2, out)
+                self.assertNotIn("Traceback", out)
+                self.assertFalse(os.path.exists(self.extras))
+
+    def test_cli_exits_2_with_a_message_when_a_directory_sits_at_the_extras_path(self):
+        os.makedirs(self.extras)
+        code, out = self.cli()
+        self.assertEqual(code, 2, out)
         self.assertNotIn("Traceback", out)
-        self.assertFalse(os.path.exists(self.extras))
+        self.assertTrue(out.strip(), "the failure printed nothing")
+
+    def test_cli_exits_2_with_a_message_when_dot_claude_is_a_file(self):
+        # makedirs fails here, before any open(): a write fault in either step is the same exit 2.
+        self.put(".claude", "not a folder\n")
+        code, out = self.cli()
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("Traceback", out)
+        self.assertTrue(out.strip(), "the failure printed nothing")
 
 
 class WaitingPageBranding(Tree):

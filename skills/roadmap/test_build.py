@@ -21,7 +21,6 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(1, str(HERE.parent.parent / "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import build  # noqa: E402
-import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
 RUN_FOLDER = None
@@ -68,15 +67,21 @@ def git(repo, *args):
                           env={**os.environ, **GIT_ENV}).stdout
 
 
-def run_build(*argv):
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+def run_build_streams(*argv):
+    """(code, stdout, stderr) of build.main(argv): 0 for a normal return, else the SystemExit code."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
             build.main(list(argv))
             code = 0
         except SystemExit as e:
             code = e.code
-    return code, out.getvalue()
+    return code, out.getvalue(), err.getvalue()
+
+
+def run_build(*argv):
+    code, out, err = run_build_streams(*argv)
+    return code, out + err
 
 
 def build_info(page):
@@ -628,7 +633,7 @@ class ForkRecord(Fixture):
 
     def page_from(self, root, *extra):
         code, out = run_build("--repo", str(root), "--out", str(self.out), *extra)
-        self.assertIn(code, (0, None), out)
+        self.assertEqual(code, 0, out)
         return self.out.read_text(encoding="utf-8")
 
     def test_fork_worktree_with_no_flag_reads_its_own_record_branch(self):
@@ -643,9 +648,37 @@ class ForkRecord(Fixture):
         self.assertIn(self.MAIN_TITLE, page)
         self.assertNotIn(self.FORK_TITLE, page)
 
-    def test_waiting_page_is_the_forks_in_its_worktree_and_mains_on_the_checkout(self):
-        self.assertEqual(layout.waiting_page(str(self.fork)), self.FORK_URL)
-        self.assertEqual(layout.waiting_page(str(self.repo)), self.MAIN_URL)
+    def broken_extras(self, text):
+        """Put `text` in the fork's extras file, uncommitted, where the build reads it."""
+        (pathlib.Path(self.fork) / ".claude" / "layout-extras.json").write_text(text, encoding="utf-8")
+
+    def test_unreadable_extras_with_no_flag_warns_on_stderr_and_reads_roadmap(self):
+        for text in ("", "{not json", json.dumps({"waiting-page": self.FORK_URL})):
+            with self.subTest(text=text):
+                self.broken_extras(text)
+                if self.out.exists():
+                    self.out.unlink()
+                code, out, err = run_build_streams("--repo", str(self.fork), "--out", str(self.out))
+                self.assertEqual(code, 0, out + err)
+                self.assertIn("layout-extras.json", err)
+                self.assertNotIn("layout-extras.json", out)
+                self.assertNotIn("Traceback", err)
+                page = self.out.read_text(encoding="utf-8")
+                self.assertIn(self.MAIN_TITLE, page)
+                self.assertNotIn(self.FORK_TITLE, page)
+
+    def test_a_readable_extras_file_with_a_bad_record_branch_still_fails(self):
+        # Guard: a bad value is refused, never read as roadmap.
+        self.write_extras(self.fork, self.FORK_URL, **{"record-branch": "two words"})
+        code, out, err = run_build_streams("--repo", str(self.fork), "--out", str(self.out))
+        self.assertNotIn(code, (0, None), out + err)
+        self.assertFalse(self.out.exists())
+
+    def test_a_flag_still_wins_over_an_unreadable_extras_file(self):
+        # Guard: with --record-branch, a broken extras file does not stop the build.
+        self.broken_extras("{not json")
+        page = self.page_from(self.fork, "--record-branch", "roadmap")
+        self.assertIn(self.MAIN_TITLE, page)
 
 
 if __name__ == "__main__":
