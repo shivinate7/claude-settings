@@ -726,3 +726,5 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- test-git-ps1-twin: the PowerShell suites (install.test.ps1 and the install-* .ps1 tests) commit in fixtures with no lint/_test_git twin. They run on Windows CI, not on the cloud signer. Step: test-runs-skip-signing.
+- test-git-bad-count-reset: lint/_test_git.py/.sh/.mjs reset a non-numeric GIT_CONFIG_COUNT to 0 and drop the preset keys silently. Step: test-runs-skip-signing.
