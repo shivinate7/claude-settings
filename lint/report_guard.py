@@ -39,6 +39,15 @@ sys.path.insert(0, HERE)
 from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
 import layout  # noqa: E402
 
+# hooks/question_form.py is the one home of the Departs from predicate (rule `question-departs`): the
+# chat box, the waiting page and this report all call it. lint/ and hooks/ sit side by side, so the hop
+# holds in the repo and under ~/.claude. A missing module fails open: a guard that cannot read cannot accuse.
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+try:
+    import question_form  # noqa: E402
+except ImportError:
+    question_form = None
+
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
 # and past the pre-subcommand options that take a value (`-C <dir>`, `--git-dir=<path>`, and
@@ -488,6 +497,17 @@ def repo_root(cwd):
         here = parent
 
 
+def departs_problem(text):
+    """The refusal text when the Input Needed item offers a pick and its Departs from line is missing or
+    restates main (rule `question-departs`), else ''. The predicate is question_form.departs_hit."""
+    if question_form is None or not offers_a_pick(text):
+        return ""
+    miss = question_form.departs_hit(input_needed_section(text))
+    if not miss:
+        return ""
+    return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
+
+
 def pick_has_a_control(records, text, cwd):
     """True when the main session's turn opened the question box, or this repo has a waiting page
     and the reply links it or its Input Needed item names the 5-minute wait and the page. An
@@ -617,8 +637,13 @@ def main():
     if not turn_landed(after):
         # An unlanded turn is judged on the pick check alone. An error in it fails open.
         try:
+            pick = []
             if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
-                reason = PICK_REFUSAL + (CORRECTION_TAIL if report_shape_ok(text) else "")
+                pick.append(PICK_REFUSAL)
+            pick.append(departs_problem(text))
+            pick = [r for r in pick if r]
+            if pick:
+                reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
                 print(json.dumps({"decision": "block", "reason": reason}))
         except Exception:
             pass
@@ -640,6 +665,12 @@ def main():
     try:
         if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
             reasons.append(PICK_REFUSAL)
+    except Exception:
+        pass
+    try:
+        departs = departs_problem(text)
+        if departs:
+            reasons.append(departs)
     except Exception:
         pass
     cite = bare_cite(text)
