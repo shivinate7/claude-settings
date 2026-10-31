@@ -116,6 +116,9 @@
 - in-throwaway-reads-paths-only: in_throwaway judges path text, so git --git-dir=/tmp/x with a real cwd passes as throwaway (hooks/guard_core.py)
 - inbox-midturn-prompt-untested: UserPromptSubmit fires for mid-turn owner messages (audit 2026-10-13), and the burst count leans on it; no test pins it (inbox hook)
 - inbox-partial-write-fence: a partial write, needing disk-full, can leave a fence open and merge later blocks into one message (inbox capture hook)
+- inbox-page-note-key-after-write: a failed write of the pagenotes key after the inbox write saves the note again on the next read of the answer (hooks/local_time.py page_note). Decision: owner-feedback-inbox
+- inbox-page-note-item-newline: an item id with a newline adds a line to the page-note label, so a one-line note can count as a burst (hooks/local_time.py page_note_text). Decision: owner-feedback-inbox
+- inbox-page-note-other-session: the page-note hook cannot tell another session's answer from its own, because answers carry no owner, so it saves every new note it reads (hooks/local_time.py page_note). Decision: owner-feedback-inbox
 - inbox-path-drop-silent: if the inbox path cannot be built, an owner message is dropped with one stderr line (inbox capture hook)
 - inbox-unreadable-drops-ids: an unreadable inbox drops open ids from the post-compaction note; the Stop guard still names the file (compact hook)
 - index-row-drop-no-finding: a records row can drop silently when a record is renamed to non-.md, or when one Drops-lines trailer excuses the page window-wide (hook_catalog.py, check_silent_undo.py)
@@ -741,3 +744,14 @@
 - cloud-setup-timeout-orphan: when `cloud-setup.sh` hits its 240 s cap, the kill may not reach install.sh's inner `timeout 40 git`. That git can run up to 40 s on, and install.sh's lock may stay, so the next install within 10 minutes fails. Found by code reading, never run (lane setup-script-install, review round 1). Decision: agent-model-cap.
 - cloud-setup-origin-copy: `origin_is_repo` in cloud-setup.sh is a looser copy of install.sh's `origin_matches_repo`, because install.sh runs on load and cannot be sourced. It differs only on contrived URLs, and no test pins the two together (lane setup-script-install). Decision: agent-model-cap.
 - cloud-setup-zombie-step: before its group kill, cloud-setup.sh first sends TERM to each child of the install, then waits 1 s. The step is there for test c2 only, because this sandbox's pid 1 never clears dead children, so a dead child still looks alive. The better fix is for c2 to count a dead child (state Z) as gone, and then drop the step (lane setup-script-install, review round 2). Decision: agent-model-cap.
+- holder-slash-unpinned: nothing pins "no / in HOLDER" (janitor/test_session_end_sweep.py); a later "/" breaks Windows only, under MSYS path rewriting, while Linux stays green. Decision: c95.
+- sweep-no-pipes-kwargs-only: SweepGetsNoPipes pins the DEVNULL kwargs; no case has a grandchild holding a pipe, so a hang by another route passes unseen. A Windows-only grandchild case would make it red-capable. Decision: c95.
+- heartbeat-starved-reads-stopped: a live holder starved 1 s or more reads as stopped, a false green only when the kill also failed. Decision: c95.
+- kill-holder-rekills-dead-pids: kill_holder and the atexit stop_holders kill each pid again, dead or not; a recycled pid inside that seconds-wide window could be killed. Decision: c95.
+- scratchpad-reap-reads-ps: ScratchpadReap reads liveness with ps, not the heartbeat; the reap is POSIX-only and needs ps to find orphans. Decision: c95.
+- ci-job-no-pointer-unknown: a copied install with no pointer checkout reads a remote code-check step unknown, not FAIL; exit 2 still blocks a pass (bin/ci-job code_check).
+- ci-job-interrupt-leaves-verdict: Ctrl-C during a step leaves bin/verdict and the step's shell running; the step's children outlived it on main too (bin/ci-job heartbeat relay).
+- ci-job-relay-locale-decode: the heartbeat relay reads verdict's UTF-8 output in the locale's text mode, so a non-cp1252 byte on Windows can raise mid-step (bin/ci-job).
+- ci-job-local-action-other-path: LOCAL_ACTION matches only `$/actions/` and `./actions/`, so a local action at another path reads as remote and borrows a copy; same on main (bin/ci-job).
+- test-ci-job-pipx-probe-windows: the pipx probe's 60 s timeout on Windows can wait on a pipx child that holds the pipe (lint/test_ci_job.py).
+- test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so a local run tests only committed bin/ci-job edits (lint/test_ci_job.py).
