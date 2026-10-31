@@ -733,3 +733,8 @@
 - heartbeat-starved-reads-stopped: a live holder starved 1 s or more reads as stopped, a false green only when the kill also failed. Decision: c95.
 - kill-holder-rekills-dead-pids: kill_holder and the atexit stop_holders kill each pid again, dead or not; a recycled pid inside that seconds-wide window could be killed. Decision: c95.
 - scratchpad-reap-reads-ps: ScratchpadReap reads liveness with ps, not the heartbeat; the reap is POSIX-only and needs ps to find orphans. Decision: c95.
+- reap-start-row-budget-unbound: janitor/agent_end_reap.py's start row give_up_at (HOOK_BUDGET, 45 s) never binds, because LOG_WAIT_SECONDS (30 s) ends the wait first; the hook-bound case tests a clamp production never reaches. The 60 s bound holds through the done row. Decision: c95.
+- hook-bound-case-1s-slack: janitor/test_sweep.py's hook-bound case allows 4.0 s on an expected 3.0 s; a stall over 1 s in main() on a loaded runner reads red. Decision: c95.
+- lock1sh-first-holder-unproven: hooks/test_install_src.sh lock1sh does not prove install A took the lock first; under load B can go first and the case passes uncontested. Decision: c95.
+- win-lk-lock-regression-uncovered: on Windows the holder holds 5 s, under LK_LOCK's own 10 s give-up, so only the POSIX stand-in can catch an LK_LOCK regression. Decision: c95.
+- sendmessage-state-skips-at-cap: hooks/test_sendmessage_state.py still skips (NOT-RUN) when a slow runner reaches its harness cap; the step's goal says never skipped. Decision: c95.
