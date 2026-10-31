@@ -1,0 +1,9 @@
+{
+  "title": "Each session keeps to its tier, and a hook points the owner to the right one",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.30494,
+  "why": "shiv, Oct 31 15:31 to 15:32 CDT, owner chat (via coordinator session_013NEJL2pASwRjgJDnsvnpNe): the coordinator took owner questions that belong to triage; sessions must point him to the right tier, and \"it needs to be like an actual fix\": a hook or check, not prose. Second incident the same hour: the classifier refused the coordinator's message handing banchi #1002's merge to the batch runner ('Merge Without Review'), so merges stay with the coordinator.",
+  "note": "Lane started Oct 31 15:32 CDT (coordinator). Fix: a hook or check that knows each session's tier (its cs-build tag, per get_session) and refuses or redirects work that belongs to another tier: owner questions to triage, merges to the batch runner, building to lanes; style rule style-wrong-tier-one-line becomes enforced, not prose. It also covers the batch-runner merge handoff the classifier refused. The lane sends triage any ruling it needs for the page. Done check: test cases show a coordinator writing an owner question and a non-runner merging both refused or redirected, red on main and green on the fix.",
+  "updatedAt": "2026-10-31T20:35:00Z"
+}
