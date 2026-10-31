@@ -46,20 +46,23 @@ words: each retired word in a checked repo, one item per line: `  <word>: <file>
   term that repeats a claude-settings term, or is the retired word itself, does not. After WORDS_DEADLINE
   seconds the group is `unknown - stopped at <file>, N of M read`. That limit is a bandaid for file shapes
   the read is not yet fast on.
-supersede: a line in the child's own text that departs from a shared rule and names no known exemption. It
-  reads the tracked `CLAUDE.md` files (any folder), the root `AGENTS.md` and `.claude/**/*.md`: Markdown
-  only, line by line. A line departs when it holds a narrow override wording: "never inherited", "not
-  inherited", "overrides the global|shared|parent|claude-settings", "instead of the ...", "unlike the ...",
-  or "global|shared|parent|claude-settings rule(s) do(es) not apply". It passes when the same line says
-  "known exemption" and names `rule:<id>`, with <id> a live anchor of claude-settings. A bare `rule:<id>` never
-  passes it. Items: `departs, no exemption` (one per line); `unknown exemption rule:<id>` (the line says "known
-  exemption" and its id is no live anchor, or it names none, shown as `?`; a departure line with such an
-  exemption gets this item alone, and a "known exemption" line with no departure wording gets it too);
-  `redefines rule:<id>` (a child `<!-- rule:<id> -->` anchor that is a live claude-settings anchor). Each item
-  counts toward N in the verdict. The live anchors come from `rule_audit.claude_md_anchors(rule_text())`, and
-  the probe holds no list. A rule text that cannot be read, or holds no anchor, or a child file that cannot be
-  read, makes the group unknown. The claude-settings root is n/a. Not read: a conflict with no override
-  wording, and hook or code text (that needs a parser).
+supersede: text in the child that departs from a shared rule and names no known exemption. It reads the tracked
+  `CLAUDE.md` files (any folder), the root `AGENTS.md` and `.claude/**/*.md`: Markdown only, a paragraph at a
+  time (consecutive lines joined; a fenced code block is never read), and a file reached twice is read once.
+  Departure wording, in one sentence, is a cue ("overrides", "instead of", "unlike", "do/does not apply")
+  beside a shared rule (global, shared or parent, then a rule noun within three words, or "claude-settings"),
+  or "never inherited" / "not inherited" beside a rule word (rule, ruling, designation, tier, claude-settings,
+  CLAUDE.md). Technical prose ("overrides the parent method") has none. A paragraph passes when it says
+  "known exemption(s)" and names `rule:<id>` with <id> a live claude-settings anchor; a bare `rule:<id>` never
+  passes it. Items, each at the paragraph's first line: `departs, no exemption`; `unknown exemption
+  rule:<id>` (the id is no live anchor, or none is named, shown as `?`; with no id it counts only beside
+  departure wording; a departure paragraph with such an exemption gets this item alone); `redefines
+  rule:<id>` (a child `<!-- rule:<id> -->` anchor that is a live claude-settings anchor). N in the verdict
+  counts the flagged items, not the pass lines. The live anchors come from
+  `rule_audit.claude_md_anchors(rule_text())`, and the probe holds no list. A root whose own rule files hold
+  the same anchors is claude-settings: n/a. An unreadable rule text, no anchor, or an unreadable child file
+  makes the group unknown. Not read: a conflict with no departure wording, hook and code text (it needs a
+  parser), and which rule an exemption id belongs to (any live id passes; "no known exemption" reads as one).
 slugs: a record file this change adds against origin/main, in the child's own record folders (the layout's),
   with a slug over 32 characters is one item line. Long slugs already on main are one note line: the count
   and the first three. No origin/main makes the group unknown. It calls lint/check_record_slugs.py.
@@ -327,18 +330,56 @@ def probe_lanecap(root):
     return finish("lanecap", lines, "in shape - %d brief or plan file(s) read" % len(where), 0)
 
 
-# Child text that overrides a shared rule in words. Narrow on purpose: a line that only agrees with a rule has none of these.
-SHARED = r"(global|shared|parent|claude-settings)"
-DEPARTURE = re.compile(
-    r"\b(never|not) inherited\b"
-    r"|\boverrides? the " + SHARED + r"\b"
-    r"|\binstead of the " + SHARED + r"\b"
-    r"|\bunlike the " + SHARED + r"\b"
-    r"|\b" + SHARED + r" rules? (do|does) not apply\b", re.I)
-KNOWN_EXEMPTION = re.compile(r"\bknown exemption\b", re.I)
+# Child text that departs from a shared rule, in words. Narrow on purpose: a line that only agrees with a rule has none
+# of these, and nor has technical prose ("overrides the parent method", "unlike the shared pool").
+# Within one sentence, a cue ("overrides", "instead of", "unlike", "do not apply") beside a shared rule named by a
+# qualifier and a rule noun within three words, or by "claude-settings" alone; or "never/not inherited" beside a rule word.
+RULE_NOUN = r"(?:rules?|rulings?|CLAUDE\.md|instructions?)"
+SHARED_RULE = re.compile(r"\b(?:global|shared|parent)(?:\W+[\w'-]+){0,2}?\W+" + RULE_NOUN + r"\b|\bclaude-settings\b", re.I)
+OVERRIDE_CUE = re.compile(r"\boverrid(?:es?|den)\b|\binstead of\b|\bunlike\b|\b(?:do|does)(?: not|n['’]t)\s+apply\b", re.I)
+NOT_INHERITED = re.compile(r"\b(?:never|not) inherited\b", re.I)
+RULE_WORD = re.compile(r"\b(?:rules?|rulings?|designations?|tiers?|claude-settings)\b|CLAUDE\.md", re.I)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+KNOWN_EXEMPTION = re.compile(r"\bknown exemptions?\b", re.I)
 RULE_REF = re.compile(r"\brule:([a-z0-9][a-z0-9-]*)")
-ANCHOR_COMMENT = re.compile(r"<!--.*?-->")
+ANCHOR_COMMENT = re.compile(r"<!--.*?-->", re.S)
+FENCE = re.compile(r"^\s*(```|~~~)")
 SUPERSEDE_SCOPE = re.compile(r"(^|/)CLAUDE\.md$|^AGENTS\.md$|^\.claude/.+\.md$")
+
+
+def departs(paragraph):
+    for sentence in SENTENCE_END.split(paragraph):
+        if SHARED_RULE.search(sentence) and OVERRIDE_CUE.search(sentence):
+            return True
+        if NOT_INHERITED.search(sentence) and RULE_WORD.search(sentence):
+            return True
+    return False
+
+
+def paragraphs(text):
+    """(first line number, joined text) of each paragraph outside a code fence. A blank line or a fence ends one."""
+    found, lines, start, fence = [], [], 0, None
+    for number, line in enumerate(text.splitlines(), 1):
+        mark = FENCE.match(line)
+        if fence or mark:
+            if lines:
+                found.append((start, " ".join(lines)))
+                lines = []
+            if not fence:
+                fence = mark.group(1)
+            elif mark and mark.group(1) == fence:
+                fence = None
+        elif not line.strip():
+            if lines:
+                found.append((start, " ".join(lines)))
+                lines = []
+        else:
+            if not lines:
+                start = number
+            lines.append(line.strip())
+    if lines:
+        found.append((start, " ".join(lines)))
+    return found
 
 
 def probe_supersede(root):
@@ -348,35 +389,42 @@ def probe_supersede(root):
         raise CannotRun("rule text: %s" % err)
     if not live:
         raise CannotRun("no live rule anchors in the claude-settings rule files")
-    if os.path.realpath(root) == os.path.realpath(rule_audit.ROOT):
+    try:
+        own = set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
+    except (OSError, ValueError):
+        own = set()  # a child holds no rule files
+    if own == live:
         print("supersede: n/a - this is claude-settings")
         return 0
-    where = [f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)]
-    hits, passes = [], []
-    for rel in where:
+    hits, passes, seen = [], [], set()
+    for rel in [f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)]:
+        real = os.path.realpath(os.path.join(root, *rel.split("/")))
+        if real in seen:
+            continue
+        seen.add(real)
         text = read(root, rel)
         if text is None:
             raise CannotRun("cannot read %s" % rel)
-        for number, line in enumerate(text.splitlines(), 1):
-            at, shown = "%s:%d" % (rel, number), line.strip()[:160]
-            departs = DEPARTURE.search(line)
-            if KNOWN_EXEMPTION.search(line):
+        for number, paragraph in paragraphs(text):
+            at, shown, departure = "%s:%d" % (rel, number), paragraph[:160], departs(paragraph)
+            if KNOWN_EXEMPTION.search(paragraph):
                 # An anchor comment is a definition, never a reference to an exemption.
-                named = RULE_REF.findall(ANCHOR_COMMENT.sub("", line))
+                named = RULE_REF.findall(ANCHOR_COMMENT.sub("", paragraph))
                 if any(n in live for n in named):
-                    if departs:
+                    if departure:
                         passes.append("  known exemption, passes: %s: %s" % (at, shown))
-                else:
+                elif named or departure:
+                    # With no id, a child's own lint exemption is not ours: it counts only beside departure wording.
                     hits.append("  unknown exemption rule:%s: %s: %s" % (named[0] if named else "?", at, shown))
-            elif departs:
+            elif departure:
                 hits.append("  departs, no exemption: %s: %s" % (at, shown))
-            for anchor in dict.fromkeys(rule_audit.claude_md_anchors(line)):
+            for anchor in dict.fromkeys(rule_audit.claude_md_anchors(paragraph)):
                 if anchor in live:
                     hits.append("  redefines rule:%s: %s" % (anchor, at))
     lines = hits + passes
     if hits:
-        return finish("supersede", lines, "out - %d line(s) to read in %d file(s)" % (len(hits), len(where)), 1)
-    return finish("supersede", lines, "in shape - %d file(s) read" % len(where), 0)
+        return finish("supersede", lines, "out - %d line(s) to read in %d file(s)" % (len(hits), len(seen)), 1)
+    return finish("supersede", lines, "in shape - %d file(s) read" % len(seen), 0)
 
 
 PW_FILE = re.compile(r"(^|/)(\.github/workflows/[^/]+\.ya?ml|action\.ya?ml|(GNU)?[Mm]akefile|[^/]+\.sh"

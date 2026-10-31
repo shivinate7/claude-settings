@@ -144,27 +144,35 @@ is `unknown`, never `in shape`.
 
 `$PY $P/lint/compliance_probes.py supersede .` finds child text that departs from a shared rule and names
 no known exemption. A claude-settings rule wins over such text. The fix goes in the child: rewrite the
-line, or name the exemption. The probe reads the child's tracked `CLAUDE.md` files (any folder), the root
-`AGENTS.md` and `.claude/**/*.md`, line by line. It reads Markdown only, and never edits or pushes to the child.
+text, or name the exemption. The probe reads the child's tracked `CLAUDE.md` files (any folder), the root
+`AGENTS.md` and `.claude/**/*.md`, a paragraph at a time: consecutive lines are joined, and a fenced code
+block is never read. A file reached twice, by a symlink, is read once. It reads Markdown only, and never
+edits or pushes to the child.
 
 The probe holds no rule list. On each run it reads the live anchors through `rule_audit.claude_md_anchors`
-in the parent clone. A root that is claude-settings itself is `n/a`.
+in the parent clone. A root whose own rule files hold the same anchors is a claude-settings checkout: `n/a`.
 
-A line departs when it holds one of these, in any case: "never inherited", "not inherited",
-"override(s) the" and "instead of the" and "unlike the" each before global, shared, parent or
-claude-settings, or "global|shared|parent|claude-settings rule(s) do(es) not apply". A line that only quotes
-or agrees with a rule has none of these. It is not a hit. A conflict with no such wording is read by hand,
-and so is hook and code text.
+Departure wording, in one sentence, in any case:
+
+- a cue (override, overrides, overridden, "instead of", "unlike", "do not apply", "does not apply", "don't
+  apply") beside a shared rule: global, shared or parent, then a rule noun (rule, ruling, instruction,
+  `CLAUDE.md`) within three words; or `claude-settings` alone.
+- "never inherited" or "not inherited" beside a rule word: rule, ruling, designation, tier,
+  `claude-settings`, `CLAUDE.md`.
+
+Technical prose has none of these: "overrides the parent method", "instead of the global tsc", "Env vars are
+not inherited by the worker". A paragraph that only quotes or agrees with a rule is not a hit. A conflict
+with no departure wording is read by hand, and so is hook and code text.
 
 | Item line | Means |
 | --- | --- |
-| `  departs, no exemption: <file>:<line>: <text>` | override wording, and no valid exemption on the line |
-| `  unknown exemption rule:<id>: <file>:<line>: <text>` | the line says "known exemption", and the id is no live anchor, or it names none (`?`). A departure line with such an exemption gets this item alone |
+| `  departs, no exemption: <file>:<line>: <text>` | departure wording, and no valid exemption in the paragraph. `<line>` is the paragraph's first line |
+| `  unknown exemption rule:<id>: <file>:<line>: <text>` | the paragraph says "known exemption" or "known exemptions", and the id is no live anchor. With no id (`?`) it counts only beside departure wording: a child's own lint exemption is not ours. A departure paragraph with such an exemption gets this item alone |
 | `  redefines rule:<id>: <file>:<line>` | the child holds a `<!-- rule:<id> -->` anchor that is a live claude-settings anchor |
-| `  known exemption, passes: <file>:<line>: <text>` | a departure whose line says "known exemption" and names a live `rule:<id>`. Not a hit |
+| `  known exemption, passes: <file>:<line>: <text>` | a departure whose paragraph says "known exemption" and names a live `rule:<id>`. Not a hit |
 
-A bare `rule:<id>` with no "known exemption" never passes a departure. Text is cut to 160 characters. Each
-item counts toward N in the verdict, `supersede: out - N line(s) to read in M file(s)`.
+A bare `rule:<id>` with no "known exemption" never passes a departure. Text is cut to 160 characters. N in
+`supersede: out - N line(s) to read in M file(s)` counts the flagged items, never the pass lines.
 
 | Exit | Group line |
 | --- | --- |

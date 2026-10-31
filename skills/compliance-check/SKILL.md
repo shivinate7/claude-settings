@@ -71,7 +71,7 @@ One line per group, in the order of step 2, then Layout, Design, Copies, iOS, Wo
 ```
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
-known score, and lists each unknown probe after it. Layout, Design, iOS and Words list each item under the
+known score, and lists each unknown probe after it. Layout, Design, iOS, Words and Supersede list each item under the
 group line, with its own grade, so one score never hides a finding. A child with no extras file, or one without `"rolled-out": true`,
 scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
 that no probe and no mechanism covers.
