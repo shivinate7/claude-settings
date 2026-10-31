@@ -34,6 +34,10 @@ class LayoutError(Exception):
     """The layout file or a repo's extras file cannot be read or has the wrong shape."""
 
 
+class BranchNameError(LayoutError):
+    """The extras file reads, and its "record-branch" key is not a branch name."""
+
+
 def _read(path):
     try:
         with open(path, encoding="utf-8") as handle:
@@ -195,6 +199,8 @@ def _safe(found, where):
 
 WAITING_PAGE = "waiting-page"  # the extras key that holds the repo's waiting page URL
 ARTIFACT_LINK = ("https://claude.ai/artifact/", "https://claude.ai/code/artifact/")
+# What a write accepts. A read keeps the looser ARTIFACT_LINK prefix: other repos hold keys written before this.
+ARTIFACT_URL = re.compile(r"https://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+")
 
 
 def _artifact_link(found, where):
@@ -217,12 +223,15 @@ def waiting_page(root):
 
 def set_waiting_page(root, url):
     """Write the "waiting-page" key of `root`'s extras file, creating the file when missing. True when it
-    wrote; False when the key is already set, with the file left byte-identical. LayoutError when `url`
-    is not an artifact link. No other key is written, "rolled-out" least of all."""
+    wrote; False when the key is already set (a null value is unset), with the file left byte-identical.
+    LayoutError when `url` is not an artifact link with an id. No other key is written, "rolled-out" least
+    of all."""
     _artifact_link(url, _extras(root))
+    if not ARTIFACT_URL.fullmatch(url):
+        raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     if has_extras(root):
         data = _read(_extras(root))
-        if WAITING_PAGE in data:
+        if data.get(WAITING_PAGE) is not None:
             return False
     else:
         data = {"kinds": {}}
@@ -247,7 +256,7 @@ def record_branch(root):
     found = keys[RECORD_BRANCH]
     if (not isinstance(found, str) or not re.fullmatch(r"[A-Za-z0-9._][A-Za-z0-9._/-]*", found)
             or ".." in found or "//" in found or found.endswith(("/", ".lock"))):
-        raise LayoutError("%s: %s %r is not a branch name" % (_extras(root), RECORD_BRANCH, found))
+        raise BranchNameError("%s: %s %r is not a branch name" % (_extras(root), RECORD_BRANCH, found))
     return found
 
 
@@ -406,21 +415,21 @@ if __name__ == "__main__":
     # python3 lint/layout.py devices <root>: the repo's devices, first drawn first, or "unknown".
     # python3 lint/layout.py caution <root>: the repo's caution level with its facts and acts.
     # python3 lint/layout.py shared-resources <root>: the repo's shared machines as JSON, [] when none.
-    # python3 lint/layout.py set-waiting-page <url>: write the key once into the current folder's extras
-    # file. Exit 0 wrote it; 1 already set (prints the URL); 2 bad URL or unreadable file.
+    # python3 lint/layout.py set-waiting-page <root> <url>: write the key once into the extras file of
+    # <root>. Exit 0 wrote it; 1 already set (prints the URL); 2 bad URL or unreadable or unwritable file.
     ROOT_VERBS = (WAITING_PAGE, "devices", "caution", SHARED_RESOURCES)
-    if len(sys.argv) == 3 and sys.argv[1] == "set-waiting-page":
+    if len(sys.argv) == 4 and sys.argv[1] == "set-waiting-page":
         try:
-            here = os.getcwd()
-            if set_waiting_page(here, sys.argv[2]):
+            here = os.path.abspath(sys.argv[2])
+            if set_waiting_page(here, sys.argv[3]):
                 sys.exit(0)
             print(waiting_page(here))
             sys.exit(1)
-        except LayoutError as err:
+        except (LayoutError, OSError) as err:
             print("layout: %s" % err, file=sys.stderr)
             sys.exit(2)
     if not (len(sys.argv) == 4 and sys.argv[1] == "path" or len(sys.argv) == 3 and sys.argv[1] in ROOT_VERBS):
-        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources <root> | layout.py set-waiting-page <url>")
+        sys.exit("usage: layout.py path <root> <kind> | layout.py waiting-page|devices|caution|shared-resources <root> | layout.py set-waiting-page <root> <url>")
     try:
         here = os.path.abspath(sys.argv[2])
         if sys.argv[1] == WAITING_PAGE:

@@ -285,14 +285,23 @@ def homes(repo):
             sys.path.remove(str(LINT))
 
 
+DEFAULT_RECORD_BRANCH = "roadmap"  # the same default as lint/layout.py, for when layout.py cannot be imported
+
+
 def default_record_branch(repo):
     """The record branch the checkout's extras file names, else "roadmap"."""
+    sys.path.insert(0, str(LINT))
     try:
-        sys.path.insert(0, str(LINT))
         import layout
-        return layout.record_branch(str(repo))
-    except Exception as err:  # a bad key must not read as "roadmap": it would build the wrong record
-        raise SystemExit("The record branch cannot be read from the layout extras file: %s" % err)
+        try:
+            return layout.record_branch(str(repo))
+        except layout.BranchNameError as err:  # a bad key must not read as "roadmap": it would build the wrong record
+            raise SystemExit("The record branch cannot be read from the layout extras file: %s" % err)
+    except SystemExit:
+        raise
+    except Exception as err:  # an extras file that cannot be parsed builds as it did before the key existed
+        print("warning: %s; reading the record branch %s" % (err, DEFAULT_RECORD_BRANCH), file=sys.stderr)
+        return DEFAULT_RECORD_BRANCH
     finally:
         if str(LINT) in sys.path:
             sys.path.remove(str(LINT))
