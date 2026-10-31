@@ -727,3 +727,5 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- trust-card-in-build-same-message-order: a `get_session` and a `set_session_tags` in one message can be read in the wrong order, so the guard misjudges the tags. Decision: session-tiers.
+- trust-card-in-build-denial-no-cause: a fail-closed denial logs no cause in guard.log, so the reason is lost. Decision: session-tiers.
