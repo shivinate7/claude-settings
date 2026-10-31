@@ -12,13 +12,14 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from './lazy-typescript.mjs';
-import { importTargets } from './import-reader.mjs';
+import { importTargets, resolveSpecifier } from './import-reader.mjs';
 import { blankCommentsAndStrings, blankShell } from './source-text.mjs';
 
 const PY_FACTS = fileURLToPath(new URL('./py-facts.py', import.meta.url));
 const TS_EXT = /\.(?:ts|tsx|mts|cts|mjs|cjs|js|jsx)$/;
-// A file whose `#` starts a comment. Only a full-line `#` comment is read as one: a trailing `# note` after code stays a stated limit.
-const HASH_COMMENT_EXT = /\.(?:sh|bash|zsh|ps1|rb|toml|ya?ml|conf|mk)$/;
+// A non-shell file whose `#` starts a comment. Only a full-line `#` comment is read as one: a trailing `# note` after code stays a
+// stated limit. A shell file goes to blankShell instead.
+const HASH_COMMENT_EXT = /\.(?:ps1|rb|toml|ya?ml|conf|mk)$/;
 const SHELL_EXT = /\.(?:sh|bash|zsh)$/;
 
 const fail = (req, reason, gone = false) => ({ file: req.file, symbol: req.symbol, ok: false, reason, ...(gone && { gone: true }) });
@@ -85,24 +86,56 @@ const moduleBindings = (sf) => {
   return out;
 };
 
-// The names a file refers to, outside its imports. A member name is no reference: `e.code` and `{ code: 1 }` refer to no `code`.
-// `ns.code` is one when `ns` is a namespace import (`import * as ns`).
-const identifiers = (sf) => {
+// The local names that hold the whole module of `target`: `import * as ns`, a default `import lib`, `import m = require(...)`,
+// `const m = require(...)` and `const m = await import(...)`. Each specifier goes through the import reader's resolver, so an
+// alias of any other module is no alias of `target`.
+const targetAliases = (sf, file, target, tracked) => {
+  const aliases = new Set();
+  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && resolveSpecifier(file, spec.text, tracked) === target;
+  const visit = (n) => {
+    if (ts.isImportDeclaration(n) && n.importClause && namesTarget(n.moduleSpecifier)) {
+      const { name, namedBindings } = n.importClause;
+      if (name) aliases.add(name.text);
+      if (namedBindings && ts.isNamespaceImport(namedBindings)) aliases.add(namedBindings.name.text);
+    } else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && namesTarget(n.moduleReference.expression)) {
+      aliases.add(n.name.text);
+    } else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      let x = n.initializer;
+      while (ts.isParenthesizedExpression(x) || ts.isAwaitExpression(x)) x = x.expression;
+      const callee = ts.isCallExpression(x) && x.arguments.length === 1 ? x.expression : null;
+      const loads = callee && (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === 'require'));
+      if (loads && namesTarget(x.arguments[0])) aliases.add(n.name.text);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return aliases;
+};
+
+// A key slot names a member, never the module's symbol: `{ notes() {} }`, a class method or field, `{ notes: x }`, the key of
+// `const { notes: x } = obj`, a type member and a JSX attribute.
+const isKeySlot = (n) => {
+  const p = n.parent;
+  if (!p) return false;
+  if (ts.isBindingElement(p)) return p.propertyName === n;
+  return p.name === n && (ts.isMethodDeclaration(p) || ts.isPropertyDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)
+    || ts.isPropertySignature(p) || ts.isMethodSignature(p) || ts.isPropertyAssignment(p) || ts.isJsxAttribute(p) || ts.isEnumMember(p));
+};
+
+// The names a file refers to, outside its imports. A key slot is no reference, and neither is a member: `e.code` refers to no `code`.
+// A member of an alias of the cited file is one: `ns.code`, and the `code` key of `const { code: c } = ns`.
+const identifiers = (sf, aliases) => {
   const names = new Set();
-  const namespaces = new Set();
-  for (const st of sf.statements) {
-    const bindings = ts.isImportDeclaration(st) ? st.importClause?.namedBindings : null;
-    if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
-  }
   const visit = (n) => {
     if (ts.isImportDeclaration(n)) return;
     if (ts.isPropertyAccessExpression(n)) {
       visit(n.expression);
-      if (ts.isIdentifier(n.expression) && namespaces.has(n.expression.text)) names.add(n.name.text);
+      if (ts.isIdentifier(n.expression) && aliases.has(n.expression.text)) names.add(n.name.text);
       return;
     }
-    if (ts.isPropertyAssignment(n) && ts.isIdentifier(n.name)) { visit(n.initializer); return; }
-    if (ts.isIdentifier(n)) names.add(n.text);
+    if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer && ts.isIdentifier(n.initializer) && aliases.has(n.initializer.text))
+      for (const e of n.name.elements) if (e.propertyName && ts.isIdentifier(e.propertyName)) names.add(e.propertyName.text);
+    if (ts.isIdentifier(n) && !isKeySlot(n)) names.add(n.text);
     ts.forEachChild(n, visit);
   };
   visit(sf);
@@ -113,8 +146,10 @@ const readTs = (req, text, tracked) => {
   let sf;
   try { sf = ts.createSourceFile(req.file, text, ts.ScriptTarget.Latest, true); } catch (e) { return fail(req, `${req.file} cannot be parsed: ${e.message}`); }
   if (req.op === 'uses') {
-    const imports = importTargets(req.file, text, new Set(tracked)).includes(req.target);
-    return good(req, { imports, uses: req.symbol == null ? null : identifiers(sf).has(req.symbol) });
+    const files = new Set(tracked);
+    const imports = importTargets(req.file, text, files).includes(req.target);
+    const uses = req.symbol == null ? null : identifiers(sf, targetAliases(sf, req.file, req.target, files)).has(req.symbol);
+    return good(req, { imports, uses });
   }
   const bindings = moduleBindings(sf);
   if (!bindings.has(req.symbol)) return gone(req);
@@ -134,7 +169,7 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const readRegex = (req, text) => {
   if (req.op === 'uses') return fail(req, `a uses fact is read for Python and JavaScript files, and ${req.file} is neither`);
   // The blanked text keeps every offset, so a match there names the same span of the original, where a string value is still text.
-  // A shell file has its own scanner: a string may span lines, and `#` opens a comment only after a space.
+  // A shell file has its own scanner (blankShell): a string may span lines, `#` opens a comment only at the start of a word, and a heredoc body is text.
   // Another `#` file blanks each full-line `#` comment first: the C-style scanner would read a lone quote in it as a string that hides real code.
   const hashBlanked = () => (HASH_COMMENT_EXT.test(req.file) ? text.replace(/^[ \t]*#.*$/gm, (m) => ' '.repeat(m.length)) : text);
   const blank = SHELL_EXT.test(req.file) ? blankShell(text) : blankCommentsAndStrings(hashBlanked(), req.file);

@@ -52,19 +52,25 @@ def defined_names(tree):
     return names
 
 
-def imported_modules(tree):
-    """Each dotted module name the file imports. `from a import b` gives `a` and `a.b`, since `b` may be a module."""
-    mods = []
+def import_bindings(tree):
+    """Each dotted module name the file imports, with the dotted name that holds that module in the file, or None.
+    `import a.b` gives (`a.b`, `a.b`). `from a import b` gives (`a`, None) and (`a.b`, `b`), since `b` may be a module."""
+    pairs = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            mods.extend(a.name for a in node.names)
+            pairs.extend((a.name, a.asname or a.name) for a in node.names)
         elif isinstance(node, ast.ImportFrom):
             base = node.module or ""
             if base:
-                mods.append(base)
+                pairs.append((base, None))
             for a in node.names:
-                mods.append(f"{base}.{a.name}" if base else a.name)
-    return mods
+                pairs.append((f"{base}.{a.name}" if base else a.name, a.asname or a.name))
+    return pairs
+
+
+def imported_modules(tree):
+    """Each dotted module name the file imports."""
+    return [m for m, _ in import_bindings(tree)]
 
 
 def resolve(dotted, parent, tracked):
@@ -84,31 +90,31 @@ def resolve(dotted, parent, tracked):
     return hits[0] if len(hits) == 1 else None
 
 
-def imported_aliases(tree):
-    """Each name an import binds. `from a import b` binds `b`, which may be a module."""
-    aliases = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            aliases.update((a.asname or a.name.split(".")[0]) for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            aliases.update((a.asname or a.name) for a in node.names)
-    return aliases
+def target_aliases(tree, parent, target, tracked):
+    """Each dotted name that holds the module `target` in `parent`: the binding of an import that resolves to `target`."""
+    return {held for mod, held in import_bindings(tree) if held and resolve(mod, parent, tracked) == target}
 
 
-def root_name(node):
-    """The name at the start of a chain such as `a.b.c`, or None when the chain starts with a call or a subscript."""
+def dotted_name(node):
+    """The dotted text of a chain such as `a.b.c`, or None when the chain starts with a call or a subscript."""
+    parts = []
     while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
         node = node.value
-    return node.id if isinstance(node, ast.Name) else None
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
 
 
-def referenced_names(tree):
-    """A bare name is a reference. `x.name` is one only when `x` starts at an imported name, so `job.run()` on an object is none."""
-    aliases = imported_aliases(tree)
+def referenced_names(tree, aliases):
+    """A bare name is a reference. `x.name` is one only when `x` starts at an alias of the cited file, so `job.run()` on an
+    object and `subprocess.run` on another module are none."""
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute):
-            if root_name(node.value) in aliases:
+            chain = dotted_name(node.value)
+            if chain and any(chain == a or chain.startswith(a + ".") for a in aliases):
                 names.add(node.attr)
         elif isinstance(node, ast.Name):
             names.add(node.id)
@@ -120,7 +126,7 @@ def answer(req, tree, tracked):
     if op == "uses":
         target = req["target"]
         imports = any(resolve(m, req["file"], tracked) == target for m in imported_modules(tree))
-        uses = None if symbol is None else symbol in referenced_names(tree)
+        uses = None if symbol is None else symbol in referenced_names(tree, target_aliases(tree, req["file"], target, tracked))
         return {"ok": True, "value": {"imports": imports, "uses": uses}}
     if op == "defines":
         if symbol in defined_names(tree):
