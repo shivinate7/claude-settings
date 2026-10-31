@@ -5,6 +5,7 @@
                           nothing. A draft is previewed too; a dropped line prints one `BLOCKED:` line and exits 1.
                           A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
+                          On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
@@ -1065,6 +1066,12 @@ class Host:
             return
         self.pause(30)  # no gh call: the next pass reads the checks (decision ci-wait-reads-run-status)
 
+    def ready(self, n):
+        """Mark a draft ready after the records step. -> (ok, why). Bandaid: it sends nothing and returns False. GitHub marks a
+        draft ready only through GraphQL (`gh pr ready`), which a cloud session answers with HTTP 403, and this tool sends no
+        GraphQL (c53). The caller then says to mark it ready by hand."""
+        return False, "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
+
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. Never --admin, never --delete-branch (cut_branch does that).
         -> (merge commit oid or None, message). The reply is never trusted: after any reply the PR state is read.
@@ -2111,7 +2118,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
     refuse_bad_pr(info, draft_ok=True)  # a draft is previewed, so its silent undos show before it is marked ready
     if info["draft"]:
-        say(f"merge: #{n} is a draft. This is a preview only; --confirm needs it ready.")
+        say(f"merge: #{n} is a draft. This is a preview only; --confirm on a draft is the records step, and it never merges.")
     base = info["base"]
     resumed = trailer = records = None
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
@@ -2131,6 +2138,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
                 resumed = own_claim(wt, sc, f"origin/{base}")
                 trailer = None if resumed else do_claim(wt, sc, f"origin/{base}")
             records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
+            if info["draft"] and records != "current" and not (trailer or resumed):  # a claim commits at confirm anyway, so the draft step would save no run
+                records += f". merge {n} --confirm on the draft pushes it before ready, so the ready run is the merge run"
     finally:
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
@@ -2153,6 +2162,36 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         f"  then:   push HEAD:{info['branch']}, wait for the checks, PUT pulls/<n>/merge with merge_method={m.get('method', '?')} and the head sha as the guard,",
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch and the batch's lane branches." if m.get("deleteBranch") else "."))
 
+def draft_step(root, cfg, n, host, info):
+    """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
+    stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
+    Takes no lock, claims no number and never merges: a claim stays at the ready confirm."""
+    base = info["base"]
+    if base != cfg["defaultBranch"]:
+        say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
+    else:
+        tmp, wt = open_worktree(root, info, base)
+        try:
+            stale, stands = holds_base(wt, f"origin/{base}", info["head"])  # before the rebuild: a small-move proof resets the tree
+            if stale or stands:
+                tip = git(wt, "rev-parse", "--short=9", f"origin/{base}")[1]
+                raise Stop("BEHIND: " + (stale or f"{info['head'][:9]} does not hold origin/{base} at {tip}.")
+                           + f" The draft step needs the head to hold the base tip. Merge {base} into {info['branch']}, push, and run again. Nothing was pushed.")
+            if rebuild_records(wt):
+                sha = commit_claim(wt, None)
+                push_branch(wt, info["branch"])
+                say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+            else:
+                say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
+        finally:
+            drop_worktree(root, tmp, wt)
+    ok, why = host.ready(n)
+    if ok:
+        say(f"merge: #{n} is ready now. Nothing was merged. When its run is green, run --confirm again to merge.")
+    else:
+        say(f"merge: #{n} could not be marked ready ({' '.join(why.split()) or 'no reason given'}). Mark it ready by hand, then run --confirm again to merge. Nothing was merged.")
+    return 0
+
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok=""):
@@ -2160,15 +2199,19 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
+    if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
+        return draft_step(root, cfg, n, host, info)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
     tmp = wt = claim_sha = None
     try:
         info = host.pr(n)
-        refuse_bad_pr(info)
+        refuse_bad_pr(info, draft_ok=True)
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken. Nothing was claimed or pushed.")
+        if info["draft"]:  # it turned draft after the first read: the records step, never a merge
+            return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         red_base(root, host, base, red_ok)
         busy = batch_refusal(host, n, base)
@@ -2424,7 +2467,7 @@ def main(argv, host=None, lock=None):
             return 0
         h = host or Host()
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
-        refuse_bad_pr(info, draft_ok=not a.confirm)  # a closed PR, or a draft under --confirm, stops before the config notice
+        refuse_bad_pr(info, draft_ok=True)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
         cfg = load_config(root, info["base"], a.config)
         ignore = ignore_checks(cfg)
         if not host:
