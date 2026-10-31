@@ -27,6 +27,16 @@ guard rule, so the watcher does the waiting and the session is told once.
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
   of the session. The guard refuses a stop of a process outside the session, unless the owner's override
   covers it (`owner-override`, the owner's typed override).
+- The one allowed wait on a stranded job is `wait-pid <pid> [--timeout SECS]` (`bin/wait-pid`). Incident,
+  2026-10-31: a stall left a lane with its job's pid, and the guards refused a `kill -0` loop, a `/proc`
+  poll and `tail --pid`. Those loops stay refused; the remedies of the `waiter` and `live-stream` rules
+  and the STALL report name the helper. It waits only on a pid that `guard_kill.pid_is_session_job`
+  calls this session's (a descendant of the session root, or a pid whose walk reaches init with this
+  session's tag on the pid or an ancestor below init), and exits 2 at once for any other pid. Exit 0
+  when the pid ends, 124 at the timeout (default 540 s, under the Bash cap). It prints a `still waiting`
+  line every 120 s, so a background wait draws no STALL. It cannot read the job's exit code: the job is
+  not its child. Start-time check against pid reuse. Not on Windows. Cost: one process per wait, no
+  file written; while it waits, four `/proc` reads a second on Linux, one `ps` a second elsewhere.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line every 120 seconds.
