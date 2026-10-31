@@ -19,7 +19,8 @@ Without a project, each tier is one Claude Code session, and the owner acts as t
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
-  The model adds only the "frozen at <sha>" line on each merge go. Under a standing merge grant,
+  The model adds only the "frozen at <sha>" line on each merge run and a fixed form for each merge go
+  (`templates/operating-model.md`, "Autopilot"). Under a standing merge grant,
   the coordinator gives each merge go, and the batch runner runs the merge tool on it. The owner is not asked.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
   briefs and role handoff notes. It is never merged into main.
