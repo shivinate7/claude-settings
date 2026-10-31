@@ -36,7 +36,7 @@ env:
 
 jobs:
   # Decides which jobs and suites a run needs (.github/scripts/ci-scope.sh). Every other job
-  # needs it. An error in the script turns every flag on, never off. A skipped job reads as passing.
+  # needs it. An error in the script turns every flag on, never off. A job behind a scope flag always runs; its steps skip when the flag is off.
   # A draft PR skips this job, so every job that needs it skips too (decision draft-until-reviewed).
   scope:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
@@ -150,6 +150,9 @@ jobs:
       - name: Call judge fixture suite
         run: python3 hooks/test_call_judge.py
 
+      - name: Question form fixture suite
+        run: python3 hooks/test_question_form.py
+
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
@@ -229,6 +232,9 @@ jobs:
 
       - name: Windows split guard
         run: python3 lint/test_windows_split.py
+
+      - name: all-jobs-passed needs every pull-request job
+        run: python3 lint/test_all_jobs_passed.py
 
       - name: Scope detector fixture suite
         run: python3 lint/test_ci_scope.py
@@ -470,6 +476,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_install_src.sh
 
+      - name: cloud-setup.sh suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: sh hooks/test_cloud_setup.sh
+
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
       # plain-english-map skill tests. The same step ends checks-windows and checks-macos. The `mods` flag
@@ -484,19 +494,21 @@ jobs:
   checks-guard:
     runs-on: ubuntu-latest
     needs: scope
-    if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Guard fixture suite
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_guard.py
 
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
@@ -506,21 +518,23 @@ jobs:
   checks-shoot:
     runs-on: ubuntu-latest
     needs: scope
-    if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
     # Cap 10 min. A green run took 18 s to 44 s over 4 runs (debt measured-time-table). The browser
     # install is the only network step, and it no longer waits on apt.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         with:
           persist-credentials: false
 
       - name: Install the pinned Playwright and Chromium, no apt step
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         uses: $/actions/playwright-setup
         with:
           package-dir: .github/shoot
 
       - name: shoot fixture suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
 
@@ -530,6 +544,7 @@ jobs:
       # roadmap build and the splice (tests/merged_page.py), so the runner needs python3 and git.
       # ubuntu-latest has both; the first line fails the step at once if one goes missing.
       - name: waiting page suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         shell: bash
         run: |
           python3 --version && git --version
@@ -540,37 +555,37 @@ jobs:
   pointer-windows:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request' }}
     # Cap 10 min leaves room for install-set.test.ps1 on a slow runner (figures: debt measured-time-table).
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Pointer encoding test, Windows PowerShell 5.1
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         shell: powershell
         run: powershell -NoProfile -File install.test.ps1
 
       - name: Install no-gap test, Windows PowerShell 5.1
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-no-gap.test.ps1
 
       - name: Install set test, Windows PowerShell 5.1
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-set.test.ps1
 
       - name: Memory monitor test, Windows PowerShell 5.1
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/mem-monitor.test.ps1
 
       - name: Install bin eol test, Windows PowerShell 5.1
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: powershell
         timeout-minutes: 3
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
@@ -581,223 +596,230 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
     # Cap 18 min = 2x the slowest of 30 runs (9.1 min; median 7.2), which passed 80% of the old 10 min cap
     # (decision ci-job-caps).
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Report the shell this job actually runs
+        if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
         run: |
           /bin/bash --version | head -n1
           command -v bash
           bash --version | head -n1
       - name: Shell syntax check, install.sh
+        if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
         run: bash -n install.sh
       - name: install.sh checkout-detection suite
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_install_src.sh
       - name: install_from_main suite
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
       - name: ios-ship fixture suite (/bin/bash 3.2)
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: /bin/bash lint/test_ios_ship.sh
       - name: ios-ship fixture suite (bash on PATH)
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: bash lint/test_ios_ship.sh
       - name: sim-test fixture suite (/bin/bash 3.2)
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: /bin/bash lint/test_sim_test.sh
       - name: sim-test fixture suite (bash on PATH)
-        if: ${{ needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: bash lint/test_sim_test.sh
 
   # The owner runs this repo on macOS. Before this job, every Python suite in the checks
   # and checks-windows jobs above proved itself only on Linux and Windows, never on a real
   # Mac, so janitor/install_launchd.py -- the one installer built for the Mac -- had no
   # macOS signal at all. This job mirrors checks-windows: same OS-touching suites, same order, and the
-  # same `if: ${{ !cancelled() }}` on every step, for the reason checks-windows documents
+  # `!cancelled()` in the `if` of every step, for the reason checks-windows documents
   # above -- a job that stops at its first red step proves nothing about the suites
   # behind it.
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
     # Cap 50 min = about 2x the slowest green run (figures: debt measured-time-table).
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Guard fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 hooks/test_guard_load_os.py
 
       - name: rm shim fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_rm_shim.py
 
       - name: Hook platform exit fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_hook_platform_exit.py
 
       # No Guard mutation test here: it runs on the checks job (Linux) only. Accepted risk: a
       # macOS-only mutation regression is not caught. No mutant is marked macOS-only.
 
       - name: Janitor sweep fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation test
-        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_config_watch.py
 
       - name: Config watch fast-exit suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_config_watch_fast_exit.py
 
       - name: Shared names suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_shared_names.py
 
       - name: Precompact handoff fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_precompact_handoff.py
 
       - name: Handoff wave-2 fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_sendmessage_state.py
 
       - name: Call judge fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_call_judge.py
 
+      - name: Question form fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_question_form.py
+
       - name: Remove-prompt answer fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_local_time.py
 
       - name: CI wake-up fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_ci_wake.py
 
       - name: Feedback inbox fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_feedback_inbox.py
 
       - name: Daily note fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_daily_note.py
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_stall_watch.py
 
       - name: Simulator boot-record fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_sim_boot_record.py
 
       - name: Guard wrappers fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_wrappers.py
 
       - name: Session start notice suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_session_start.py
 
       - name: Stop-hook guard fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard.py
 
       - name: Ruling home fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_ruling_home.py
 
       - name: Ruling census fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_ruling_census.py
 
       - name: Verdict runner fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_verdict.py
 
       - name: Unknown-read contract (guard + session_start)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_session_end_sweep.py
 
       - name: Janitor triggers fixture suite (launchd installer)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_launchd.py
 
       - name: Janitor triggers fixture suite (schtasks installer)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
       # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
       # prints the process tree and kills it. timeout-minutes is the backstop.
       - name: Record stamp engine fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         timeout-minutes: 5
         run: node actions/stamp/test_stamp.mjs
 
       - name: Record stamp action fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: bash actions/stamp/test_action.sh
 
       - name: Mod and map-skill tests
-        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
@@ -806,7 +828,7 @@ jobs:
   # suites on Windows and reports the environment first. It is blocking: run
   # 35766479009 went green here for the first time, on its own merit, not through
   # continue-on-error.
-  # Every step in all three jobs carries `if: ${{ !cancelled() }}`. Without it, GitHub Actions
+  # Every step in all three jobs carries `!cancelled()` in its `if`. Without it, GitHub Actions
   # skips every step after the first failure, even inside a job marked
   # continue-on-error. This job stayed advisory-red at its first failing step for a
   # while, and that hid eleven suites behind it that never ran on Windows at all. A
@@ -814,22 +836,23 @@ jobs:
   checks-windows:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
     # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Report the Windows environment
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         shell: bash
         run: |
           echo "== python --version =="
@@ -893,11 +916,11 @@ jobs:
       # Accepted risk: a Windows-only mutation regression is not caught. No mutant is marked windows-only.
 
       - name: Load reader against the OS tools
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python hooks/test_guard_load_os.py
 
       - name: install.sh stays off Windows suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: bash
         run: sh hooks/test_install_windows.sh
 
@@ -905,13 +928,13 @@ jobs:
       # own 2 s bound (hooks/session_start.sh:15), so a slow runner may kill the fetch. A hang fails this step in 3 min,
       # by name, not the job's 10 (debt install-checkout-flake).
       - name: Session start freshness cases (caseF1, caseG1)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: bash
         timeout-minutes: 3
         run: sh hooks/test_install_src.sh caseF1 caseG1
 
       - name: Mod and map-skill tests
-        if: ${{ !cancelled() && needs.scope.outputs.mods == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
@@ -919,51 +942,54 @@ jobs:
   checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope
-    if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
     # 2x the slowest green step (193 s) is 386 s; 10 min with setup.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Guard mutation test
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/mutate_guard.py
 
   # The guard fixture suite on Windows, split off checks-windows by cut F. On pull_request it runs only the cases
-  # tagged windows (the slice step below), whole, in this job, the required check. Push, schedule and
+  # tagged windows (the slice step below), whole, in this job. Push, schedule and
   # workflow_dispatch run the full suite in shards: shard 1 here, the rest in checks-windows-guard-<i>, which never
   # run on pull_request (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each case runs once).
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
     # Full guard suite off pull_request: 1296 s in one job (run 40293472341). In 2 shards the jobs took 582 s and
     # 679 s (run 40296937814); 20 min is about 1.8x the slower.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 1 of 2)
-        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
         env:
           GUARD_SHARD: 1/2
         run: python hooks/test_guard.py
 
       - name: Guard fixture suite (Windows slice)
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}
         env:
           GUARD_TESTS: windows-slice
         run: python hooks/test_guard.py
@@ -995,39 +1021,40 @@ jobs:
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
     # Full git-half suite off pull_request: about 6.5 s a test on Windows, so about 59 min in one job (run 40293472341).
     # In 5 shards the jobs took 295 s to 520 s (run 40296937814); 15 min is about 1.7x the slowest.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Merge launcher fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python merge/test_launch.py
 
       - name: Merge tool git-half fixture suite (shard 1 of 5)
-        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
         env:
           MERGE_SHARD: 1/5
         run: python merge/test_merge.py
 
       - name: Merge tool git-half fixture suite (Windows slice)
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}
         env:
           MERGE_TESTS: windows-slice
         run: python merge/test_merge.py
 
       - name: Merge launcher fixture suite (merge.cmd)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python merge/test_cmd.py
 
   checks-windows-merge-2:
@@ -1123,171 +1150,207 @@ jobs:
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Janitor sweep fixture suite
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_sweep.py
 
       - name: Janitor sweep mutation test
-        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
 
   checks-windows-rest:
     runs-on: windows-latest
     needs: scope
-    if: ${{ needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request' }}
     # Cap 28 min = about 2x the slowest run without the janitor sweep suites (about 13.3 min of 30 runs; they moved to
     # checks-windows-sweep, decision ci-job-caps).
     timeout-minutes: 28
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Config watch fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_config_watch.py
 
       - name: Config watch fast-exit suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_config_watch_fast_exit.py
 
       - name: Shared names suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_shared_names.py
 
       - name: Precompact handoff fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_precompact_handoff.py
 
       - name: Handoff wave-2 fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_prose_judge.py
 
       - name: SendMessage state fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_sendmessage_state.py
 
       - name: Call judge fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_call_judge.py
 
+      - name: Question form fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_question_form.py
+
       - name: Remove-prompt answer fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_rm_prompt_answer.py
 
       - name: Agent brief fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_agent_brief.py
 
       - name: Blind brief fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_blind_brief.py
 
       - name: Local time line fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_local_time.py
 
       - name: Stall watch stop suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_stall_watch_stop.py
 
       - name: CI wake-up fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_ci_wake.py
 
       - name: Feedback inbox fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_feedback_inbox.py
 
       - name: Daily note fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_daily_note.py
 
       - name: Guard wrappers fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_wrappers.py
 
       - name: Session start notice suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_session_start.py
 
       - name: Stop-hook guard fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard.py
 
       - name: Ruling home fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_ruling_home.py
 
       - name: Ruling census fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_ruling_census.py
 
       - name: Verdict runner fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_verdict.py
 
       - name: Hook platform exit fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_hook_platform_exit.py
 
       - name: Unknown-read contract (guard + session_start)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python lint/check_unknown_reads_contract.py
 
       - name: Janitor triggers fixture suite (SessionEnd hook)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_session_end_sweep.py
 
       - name: Janitor triggers fixture suite (launchd installer)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_install_launchd.py
 
       - name: Janitor triggers fixture suite (schtasks installer)
-        if: ${{ !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_install_schtasks.py
 
       # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
       # prints the process tree and kills it. timeout-minutes is the backstop.
       - name: Record stamp engine fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         timeout-minutes: 5
         run: node actions/stamp/test_stamp.mjs
 
       - name: Record stamp action fixture suite
-        if: ${{ !cancelled() }}
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         shell: bash
         run: bash actions/stamp/test_action.sh
+
+  # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
+  # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job.
+  # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
+  all-jobs-passed:
+    runs-on: ubuntu-latest
+    needs:
+      - scope
+      - checks
+      - checks-guard
+      - checks-shoot
+      - pointer-windows
+      - shell-macos
+      - checks-macos
+      - checks-windows
+      - checks-mutate-guard
+      - checks-windows-guard
+      - checks-windows-merge
+      - checks-windows-rest
+      - checks-windows-sweep
+    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: $/actions/all-jobs-passed
+        with:
+          needs: ${{ toJSON(needs) }}
 
   # Wakes a session that waits on this PR (decision ci-wait-reads-run-status, "The cloud wake").
   # A run with a red job sends no "all checks done" wake, so this job comments once when the run
@@ -1314,6 +1377,7 @@ jobs:
       - checks-windows-merge-5
       - checks-windows-rest
       - checks-windows-sweep
+      - all-jobs-passed
     if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
     timeout-minutes: 5
     permissions:

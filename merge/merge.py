@@ -991,8 +991,11 @@ class Host:
         A cancel entry is dropped when another entry of that name is pass or pending (another run ran; concurrency cancels one of two
         same-head runs; a cancel beside only a skip or alone stays red; a fail or timeout is never dropped).
         Also red: a head with entries where none is pass or pending (all skipping): no check ran on it,
-        unless something is pending. `branch` fills the remedy's `--ref`.
-        Pending: a pending entry, or a required name with no entry. `ignore` maps a name to its reason:
+        unless something is pending. `branch` fills the remedy's `--ref`. A dispatch run skips DRAFT_SKIP_CHECK, so when it is
+        required the remedy names `gh pr ready` or a new push, not a dispatch.
+        Pending: a pending entry, or a required name with no entry, or, when nothing is red, a required DRAFT_SKIP_CHECK whose
+        entries are all skipping (a draft run on the same head skipped it; the ready run has not passed it yet). Any other required
+        name that only skipped reads green. `ignore` maps a name to its reason:
         those checks are left out of red and pending, and named in `ignored`."""
         ignore = ignore or {}
         live = {k: rows for k, rows in got.items() if k not in ignore or k in names}
@@ -1000,7 +1003,11 @@ class Host:
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
-            red = [f"no check ran on this head (every check skipped). Run `gh workflow run checks.yml --ref {branch}`, or push anew after `gh pr ready`"]
+            fix = ("Run `gh pr ready`, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
+                   else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after `gh pr ready`")
+            red = [f"no check ran on this head (every check skipped). {fix}"]
+        if not red and DRAFT_SKIP_CHECK in names and live.get(DRAFT_SKIP_CHECK) and all(b == "skipping" for b, _ in live[DRAFT_SKIP_CHECK]):
+            pending = sorted(set(pending) | {DRAFT_SKIP_CHECK})
         ignored = [f"{k} ({ignore[k]}): " + "/".join(sorted({b for b, _ in rows})) for k, rows in got.items() if k in ignore]
         return red, pending, ignored
 
@@ -1220,6 +1227,7 @@ def records_proof(wt, base_ref):
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
+DRAFT_SKIP_CHECK = "all-jobs-passed"  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 
@@ -1891,7 +1899,7 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
-MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches"}
+MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "standingGrant"}
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
@@ -2012,6 +2020,7 @@ def load_config(root, base, path):
     rc, am = m.get("requiredChecks", "protection"), m.get("afterMerge", [])
     for ok, k in ((m.get("method", "merge") in ("merge", "squash", "rebase"), "method"),
                   (isinstance(m.get("deleteBranch", True), bool), "deleteBranch"),
+                  (isinstance(m.get("standingGrant", True), bool), "standingGrant"),
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
@@ -2418,6 +2427,8 @@ def main(argv, host=None, lock=None):
         info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
         refuse_bad_pr(info, draft_ok=not a.confirm)  # a closed PR, or a draft under --confirm, stops before the config notice
         cfg = load_config(root, info["base"], a.config)
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
+            raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR.")
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore

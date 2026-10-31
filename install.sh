@@ -2,7 +2,7 @@
 # Wire ~/.claude to the files in this repo. Linux/macOS local, and Claude Code cloud sessions.
 #
 #   Local (from a clone):   bash install.sh
-#   Cloud setup script:     curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud
+#   Cloud setup script:     fetch cloud-setup.sh (it fetches this file and runs it with --cloud)
 #
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
@@ -437,7 +437,7 @@ log "wrote $TARGET_MD -> $POINTER"
 
 # land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files (install-hooks-whole).
 # A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
-# with this run's id, and shared_names.py and git_reads.py, which the guard imports, into DEST_HOOKS/guard.d/<id>/,
+# with this run's id, and shared_names.py, git_reads.py, question_form.py and precompact_handoff.py, which the guard imports, into DEST_HOOKS/guard.d/<id>/,
 # where no guard reads it yet. Step 2 replaces
 # DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its
 # id>/ (see the comment above INSTALL_ID in hooks/guard.py). Step 3 lands the flat guard_*.py, kept
@@ -448,7 +448,7 @@ land_guard_set() {
   gdir="$2/guard.d/$INSTALL_ID_VALUE"
   prev_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$2/guard.py" 2>/dev/null | head -n1)
   mkdir -p "$gdir" || { log "could not make $gdir; the guard files stay as they were"; INSTALL_FAILED=1; return 1; }
-  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py; do
+  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/precompact_handoff.py; do
     [ -f "$gf" ] || continue
     put_file "$gf" "$gdir/$(basename "$gf")" || { rm -rf "$gdir"; log "the guard files stay as they were"; return 1; }
   done
