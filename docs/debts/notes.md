@@ -753,3 +753,5 @@
 - ci-job-local-action-other-path: LOCAL_ACTION matches only `$/actions/` and `./actions/`, so a local action at another path reads as remote and borrows a copy; same on main (bin/ci-job).
 - test-ci-job-pipx-probe-windows: the pipx probe's 60 s timeout on Windows can wait on a pipx child that holds the pipe (lint/test_ci_job.py).
 - test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so a local run tests only committed bin/ci-job edits (lint/test_ci_job.py).
+- frozen-redirect-and-word: `echo x >&settings.json` from the config dir writes the file `settings.json` and the frozen-path rule allows it; same on main (hooks/guard_frozen.py).
+- frozen-copy-read-amp-redirect: `cp /tmp/x <frozen> &> /dev/null` is allowed because `_copy_reads` reads the bare `&` of `&>` as an operand, so the frozen DEST counts as a source; same on main (hooks/guard_frozen.py).
