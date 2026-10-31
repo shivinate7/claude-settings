@@ -725,7 +725,8 @@ WORKTREE_HAND_MADE_REASON = (
     "Rule (hand-made worktree): a lane tree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
     "A hand-made tree sends a lane to work in the main clone and loses the isolation. "
-    "Remedy: start the lane with one of those two tools. If the tool's isolation was refused, "
+    "Remedy: start the lane with one of those two tools. Call EnterWorktree with a `name` and no "
+    "`path`. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
@@ -2547,57 +2548,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                      log_path_and_text(matched, change), "settings write")
     settle_ask(tool, raw)
 
-# ------------------------------------------------------------------ a port question departs or is not asked
+# ------------------------------------------------------------------ a waiting-page item states the question form
 #
-# docs/decisions/port-keeps-behaviour.md, rule `port-question`, built against a named incident
-# (incident in the record): a waiting item about a port or redesign of an
-# existing app carries a "Departs from:" line and never holds work, since the existing app answers
-# the question. The item is read at the ArtifactData call that writes it.
+# hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
+# `command-in-item`, `task-names-check`, `owner-judge`, `question-form`). This check runs them only for a
+# write to this repo's waiting page.
 DATA_TOOL = "ArtifactData"
 WAITING_ITEMS = "items"
-PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|redesign(?:s|ed|ing)?"
-                       r"|rewrite\s+of|rebuild\s+of)\b", re.I)
-DEPARTS_LINE = re.compile(r"^\s*Departs from:", re.I | re.M)
-PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
-               "departs from the app, and it never holds work. Add a line to context that starts "
-               "\"Departs from: <file>:<symbol> \u2014 <what changes>\", leave out holds, or set "
-               "port to false if this is not a port.")
-
-
-def _item_text(data) -> str:
-    return " ".join(str(data.get(k) or "") for k in ("title", "context", "holds"))
-
-
-def port_item_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting item is a port question that skips the rule."""
-    if not isinstance(data, dict) or ("kind" in data and data["kind"] not in ("decision", "task")):
-        return ""
-    if op == "set" and "kind" not in data:
-        return ""
-    if "port" in data:
-        on_port = bool(data["port"])
-    else:
-        on_port = op == "set" and bool(PORT_WORD.search(_item_text(data)))
-    if not on_port:
-        return ""
-    if data.get("holds"):
-        return "port item with holds"
-    if (op == "set" or "context" in data) and not DEPARTS_LINE.search(str(data.get("context") or "")):
-        return "port item with no Departs from line"
-    return ""
-
-
-def _write_data(entry):
-    """The data of one write: `data`, else the JSON in `file_path`. None when neither reads."""
-    data = entry.get("data")
-    path = entry.get("file_path")
-    if data is None and isinstance(path, str) and path:
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return None
-    return data
 
 
 def _is_waiting_page(tool_input, cwd) -> bool:
@@ -2624,218 +2581,6 @@ def _git_root_of(cwd):
         here = parent
 
 
-# ------------------------------------------------------------------ a pick never widens a shared tool
-#
-# docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
-# (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`.
-# Read at the same ArtifactData call.
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
-                 "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
-                 "match the shared format, or leave pick out.")
-
-
-def widens_pick_hit(data) -> str:
-    """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
-    `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
-    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
-        return ""
-    options, pick = data.get("options"), data.get("pick")
-    if isinstance(pick, str):
-        pick = [pick]
-    if not isinstance(pick, list) or not isinstance(options, list):
-        return ""  # an absent or null pick picks nothing, so it never matches a keyless option
-    keys = {p for p in pick if isinstance(p, str)}
-    if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
-           and o.get("widens") is True for o in options):
-        return "pick names a widening option"
-    return ""
-
-
-# ------------------------------------------------------------------ the owner acts in place
-#
-# docs/decisions/act-in-place.md, rules `press-link` and `command-in-item`, built against a named
-# incident (incident in the record): an option or step that asks the owner to press in a web app
-# carries a link to that exact page, and a step never sends him to a file for a command. Both are
-# read at the same ArtifactData call.
-PRESS_LINK_REASON = ("An option or step that asks the owner to press in a web app carries a link to "
-                     "that exact page. Put links: [{label, url}] on that option (a task: on the item), "
-                     "with the url of the page where he presses; for a pull request or an issue, the "
-                     "url of that number.")
-COMMAND_REASON = ("A step never sends the owner to a file for a command. Put the command in the item's "
-                  "`command` field, and say \"paste the command below\" in the step.")
-# A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
-# a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
-# pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
-# is not a press, and neither is a press of the waiting page's own buttons: it needs no link.
-_CLAUSE = r"(?:^|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
-_PAGE_BUTTON = r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b)"
-# An item or step number on the page, "item #47" or "step #2", is not a PR ref.
-_REF = r"(?<!\bitem\s)(?<!\bstep\s)(?<!\bitem)(?<!\bstep)#\s*(\d+)"
-PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|ed|ing)?"
-                        r"|click(?:s|ed|ing)?|tap(?:s|ped|ping)?)\b" + _PAGE_BUTTON +
-                        r"|" + _CLAUSE + r"(?:approve|merge|hit|turn\s+(?:it\s+)?on)\b"
-                        r"|\bmark(?:s|ed|ing)?\b[^.\n]*?(?:\bprs?\b|pull\s+requests?|" + _REF + r")[^.\n]*?\bready\b"
-                        r"|\bmark(?:s|ed|ing)?\b[^.\n]*?\bready\b(?:\s+for\s+review)?\s+(?:on|in|at)\s+"
-                        r"(?:the\s+)?(?:[\w./-]*" + _REF + r"|prs?\b|pull\s+requests?|github)",
-                        re.I | re.M)
-# A web page: GitHub, a PR, a pull request, a ref `home#374`, or Settings as a page name (capital S,
-# or "settings page"; never settings.json or claude-settings).
-WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|" + _REF +
-                        r"|(?-i:(?<![\w-])Settings\b(?!\.\w))|\bsettings\s+page\b", re.I)
-PRESS_REF = re.compile(_REF, re.I)
-_FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
-         r"|\b(?:plans|docs|notes)/[\w./-]+")
-COMMAND_FILE = re.compile(_FILE, re.I)
-# "the command in/from <file>" and "its command" (after a file step) point at a file. "run the
-# command" and the like count only with no `command` on the item; "the command below" never does.
-COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
-                             + _FILE + ")", re.I)
-COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
-COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b(?!\s+below)"
-                          r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
-
-
-def _flat_text(value) -> str:
-    """One string from a step or option field: a string as is, a dict's string values joined."""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        return " ".join(v for v in value.values() if isinstance(v, str))
-    return ""
-
-
-def _press_field_ok(text, links, context="") -> bool:
-    """True when this field asks for no web press, or `links` holds a link to the exact page. The
-    press verb is read in `text`. The page, and each `#N` that needs a url with /pull/N or
-    /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
-    if not PRESS_VERB.search(text):
-        return True
-    page = text if WEB_MARKER.search(text) else context
-    if not WEB_MARKER.search(page):
-        return True
-    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
-    if not urls:
-        return False
-    return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
-               for n in PRESS_REF.findall(page))
-
-
-def press_link_hit(op, data) -> str:
-    """The matched text when this write names a press in a web app with no link to the exact page.
-    The link sits on the option that presses, or on the task. An update of `steps` with no `links`
-    cannot see the stored links and passes."""
-    if not isinstance(data, dict) or data.get("kind", "decision") not in ("decision", "task"):
-        return ""
-    options, steps = data.get("options"), data.get("steps")
-    if isinstance(options, list):
-        for o in options:
-            if not isinstance(o, dict):
-                continue
-            # label and how are one text: the ref may sit in one and the press in the other
-            text = _flat_text(o.get("label")) + ". " + _flat_text(o.get("how"))
-            if not _press_field_ok(text, o.get("links")):
-                return "option presses in a web app with no link to the page"
-    if isinstance(steps, list) and (op == "set" or "links" in data):
-        # the steps are one text, as command-in-item reads them: the page may sit in one step and
-        # the press in another. The title names the page only when the steps name none, and a
-        # title alone never makes a press.
-        joined = "\n".join(_flat_text(s) for s in steps)
-        if not _press_field_ok(joined, data.get("links"), _flat_text(data.get("title"))):
-            return "step presses in a web app with no link to the page"
-    return ""
-
-
-def command_in_item_hit(data) -> str:
-    """The matched text when a task's steps, joined, send the owner to a file for a command. A
-    `command` on the item does not excuse it: the step still points at the file."""
-    if not isinstance(data, dict) or data.get("kind", "task") != "task":
-        return ""
-    steps = data.get("steps")
-    if not isinstance(steps, list):
-        return ""
-    joined = "\n".join(_flat_text(s) for s in steps)
-    has_file = COMMAND_FILE.search(joined)
-    has_command = isinstance(data.get("command"), str) and data["command"].strip()
-    if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
-            or (has_file and not has_command and COMMAND_VERB.search(joined)):
-        return "steps send the owner to a file for a command"
-    return ""
-
-
-# ------------------------------------------------------------------ a task names why only the owner can do it
-#
-# docs/decisions/task-names-its-check.md, rule `task-names-check`, built against a named incident
-# (incident in the record): a waiting-page task handed the owner a job a session on his computer then
-# did. A task carries a "Why yours:" line naming the check that showed no session could do it.
-WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
-TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
-               "act, ask a session on the owner's computer first (list_computer_folders, then "
-               "request_computer_folder). Then add a line to context that starts \"Why yours: "
-               "<the check that showed no session could do it>\".")
-
-
-def task_check_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting-page task has no Why yours line. An update that
-    carries no `context` cannot change the line and passes, as does one with no `kind`."""
-    if not isinstance(data, dict) or data.get("kind") != "task":
-        return ""
-    if (op == "set" or "context" in data) and not WHY_YOURS_LINE.search(str(data.get("context") or "")):
-        return "task with no Why yours line"
-    return ""
-
-
-def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line. It carries no
-    `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it
-    judges a context edit that touches the line, whatever the item's kind."""
-    if entry.get("field") != "context":
-        return ""
-    old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
-    if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
-        return "context edit that removes the Why yours line"
-    return ""
-
-
-# ------------------------------------------------------------------ a decision names what it costs the owner
-#
-# docs/decisions/owner-judge-test.md, rule `owner-judge`, built against a named incident (incident in
-# the record): a decision about CI internals reached the owner, who had no stake in it. A decision
-# carries a "Your stake: <kind> <text>" line in `context`. Only that line counts.
-OWNER_STAKES = ("goal", "money", "risk", "rule", "cannot undo")
-STAKE_LINE = re.compile(r"^[ \t]*Your stake:[ \t]*(?:%s)[ \t]+\S" % "|".join(OWNER_STAKES), re.I | re.M)
-STAKE_REASON = ("A decision is the owner's only when he can judge it. Add a line to context that starts "
-                "\"Your stake: <kind> <text>\", where kind is one of %s, and the text says what the pick "
-                "costs him. If no kind fits, take your own pick and set stands: true." % ", ".join(OWNER_STAKES))
-
-
-def owner_judge_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting-page decision has no Your stake line. A stood pick
-    a port (its Departs from line is the stake) and a closed item (it asks the owner nothing) pass. An
-    update is judged only when it carries both kind decision and context."""
-    if not isinstance(data, dict) or data.get("stands") is True or data.get("port") is True \
-            or data.get("status") == "closed":
-        return ""
-    if op == "set":
-        judged = data.get("kind") in (None, "decision")
-    else:
-        judged = data.get("kind") == "decision" and "context" in data
-    if judged and not STAKE_LINE.search(str(data.get("context") or "")):
-        return "decision with no Your stake line"
-    return ""
-
-
-def stake_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Your stake line. It carries no
-    `data`, so it is read from old_str and new_str."""
-    if entry.get("field") != "context":
-        return ""
-    old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
-    if STAKE_LINE.search(old) and not STAKE_LINE.search(new):
-        return "context edit that removes the Your stake line"
-    return ""
-
-
 def data_tool_hit(tool_input, cwd=""):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
@@ -2848,34 +2593,11 @@ def data_tool_hit(tool_input, cwd=""):
               if op in ("set", "update", "str_replace") and e.get("collection") == WAITING_ITEMS]
     if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
         return "", ""
+    import question_form
     for op, entry in writes:
-        if op == "str_replace":
-            hit = task_str_replace_hit(entry)
-            if hit:
-                return "task-names-check", hit
-            hit = stake_str_replace_hit(entry)
-            if hit:
-                return "owner-judge", hit
-            continue
-        data = _write_data(entry)
-        hit = port_item_hit(op, data)
-        if hit:
-            return "port-question", hit
-        hit = widens_pick_hit(data)
-        if hit:
-            return "uniform-pick", hit
-        hit = press_link_hit(op, data)
-        if hit:
-            return "press-link", hit
-        hit = command_in_item_hit(data)
-        if hit:
-            return "command-in-item", hit
-        hit = task_check_hit(op, data)
-        if hit:
-            return "task-names-check", hit
-        hit = owner_judge_hit(op, data)
-        if hit:
-            return "owner-judge", hit
+        hit = question_form.item_hit(op, entry)
+        if hit[0]:
+            return hit
     return "", ""
 
 
@@ -3146,8 +2868,8 @@ SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "reba
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
-    "Remedy: call the EnterWorktree tool first. It branches from origin's default branch. Then "
-    "write inside that worktree."
+    "Remedy: call the EnterWorktree tool first. Call it with a `name` and no `path`. It branches "
+    "from origin's default branch. Then write inside that worktree."
 )
 
 
@@ -3421,18 +3143,25 @@ def judge(payload) -> None:
 
     if tool == DATA_TOOL:
         rule, matched = data_tool_hit(tool_input, cwd)
+        if rule:
+            import question_form
+        # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
         if rule == "port-question":
-            refuse(tool, "deny", "port-question", PORT_REASON, matched)
+            refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
         if rule == "uniform-pick":
-            refuse(tool, "deny", "uniform-pick", WIDENS_REASON, matched)
+            refuse(tool, "deny", "uniform-pick", question_form.PAGE_REASONS["uniform-pick"], matched)
         if rule == "press-link":
-            refuse(tool, "deny", "press-link", PRESS_LINK_REASON, matched)
+            refuse(tool, "deny", "press-link", question_form.PAGE_REASONS["press-link"], matched)
         if rule == "command-in-item":
-            refuse(tool, "deny", "command-in-item", COMMAND_REASON, matched)
+            refuse(tool, "deny", "command-in-item", question_form.PAGE_REASONS["command-in-item"], matched)
         if rule == "task-names-check":
-            refuse(tool, "deny", "task-names-check", TASK_REASON, matched)
+            refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
         if rule == "owner-judge":
-            refuse(tool, "deny", "owner-judge", STAKE_REASON, matched)
+            refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
+        if rule == "question-form":
+            refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
+        if rule == "item-field-rendered":
+            refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         return
 
     if tool in SHELL_TOOLS:
