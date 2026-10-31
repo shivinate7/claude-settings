@@ -5,13 +5,15 @@
 Each repo that keeps records has one generated index page, `docs/records.md`. It lists each decision and
 debt with a one-line gist. Only the merge tool rebuilds the page. A branch never edits the page by hand.
 
-The tool rebuilds the page on the integration branch before the branch goes ready: `merge <pr> --prepare`.
-It runs on a draft PR only, and only when the head holds the base tip. It commits the page alone and pushes
-it, so the branch is final at ready. Then the ready run is the merge run, and `--confirm` finds the page
-current and pushes no commit. `--prepare` claims no record numbers and takes no merge lock.
+The tool rebuilds the page on the integration branch before the branch goes ready. `merge <pr> --confirm`
+on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip. It
+commits the page alone, pushes it, marks the PR ready, and stops. When it cannot mark the PR ready (a cloud
+session's `gh` gets 403 on GraphQL), it says so, and the batch runner marks it ready. So the branch is final
+at ready, and the ready run is the merge run. The step claims no record numbers and takes no merge lock.
+The same two allow rules cover both steps, so no new rule is needed.
 
-`--confirm` still rebuilds the page and claims record numbers under the merge lock. A page that is current
-makes no commit. A stale page (no `--prepare`, or the base gained a record since) gets the rebuild commit, and
+`--confirm` on a ready PR rebuilds the page and claims record numbers under the merge lock. A page that is
+current makes no commit. A stale page (no draft step, or the base gained a record since) gets the rebuild commit, and
 that commit needs a second CI run. A claim stays at confirm, so its numbers are free on the base tip under
 the lock, as before. A batch that claims numbers still runs CI twice (unmeasured in other repos; none in
 this repo, Oct 24 to 31). When only the page conflicts with the base, the tool rebuilds it on the merged tree.
@@ -29,7 +31,7 @@ paths have tests. `RECORDS_HEADER` in `hooks/guard_merge.py` copies the first li
 
 Reason: a hand-kept index goes stale at the first merge that forgets it, so the tool owns it. Lanes that
 each rebuilt the page conflicted on it in three batches. A rebuild at confirm came after the ready run: 15
-of 50 merges to main, Oct 24 to 31, ended on that commit and ran CI twice.
+of 50 merges to main, Oct 24 to 31, ended on that commit and ran CI twice. None ended on a claim commit.
 
 Kind: build
 Plan: docs/decisions/records-index-at-merge.md#ruling (all)
