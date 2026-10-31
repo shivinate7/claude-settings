@@ -728,3 +728,8 @@
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
 - reap-log-done-by-margin: janitor/agent_end_reap.py LOG_DONE_BY 58 leaves 2 s, but the hook's 60 s timer starts before `started` (shell, interpreter start, stdin read); 55 was proposed. Decision: c95.
 - log-lock-retries-every-oserror: _log_lock retries on every OSError, so a non-contention error (ENOLCK, EOPNOTSUPP) waits to the deadline; a contention-only retry was proposed but its Windows errno pair (13, 36) for msvcrt.locking is unverified. Decision: c95.
+- holder-slash-unpinned: nothing pins "no / in HOLDER" (janitor/test_session_end_sweep.py); a later "/" breaks Windows only, under MSYS path rewriting, while Linux stays green. Decision: c95.
+- sweep-no-pipes-kwargs-only: SweepGetsNoPipes pins the DEVNULL kwargs; no case has a grandchild holding a pipe, so a hang by another route passes unseen. A Windows-only grandchild case would make it red-capable. Decision: c95.
+- heartbeat-starved-reads-stopped: a live holder starved 1 s or more reads as stopped, a false green only when the kill also failed. Decision: c95.
+- kill-holder-rekills-dead-pids: kill_holder and the atexit stop_holders kill each pid again, dead or not; a recycled pid inside that seconds-wide window could be killed. Decision: c95.
+- scratchpad-reap-reads-ps: ScratchpadReap reads liveness with ps, not the heartbeat; the reap is POSIX-only and needs ps to find orphans. Decision: c95.
