@@ -10,8 +10,12 @@
 # (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. Two `uses:` it runs in place, each
 # by its one home and only with a base: actions/ste-lint as `bin/ste-changed <base>` (shared with the action through
 # actions/ste-lint/run.sh), and actions/code-check as its action.yml's command, `python3 code_check.py --base <base>`
-# from this repo. When every failure code_check.py reports is a pinned tool that could not start, the step is
-# unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
+# from a checkout of this repo. The step's uses: picks which checkout, as CI does. A local uses: (`$/actions/...`,
+# `./actions/...`) runs the repo under test's own code_check.py, never another's: missing or failing, it FAILs. A
+# remote uses: (`owner/repo/actions/code-check@ref`) runs the copy beside ci-job, else the one in the checkout the
+# global rules file names, else the step is unknown and names the paths it looked at. The step's line names
+# the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
+# step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
 # line names each pull-request step it skips. A lane runs `bin/ci-job checks --lint --base origin/main` before it
@@ -31,8 +35,11 @@
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
 # runs `git fetch --unshallow` once (--plan only says so); a failed fetch is one unknown line. Cost: one git fetch,
 # only when shallow.
+# A step's stdout is its one verdict line. verdict's "still running" heartbeat (every $VERDICT_HEARTBEAT s) goes to
+# stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
+# line at least every 120 s).
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process.
-import os, re, shutil, sys, tempfile
+import os, re, shutil, subprocess, sys, tempfile
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -143,7 +150,24 @@ LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN"}  # absent from a runner step's env unless its env: maps them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check)(?:@\S*)?")
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
-CODE_CHECK = os.path.join(os.path.dirname(BIN), "actions", "code-check", "code_check.py")
+CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
+
+
+def code_check(top, step):
+    """(path, None) to the code_check.py the step's uses: names; (None, looked-at) when a remote uses: finds none.
+    A local uses: is always the repo under test's own file, even when missing, so the step fails here as in CI. A
+    remote uses: is the copy beside this file, else the one in the pointer checkout."""
+    if LOCAL_ACTION.fullmatch(uses(step)):
+        return os.path.join(top, CODE_CHECK), None
+    roots = [os.path.dirname(BIN)]
+    try:
+        from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
+        roots.append(pointer_checkout())
+    except ImportError:
+        pass
+    paths = [os.path.join(root, CODE_CHECK) for root in roots if root]
+    found = next((p for p in paths if os.path.isfile(p)), None)
+    return found, None if found else " or ".join(paths)
 
 
 def uses(step):
@@ -181,7 +205,7 @@ def could_not_start(log, start):
     return unstarted, bool(errors) and len(unstarted) == len(set(errors))
 
 
-def plan(step, pr, values):
+def plan(step, pr, values, top):
     """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
@@ -192,7 +216,10 @@ def plan(step, pr, values):
         if not shutil.which("bash") or not shutil.which("python3"):
             return "unknown", "tool missing: bash and python3", None, None, None
         if action == "code-check":  # the action.yml's own command
-            return "run", 'python3 "%s" --base "%s"' % (CODE_CHECK, values["base"]), SHELLS[None], {}, None
+            path, looked = code_check(top, step)
+            if not path:
+                return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
+            return "run", 'python3 "%s" --base "%s"' % (path, values["base"]), SHELLS[None], {}, None
         return "run", '"%s" "%s"' % (os.path.join(BIN, "ste-changed"), values["base"]), SHELLS[None], {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
@@ -265,7 +292,7 @@ def main(argv):
         else:
             idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": ""}
             unread = [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(step_blocks(block), 1)
-                      if is_lint(st) and plan(st, False, idle)[0] == "skipped"]
+                      if is_lint(st) and plan(st, False, idle, top)[0] == "skipped"]
             if unread:
                 print("unknown         no base resolved (origin/main is absent; pass --base), so these pull-request "
                       "steps are skipped: %s" % ", ".join(unread))
@@ -285,7 +312,7 @@ def main(argv):
                 tally["unknown"] += 1
                 print("%-15s %s: --lint cannot run this repo's action %s" % ("unknown", name, uses(step)))
             continue
-        state, detail, shell, env, cwd = plan(step, bool(base), values)
+        state, detail, shell, env, cwd = plan(step, bool(base), values, top)
         if state != "run":
             print("%-15s %s: %s" % (state, name, detail))
             tally["unknown"] += state == "unknown"
@@ -299,24 +326,38 @@ def main(argv):
             script = f.name
         try:
             start = os.path.getsize(log) if os.path.exists(log) else 0
-            done = _nowindow.run([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
-                                 cwd=os.path.join(top, cwd) if cwd else top, capture_output=True, text=True,
+            kept = []
+            with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
+                                 cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True,
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET},
-                                      **env, "VERDICT_LOG": log})
+                                      **env, "VERDICT_LOG": log}) as proc:
+                for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
+                    if not line.startswith("verdict: still running"):
+                        kept.append(line)
+                        continue
+                    try:
+                        sys.stderr.write(line)
+                        sys.stderr.flush()
+                    except OSError:
+                        pass  # reader gone: keep reading, keep the step's verdict
+            rc = proc.returncode
             gone = missing_in_log(log, start, script)
             unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
         finally:
             os.remove(script)
-        first = next((ln for ln in done.stdout.splitlines() if ln.startswith(("PASS ", "FAIL "))),
-                     "(verdict printed no verdict line)")  # skip its "still running" heartbeats
-        if done.returncode == 127 or gone:
+        first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "FAIL "))),
+                     "(verdict printed no verdict line)")
+        if known_action(step) == "code-check":
+            first += " (code_check.py: %s)" % code_check(top, step)[0]
+        if rc == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
         elif unstarted and only:
             state = "unknown"
             first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
         else:
-            state = "PASS" if done.returncode == 0 else "FAIL"
+            state = "PASS" if rc == 0 else "FAIL"
             if unstarted:
                 first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
         tally["FAIL" if state == "FAIL" else "unknown"] += state != "PASS"

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(~/.claude/bin/merge * --confirm)",
-      "Bash(~/.claude/bin/merge * --confirm *)"
+      "Bash(~/.claude/bin/merge * --confirm *)",
+      "Bash(~/.claude/bin/merge --role coordinator)",
+      "Bash(~/.claude/bin/merge --role batch-runner)"
     ]
   }
 }
