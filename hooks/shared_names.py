@@ -11,7 +11,11 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
-MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG)
+# A subagent hand-back (CLI 2.1.316 text), bare or after its frame line. The tag name ends at `>`
+# or whitespace.
+_HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")
+MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + tuple(
+    "Another Claude session sent a message:\n" + tag for tag in _HAND_BACK_TAGS)
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
