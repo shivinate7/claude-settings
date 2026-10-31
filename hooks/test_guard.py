@@ -101,6 +101,7 @@ FAMILIES = {
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
+    "gh-login-switch": "the waiting-page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
     "rule9": "rule 9, the agent model floor",
@@ -11854,6 +11855,89 @@ ci("a file step with the command set is denied", "deny",
    ci_task(CI_STEPS, command="git push origin --delete old-a"))
 ci("a run-the-command-in-file step with the command set is denied", "deny",
    ci_task(["Run the command in plans/c152.md"], command="git push origin --delete old-a"))
+
+
+# --------------------------------------------------------------------------- a gh command handed to the owner switches login first
+FAMILY = "gh-login-switch"
+#
+# Owner ruling, Oct 31 14:55 CDT: shivinate7 is the default login; ssemwal-cdc only for a repo shivinate7
+# cannot reach. A task's `command` runs on the owner's computer, so a gh command in it runs as whichever
+# login is active there. The command switches first: `gh auth switch -u <login>` before the first non-auth
+# gh command. Built against a named incident: a branch-protection PATCH on shivinate7/claude-settings was
+# handed to the owner with no switch, Oct 31 14:52 CDT. A decision is not judged by this rule.
+
+GL_PATCH = ("gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/"
+            "required_status_checks -f strict=true")
+GL_SWITCH = "gh auth switch -u shivinate7"
+GL_DOC = "gh-login-main-protection"
+GL_TITLE = "Protect main on claude-settings"
+
+
+def gl(name, expected, command=None, carries=(), **over):
+    """One task whose `command` is judged. The steps and the Why yours line come from ci_task, the one task builder."""
+    item = ci_task(["Open Terminal", "Paste the command below and run it"],
+                   **dict({"command": command, "id": GL_DOC, "title": GL_TITLE}, **over))
+    wp_write("gh login switch: " + name, expected, "gh-login-switch", item, doc_id=GL_DOC, carries=carries)
+
+
+gl("today's incident: a branch-protection PATCH with no switch is denied", "deny", GL_PATCH)
+gl("the refusal names the switch to add", "deny", GL_PATCH, carries=("gh auth switch",))
+gl("a switch after the gh line is denied", "deny", GL_PATCH + "\n" + GL_SWITCH)
+gl("a cd then gh pr ready, with no switch, is denied", "deny", "cd x && gh pr ready 5")
+gl("a switch to ssemwal-cdc before a shivinate7/ repo is denied", "deny",
+   "gh auth switch -u ssemwal-cdc && " + GL_PATCH)
+gl("the long form, a switch to ssemwal-cdc before a shivinate7/ repo, is denied", "deny",
+   "gh auth switch --user ssemwal-cdc && " + GL_PATCH)
+gl("a switch to a login outside the pair is denied", "deny", "gh auth switch -u someoneelse && gh pr ready 5")
+gl("a gh command after a semicolon, with no switch, is denied", "deny", "cd x; gh pr ready 5")
+gl("a gh command after a pipe, with no switch, is denied", "deny",
+   "printf '{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -")
+gl("a gh api piped to jq, with no switch, is denied", "deny",
+   "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .")
+gl("a gh api split by line continuations, with no switch, is denied", "deny",
+   "gh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true")
+gl("a # inside quotes does not hide a gh command, with no switch, is denied", "deny",
+   'echo "# note" && gh api repos/shivinate7/claude-settings/branches/main/protection')
+gl("a # after a quote does not cut off a gh command, with no switch, is denied", "deny",
+   'echo "x #" ; gh pr ready 5')
+gl("a gh command after a multi-line quoted argument, with no switch, is denied", "deny",
+   'gh pr comment 5 --body "first\nsecond"')
+gl("a switch named inside quotes does not count, so the gh command is denied", "deny",
+   'echo "gh auth switch -u shivinate7" && gh pr ready 5')
+gl("a switch named in a # comment line does not count, so the gh command is denied", "deny",
+   "# gh auth switch -u shivinate7\ngh pr ready 5")
+gl("a lone quote in text before a gh command, with no switch, is denied", "deny", "echo Don't && gh pr ready 5")
+
+gl("a switch to shivinate7, then gh api, is allowed", "allow", GL_SWITCH + " && " + GL_PATCH)
+gl("the long form, a switch to shivinate7, is allowed", "allow", "gh auth switch --user shivinate7 && gh pr ready 5")
+gl("a switch and a gh command joined by a semicolon are allowed", "allow", GL_SWITCH + "; gh pr ready 5")
+gl("a cd line, then the switch, then gh, is allowed", "allow", "cd x\n" + GL_SWITCH + "\ngh pr ready 5")
+gl("a # open Git Bash line, then cd, then the switch, then gh, is allowed", "allow",
+   "# open Git Bash\ncd x\n" + GL_SWITCH + "\ngh pr ready 5")
+gl("a switch with no gh command after it is allowed", "allow", GL_SWITCH)
+gl("a # comment line holding a gh command is allowed", "allow", "# gh pr ready 5")
+gl("a gh command echoed as text is allowed", "allow", 'echo "gh pr list"')
+gl("a command that is only gh auth login is allowed", "allow", "gh auth login")
+gl("a command with no gh is allowed", "allow", "python3 hooks/test_guard.py")
+gl("ghq is not gh and is allowed", "allow", "ghq get x")
+gl("ssemwal-cdc on a repo not under shivinate7 is allowed", "allow",
+   "gh auth switch -u ssemwal-cdc && gh api repos/ssemwal-cdc/ops-tools/pulls/5")
+gl("a lone quote in a comment line before the switch is allowed", "allow",
+   "# Don't forget\n" + GL_SWITCH + "\ngh pr ready 5")
+gl("a continued gh api after the switch is allowed", "allow",
+   GL_SWITCH + "\ngh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true")
+gl("a multi-line quoted argument after the switch is allowed", "allow",
+   GL_SWITCH + '\ngh pr comment 5 --body "first\nsecond"')
+
+# A decision is not judged: it carries the command, with the form lines and gain and lose, and no switch.
+wp_write("gh login switch: a decision that holds a gh command with no switch is not judged", "allow", "gh-login-switch",
+         {"id": GL_DOC, "kind": "decision", "status": "open", "title": "Protect main on claude-settings?",
+          "context": OJ_FORM + "\nThe branch rule needs admin, and the active login decides who can run it.",
+          "command": GL_PATCH,
+          "options": [{"key": "a", "label": "Apply the rule", "how": "Run the command the item holds.",
+                       "gain": "g", "lose": "l"},
+                      {"key": "b", "label": "Keep it", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]},
+         doc_id=GL_DOC)
 
 
 # --------------------------------------------------------------------------- a task names the check that showed only the owner can do it
