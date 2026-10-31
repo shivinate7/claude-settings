@@ -538,10 +538,9 @@ def case_page_reasons_are_one_table():
 
 # ------------------------------------------------------------------ a question says how it departs from main
 #
-# Rule question-departs (decision: the owner's question is asked only when the work departs from main, and
-# the owner's ruling says a restatement of main is no question). Judged after the form passes, on the chat
-# box (each question with 2+ options, in `question`) and on a page decision (set, or an update that carries
-# context, in `context`). Each refusal below is red on today's code, which has no such rule.
+# Rule question-departs: a question is asked only when the work departs from main. A line that restates
+# main names no departure, so it is refused. Judged after the form passes, on the chat box (each question
+# with 2+ options, in `question`) and on a page decision (set, or an update that carries context, in `context`).
 
 # A line that restates main: its change side says there is no change. Each is refused.
 RESTATES = [
