@@ -75,6 +75,9 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Local sessions: unchanged. No allow rule and no role check apply, so the classifier or a permission prompt judges each confirm, as before. The guard also denies `merge --role` there, because no cloud session id is set. That is harmless: `merge.py` already refuses `--role` outside the cloud.
   - Not covered: raw `gh pr merge` and the GitHub MCP merge tool. `hooks/guard_merge.py` judges both on CI only, as before.
   - Cost: one small file read per cloud confirm, one file write per role record, one log read per `--role` call, inside processes already running. No new process, timer or log. Checks: `merge/test_merge.py` (MergeRoleCheck, CloudAllow), `hooks/test_guard.py` (section "the merge role record") and `hooks/test_session_start.py`.
+- **Trust card** (rule `trust-card-in-build`, guard rule that denies the two owner-card calls in a `cs-build:` session). Risk kind: incident. The coordinator took the trusted-device card on 2026-10-30, 16:19-17:06 CDT, and it blocked every message into that session. Landed 2026-10-31.
+  - The guard allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag. It reads the tags as `merge-role-proof` does. No record, no transcript or no env id is a denial.
+  - Steer: a `cs-build` session hands the act to the owner or to an untagged bridge session. A session with no record runs `get_session` alone in its own turn, then retries.
 
 ## How it works
 

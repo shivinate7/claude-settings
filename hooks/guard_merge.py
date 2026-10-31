@@ -567,6 +567,33 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
     return ""
 
 
+TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude-code-remote__request_computer_folder")
+TRUST_REASON = (
+    "trust-card-in-build: this call opens an owner card that blocks every message into the session, and "
+    "this session's own record does not prove it has no cs-build tag. A cs-build session hands the act to "
+    "the owner or to an untagged bridge session. A session with no record yet: run get_session (no "
+    "argument) alone in its own turn, then retry."
+)
+
+
+def trust_card_hit(tool: str, transcript: str) -> str:
+    """Return the tool name when it opens a trust card and the own record does not prove an untagged
+    session, else ''. Fails closed: any error in the reads is a refusal, because the guard-wide crash
+    path fails open."""
+    if tool not in TRUST_TOOLS:
+        return ""
+    try:  # cost: one transcript read, only on these two calls
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and transcript:
+            tags = _own_get_session_tags(transcript, own_id)
+            if tags is not None and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
+                return ""
+    except Exception:
+        pass
+    return tool
+
+
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"
