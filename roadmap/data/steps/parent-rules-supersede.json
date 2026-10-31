@@ -1,0 +1,9 @@
+{
+  "title": "A claude-settings ruling overrides a child repo, unless the repo names it as a known exemption",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3047,
+  "why": "shiv, Oct 31 15:04 CDT owner chat (via coordinator session_013NEJL2pASwRjgJDnsvnpNe), a build rule. First case: banchi CLAUDE.md line 350, \"The designation is never inherited. A later session re-asks\", conflicts with decision session-tiers and cites no exemption.",
+  "note": "Ruled Oct 31 15:04 CDT (shiv): if claude-settings rules on something, it supersedes what a repo has, unless the repo explicitly carves out the rule by naming the claude-settings rule. Any guard, hook, CLAUDE.md line or other text in a child repo that conflicts with how repos inherit from claude-settings is wrong unless it cites the claude-settings rule as a \"known exemption\"; such text is stale prose for the compliance check to find. Home: decision compliance-defined (#886, batch 37), rewritten in place after batch 37 merges. Fix: skill compliance-check gains a check that flags child-repo text that conflicts with a claude-settings rule and cites no known exemption. The banchi lane fixes the first case (CLAUDE.md line 350). Starts when batch 37 lands (coordinator). Done check: a fixture child repo with a conflicting line and no exemption is flagged; the same line citing the rule as a known exemption is not; red on main, green on the fix. Needs no answer. Files: skills/compliance-check/SKILL.md and probes, lint/compliance_probes.py, docs/decisions/compliance-defined.md.",
+  "updatedAt": "2026-10-31T20:07:00Z"
+}
