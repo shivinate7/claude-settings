@@ -8103,10 +8103,10 @@ TRUST_TOOLS = {
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
 
 
-def trust_deny(name, tool, transcript, carries=()):
+def trust_deny(name, tool, transcript, carries=(), env=ROLE_ENV):
     """A trust-card call the guard refuses. The reason names its rule, and never either tool."""
     add("trust-card-in-build: " + name, "deny", rule=TRUST_RULE, tool=tool, cwd=NOGIT, lacks=TRUST_NAMED,
-        carries=carries, transcript=transcript, env=ROLE_ENV, **TRUST_TOOLS[tool])
+        carries=carries, transcript=transcript, env=env, **TRUST_TOOLS[tool])
 
 
 def trust_allow(name, tool, transcript):
@@ -8129,6 +8129,16 @@ for _trust_tool in TRUST_TOOLS:
     ):
         trust_deny(_trust_word + " with " + _trust_why + " is refused", _trust_tool, role_path(_trust_file),
                    carries=("get_session", "alone", ("retry", "Retry")))
+    # A transcript or env id the guard cannot use is a refusal too, never a crash that lets the call through.
+    # No remedy text is pinned: get_session cannot help when there is no transcript to read.
+    for _trust_why, _trust_file in (
+        ("a transcript_path that names no file", role_path("missing")),
+        ("a transcript_path that cannot be read", role_path("unreadable")),
+        ("a payload with no transcript_path", None),
+    ):
+        trust_deny(_trust_word + " with " + _trust_why + " is refused", _trust_tool, _trust_file)
+    trust_deny(_trust_word + " with no session id in the env is refused, whatever the record holds",
+               _trust_tool, role_path("untagged"), env=None)
     # The own-id filter: a newer foreign cs-build:lane record is not this session's tag.
     trust_allow(_trust_word + " beside a newer record of another session that is tagged allows", _trust_tool,
                 role_path("foreign-lane-newest"))
