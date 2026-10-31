@@ -28,7 +28,7 @@ session transcripts, not a repo.
 | --- | --- | --- |
 | Outcomes | Read the child `CLAUDE.md` and README first screen. Run `ste_lint` on both | rules name the person served; README passes `fresh-prose` |
 | Outcomes | `grep -c "rule:" CLAUDE.md`; look for a check per local rule | each local rule has a hook, test, or CI step |
-| Outcomes | `$PY $P/lint/compliance_probes.py supersede .` reads the child's `CLAUDE.md` files, `AGENTS.md` and `.claude/**/*.md` for text that departs from a shared rule (Supersede, below); read each hit in its file | exit 0. A departure passes when its line says "known exemption" and names a live `rule:<id>` |
+| Outcomes | `$PY $P/lint/compliance_probes.py supersede .` reads the child's `CLAUDE.md` files, `AGENTS.md` and `.claude/**/*.md` for text that departs from a shared rule (Supersede, below); read each hit in its file | exit 0. A departure passes when its paragraph or list item says "known exemption" and names a live `rule:<id>` |
 | Roles | `git log --oneline -40 origin/main` and `git branch -r` | test commits or `tests/*` branches land before product commits |
 | Roles | `cat .claude/settings.local.json` | no stale model raise; any raise has `_agentCapUntil` in the future |
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
@@ -146,31 +146,34 @@ is `unknown`, never `in shape`.
 no known exemption. A claude-settings rule wins over such text. The fix goes in the child: rewrite the
 text, or name the exemption.
 The probe reads the child's tracked `CLAUDE.md` files (any folder), the root
-`AGENTS.md` and `.claude/**/*.md`, a paragraph at a time. Consecutive lines are joined. A fenced code
-block is never read. A file reached twice, by a symlink, is read once. It reads Markdown only, and never
+`AGENTS.md` and `.claude/**/*.md`, a paragraph or list item at a time. Wrapped lines are joined. A list
+item, a table row or a heading starts a new unit, and a heading or table row is one unit alone. A fenced
+code block is never read. A file reached twice, by a symlink, is read once. It reads Markdown only, and never
 edits or pushes to the child.
 
 The probe holds no rule list. On each run it reads the live anchors through `rule_audit.claude_md_anchors`
-in the parent clone. A root whose own rule files hold the same anchors is a claude-settings checkout: `n/a`.
+in the parent clone. A root that holds all the rule files, with at least 90% of the live anchors in them, is
+a claude-settings checkout: `n/a`.
 
 Departure wording, in one sentence, in any case:
 
-- a cue (override, overrides, overridden, "instead of", "unlike", "do not apply", "does not apply", and the
+- a cue (override, overrides, overridden, overriding, overrode, "instead of", "unlike", "do not apply", "does not apply", and the
   contracted forms) beside a shared rule: global, shared or parent, then a rule noun (rule, ruling, instruction,
   `CLAUDE.md`) within three words; or `claude-settings` alone.
-- "never inherited" or "not inherited" beside a rule word: rule, ruling, designation, tier,
+- "never", "not", "isn't" or "aren't" "inherited" beside a rule word: rule, ruling, designation, tier,
   `claude-settings`, `CLAUDE.md`.
 
 Technical prose has none of these: "overrides the parent method", "instead of the global tsc", "Env vars are
-not inherited by the worker". A paragraph that only quotes or agrees with a rule is not a hit. A conflict
-with no departure wording is read by hand, and so is hook and code text.
+not inherited by the worker". A paragraph or list item that only quotes or agrees with a rule is not a hit.
+A conflict with no departure wording, or a departure split over two sentences, is read by hand, and so is hook
+and code text.
 
 | Item line | Means |
 | --- | --- |
-| `  departs, no exemption: <file>:<line>: <text>` | departure wording, and no valid exemption in the paragraph. `<line>` is the paragraph's first line |
-| `  unknown exemption rule:<id>: <file>:<line>: <text>` | the paragraph says "known exemption" or "known exemptions", and the id is no live anchor. With no id (`?`) it counts only beside departure wording: a child's own lint exemption is not ours. A departure paragraph with such an exemption gets this item alone |
+| `  departs, no exemption: <file>:<line>: <text>` | departure wording, and no valid exemption in the paragraph or list item. `<line>` is its first line |
+| `  unknown exemption rule:<id>: <file>:<line>: <text>` | the paragraph or list item says "known exemption" or "known exemptions", and the id is no live anchor. With no id (`?`) it counts only beside departure wording: a child's own lint exemption is not ours. A departure with such an exemption gets this item alone |
 | `  redefines rule:<id>: <file>:<line>` | the child holds a `<!-- rule:<id> -->` anchor that is a live claude-settings anchor |
-| `  known exemption, passes: <file>:<line>: <text>` | a departure whose paragraph says "known exemption" and names a live `rule:<id>`. Not a hit |
+| `  known exemption, passes: <file>:<line>: <text>` | a departure whose paragraph or list item says "known exemption" and names a live `rule:<id>`. Not a hit |
 
 A bare `rule:<id>` with no "known exemption" never passes a departure. Text is cut to 160 characters. N in
 `supersede: out - N line(s) to read in M file(s)` counts the flagged items, never the pass lines.
@@ -179,7 +182,7 @@ A bare `rule:<id>` with no "known exemption" never passes a departure. Text is c
 | --- | --- |
 | 0 | `supersede: in shape - M file(s) read`, or `supersede: n/a - this is claude-settings` |
 | 1 | `supersede: out - N line(s) to read in M file(s)`, one item line per hit |
-| 2 | `supersede: unknown`: the rule text cannot be read, it has no anchor, or a tracked file of the child cannot be read |
+| 2 | `supersede: unknown`: the rule text cannot be read, it has no anchor, a tracked file of the child cannot be read, or a code fence is still open at the end of a file (the file and the fence's line are named) |
 
 ## Copies
 

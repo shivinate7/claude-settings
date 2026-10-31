@@ -47,21 +47,22 @@ words: each retired word in a checked repo, one item per line: `  <word>: <file>
   seconds the group is `unknown - stopped at <file>, N of M read`. That limit is a bandaid for file shapes
   the read is not yet fast on.
 supersede: text in the child that departs from a shared rule and names no known exemption. It reads the tracked
-  `CLAUDE.md` files (any folder), the root `AGENTS.md` and `.claude/**/*.md`: Markdown only, a paragraph at a
-  time (consecutive lines joined; a fenced code block is never read), and a file reached twice is read once.
-  Departure wording, in one sentence, is a cue ("overrides", "instead of", "unlike", "do/does not apply")
-  beside a shared rule (global, shared or parent, then a rule noun within three words, or "claude-settings"),
-  or "never inherited" / "not inherited" beside a rule word (rule, ruling, designation, tier, claude-settings,
-  CLAUDE.md). Technical prose ("overrides the parent method") has none. A paragraph passes when it says
-  "known exemption(s)" and names `rule:<id>` with <id> a live claude-settings anchor; a bare `rule:<id>` never
-  passes it. Items, each at the paragraph's first line: `departs, no exemption`; `unknown exemption
-  rule:<id>` (the id is no live anchor, or none is named, shown as `?`; with no id it counts only beside
-  departure wording; a departure paragraph with such an exemption gets this item alone); `redefines
-  rule:<id>` (a child `<!-- rule:<id> -->` anchor that is a live claude-settings anchor). N in the verdict
-  counts the flagged items, not the pass lines. The live anchors come from
-  `rule_audit.claude_md_anchors(rule_text())`, and the probe holds no list. A root whose own rule files hold
-  the same anchors is claude-settings: n/a. An unreadable rule text, no anchor, or an unreadable child file
-  makes the group unknown. Not read: a conflict with no departure wording, hook and code text (it needs a
+  `CLAUDE.md` files (any folder), the root `AGENTS.md` and `.claude/**/*.md`: Markdown only, a paragraph or list
+  item at a time (wrapped lines joined; a heading and a table row are each a unit of their own; a fenced code block
+  is never read), and a file reached twice is read once. Departure wording, in one sentence, is a cue ("overrides",
+  "overriding", "overrode", "instead of", "unlike", "do/does not apply") beside a shared rule (global, shared or
+  parent, then a rule noun within three words, or "claude-settings"), or "never/not/isn't/aren't inherited" beside a
+  rule word (rule, ruling, designation, tier, claude-settings, CLAUDE.md). Technical prose ("overrides the parent
+  method") has none. A paragraph or list item passes when it says "known exemption(s)" and names `rule:<id>` with
+  <id> a live claude-settings anchor; a bare `rule:<id>` never passes it. Items, each at the first line of its
+  paragraph or list item: `departs, no exemption`; `unknown exemption rule:<id>` (the id is no live anchor, or none
+  is named, shown as `?`; with no id it counts only beside departure wording; a departure with such an exemption gets
+  this item alone); `redefines rule:<id>` (a child `<!-- rule:<id> -->` anchor that is a live claude-settings
+  anchor). N in the verdict counts the flagged items, not the pass lines. The live anchors come from
+  `rule_audit.claude_md_anchors(rule_text())`, and the probe holds no list. A root whose own rule files are all
+  there and hold at least NA_SHARE of the live anchors is claude-settings: n/a. An unreadable rule text, no anchor,
+  an unreadable child file, or a code fence still open at the end of a file makes the group unknown. Not read: a
+  conflict with no departure wording, a departure split over two sentences, hook and code text (it needs a
   parser), and which rule an exemption id belongs to (any live id passes; "no known exemption" reads as one).
 slugs: a record file this change adds against origin/main, in the child's own record folders (the layout's),
   with a slug over 32 characters is one item line. Long slugs already on main are one note line: the count
@@ -336,15 +337,22 @@ def probe_lanecap(root):
 # qualifier and a rule noun within three words, or by "claude-settings" alone; or "never/not inherited" beside a rule word.
 RULE_NOUN = r"(?:rules?|rulings?|CLAUDE\.md|instructions?)"
 SHARED_RULE = re.compile(r"\b(?:global|shared|parent)(?:\W+[\w'-]+){0,2}?\W+" + RULE_NOUN + r"\b|\bclaude-settings\b", re.I)
-OVERRIDE_CUE = re.compile(r"\boverrid(?:es?|den)\b|\binstead of\b|\bunlike\b|\b(?:do|does)(?: not|n['’]t)\s+apply\b", re.I)
-NOT_INHERITED = re.compile(r"\b(?:never|not) inherited\b", re.I)
+OVERRIDE_CUE = re.compile(r"\boverrid(?:es?|den|ing)\b|\boverrode\b|\binstead of\b|\bunlike\b"
+                          r"|\b(?:do|does)(?: not|n['’]t)\s+apply\b", re.I)
+NOT_INHERITED = re.compile(r"\b(?:never|not|isn['’]t|aren['’]t) inherited\b", re.I)
 RULE_WORD = re.compile(r"\b(?:rules?|rulings?|designations?|tiers?|claude-settings)\b|CLAUDE\.md", re.I)
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 KNOWN_EXEMPTION = re.compile(r"\bknown exemptions?\b", re.I)
 RULE_REF = re.compile(r"\brule:([a-z0-9][a-z0-9-]*)")
 ANCHOR_COMMENT = re.compile(r"<!--.*?-->", re.S)
-FENCE = re.compile(r"^\s*(```|~~~)")
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+# Each of these lines starts a unit of its own, so one bullet's exemption never passes another bullet's departure.
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])\s")
+# A heading and a table row are each one whole unit; the lines after them never join them.
+ONE_LINE_UNIT = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)|^\s*\|")
 SUPERSEDE_SCOPE = re.compile(r"(^|/)CLAUDE\.md$|^AGENTS\.md$|^\.claude/.+\.md$")
+# A second claude-settings checkout may lag a few anchors behind this one, so n/a needs most of them, not all.
+NA_SHARE = 0.9
 
 
 def departs(paragraph):
@@ -356,29 +364,41 @@ def departs(paragraph):
     return False
 
 
-def paragraphs(text):
-    """(first line number, joined text) of each paragraph outside a code fence. A blank line or a fence ends one."""
+def paragraphs(text, rel):
+    """(first line number, joined text) of each paragraph or list item outside a code fence. A blank line, a fence, a
+    list item, a table row or a heading ends one; a table row and a heading are each one of their own. A fence still
+    open at the end of the file makes the group unknown: the rest of the file would go unread."""
     found, lines, start, fence = [], [], 0, None
+
+    def flush():
+        if lines:
+            found.append((start, " ".join(lines)))
+            del lines[:]
+
     for number, line in enumerate(text.splitlines(), 1):
         mark = FENCE.match(line)
-        if fence or mark:
-            if lines:
-                found.append((start, " ".join(lines)))
-                lines = []
-            if not fence:
-                fence = mark.group(1)
-            elif mark and mark.group(1) == fence:
+        if fence:
+            # A fence closes on a run of its own character, at least as long, with nothing after it.
+            if mark and mark.group(1)[0] == fence[0][0] and len(mark.group(1)) >= len(fence[0]) and not mark.group(2).strip():
                 fence = None
+        # A backtick in the rest of the line means the ticks close on it ("```x``` is code."): no fence opens.
+        elif mark and not (mark.group(1)[0] == "`" and "`" in mark.group(2)):
+            flush()
+            fence = (mark.group(1), number)
         elif not line.strip():
-            if lines:
-                found.append((start, " ".join(lines)))
-                lines = []
+            flush()
+        elif ONE_LINE_UNIT.match(line):
+            flush()
+            found.append((number, line.strip()))
         else:
+            if LIST_ITEM.match(line):
+                flush()
             if not lines:
                 start = number
             lines.append(line.strip())
-    if lines:
-        found.append((start, " ".join(lines)))
+    if fence:
+        raise CannotRun("%s:%d: a code fence never closes" % (rel, fence[1]))
+    flush()
     return found
 
 
@@ -393,7 +413,7 @@ def probe_supersede(root):
         own = set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
     except (OSError, ValueError):
         own = set()  # a child holds no rule files
-    if own == live:
+    if len(own & live) >= NA_SHARE * len(live):
         print("supersede: n/a - this is claude-settings")
         return 0
     hits, passes, seen = [], [], set()
@@ -405,7 +425,7 @@ def probe_supersede(root):
         text = read(root, rel)
         if text is None:
             raise CannotRun("cannot read %s" % rel)
-        for number, paragraph in paragraphs(text):
+        for number, paragraph in paragraphs(text, rel):
             at, shown, departure = "%s:%d" % (rel, number), paragraph[:160], departs(paragraph)
             if KNOWN_EXEMPTION.search(paragraph):
                 # An anchor comment is a definition, never a reference to an exemption.
