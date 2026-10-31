@@ -1,9 +1,9 @@
 {
   "title": "A session can wait for a process it started to exit",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.30495,
   "why": "Incident, Oct 31 (coordinator, 16:41 CDT): a lane piped a gate run through grep, which dropped verdict's heartbeat, so the stall watch tripped and stranded the run. The guards then refused every way to wait on the stranded pid: kill -0, a /proc poll, a Monitor until-loop, and tail --pid.",
-  "note": "Likely in normal work: any stall or lost shell leaves a session holding a pid it cannot wait on. Give one allowed form a home, for example a 'wait for pid N to exit' helper the guards let through for a pid the session started. Second cause to weigh: a pipe after verdict hides its heartbeat. Done check: a test where the session waits on its own stranded pid passes the guards and returns when the pid exits, red on main and green on the fix; a pid the session did not start stays refused. Needs no answer. Files: hooks/guard_kill.py, hooks/stall_watch.py, bin/verdict.",
-  "updatedAt": "2026-10-31T21:41:00Z"
+  "note": "Likely in normal work: any stall or lost shell leaves a session holding a pid it cannot wait on. Give one allowed form a home, for example a 'wait for pid N to exit' helper the guards let through for a pid the session started. Second cause to weigh: a pipe after verdict hides its heartbeat. Done check: a test where the session waits on its own stranded pid passes the guards and returns when the pid exits, red on main and green on the fix; a pid the session did not start stays refused. Needs no answer. Files: hooks/guard_kill.py, hooks/stall_watch.py, bin/verdict. Lane started Oct 31 16:42 CDT, session_013NEJKyizZSQXtCFLqEFgUU (coordinator, 17:13 CDT). No file overlap with #906 (bin/ci-job, docs/debts/notes.md, lint/test_ci_job.py).",
+  "updatedAt": "2026-10-31T22:13:00Z"
 }
