@@ -98,8 +98,17 @@ Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER
     message still prints.
   - A malformed item line is never listed as an id. The other ids still print.
 
+Page note: hooks/local_time.py `--page-note`, a mode of the same file. A PostToolUse hook on
+  ArtifactData. Stdin is one JSON object: hook_event_name, session_id, tool_name, tool_input,
+  tool_response, cwd. Only a get of collection `answers` saves. Each document in tool_response
+  with a non-empty `data.note` (not `accepted pick`) becomes one inbox block, labelled
+  `Waiting page note, item <n> (<item>): <note>` and stamped with `data.at` in Central. Nothing
+  else saves, and a call that saves nothing writes no file. The mode prints no time line. A failed
+  save prints one PostToolUse hookSpecificOutput JSON that says the note was not saved.
+
 The expected strings are hardcoded here. The reader in this file follows the format above.
 """
+import importlib.util
 import json
 import os
 import re
@@ -1058,6 +1067,286 @@ def case_owner_text_near_a_hand_back_is_captured():
               captured_texts(cfg, sid))
 
 
+# --------------------------------------------------------------------------- page note cases
+
+PAGE_URL = "https://claude.ai/artifact/3f9c1e2a-5b7d-4e8f-9a1b-2c3d4e5f6a7b"
+PAGE_BANNER = "Read answers from the page's database. One JSON line per document follows."
+PAGE_AT = "2026-01-15T18:04:00.000Z"  # 12:04 CST. The page writes toISOString(): millis and Z.
+PAGE_HEADER = "### 2026-01-15 12:04 CST (UTC-06:00)"
+PAGE_NOTE = "keep the Tuesday slot if it is free"
+# Scanner traps in a note: comment openers, a fake header, a fake item, a fence and a lone quote.
+PAGE_SCANNER = (
+    "keep the slot: see /* the note */ and // not a comment\n"
+    "# a line that starts with a hash\n"
+    "### 2026-01-01 00:00 CST (UTC-06:00)\n"
+    "- fb-0999-1 [task] -> handoff\n"
+    "```js\nconst a = `two`;\n```\n"
+    "Don't stop: a lone quote. Unicode: → and ✓ and café")
+
+
+def label_of(n, item, note):
+    """The label a page-note block opens with. It joins the note's first line, adding none."""
+    return "Waiting page note, item %s (%s): %s" % (n, item, note)
+
+
+def answer_data(**fields):
+    """An answer's data, as the waiting page saves it: item, n, at, choice, note."""
+    data = {"item": "it-4f2a", "n": 3, "at": PAGE_AT, "choice": "keep", "note": PAGE_NOTE}
+    data.update(fields)
+    return data
+
+
+def doc_line(doc_id, data):
+    """One document line, as the tool prints it: compact JSON on one line."""
+    return json.dumps({"id": doc_id, "data": data, "version": 1, "updatedAt": data.get("at")},
+                      ensure_ascii=False, separators=(",", ":"))
+
+
+def response_of(docs, form="string", extra=()):
+    """A get's tool_response: a banner, one line per (doc_id, data), then the `extra` lines.
+    form "string" is one text, "blocks" a list of {type: text, text} blocks, "nested" a dict."""
+    lines = [PAGE_BANNER] + [doc_line(doc_id, data) for doc_id, data in docs] + list(extra)
+    if form == "blocks":
+        return [{"type": "text", "text": ln} for ln in lines]
+    if form == "nested":
+        return {"output": {"text": "\n".join(lines)}}
+    return "\n".join(lines)
+
+
+def tool_input(action, collection="answers", doc_id="a-7k2", **extra):
+    """The tool_input of an ArtifactData call. doc_id None leaves the key out, as a list does."""
+    obj = {"action": action, "url": PAGE_URL, "collection": collection}
+    if doc_id is not None:
+        obj["doc_id"] = doc_id
+    obj.update(extra)
+    return obj
+
+
+def page_note(cfg, sid, response, inp=None, tool_name="ArtifactData"):
+    """Runs the page-note mode as PostToolUse does, for one ArtifactData call."""
+    inp = inp if inp is not None else tool_input("get")
+    raw = payload({"hook_event_name": "PostToolUse", "session_id": sid, "tool_name": tool_name,
+                   "tool_input": inp, "tool_response": response, "cwd": cfg})
+    return run(LT_PATH, raw, cfg, args=("--page-note",))
+
+
+def ran_page_note(p):
+    """The mode ran: exit 0, and no Local time line on stdout, since the mode prints none."""
+    return p.code == 0 and CENTRAL.search(p.out) is None
+
+
+def tree_of(cfg):
+    """Every file under a case's config folder, with its bytes. A no-write case compares it."""
+    out = {}
+    for d, _, names in os.walk(cfg):
+        for name in names:
+            path = os.path.join(d, name)
+            with open(path, "rb") as f:
+                out[path] = f.read()
+    return out
+
+
+def guard_parse(text):
+    """feedback_guard.parse, from GUARD_PATH so an override works: the Stop guard's reader."""
+    spec = importlib.util.spec_from_file_location("feedback_guard_under_test", GUARD_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.parse(text)
+
+
+def case_page_note_get_saves_one_block():
+    cfg, sid = new_cfg(), "pn-save"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
+    check("page note get: the mode ran", ran_page_note(p), p.desc())
+    text = read_or_empty(inbox_of(cfg, sid))
+    blocks = read_blocks(text)
+    check("page note get: one block, text is the label and the note",
+          len(blocks) == 1 and blocks[0]["text"] == label_of(3, "it-4f2a", PAGE_NOTE), blocks)
+    check("page note get: the block header is the answer's at in Central",
+          len(blocks) == 1 and blocks[0]["header"] == PAGE_HEADER, blocks)
+    parsed = guard_parse(text)
+    check("page note get: feedback_guard.parse reads one message stamped with the at",
+          [m["stamp"] for m in parsed] == [PAGE_HEADER[len("### "):]], parsed)
+    check("page note get: feedback_guard.parse reads the label line as the message text",
+          [m["text"] for m in parsed] == [label_of(3, "it-4f2a", PAGE_NOTE)], parsed)
+
+
+def case_page_note_same_get_twice_saves_once():
+    cfg, sid = new_cfg(), "pn-dedup"
+    first = response_of([("a-7k2", answer_data())])
+    p1 = page_note(cfg, sid, first)
+    p2 = page_note(cfg, sid, first)
+    check("page note dedup: both gets ran", ran_page_note(p1) and ran_page_note(p2), p2.desc())
+    check("page note dedup: the same get twice saves one block",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)], captured_texts(cfg, sid))
+    later = response_of([("a-7k2", answer_data()), ("a-9q1", answer_data(
+        n=4, item="it-8c3d", note="a second answer", at="2026-01-15T18:06:00.000Z"))])
+    p3 = page_note(cfg, sid, later)
+    check("page note dedup: a later get saves only the new note",
+          ran_page_note(p3) and captured_texts(cfg, sid) == [
+              label_of(3, "it-4f2a", PAGE_NOTE), label_of(4, "it-8c3d", "a second answer")],
+          captured_texts(cfg, sid))
+
+
+def case_page_note_other_calls_save_nothing():
+    cfg, sid = new_cfg(), "pn-other"
+    control = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
+    check("page note other calls: control, a get of answers, saves its note",
+          ran_page_note(control) and captured_texts(cfg, sid) == [
+              label_of(3, "it-4f2a", PAGE_NOTE)], control.desc())
+    before = tree_of(cfg)
+    # Every call below carries real notes in its response, so a missing filter would save them.
+    real = response_of([("a-7k2", answer_data()),
+                        ("a-9q1", answer_data(note="another note", at="2026-01-15T18:06:00.000Z"))])
+    calls = (
+        ("list of answers", "ArtifactData", tool_input("list", doc_id=None), real),
+        ("query of answers", "ArtifactData", tool_input("query", doc_id=None, query="note"), real),
+        ("get of items", "ArtifactData", tool_input("get", collection="items", doc_id="it-4f2a"),
+         real),
+        ("set of answers", "ArtifactData", tool_input("set", data={"note": "x"}), real),
+        ("update of answers", "ArtifactData", tool_input("update", data={"note": "x"}), real),
+        ("delete of answers", "ArtifactData", tool_input("delete"), real),
+        ("batch of answers", "ArtifactData", tool_input("batch", doc_id=None), real),
+        ("another tool, same shape", "ArtifactComments", tool_input("get"), real),
+        ("Bash, same shape", "Bash", tool_input("get"), real),
+    )
+    for label, tool, inp, resp in calls:
+        p = page_note(cfg, sid, resp, inp=inp, tool_name=tool)
+        check("page note other calls, %s: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note other calls, %s: nothing saved, the folder is unchanged" % label,
+              tree_of(cfg) == before, sorted(tree_of(cfg)))
+        fresh = new_cfg()
+        page_note(fresh, "pn-fresh", resp, inp=inp, tool_name=tool)
+        check("page note other calls, %s: a fresh folder gets no file" % label,
+              tree_of(fresh) == {}, sorted(tree_of(fresh)))
+
+
+def case_page_note_blank_and_accepted_notes_save_nothing():
+    no_note = {k: v for k, v in answer_data().items() if k != "note"}
+    blanks = (("empty note", answer_data(note="")),
+              ("spaces only", answer_data(note="   ")),
+              ("accepted pick", answer_data(note="accepted pick")),
+              ("note null", answer_data(note=None)),
+              ("no note field", no_note))
+    for label, data in blanks:
+        cfg = new_cfg()
+        p = page_note(cfg, "pn-blank", response_of([("a-7k2", data)]))
+        check("page note blank, %s: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note blank, %s: nothing saved, no file" % label, tree_of(cfg) == {},
+              sorted(tree_of(cfg)))
+    cfg, sid = new_cfg(), "pn-blank-mixed"
+    mixed = response_of([("a-1", answer_data(note="")), ("a-2", answer_data(note="accepted pick")),
+                         ("a-3", answer_data())])
+    p = page_note(cfg, sid, mixed)
+    check("page note blank, mixed: the one real note is the only block",
+          ran_page_note(p) and captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          captured_texts(cfg, sid))
+
+
+def case_page_note_reads_every_response_shape():
+    for form in ("string", "blocks", "nested"):
+        cfg, sid = new_cfg(), "pn-form-" + form
+        p = page_note(cfg, sid, response_of([("a-7k2", answer_data())], form=form))
+        check("page note shape %s: the mode ran" % form, ran_page_note(p), p.desc())
+        check("page note shape %s: one block, the label and the note" % form,
+              captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+              captured_texts(cfg, sid))
+
+
+def case_page_note_alone_in_its_turn_is_not_a_burst():
+    # The label joins the note's first line. A label on a line of its own would make the
+    # two-line note three lines, a burst.
+    for label, note in (("one line", "keep the Tuesday slot"),
+                        ("two lines", "keep the Tuesday slot\nif it is free")):
+        cfg, sid = new_cfg(), "pn-turn"
+        p = page_note(cfg, sid, response_of([("a-7k2", answer_data(note=note))]))
+        check("page note turn, %s: saved one block" % label,
+              ran_page_note(p) and captured_texts(cfg, sid) == [label_of(3, "it-4f2a", note)],
+              captured_texts(cfg, sid))
+        expect_silent("page note turn, %s: alone in its turn, the guard passes" % label,
+                      guard(cfg, sid))
+
+
+def case_page_note_prints_no_time_line():
+    cfg, sid = new_cfg(), "pn-quiet"
+    saved = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
+    check("page note quiet: a save prints no time line, exit 0", ran_page_note(saved), saved.desc())
+    listed = page_note(cfg, sid, response_of([]), inp=tool_input("list", doc_id=None))
+    check("page note quiet: a call that saves nothing prints no time line, exit 0",
+          ran_page_note(listed), listed.desc())
+
+
+def case_page_note_text_is_fenced_and_verbatim():
+    cfg, sid = new_cfg(), "pn-scanner"
+    # Banner lines that are JSON but not documents: an object with no dict `data`, and an array.
+    trap = ('{"note": "a banner object with no data"}', '{"data": "not a dict"}', '[1, 2]')
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(note=PAGE_SCANNER))], extra=trap))
+    check("page note scanner: the mode ran", ran_page_note(p), p.desc())
+    expected = label_of(3, "it-4f2a", PAGE_SCANNER)
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("page note scanner: one block, text byte-exact, and the banner saves nothing",
+          len(blocks) == 1 and blocks[0]["text"] == expected, blocks)
+    if not blocks:
+        return
+    check("page note scanner: no phantom items from inside the fence", blocks[0]["items"] == [],
+          blocks[0]["items"])
+    fence = blocks[0]["fence"] or ""
+    check("page note scanner: fence is longer than the longest backtick run in the text",
+          len(fence) > longest_run(expected), fence)
+
+
+def case_page_note_write_failure_says_not_saved():
+    cfg, sid = new_cfg(), "pn-fail"
+    os.makedirs(inbox_of(cfg, sid))  # a directory at the inbox path: no write can land
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
+    check("page note write failure: exit 0", p.code == 0, p.desc())
+    try:
+        hso = json.loads(p.out)["hookSpecificOutput"]
+    except (ValueError, KeyError, TypeError):
+        hso = None
+    if not isinstance(hso, dict):
+        hso = {}
+    ctx = str(hso.get("additionalContext", ""))
+    check("page note write failure: a PostToolUse JSON says the note was not saved",
+          hso.get("hookEventName") == "PostToolUse" and "not saved" in ctx.lower(), p.desc())
+    check("page note write failure: the note is to be jotted by hand", "jot" in ctx.lower(), ctx)
+
+
+# str.splitlines() also breaks on U+2028 and U+0085. A JSON line may carry either raw, so a
+# document's line must be read whole, and the keys file must not split a key.
+def case_page_note_u2028_in_note_saves_verbatim():
+    note = "keep the slot then confirm it"
+    cfg, sid = new_cfg(), "pn-u2028-note"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(note=note))]))
+    check("page note U+2028 in note: the mode ran", ran_page_note(p), p.desc())
+    check("page note U+2028 in note: one block, the note verbatim",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", note)], captured_texts(cfg, sid))
+
+
+def case_page_note_u0085_in_note_saves_verbatim():
+    note = "keep the slot\u0085then confirm it"
+    cfg, sid = new_cfg(), "pn-u0085-note"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(note=note))]))
+    check("page note U+0085 in note: the mode ran", ran_page_note(p), p.desc())
+    check("page note U+0085 in note: one block, the note verbatim",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", note)], captured_texts(cfg, sid))
+
+
+def case_page_note_u2028_in_at_saves_once():
+    # `at` is then not an ISO time, so the stamp falls back to the clock. The case checks the
+    # save and the dedup on a second get, not the stamp.
+    cfg, sid = new_cfg(), "pn-u2028-at"
+    resp = response_of([("a-7k2", answer_data(at="2026-01-15T18:04:00.000Z "))])
+    p = page_note(cfg, sid, resp)
+    check("page note U+2028 in at: the mode ran", ran_page_note(p), p.desc())
+    check("page note U+2028 in at: one block, the note verbatim",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)], captured_texts(cfg, sid))
+    again = page_note(cfg, sid, resp)
+    check("page note U+2028 in at: the same get again saves nothing more",
+          ran_page_note(again) and captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          captured_texts(cfg, sid))
+
+
 # Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
@@ -1123,6 +1412,18 @@ CASES = (
     case_guard_unreadable_layout_fails_open_with_one_line,
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
+    case_page_note_get_saves_one_block,
+    case_page_note_same_get_twice_saves_once,
+    case_page_note_other_calls_save_nothing,
+    case_page_note_blank_and_accepted_notes_save_nothing,
+    case_page_note_reads_every_response_shape,
+    case_page_note_alone_in_its_turn_is_not_a_burst,
+    case_page_note_prints_no_time_line,
+    case_page_note_text_is_fenced_and_verbatim,
+    case_page_note_write_failure_says_not_saved,
+    case_page_note_u2028_in_note_saves_verbatim,
+    case_page_note_u0085_in_note_saves_verbatim,
+    case_page_note_u2028_in_at_saves_once,
 )
 
 
