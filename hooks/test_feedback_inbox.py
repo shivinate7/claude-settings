@@ -21,7 +21,8 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
   - A notice is never captured: a prompt that starts with `<task-notification>` or
     `<system-reminder>` (shared_names.MACHINE_TAGS). A tag quoted mid-message is owner text.
   - A subagent hand-back is never captured. It starts with `<agent-message` followed by whitespace
-    or `>`, or with the line `Another Claude session sent a message:`, then a newline and that tag.
+    or `>`, or with the line `Another Claude session sent a message:` (or `... message while you
+    were working:`, the CLI's mid-turn frame), then a newline and that tag.
   - A lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD (the
     replacement character) in its place, or stdout carries a line that says `not saved`. Never
     silent. The inbox stays strict UTF-8.
@@ -1012,11 +1013,13 @@ def case_damaged_turn_state_counts_every_message():
 # The harness's text for a subagent's hand-back (a CLI 2.1.316 constant), ids faked. An agent wrote
 # it, not the owner, so capture never saves it.
 FRAME = "Another Claude session sent a message:\n"
+MID_TURN_FRAME = "Another Claude session sent a message while you were working:\n"
 HAND_BACK_LINES = ("[Subagent hand-back] The text below is the final report of a subagent ...\n"
                    "Lint: 0 findings in 12 files.\n")
 TAGGED = '<agent-message from="a0000000000000001">\n' + HAND_BACK_LINES + "</agent-message>"
 HAND_BACK_SHAPES = (
     ("the frame line, then the tag", FRAME + TAGGED),
+    ("the mid-turn frame line, then the tag", MID_TURN_FRAME + TAGGED),
     ("the tag with an attribute", TAGGED),
     ("the bare tag", "<agent-message>\n" + HAND_BACK_LINES + "</agent-message>"),
 )
@@ -1042,6 +1045,8 @@ def case_owner_text_near_a_hand_back_is_captured():
         ("a quoted tag mid-sentence", 'the log shows an <agent-message from="x"> tag I did not expect'),
         ("a hand-back quoted after the owner's line", "a note first\n" + FRAME + TAGGED),
         ("the frame line, then owner text", FRAME + "the owner's own follow-up line"),
+        ("the mid-turn frame line, then owner text",
+         MID_TURN_FRAME + "the owner's own follow-up line"),
         ("the frame line, then the tag on the same line",
          'Another Claude session sent a message: <agent-message from="x">'),
         ("a longer tag name", "<agent-messages>\nan owner note that opens with a longer tag name"),
