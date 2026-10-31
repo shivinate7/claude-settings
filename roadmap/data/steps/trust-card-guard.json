@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 103.0,
   "why": "shiv, Oct 31 14:12 CDT owner ask (via coordinator session_013NEJL2pASwRjgJDnsvnpNe): first in work order. Named incident: the old coordinator took confirm_repository_trust, Oct 30 16:19 to 17:06 CDT, and the card blocked every message into that session (freeze record handoffs/freeze-2026-10-30.md, RESTART item 7).",
-  "note": "Fix: the guard refuses mcp__claude-code-remote__confirm_repository_trust and mcp__claude-code-remote__request_computer_folder in any session tagged cs-build:<tier>. A PC bridge that needs the card is its own untagged session. The rule's record names the incident and the landing date (rule building-guard-needs-incident). Done check: test-author cases go red on main and green on the fix, for both tools, in a tagged and an untagged session. Needs no answer. Files: hooks/guard*.py, hooks/test_guard.py, the settings matcher.",
-  "updatedAt": "2026-10-31T19:50:00Z"
+  "note": "Placed ahead of c52 and every other open step: owner ask, Oct 31 14:12 CDT. Fix: the guard refuses mcp__claude-code-remote__confirm_repository_trust and mcp__claude-code-remote__request_computer_folder in any session tagged cs-build:<tier>. A PC bridge that needs the card is its own untagged session. The rule's record names the incident and the landing date (rule building-guard-needs-incident). Done check: test-author cases go red on main and green on the fix, for both tools, in a tagged and an untagged session. Needs no answer. Files: hooks/guard*.py, hooks/test_guard.py, the settings matcher.",
+  "updatedAt": "2026-10-31T19:55:00Z"
 }
