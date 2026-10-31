@@ -17685,8 +17685,8 @@ for _command, _target in (("echo x > src/app.py", "app.py"), ("echo x >> src/app
                           ('echo "it\'s done" > README.md', "README.md")):         # a lone quote in the text hides nothing
     cs_shell("shell_redirect_denied", "deny", _command, _target)
 for _command in ("echo x >> docs/todo.md",
-                 "echo x > " + OUTSIDE_TEMP,
-                 "echo x > " + CS_OWN_SCRATCH,
+                 "echo x > " + slash(OUTSIDE_TEMP),
+                 "echo x > " + slash(CS_OWN_SCRATCH),
                  "git status", "cat CLAUDE.md", "grep -n x hooks/guard.py",
                  'echo "a > README.md"', "echo hi # > README.md",
                  'echo "first\nsecond > README.md"', "echo \"it's > README.md\"",
