@@ -115,6 +115,7 @@ class FakeHost:
         self.waits, self.seq, self.state = [], None, "green"  # waits: (sha, prior) per call; seq: scripted results, then self.checks
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
+        self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
 
     def pr(self, n):
         self.pr_calls.append(n)
@@ -154,6 +155,13 @@ class FakeHost:
         sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge #{n}", sha)
         sh(o, "git", "push", "-q", "origin", self.base)
         return sh(o, "git", "rev-parse", "HEAD"), ""
+
+    def ready(self, n):  # the mark-ready call after a draft confirm's push -> (ok, why). On success the host clears the draft flag.
+        self.readies.append(n)
+        if self.ready_refuse:
+            return False, self.ready_refuse
+        self.draft = False
+        return True, ""
 
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
@@ -4370,17 +4378,16 @@ class GhHalf(Env):
         self.assertIn(REPO_CALL, self.calls())
         self.assertIn("main is not the default branch (trunk)", out)
 
-    def assert_draft_refused(self, rc, out, before):
-        self.assertEqual(rc, 1, out)
-        lines = [l for l in out.splitlines() if l.strip()]
-        self.assertEqual(len(lines), 1, out)
-        self.assertTrue(lines[0].startswith("merge:"), out)
-        self.assertIn("draft", lines[0])
-        self.assertEqual(self.refs(), before)  # no claim pushed
+    def assert_draft_stops(self, rc, out, before):
+        """A draft confirm is the records step: it pushes at most the page, marks the pull request ready, and stops.
+        It never merges, claims a record number, or waits on a check. before: the head sha before the run."""
+        self.assertEqual(rc, 0, out)
         self.assertEqual(self.ticks, 0, "waited on a draft")
         self.assertNotIn(CHECKS_CALL, self.calls())
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", f"{before}..{self.head()}", "--format=%(trailers:key=Record-claim,valueonly)"), "")
 
     def test_a_draft_pr_previews_with_the_undo_check_and_claims_nothing_or_waits(self):
         self.set(draft=True)
@@ -4399,18 +4406,18 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
 
-    def test_a_pr_that_turns_draft_after_the_preview_read_is_refused_at_confirm(self):  # guard: merge.py checks draft under the lock
+    def test_a_pr_that_turns_draft_after_the_preview_read_stops_at_the_draft_step_at_confirm(self):  # guard: merge.py checks draft under the lock
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"]))))  # complete: no defaults notice in the output
         self.set(draft_when_locked=True)  # main's read at the top of --confirm sees a ready PR; confirm's read under the lock sees a draft
-        before = self.refs()
+        before = self.head()
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
-        self.assert_draft_refused(rc, out, before)
+        self.assert_draft_stops(rc, out, before)
 
-    def test_a_draft_pr_is_refused_at_confirm_before_any_claim_or_wait(self):
+    def test_a_draft_pr_at_confirm_marks_ready_and_stops_before_any_merge_or_wait(self):
         self.set(draft=True)
-        before = self.refs()
+        before = self.head()
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
-        self.assert_draft_refused(rc, out, before)
+        self.assert_draft_stops(rc, out, before)
 
 class RestRoutes(Env):
     """c53: the merge tool reads and merges through the REST API (`gh api`), never GraphQL, which a Claude Code cloud session answers with HTTP 403
@@ -6723,6 +6730,28 @@ class RecordsEnv(Env):
         sh(self.co, "git", "fetch", "-q", "origin")
         return sh(self.co, "git", "ls-tree", "-r", "--name-only", ref).splitlines()
 
+    def draft_confirm(self, lock=None):
+        """--confirm on the pull request while it is a draft: the records step, then the mark-ready call. Never a merge."""
+        self.host.draft = True  # a draft, whatever the last step left
+        return self.run_merge("7", "--confirm", lock=lock)
+
+    def spy_merge(self):
+        """Replace the host's merge with a recorder. -> the list of shas it was asked to merge."""
+        asked = []
+        def merge_call(n, method, sha):
+            asked.append(sha)
+            return None, "spy: a draft confirm must not merge"
+        self.host.merge = merge_call
+        return asked
+
+    def reject_pushes(self, branch):
+        """A pre-receive hook on origin that refuses any push to branch, as a branch rule would."""
+        put_lf(os.path.join(self.bare, "hooks", "pre-receive"),
+               "#!/bin/sh\nstatus=0\nwhile read old new ref; do\n"
+               f"  if [ \"$ref\" = \"refs/heads/{branch}\" ]; then\n    echo \"pre-receive: refused $ref\" >&2\n    status=1\n  fi\n"
+               "done\nexit $status\n")
+        os.chmod(os.path.join(self.bare, "hooks", "pre-receive"), 0o755)
+
 class RecordsRebuild(RecordsEnv):
     """The records index is rebuilt at merge time, the way record numbers are claimed
     from the slug form at merge: merge.py runs a records generator.
@@ -6747,10 +6776,12 @@ class RecordsRebuild(RecordsEnv):
       commit, merge nothing. A base that moved with an unrelated change merges. The lock keeps other tool merges out,
       so only a push that did not use the tool can trip it.
     - The preview prints one line `  records: rebuild ...` or `  records: current`, and presses nothing.
-    - `--prepare` (a draft, before it goes ready): the same rebuild, pushed to the head alone, with no lock and no claim.
-      A pull request that is not a draft is refused, and so is a head that does not hold the base tip (the line says
-      BEHIND). A current page adds no commit. A stale one adds "Rebuild the records page" with its Drops-lines trailer.
-      Confirm then finds the page current and pushes nothing, so the ready run's sha is the merged sha.
+    - A draft pull request: `--confirm` is the records step. It refuses a head that does not hold the base tip (the line
+      says BEHIND), commits the page alone when it is stale and pushes it, then marks the pull request ready and stops.
+      It never merges, takes no merge lock and claims no record number. A current page adds no commit. A refused push
+      stops before the mark-ready call. If the mark-ready call fails, one line tells the reader to mark it ready, the
+      push stays, and the exit is 0. A ready confirm then finds the page current, pushes nothing, and merges the sha the
+      draft step pushed.
     """
     def setUp(self):
         super().setUp()
@@ -6952,45 +6983,37 @@ class RecordsRebuild(RecordsEnv):
         on_main = "docs/records.md" in self.tree_names("origin/main")
         self.assertEqual("rebuild" in line[0], on_main, f"{line[0]}\n{out}")
 
-    def test_prepare_refuses_a_pull_request_that_is_not_a_draft(self):
-        # A push to a ready pull request restarts its checks. The page is stale here, so only the draft state stops the push.
-        self.kinds_off()
-        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        before = self.refs()
-        rc, out = self.run_merge("7", "--prepare")
-        self.assertNotEqual(rc, 0, out)
-        self.assertEqual(self.refs(), before)
-
     def test_prepare_refuses_a_head_that_does_not_hold_the_base_tip(self):
-        self.host.draft = True
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # main moves on; the head does not hold its tip
-        before = self.refs()
-        rc, out = self.run_merge("7", "--prepare")
+        before = (self.head(), self.head("main"))
+        rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, out)
         self.assertIn("BEHIND", out)
-        self.assertEqual(self.refs(), before)
+        self.assertEqual((self.head(), self.head("main")), before, "pushed on a refusal")
+        self.assertEqual(self.host.readies, [], "marked ready on a refusal")
+        self.assertFalse(getattr(self.host, "merged", False), out)
 
     def test_prepare_adds_no_commit_when_the_page_is_current(self):
         self.kinds_off()
-        self.host.draft = True
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "docs/records.md": page("gap-one")})
-        before = self.refs()
-        rc, out = self.run_merge("7", "--prepare")
+        before = (self.head(), self.head("main"))
+        rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
         self.assertTrue(any("current" in l for l in out.splitlines()), out)
-        self.assertEqual(self.refs(), before)
+        self.assertEqual((self.head(), self.head("main")), before, "pushed a commit for a current page")
+        self.assertEqual(self.host.readies, [7])
+        self.assertFalse(getattr(self.host, "merged", False), out)
 
     def test_prepare_pushes_one_rebuild_commit_when_the_page_is_stale(self):
         self.kinds_off()
-        self.host.draft = True
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         before = self.head()
         lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
         with unittest.mock.patch.object(lock, "acquire", wraps=lock.acquire) as acquire:
-            rc, out = self.run_merge("7", "--prepare", lock=lock)
+            rc, out = self.draft_confirm(lock=lock)
         self.assertEqual(rc, 0, out)
-        self.assertFalse(acquire.called, "--prepare took the merge lock")
+        self.assertFalse(acquire.called, "the draft step took the merge lock")
         self.assertFalse(self.lock_ref())
         after = self.head()
         self.assertNotEqual(after, before)
@@ -6999,37 +7022,84 @@ class RecordsRebuild(RecordsEnv):
         self.assertIn(merge.RECORDS_PAGE, self.log1("%(trailers:key=Drops-lines,valueonly)", after))
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", after).strip(), "")
         self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip())
+        self.assertEqual(self.host.readies, [7])
+        self.assertFalse(getattr(self.host, "merged", False), out)
 
     def test_prepare_claims_no_record_numbers(self):
-        # The pending decision on the head stays pending: claims are made at confirm, never at prepare.
-        self.host.draft = True
+        # The pending decision on the head stays pending: claims are made at a ready confirm, never on the draft step.
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         before = self.head()
-        rc, out = self.run_merge("7", "--prepare")
+        rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
         after = self.head()
         self.assertNotEqual(after, before)
         self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%s"), "Rebuild the records page")
         self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%(trailers:key=Record-claim,valueonly)").strip(), "")
         self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
+        self.assertEqual(self.host.readies, [7])
 
     def test_prepare_then_confirm_merges_the_head_prepare_pushed(self):
-        # The one CI run of a batch: --prepare puts the page on the head while the pull request is a draft, so confirm finds
-        # the page current and pushes nothing. The ready run is then on the sha that merges.
+        # The one CI run of a batch: the draft confirm pushes the page and marks the pull request ready. The ready confirm
+        # finds the page current, pushes nothing, and merges the sha the draft step pushed.
         self.kinds_off()
-        self.host.draft = True
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        rc, out = self.run_merge("7", "--prepare")
+        rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
         prepared = self.head()
-        self.host.draft = False  # marked ready in the fake host
+        self.assertFalse(self.host.draft, "the draft confirm did not mark the pull request ready")
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], "the ready confirm marked it ready again")
         # deleteBranch removes `feat` after the merge, so read the merge commit instead. Its second parent is the sha
-        # --prepare pushed, and the one wait is on that sha: confirm pushed no commit after it.
-        self.assertEqual(self.rev("origin/main^2"), prepared, "confirm pushed a commit after --prepare")
+        # the draft step pushed, and the one wait is on that sha: the ready confirm pushed no commit after it.
+        self.assertEqual(self.rev("origin/main^2"), prepared, "the ready confirm pushed a commit after the draft step")
         self.assertEqual([sha for sha, _ in self.host.waits], [prepared])
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
+
+    def test_prepare_draft_confirm_never_calls_merge_on_any_path(self):
+        # One repo, four draft confirms in turn: a stale page, a current page, a refused push, and a head behind main.
+        # On each, merge is never called and the pull request stays open.
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        asked = self.spy_merge()
+        before = self.head()
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, "stale page: " + out)
+        self.assertNotEqual(self.head(), before, "stale page: no rebuild was pushed")
+        self.assertEqual(asked, [], "stale page: merge was called")
+        self.assertEqual(self.host.pr_state, "OPEN")
+        rc, out = self.draft_confirm()  # the page is current now
+        self.assertEqual(rc, 0, "current page: " + out)
+        self.assertEqual(asked, [], "current page: merge was called")
+        self.on("feat", {"debts/third-gap.md": DEBT_TEXT.replace("Gap one", "Third gap")})  # stale again
+        before = self.head()
+        self.reject_pushes("feat")
+        rc, out = self.draft_confirm()
+        self.assertNotEqual(rc, 0, "refused push: " + out)
+        self.assertEqual(self.head(), before, "refused push: the head moved")
+        self.assertEqual(len(self.host.readies), 2, "refused push: the pull request was marked ready")
+        self.assertEqual(asked, [], "refused push: merge was called")
+        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # main moves on: the head is behind it
+        rc, out = self.draft_confirm()
+        self.assertNotEqual(rc, 0, "BEHIND: " + out)
+        self.assertIn("BEHIND", out)
+        self.assertEqual(asked, [], "BEHIND: merge was called")
+        self.assertEqual(self.host.pr_state, "OPEN")
+
+    def test_prepare_a_refused_ready_prints_one_line_and_keeps_the_push(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.host.ready_refuse = "the host refused the change to ready"
+        before = self.head()
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        told = [l for l in out.splitlines() if "mark" in l.lower() and "ready" in l.lower()]
+        self.assertEqual(len(told), 1, out)
+        self.assertNotEqual(self.head(), before, "the push was not kept")
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip())
+        self.assertEqual(self.host.readies, [7])
+        self.assertTrue(self.host.draft, "the refused ready cleared the draft flag")
+        self.assertFalse(getattr(self.host, "merged", False), out)
 
 class RecordsRebuildReal(RecordsEnv):
     """The same seam with the real generator, lint/hook_catalog.py, as merge.RECORDS defaults to it."""
