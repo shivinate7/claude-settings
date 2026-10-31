@@ -8103,10 +8103,10 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # =========================================================================== 5f. the trust card in a cs-build session
 #
 # Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a
-# cs-build: tag may not call the two tools that open the owner's trust card. The incident: on 2026-10-30,
-# 16:19-17:06 CDT, a coordinator opened the trusted-device card, and the card blocked every message into
-# that session. The tags are read as merge-role-proof reads them (same transcript fixtures, same env
-# id), and the read fails closed: no own record is a refusal.
+# cs-build: tag may not call the two tools that open the owner's trust card, because the card blocks every
+# message into that session. These cases prove the refusal, and that it holds when the tags are missing.
+# The tags are read as merge-role-proof reads them (same transcript fixtures, same env id), and the read
+# fails closed: no own record is a refusal.
 TRUST_RULE = "trust-card-in-build"
 TRUST_TOOLS = {
     "mcp__claude-code-remote__confirm_repository_trust": {"content_digest": "0" * 64},
