@@ -731,4 +731,4 @@
 - ci-job-relay-locale-decode: the heartbeat relay reads verdict's UTF-8 output in the locale's text mode, so a non-cp1252 byte on Windows can raise mid-step (bin/ci-job).
 - ci-job-local-action-other-path: LOCAL_ACTION matches only `$/actions/` and `./actions/`, so a local action at another path reads as remote and borrows a copy; same on main (bin/ci-job).
 - test-ci-job-pipx-probe-windows: the pipx probe's 60 s timeout on Windows can wait on a pipx child that holds the pipe (lint/test_ci_job.py).
-- test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so uncommitted bin/ci-job edits are not under test locally (lint/test_ci_job.py).
+- test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so a local run tests only committed bin/ci-job edits (lint/test_ci_job.py).
