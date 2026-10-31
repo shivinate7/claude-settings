@@ -5,7 +5,7 @@
                           nothing. A draft is previewed too; a dropped line prints one `BLOCKED:` line and exits 1.
                           A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
-                          On a draft it is the records step and never merges: rebuild the page, push it, mark the PR ready.
+                          On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Reads no lock state first.
   merge --role TIER       cloud only: record this session's merge role (coordinator or batch-runner). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
