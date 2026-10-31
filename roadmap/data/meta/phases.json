@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Oct 30: claude-settings 8a45b83, banchi 5a69c3a, q_max 7667003, home-app e2d35ae (home merged in)",
+    "asOf": "Measured Oct 31: claude-settings 84a5603, banchi 0f96848, q_max 6943da3c, home-app 8e5feb5 (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Oct 30 at claude-settings 8a45b83",
+    "asOf": "Measured Oct 31 at claude-settings 84a5603",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Oct 30: claude-settings 8a45b83, banchi 5a69c3a, q_max 7667003, home-app e2d35ae (home merged in)",
+    "asOf": "Measured Oct 31: claude-settings 84a5603, banchi 0f96848, q_max 6943da3c, home-app 8e5feb5 (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -68,7 +68,7 @@
         "label": "Biggest CLAUDE.md, lines",
         "rule": "banchi 402 (Oct 27, fbb9200), q_max 182, claude-settings 106, home-app 15",
         "target": "200 or fewer",
-        "value": 407
+        "value": 410
       },
       {
         "label": "Remote branches, claude-settings",
@@ -81,9 +81,10 @@
           55,
           79,
           77,
-          124
+          124,
+          107
         ],
-        "value": 124
+        "value": 107
       },
       {
         "label": "Repos with a living roadmap page",
@@ -94,7 +95,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Oct 30: q_max 7667003, home-app e2d35ae",
+    "asOf": "Measured Oct 31: q_max 6943da3c, home-app 8e5feb5",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
