@@ -133,7 +133,7 @@ def _effects_hit(pairs):
 # ------------------------------------------------------------------ a question departs from main
 #
 # docs/decisions/port-keeps-behaviour.md, rule `question-departs`, built against a named incident
-# (incident in the record, landed 2026-10-31): a lane's "departures" said "Opus above a role's row stays the
+# (incident in the record): a lane's "departures" said "Opus above a role's row stays the
 # existing ask", which restates decision agent-model-cap. A question to the owner that restates main is not a
 # question (rule building-port-keeps-behaviour). Each line at a line start `Departs from: <what on main> —
 # <what changes>` must hold both sides, and the change side must not say there is no change. This is the

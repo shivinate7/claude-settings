@@ -28,6 +28,8 @@ unless the same main-session turn opened the question box (AskUserQuestion), or 
 waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
 waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
 check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
+The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
+hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 """
 import json
 import os
@@ -38,15 +40,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import is_last_human, last_reply, tool_uses  # noqa: E402
 import layout  # noqa: E402
-
-# hooks/question_form.py is the one home of the Departs from predicate (rule `question-departs`): the
-# chat box, the waiting page and this report all call it. lint/ and hooks/ sit side by side, so the hop
-# holds in the repo and under ~/.claude. A missing module fails open: a guard that cannot read cannot accuse.
-sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-try:
-    import question_form  # noqa: E402
-except ImportError:
-    question_form = None
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -500,8 +493,13 @@ def repo_root(cwd):
 def departs_problem(text):
     """The refusal text when the Input Needed item offers a pick and its Departs from line is missing or
     restates main (rule `question-departs`), else ''. The predicate is question_form.departs_hit."""
-    if question_form is None or not offers_a_pick(text):
+    if not offers_a_pick(text):
         return ""
+    # hooks/question_form.py is the one home of the predicate: the chat box, the waiting page and this
+    # report all call it. lint/ and hooks/ sit side by side, in the repo and under ~/.claude. It loads only
+    # for a turn that offers a pick, and an import error fails this one check open (the callers catch it).
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
     miss = question_form.departs_hit(input_needed_section(text))
     if not miss:
         return ""
