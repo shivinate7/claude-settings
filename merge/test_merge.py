@@ -928,13 +928,17 @@ class Guards(Env):
         info = self.host.pr(7)
         tmp, wt = merge.open_worktree(self.co, info, "main")
         keep = {k: os.environ.pop(k) for k in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")}
-        os.environ.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="user.useConfigOnly", GIT_CONFIG_VALUE_0="true")
+        cfg_key = re.compile(r"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$")  # append to keys already set, never replace them
+        keep_cfg = {k: v for k, v in os.environ.items() if cfg_key.match(k)}
+        n = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+        os.environ.update(GIT_CONFIG_COUNT=str(n + 1), **{"GIT_CONFIG_KEY_%d" % n: "user.useConfigOnly", "GIT_CONFIG_VALUE_%d" % n: "true"})
         try:
             trailer = merge.do_claim(wt, ".github/stamp.json", "origin/main")
             self.assertEqual(len(merge.commit_claim(wt, trailer)), 40)
         finally:
-            for k in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+            for k in [k for k in os.environ if cfg_key.match(k)]:
                 os.environ.pop(k)
+            os.environ.update(keep_cfg)
             os.environ.update(keep)
             merge.drop_worktree(self.co, tmp, wt)
 
