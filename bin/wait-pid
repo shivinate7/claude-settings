@@ -15,6 +15,7 @@
 import errno, os, re, subprocess, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import guard_kill  # noqa: E402  the one home of the ownership read (hooks/guard_kill.py)
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 DEFAULT_TIMEOUT = 540.0
 USAGE = "usage: wait-pid PID [--timeout SECS]"
 LINUX = sys.platform.startswith("linux")
@@ -31,7 +32,7 @@ def snapshot(pid):
             rest = data[data.rindex(")") + 2:].split()  # fields 3 on; the name in field 2 may hold spaces
             state, start = rest[0], rest[19]  # field 22, the start time in ticks since boot
         else:
-            done = subprocess.run(["ps", "-o", "stat=,lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+            done = _nowindow.run(["ps", "-o", "stat=,lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
             out = done.stdout.split()
             if not out:
                 # `ps` exits 1 with no output at all for no such process; any other empty answer is a failure
