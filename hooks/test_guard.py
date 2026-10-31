@@ -12272,7 +12272,7 @@ IF_LAST = {"choice": "b", "note": "n", "at": "2026-10-29T19:05:00Z"}
 IF_VALUE = {"port": False, "stands": True, "rank": 3, "multi": True, "ranked": True, "kind": "decision",
             "status": "open", "options": [{"key": "a", "label": "Keep the blue"}], "pick": "a",
             "steps": ["Open the page."], "links": [{"label": "Page", "url": "https://example.com/p"}],
-            "lastAnswer": IF_LAST}
+            "command": CMD_BOTH_SHELLS, "lastAnswer": IF_LAST}
 IF_OWN = '["id", "kind", "status", "title", "context", "zzCustom"]'   # a block of a page of its own
 os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
 
