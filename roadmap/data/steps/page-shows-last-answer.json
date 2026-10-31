@@ -1,9 +1,9 @@
 {
   "title": "A waiting-page card shows your last answer and Claude's reply to it",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33743,
   "why": "shiv, Oct 30 12:57 CDT: the page showed questions he had already answered. Read: a session revising an item after his note deletes his answer doc, so the card looks never answered; and skills/waiting-page/page.html (main 42822fef) renders no reply field, so Triage 12's replies on items 61, 77, 78, 85 and 86 were invisible (written 12:58 CDT, moved into context 13:05 CDT). Not a compaction loss: the transcript shows every 12:44-12:46 answer was handled.",
-  "note": "Fix: one item field for the last exchange (his answer with its time, Claude's reply), rendered at the top of the card; a revised item keeps it instead of losing it with the answer doc. An item that waits on a lane, not on him, shows as waiting with the lane name and no buttons. Guard: refuse an item write with a field the page does not render (the allow list is the page's own field list). Done check: write a note, revise the item; the card shows the note and reply; a write with field reply is refused. Needs no answer. Port: yes, every repo with a waiting page. Placed ahead of page-question-shape (Triage 12, Oct 30): an answer he cannot see costs him a second answer on every revised item.",
-  "updatedAt": "2026-10-30T18:01:00Z"
+  "note": "Fix: one item field for the last exchange (his answer with its time, Claude's reply), rendered at the top of the card; a revised item keeps it instead of losing it with the answer doc. An item that waits on a lane, not on him, shows as waiting with the lane name and no buttons. Guard: refuse an item write with a field the page does not render (the allow list is the page's own field list). Done check: write a note, revise the item; the card shows the note and reply; a write with field reply is refused. Needs no answer. Port: yes, every repo with a waiting page. Placed ahead of page-question-shape (Triage 12, Oct 30): an answer he cannot see costs him a second answer on every revised item. Done: batch 37 #904, main 502dbd5e (coordinator, Oct 31 17:09 CDT).",
+  "updatedAt": "2026-10-31T22:09:00Z"
 }

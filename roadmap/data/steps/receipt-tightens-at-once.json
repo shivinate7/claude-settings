@@ -1,9 +1,9 @@
 {
   "title": "An answered card tightens at once, not only off screen",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.337425,
   "why": "shiv, Oct 30 15:06 CDT (waiting-page comment): 'why is this green area still so large after submitting a question, yet often it's started fixing where it correctly tightens? just not always?' Read on main page.html (releaseHeld, heldWatch): after Send a card keeps its old height (minHeight held) so nothing in view moves, and drops it only once wholly off screen with the scroll idle. A card still in view stays tall, so it looks random.",
-  "note": "Built rule (lane receipt-tightens-at-once, PR #880, batch 37; coordinator 2's rewrite, Oct 30 17:26 CDT, can be undone): only Send tightens an answered card at once; the first card under the sticky header holds its place on screen (not the next card: holding the next card measured +456 px and +624 px jumps). Other ways a card turns answered keep today's rule: hold the height while in view, drop it once off screen. Done check: send an item mid-screen; its card shrinks within one frame and the first card under the header does not move. Needs no answer. Port: every repo with a waiting page.",
-  "updatedAt": "2026-10-30T22:30:00Z"
+  "note": "Built rule (lane receipt-tightens-at-once, PR #880, batch 37; coordinator 2's rewrite, Oct 30 17:26 CDT, can be undone): only Send tightens an answered card at once; the first card under the sticky header holds its place on screen (not the next card: holding the next card measured +456 px and +624 px jumps). Other ways a card turns answered keep today's rule: hold the height while in view, drop it once off screen. Done check: send an item mid-screen; its card shrinks within one frame and the first card under the header does not move. Needs no answer. Port: every repo with a waiting page. Done: batch 37 #904, main 502dbd5e (coordinator, Oct 31 17:09 CDT).",
+  "updatedAt": "2026-10-31T22:09:00Z"
 }
