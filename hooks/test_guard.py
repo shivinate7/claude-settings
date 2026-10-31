@@ -17894,6 +17894,15 @@ for _command, _target in ((VCS + " add CLAUDE.md && " + COMMIT, "CLAUDE.md"),
                           (VCS + " add -A && " + COMMIT, "app.py"),
                           (VCS + " add . ; " + COMMIT, "app.py")):
     cs_shell("chained_add_commit_denied", "deny", _command, _target, cwd=CS_CHAIN)
+# The scanner reads shell text: a comment opener, a lone quote and a line break inside the message hide nothing, and a real
+# comment hides the commit that follows it.
+for _message in ('"see # and // here"', '"it\'s done"', '"first\nsecond # third\nfourth"'):
+    cs_shell("chained_add_commit_denied, message %s" % _message.splitlines()[0], "deny",
+             VCS + " add CLAUDE.md && " + VCS + " commit -m " + _message, "CLAUDE.md", cwd=CS_CHAIN)
+cs_shell("chained_add_record_commit_allowed, message names code as text", "allow",
+         VCS + " add docs/todo.md && " + VCS + ' commit -m "# CLAUDE.md // src/app.py"', cwd=CS_CHAIN)
+cs_shell("chained_add_commit_allowed, a comment hides the commit", "allow",
+         VCS + " add CLAUDE.md # && " + COMMIT, cwd=CS_CHAIN)
 cs_shell("chained_add_record_commit_allowed", "allow", VCS + " add docs/todo.md && " + COMMIT, cwd=CS_CHAIN)
 cs_shell("chained_add_all_of_records_commit_allowed", "allow", VCS + " add -A && " + COMMIT, cwd=CS_CHAIN_RECORDS)
 
