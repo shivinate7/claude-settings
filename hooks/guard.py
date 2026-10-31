@@ -1973,9 +1973,16 @@ def role_has_model_pin(pointer_root, role):
                 break
             key, _, value = line.partition(":")
             keys.setdefault(key.strip(), value.strip())
-        if keys.get("name") == role and keys.get("model"):
+        if keys.get("name", "").lower() == role.lower() and keys.get("model"):
             return True
     return False
+
+
+def role_name(table, subagent_type) -> str:
+    """The role a spawn names, as the table spells it: matched without case and without surrounding space.
+    A role the table lacks keeps its own spelling, stripped. An empty role is the default role."""
+    role = str(subagent_type or "").strip() or ROLE_DEFAULT
+    return next((name for name in table if name.lower() == role.lower()), role)
 
 
 def role_model_check(tool: str, tool_input):
@@ -1991,15 +1998,19 @@ def role_model_check(tool: str, tool_input):
     table = role_model_table(pointer)
     if table is None:
         return "", pointer, True
-    role = str(tool_input.get("subagent_type") or ROLE_DEFAULT)
+    role = role_name(table, tool_input.get("subagent_type"))
     model = str(tool_input.get("model") or "").strip()
     if model:
+        top = len(ROLE_MODEL_RANK) - 1
         named = next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in model.lower()), None)
         row = table.get(role)
-        if named is None or named == len(ROLE_MODEL_RANK) - 1 or row is None or role in ROLE_ABOVE_ROW_ROLES:
+        if named is None:
+            # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
+            named = top if row == ROLE_MODEL_RANK[top] else top + 1
+        if named == top or row is None or role in ROLE_ABOVE_ROW_ROLES:
             return "", "", False
-        if role == "reviewer" and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
-                                      for kind, n in brief_markers(tool_input.get("prompt"))):
+        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
+                                                      for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             return ROLE_MODEL_REASON, model, False
