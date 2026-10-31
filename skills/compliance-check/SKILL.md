@@ -44,6 +44,8 @@ Some groups read the tree, not a rule prefix. Each comes after the rule groups:
 - `iOS`: drift from the iOS standard of the `ios-apps` skill. A child with no iOS app is `n/a`.
 - `Words`: each retired word the child uses, read live from the glossary check (`probes.md`, Words). Name the
   parent commit whose glossary the run read.
+- `Supersede`: child text that departs from a shared rule with no known exemption named (`probes.md`,
+  Supersede). A claude-settings rule wins over it. The fix goes in the child.
 - `Caution`: listing only, for the owner to prune. It has no grade. Run `python3 <parent>/lint/layout.py caution <child>`
   and print the level it resolves. Then list each rule in the child's `CLAUDE.md` and `.claude/rules/` that
   restricts what Claude does with a password, a token, a login, a secret or a private datum, as
@@ -62,7 +64,7 @@ not repeat its steps.
 
 ## 4. Scorecard
 
-One line per group, in the order of step 2, then Layout, Design, Copies, iOS, Words and the Caution listing:
+One line per group, in the order of step 2, then Layout, Design, Copies, iOS, Words, Supersede and the Caution listing:
 
 ```
 <Group>: <in shape | partial | out | parent-covered | not rolled out | n/a | unknown> - <finding> (<file:line or command>)

@@ -7,6 +7,7 @@
     python3 lint/compliance_probes.py playwright <child root>
     python3 lint/compliance_probes.py ios <child root>
     python3 lint/compliance_probes.py words <child root>
+    python3 lint/compliance_probes.py supersede <child root>
     python3 lint/compliance_probes.py slugs <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
@@ -45,6 +46,20 @@ words: each retired word in a checked repo, one item per line: `  <word>: <file>
   term that repeats a claude-settings term, or is the retired word itself, does not. After WORDS_DEADLINE
   seconds the group is `unknown - stopped at <file>, N of M read`. That limit is a bandaid for file shapes
   the read is not yet fast on.
+supersede: a line in the child's own text that departs from a shared rule and names no known exemption. It
+  reads the tracked `CLAUDE.md` files (any folder), the root `AGENTS.md` and `.claude/**/*.md`: Markdown
+  only, line by line. A line departs when it holds a narrow override wording: "never inherited", "not
+  inherited", "overrides the global|shared|parent|claude-settings", "instead of the ...", "unlike the ...",
+  or "global|shared|parent|claude-settings rule(s) do(es) not apply". It passes when the same line says
+  "known exemption" and names `rule:<id>`, with <id> a live anchor of claude-settings. A bare `rule:<id>` never
+  passes it. Items: `departs, no exemption` (one per line); `unknown exemption rule:<id>` (the line says "known
+  exemption" and its id is no live anchor, or it names none, shown as `?`; a departure line with such an
+  exemption gets this item alone, and a "known exemption" line with no departure wording gets it too);
+  `redefines rule:<id>` (a child `<!-- rule:<id> -->` anchor that is a live claude-settings anchor). Each item
+  counts toward N in the verdict. The live anchors come from `rule_audit.claude_md_anchors(rule_text())`, and
+  the probe holds no list. A rule text that cannot be read, or holds no anchor, or a child file that cannot be
+  read, makes the group unknown. The claude-settings root is n/a. Not read: a conflict with no override
+  wording, and hook or code text (that needs a parser).
 slugs: a record file this change adds against origin/main, in the child's own record folders (the layout's),
   with a slug over 32 characters is one item line. Long slugs already on main are one note line: the count
   and the first three. No origin/main makes the group unknown. It calls lint/check_record_slugs.py.
@@ -62,6 +77,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import layout  # noqa: E402  the one home of every kind's path
+import rule_audit  # noqa: E402  the one home of the live rule anchors
 import _nowindow  # noqa: E402  the one home of a no-window child start
 from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as front-end copy
 
@@ -309,6 +325,58 @@ def probe_lanecap(root):
     if hits:
         return finish("lanecap", lines, "out - %d cap(s) to read in %d brief or plan file(s)" % (len(hits), len(where)), 1)
     return finish("lanecap", lines, "in shape - %d brief or plan file(s) read" % len(where), 0)
+
+
+# Child text that overrides a shared rule in words. Narrow on purpose: a line that only agrees with a rule has none of these.
+SHARED = r"(global|shared|parent|claude-settings)"
+DEPARTURE = re.compile(
+    r"\b(never|not) inherited\b"
+    r"|\boverrides? the " + SHARED + r"\b"
+    r"|\binstead of the " + SHARED + r"\b"
+    r"|\bunlike the " + SHARED + r"\b"
+    r"|\b" + SHARED + r" rules? (do|does) not apply\b", re.I)
+KNOWN_EXEMPTION = re.compile(r"\bknown exemption\b", re.I)
+RULE_REF = re.compile(r"\brule:([a-z0-9][a-z0-9-]*)")
+ANCHOR_COMMENT = re.compile(r"<!--.*?-->")
+SUPERSEDE_SCOPE = re.compile(r"(^|/)CLAUDE\.md$|^AGENTS\.md$|^\.claude/.+\.md$")
+
+
+def probe_supersede(root):
+    try:
+        live = set(rule_audit.claude_md_anchors(rule_audit.rule_text()))
+    except (OSError, ValueError) as err:
+        raise CannotRun("rule text: %s" % err)
+    if not live:
+        raise CannotRun("no live rule anchors in the claude-settings rule files")
+    if os.path.realpath(root) == os.path.realpath(rule_audit.ROOT):
+        print("supersede: n/a - this is claude-settings")
+        return 0
+    where = [f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)]
+    hits, passes = [], []
+    for rel in where:
+        text = read(root, rel)
+        if text is None:
+            raise CannotRun("cannot read %s" % rel)
+        for number, line in enumerate(text.splitlines(), 1):
+            at, shown = "%s:%d" % (rel, number), line.strip()[:160]
+            departs = DEPARTURE.search(line)
+            if KNOWN_EXEMPTION.search(line):
+                # An anchor comment is a definition, never a reference to an exemption.
+                named = RULE_REF.findall(ANCHOR_COMMENT.sub("", line))
+                if any(n in live for n in named):
+                    if departs:
+                        passes.append("  known exemption, passes: %s: %s" % (at, shown))
+                else:
+                    hits.append("  unknown exemption rule:%s: %s: %s" % (named[0] if named else "?", at, shown))
+            elif departs:
+                hits.append("  departs, no exemption: %s: %s" % (at, shown))
+            for anchor in dict.fromkeys(rule_audit.claude_md_anchors(line)):
+                if anchor in live:
+                    hits.append("  redefines rule:%s: %s" % (anchor, at))
+    lines = hits + passes
+    if hits:
+        return finish("supersede", lines, "out - %d line(s) to read in %d file(s)" % (len(hits), len(where)), 1)
+    return finish("supersede", lines, "in shape - %d file(s) read" % len(where), 0)
 
 
 PW_FILE = re.compile(r"(^|/)(\.github/workflows/[^/]+\.ya?ml|action\.ya?ml|(GNU)?[Mm]akefile|[^/]+\.sh"
@@ -799,7 +867,8 @@ def probe_words(root):
 
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
-          "ios": probe_ios, "words": probe_words, "slugs": probe_slugs, "scorecard": scorecard}
+          "ios": probe_ios, "words": probe_words, "supersede": probe_supersede, "slugs": probe_slugs,
+          "scorecard": scorecard}
 
 
 def main(argv):

@@ -28,6 +28,7 @@ session transcripts, not a repo.
 | --- | --- | --- |
 | Outcomes | Read the child `CLAUDE.md` and README first screen. Run `ste_lint` on both | rules name the person served; README passes `fresh-prose` |
 | Outcomes | `grep -c "rule:" CLAUDE.md`; look for a check per local rule | each local rule has a hook, test, or CI step |
+| Outcomes | `$PY $P/lint/compliance_probes.py supersede .` reads the child's `CLAUDE.md` files, `AGENTS.md` and `.claude/**/*.md` for text that departs from a shared rule (Supersede, below); read each hit in its file | exit 0. A departure passes when its line says "known exemption" and names a live `rule:<id>` |
 | Roles | `git log --oneline -40 origin/main` and `git branch -r` | test commits or `tests/*` branches land before product commits |
 | Roles | `cat .claude/settings.local.json` | no stale model raise; any raise has `_agentCapUntil` in the future |
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
@@ -138,6 +139,38 @@ A tracked file that does not decode as text, such as a binary, is still read by 
 
 A copy of the probe with no `GLOSSARY.md` beside it, such as an installed copy under `~/.claude/lint`,
 is `unknown`, never `in shape`.
+
+## Supersede
+
+`$PY $P/lint/compliance_probes.py supersede .` finds child text that departs from a shared rule and names
+no known exemption. A claude-settings rule wins over such text. The fix goes in the child: rewrite the
+line, or name the exemption. The probe reads the child's tracked `CLAUDE.md` files (any folder), the root
+`AGENTS.md` and `.claude/**/*.md`, line by line. It reads Markdown only, and never edits or pushes to the child.
+
+The probe holds no rule list. On each run it reads the live anchors through `rule_audit.claude_md_anchors`
+in the parent clone. A root that is claude-settings itself is `n/a`.
+
+A line departs when it holds one of these, in any case: "never inherited", "not inherited",
+"override(s) the" and "instead of the" and "unlike the" each before global, shared, parent or
+claude-settings, or "global|shared|parent|claude-settings rule(s) do(es) not apply". A line that only quotes
+or agrees with a rule has none of these. It is not a hit. A conflict with no such wording is read by hand,
+and so is hook and code text.
+
+| Item line | Means |
+| --- | --- |
+| `  departs, no exemption: <file>:<line>: <text>` | override wording, and no valid exemption on the line |
+| `  unknown exemption rule:<id>: <file>:<line>: <text>` | the line says "known exemption", and the id is no live anchor, or it names none (`?`). A departure line with such an exemption gets this item alone |
+| `  redefines rule:<id>: <file>:<line>` | the child holds a `<!-- rule:<id> -->` anchor that is a live claude-settings anchor |
+| `  known exemption, passes: <file>:<line>: <text>` | a departure whose line says "known exemption" and names a live `rule:<id>`. Not a hit |
+
+A bare `rule:<id>` with no "known exemption" never passes a departure. Text is cut to 160 characters. Each
+item counts toward N in the verdict, `supersede: out - N line(s) to read in M file(s)`.
+
+| Exit | Group line |
+| --- | --- |
+| 0 | `supersede: in shape - M file(s) read`, or `supersede: n/a - this is claude-settings` |
+| 1 | `supersede: out - N line(s) to read in M file(s)`, one item line per hit |
+| 2 | `supersede: unknown`: the rule text cannot be read, it has no anchor, or a tracked file of the child cannot be read |
 
 ## Copies
 

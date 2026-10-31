@@ -16,7 +16,7 @@ First case: banchi `CLAUDE.md`, line 350, "The designation is never inherited. A
 
 Skill `compliance-check` runs probe group `supersede`: `python3 lint/compliance_probes.py supersede <child root>`. `lint/compliance_probes.py` holds the exact patterns.
 
-- It reads the child's tracked `CLAUDE.md` files (in any folder), `AGENTS.md` and `.claude/**/*.md`. It reads Markdown only.
+- It reads the child's tracked `CLAUDE.md` files (in any folder), the root `AGENTS.md` and `.claude/**/*.md`. It reads Markdown only. A tracked file it cannot read gives `unknown`.
 - Live anchors come from `rule_audit.claude_md_anchors(rule_text())` in `lint/rule_audit.py`, never from a copy. A failed read, or zero anchors, gives `unknown` and exit 2.
 - A root with the same real path as this repo prints `supersede: n/a - this is claude-settings` and exits 0.
 - A line is a departure when it matches one of these wordings, case-insensitive:
@@ -29,10 +29,10 @@ Skill `compliance-check` runs probe group `supersede`: `python3 lint/compliance_
 - A line that only quotes or agrees with a shared rule has no departure wording, so no flag.
 - Each hit is one item line, with the text cut to 160 characters:
   - `departs, no exemption: <file>:<line>: <text>`: departure wording, no valid exemption on the line.
-  - `unknown exemption rule:<id>: <file>:<line>: <text>`: `known exemption` with an id that is not a live anchor, or with no id (the id shows as `?`).
+  - `unknown exemption rule:<id>: <file>:<line>: <text>`: `known exemption` with an id that is not a live anchor, or with no id (the id shows as `?`). It counts with or without departure wording on the line. A departure line gets this item alone, not also `departs, no exemption`.
   - `redefines rule:<id>: <file>:<line>`: the child holds a rule anchor whose id is a live claude-settings anchor.
   - `known exemption, passes: <file>:<line>: <text>`: a pass line, not a flag.
-- Verdicts: `supersede: out - N line(s) to read in M file(s)`, exit 1. `supersede: in shape - M file(s) read`, exit 0.
+- Verdicts: `supersede: out - N line(s) to read in M file(s)`, exit 1. N counts every item above. M counts every file read. `supersede: in shape - M file(s) read`, exit 0.
 
 Risk kind: named incident, per `building-guard-needs-incident`: banchi `CLAUDE.md` line 350 above. Landed 2026-10-31.
 
