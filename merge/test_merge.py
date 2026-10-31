@@ -4407,6 +4407,7 @@ class GhHalf(Env):
         self.assertNotIn("Traceback", out)
 
     def test_a_pr_that_turns_draft_after_the_preview_read_stops_at_the_draft_step_at_confirm(self):  # guard: merge.py checks draft under the lock
+        """Ruling: records-index-at-merge (confirm on a draft is the records page step)"""
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"]))))  # complete: no defaults notice in the output
         self.set(draft_when_locked=True)  # main's read at the top of --confirm sees a ready PR; confirm's read under the lock sees a draft
         before = self.head()
@@ -4414,6 +4415,7 @@ class GhHalf(Env):
         self.assert_draft_stops(rc, out, before)
 
     def test_a_draft_pr_at_confirm_marks_ready_and_stops_before_any_merge_or_wait(self):
+        """Ruling: records-index-at-merge (confirm on a draft is the records page step)"""
         self.set(draft=True)
         before = self.head()
         rc, out = self.run_merge("7", "--confirm", host=self.gh_host())
@@ -6782,6 +6784,8 @@ class RecordsRebuild(RecordsEnv):
       stops before the mark-ready call. If the mark-ready call fails, one line tells the reader to mark it ready, the
       push stays, and the exit is 0. A ready confirm then finds the page current, pushes nothing, and merges the sha the
       draft step pushed.
+
+    Ruling: records-index-at-merge (confirm on a draft is the records page step)
     """
     def setUp(self):
         super().setUp()
@@ -7099,6 +7103,78 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip())
         self.assertEqual(self.host.readies, [7])
         self.assertTrue(self.host.draft, "the refused ready cleared the draft flag")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_prepare_goes_on_when_the_green_run_stands_on_a_small_base_move(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # the head lacks the base tip, but its green run stands
+        before = self.head()
+        stands = (True, "main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge")
+        with unittest.mock.patch.object(merge, "small_base_move", return_value=stands):
+            rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("The green run stands", out)
+        self.assertNotIn("BEHIND", out)
+        self.assertNotEqual(self.head(), before, "the stale page was not pushed")
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), page("gap-one").strip())
+        self.assertEqual(self.host.readies, [7])
+
+    def test_prepare_says_unknown_not_behind_when_the_base_cannot_be_read(self):
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        before = self.head()
+        why = "cannot read whether 0123456789 holds origin/main, so the run cannot be proved current: boom"
+        with unittest.mock.patch.object(merge, "holds_base", return_value=(why, None)):
+            rc, out = self.draft_confirm()
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("UNKNOWN: " + why, out)
+        self.assertNotIn("BEHIND", out)
+        self.assertEqual(self.head(), before, "pushed on a refusal")
+        self.assertEqual(self.host.readies, [], "marked ready on a refusal")
+
+    def test_prepare_behind_names_the_remedy_once(self):
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        rc, out = self.draft_confirm()
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("BEHIND: ", out)
+        self.assertEqual(out.count("Merge main into"), 1, out)
+
+    def test_prepare_refuses_a_head_that_holds_a_record_claim(self):
+        # A page commit on top of a claim would hide the claim from the ready confirm, which then claims again.
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "docs/decisions/second.md": record("D-002", "second")},
+                "Claim record numbers\n\nRecord-claim: D-002")
+        before = self.head()
+        rc, out = self.draft_confirm()
+        self.assertNotEqual(rc, 0, out)
+        self.assertEqual(len([l for l in out.splitlines() if "Record-claim" in l]), 1, out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.head(), before, "pushed a page commit on top of the claim")
+        self.assertEqual(self.host.readies, [], "marked ready on a refusal")
+
+    def test_prepare_under_the_lock_extends_it_and_releases_it(self):
+        # A PR that turns draft once the lock is held: the draft step runs under confirm's lock, so its proof hands holds_base
+        # the lock's own extend_for, as the ready path does. Without it a rate wait there could outlive the lock.
+        self.kinds_off()
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        real_acquire, real_holds, seen = lock.acquire, merge.holds_base, []
+        def acquire(*a, **k):
+            token = real_acquire(*a, **k)
+            self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
+            return token
+        def holds(wt, base_ref, sha, before_run=None):
+            seen.append(before_run)
+            return real_holds(wt, base_ref, sha, before_run)
+        lock.acquire = acquire
+        with unittest.mock.patch.object(merge, "holds_base", holds):
+            rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+        self.assertEqual(seen, [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
+        self.assertFalse(self.lock_ref(), "the lock was not released")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
 class RecordsRebuildReal(RecordsEnv):
