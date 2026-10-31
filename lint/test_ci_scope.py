@@ -18,7 +18,10 @@ import subprocess
 import tempfile
 import unittest
 
+import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]

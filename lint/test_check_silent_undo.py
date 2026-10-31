@@ -9,6 +9,7 @@ import contextlib, io, json, os, shutil, subprocess, sys, tempfile, unittest, un
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import check_silent_undo as C  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
@@ -29,8 +30,17 @@ def tearDownModule():
         r.tmp.cleanup()
 
 
+OPT_OUT_KEYS = ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+
+
+def without_opt_out(env):
+    """`env` without the test-run signing opt-out (lint/_test_git.py). Only a case that signs on purpose uses it."""
+    return {k: v for k, v in env.items() if not k.startswith(OPT_OUT_KEYS)}
+
+
 class Repo:
     def __init__(self):
+        self.signs = False  # a case that signs on purpose sets this, and its git runs without the opt-out
         self.tmp = tempfile.TemporaryDirectory()
         REPOS.append(self)
         self.dir = os.path.join(self.tmp.name, "w")
@@ -41,6 +51,8 @@ class Repo:
 
     def sh(self, *a, cwd=None, ok=True, date=None):
         env = dict(os.environ, GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date) if date else None
+        if self.signs:
+            env = without_opt_out(env or os.environ)
         r = subprocess.run(["git", *a], cwd=cwd or self.dir, capture_output=True, text=True, env=env)
         assert r.returncode == 0 or not ok, (a, r.stdout, r.stderr)
         return r.stdout.strip()
@@ -1840,8 +1852,11 @@ class DropsLinesHint(unittest.TestCase):
         with open(signers, "w", encoding="utf-8") as f:
             f.write('t@t namespaces="git" %s %s\n' % (kind, blob))
         self.land_pr()
+        # This case signs on purpose, so its git runs without the opt-out. The signer is the local ssh-keygen with the
+        # key above, named here so no global signer (a cloud signing program) is ever called.
+        self.r.signs = True
         for k, v in (("gpg.format", "ssh"), ("user.signingkey", key), ("gpg.ssh.allowedSignersFile", signers),
-                     ("commit.gpgsign", "true"), ("log.showSignature", "true")):
+                     ("gpg.ssh.program", ssh_keygen), ("commit.gpgsign", "true"), ("log.showSignature", "true")):
             self.r.sh("config", k, v)
         sha = self.revert_with(self.ABOVE)
         self.assertEqual(self.r.sh("log", "-1", "--no-show-signature", "--format=%G?", sha), "G",

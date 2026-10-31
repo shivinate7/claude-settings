@@ -14,6 +14,8 @@ import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 CMD = os.environ.get("STALE_PAGES_UNDER_TEST") or os.path.join(HERE, "stale_pages.py")
 SPLICE = os.environ.get("SPLICE_UNDER_TEST") or os.path.join(HERE, "splice.py")  # the same seam as test_splice.py
 DESIGN_BLOCK = re.compile(r'<script type="application/json" id="designData">.*?</script>', re.S)
@@ -90,7 +92,7 @@ def link_repo_dirs(claude, hooks=True):
 def git(cwd, *args):
     """One git step of a fixture clone. The timeout bounds it, as it bounds every script run."""
     return subprocess.run(["git", "-C", cwd, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
-                           "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+                           "-c", "core.hooksPath=/dev/null", *args],
                           capture_output=True, text=True, timeout=30, check=True)
 
 

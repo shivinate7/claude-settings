@@ -37,6 +37,8 @@ HOOK = os.path.join(HERE, "session_end_sweep.py")
 REAL_SWEEP = os.path.join(HERE, "sweep.py")
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import guard  # noqa: E402
 
 VCS = "g" + "it"
