@@ -65,18 +65,35 @@ Everything is a real symlink. A `git pull` in the clone is the whole update.
 
 ### Cloud sessions (desktop app, claude.ai/code, `claude --cloud`)
 
-A cloud VM never sees your machine's `~/.claude`. In claude.ai/code, set the environment's
-setup script to:
+A cloud VM never sees your machine's `~/.claude`. Paste this once per environment, in the
+cloud environment menu in the session title bar, then Edit, then Setup script. It installs
+before Claude Code starts, so the first agent spawn reads `agents/*.md` (decision
+`agent-model-cap`). It never fails setup: on any failure it prints one
+`claude-settings setup:` line and the session starts without the install.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud
+f=$(mktemp)
+if ! curl -fsS --max-time 20 https://raw.githubusercontent.com/shivinate7/claude-settings/main/cloud-setup.sh -o "$f"; then
+  : > "$f"
+  for d in ${CLAUDE_SETTINGS_SEARCH_ROOTS:-/home/user /root}; do
+    for c in "$d"/*/cloud-setup.sh; do
+      case "$(git -C "${c%/*}" config --get remote.origin.url 2>/dev/null)" in
+        *github.com[/:]shivinate7/claude-settings|*github.com[/:]shivinate7/claude-settings.git) cp "$c" "$f" && break 2 ;;
+      esac
+    done
+  done
+fi
+if [ -s "$f" ]; then bash "$f" || true; else echo "claude-settings setup: no source: GitHub down, or the repo is private and not under the environment's Repositories"; fi
+rm -f "$f"
+exit 0
 ```
 
 Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com`, and
-`codeload.github.com` to a Custom list. The script also writes a `SessionStart` hook that
-re-runs itself, so each new or resumed session re-fetches the files even from a stale
-snapshot. To pin cloud sessions to one commit instead of `main`, replace `/main/` in the URL
-with `/<sha>/`, or set `CLAUDE_SETTINGS_REF=<sha>` as an environment variable.
+`codeload.github.com` to a Custom list. The setup script cannot read the environment's
+variables or secrets. If this repo goes private, add it under the environment's Repositories.
+install.sh also writes a `SessionStart` hook that re-runs it, so each new or resumed session
+re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
+`CLAUDE_SETTINGS_REF=<sha>` as an environment variable. Only the `SessionStart` hook reads it.
 
 ## Verify the install
 
@@ -107,7 +124,7 @@ Once merged:
 * Local (copy mode, Windows without Developer Mode): the `post-merge` git hook copies the
   changed files after your next `git pull` on `main`, and re-runs `install.ps1` itself if
   `install.ps1` changed.
-* Cloud: the next new or resumed session re-runs the setup script and picks up the change.
+* Cloud: the next new session runs the setup script, and each new or resumed session runs the `SessionStart` refresh hook; both pick up the change.
 
 ## The `merge` command
 

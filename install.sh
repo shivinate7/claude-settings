@@ -2,7 +2,7 @@
 # Wire ~/.claude to the files in this repo. Linux/macOS local, and Claude Code cloud sessions.
 #
 #   Local (from a clone):   bash install.sh
-#   Cloud setup script:     curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | bash -s -- --cloud
+#   Cloud setup script:     fetch cloud-setup.sh (it fetches this file and runs it with --cloud)
 #
 # What it does:
 #   ~/.claude/CLAUDE.md      -> one-line pointer: @<repo>/CLAUDE.md
