@@ -17,6 +17,8 @@ Run from any folder:
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch <branch>] --block --out FILE
 
 `--record-branch` defaults to the extras key `record-branch` in `.claude/layout-extras.json`, else `roadmap`.
+With no flag, an extras file that cannot be read warns and reads `roadmap`. A `record-branch` value that is
+not a plain git branch name stops the build.
 
 `--block` writes only the roadmap block, the text between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->`. It holds
 `window.ROADMAP_DATA` and `window.ROADMAP_BUILD`, and never a database stand-in. With no record branch,
