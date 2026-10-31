@@ -3126,6 +3126,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
         if rule == "question-departs":
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
+        if rule == "item-field-rendered":
+            refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         return
 
     if tool in SHELL_TOOLS:
