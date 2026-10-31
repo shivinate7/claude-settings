@@ -254,7 +254,8 @@ def handle(hook, start=None, elapsed_seconds=None) -> None:
         _nowindow.run(
             [sys.executable, SWEEP_PATH, root, "--confirm",
              "--deadline-seconds", str(sweep_timeout)],  # the only run with a deadline
-            capture_output=True, text=True, timeout=sweep_timeout,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=sweep_timeout,  # nothing reads the sweep's output; a pipe would outlive a kill on Windows
         )
     except Exception:
         # Covers subprocess.TimeoutExpired (the sweep hung) and every other way the call could
