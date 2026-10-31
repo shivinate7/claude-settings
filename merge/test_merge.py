@@ -7025,8 +7025,9 @@ class RecordsRebuild(RecordsEnv):
         self.host.draft = False  # marked ready in the fake host
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.head(), prepared, "confirm pushed to the pull request branch")
-        self.assertEqual(self.rev("origin/main^2"), prepared)
+        # deleteBranch removes `feat` after the merge, so read the merge commit instead. Its second parent is the sha
+        # --prepare pushed, and the one wait is on that sha: confirm pushed no commit after it.
+        self.assertEqual(self.rev("origin/main^2"), prepared, "confirm pushed a commit after --prepare")
         self.assertEqual([sha for sha, _ in self.host.waits], [prepared])
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
 
