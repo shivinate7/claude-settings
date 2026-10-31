@@ -20,13 +20,15 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 # One home for the role list: the guard's HAIKU_ROLES. Read it, never copy it.
 _spec = importlib.util.spec_from_file_location("guard", os.path.join(ROOT, "hooks", "guard.py"))
 _guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_guard)
 HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
 LANE_EFFORT = _guard.LANE_EFFORT
-LANE_RECORD = os.path.join("docs", "decisions", "agent-model-cap.md")
+LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
 LANE_ROW = re.compile(r"^\|\s*lane session\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
 MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 
