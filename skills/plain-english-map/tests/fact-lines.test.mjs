@@ -717,6 +717,71 @@ test('V7b. the regex reader on a shell file: a double-quoted string over three l
   assert.deepEqual(r, { file: 'scripts/run.sh', symbol: 'X', ok: true, value: 30 });
 });
 
+// ---- Round 3: the aliases of a uses fact belong to the cited file, and a heredoc body hides no later code ----
+
+/** Runs the check on a scratch repository where `rel` holds `body`. The map line and the fact of `rel` stay as the fixture has them. */
+const checkWith = (rel, body) => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  write(dir, rel, body);
+  return check(dir);
+};
+
+test('R1a. uses in typescript: path.notes on a namespace import of node:path is no use of notes.ts, because the alias is not bound to notes.ts, so MAP9 fails and says so', () => {
+  // The import of ./notes binds `other`, and `path` is a namespace of another module. Today any namespace alias counts, so this passes by mistake.
+  const r = checkWith('src/home.ts', 'import { other } from "./notes";\nimport * as path from "node:path";\npath.notes;\nexport const homeTitle = () => other;\n');
+  assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
+  assert.match(mapLine(r.out), /never uses notes/, `MAP9 must say home.ts never uses notes\n${out1500(r)}`);
+});
+
+test('R1b. uses in Python: subprocess.RETRY_WAIT_S on an import that is not retry.py is no use of RETRY_WAIT_S, so MAP9 fails and says so', () => {
+  // `import retry, subprocess` binds two aliases. Today any imported alias counts, so the subprocess one passes by mistake.
+  const r = checkWith('src/caller.py', 'import retry, subprocess\n\n\ndef wait_s():\n    return subprocess.RETRY_WAIT_S\n');
+  assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
+  assert.match(mapLine(r.out), /never uses RETRY_WAIT_S/, `MAP9 must say caller.py never uses RETRY_WAIT_S\n${out1500(r)}`);
+});
+
+test('R1c. uses in typescript: m.notes after const m = require("./notes") is a use of notes, so MAP9 passes (false alarm today: only an import * alias counts)', () => {
+  const r = checkWith('src/home.ts', 'const m = require("./notes");\nexport const homeTitle = () => m.notes;\n');
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('R1d. uses in typescript: m.notes after const m = await import("./notes") is a use of notes, so MAP9 passes (false alarm today: only an import * alias counts)', () => {
+  const r = checkWith('src/home.ts', 'const m = await import("./notes");\nexport const homeTitle = () => m.notes;\n');
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('R1e. uses in typescript: lib.notes after import lib from "./notes" is a use of notes, so MAP9 passes (false alarm today: only an import * alias counts)', () => {
+  const r = checkWith('src/home.ts', 'import lib from "./notes";\nexport const homeTitle = () => lib.notes;\n');
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('R1f. uses in Python, control: retry.RETRY_WAIT_S beside a second import is a use of RETRY_WAIT_S, so MAP9 passes (green today; it pins that R1b fails for the alias and not for the second import)', () => {
+  const r = checkWith('src/caller.py', 'import retry, subprocess\n\n\ndef wait_s():\n    return retry.RETRY_WAIT_S, subprocess.run\n');
+  assert.equal(verdicts(r.out), expected(), `every check must pass\n${out1500(r)}`);
+});
+
+test('R2a. the regex reader on a shell file: a lone quote in a heredoc body is text, so the X=30 after the heredoc reads 30 (the quote opens a string today and hides it)', async () => {
+  const { readValues } = await readersModule();
+  const dir = scratchFiles({ 'scripts/run.sh': "cat <<EOF\ndon't\nEOF\nX=30\nB='z'\n" });
+  const [r] = readValues([{ file: 'scripts/run.sh', symbol: 'X' }], dir);
+  assert.deepEqual(r, { file: 'scripts/run.sh', symbol: 'X', ok: true, value: 30 });
+});
+
+test('R2b. the regex reader on a shell file, control: a lone quote inside a double-quoted string is text, so the X=30 after it reads 30 (green today)', async () => {
+  const { readValues } = await readersModule();
+  const dir = scratchFiles({ 'scripts/run.sh': 'M="don\'t"\nX=30\n' });
+  const [r] = readValues([{ file: 'scripts/run.sh', symbol: 'X' }], dir);
+  assert.deepEqual(r, { file: 'scripts/run.sh', symbol: 'X', ok: true, value: 30 });
+});
+
+test('R2c. the regex reader on a shell file, control: a # inside a double-quoted string opens no comment, so the X=30 after it reads 30 (green today)', async () => {
+  const { readValues } = await readersModule();
+  const dir = scratchFiles({ 'scripts/run.sh': 'U="a#b"\nX=30\n' });
+  const [r] = readValues([{ file: 'scripts/run.sh', symbol: 'X' }], dir);
+  assert.deepEqual(r, { file: 'scripts/run.sh', symbol: 'X', ok: true, value: 30 });
+});
+
 test('V8. cost: one map-check run starts git ls-files no more often than origin/main does, which is 13 times', POSIX_ONLY, () => {
   needFile('scripts/map-check.mjs');
   const shim = lsFilesShim();
