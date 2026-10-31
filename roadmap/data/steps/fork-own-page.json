@@ -1,9 +1,9 @@
 {
   "title": "A semi-fork gets its own waiting page and record branch",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3045,
   "why": "shiv, Oct 31 15:00 CDT, chat with triage: option a. Asked how a worktree whose work never reaches main (a semi-fork) works with the artifacts. Risk read from the code: a worktree keeps the repo's waiting-page key in .claude/layout-extras.json, so fork and main share one page, one database and two writers, and the record branch roadmap is shared too.",
-  "note": "Ruled Oct 31 15:00 CDT (shiv, a): a fork gets its own page from skill waiting-page 'Make a repo's page', its own waiting-page key in its extras file, and its own record branch (such as roadmap-<fork>). The template stays the same. Known limit, kept: a fork of claude-settings still runs main's hooks and skills, because session start installs ~/.claude from main, and the writer rebuilds pages from main's page.html. The lane lands the ruling in a decision record on main. Done check: a test makes a fork checkout and shows the page lookup and the roadmap build read the fork's own page and branch, not main's, red on main and green on the fix. Needs no answer. Files: skills/waiting-page/SKILL.md, skills/project-ops/SKILL.md, lint/layout.py, skills/roadmap/build.py.",
-  "updatedAt": "2026-10-31T20:01:00Z"
+  "note": "Ruled Oct 31 15:00 CDT (shiv, a): a fork gets its own page from skill waiting-page 'Make a repo's page', its own waiting-page key in its extras file, and its own record branch (such as roadmap-<fork>). The template stays the same. Known limit, kept: a fork of claude-settings still runs main's hooks and skills, because session start installs ~/.claude from main, and the writer rebuilds pages from main's page.html. Lane: session ...KzvCnTqNk7gg7sMmUM, started Oct 31 15:03 CDT; it also carries triage-makes-page. The lane lands the ruling in a decision record on main. Done check: a test makes a fork checkout and shows the page lookup and the roadmap build read the fork's own page and branch, not main's, red on main and green on the fix. Needs no answer. Files: skills/waiting-page/SKILL.md, skills/project-ops/SKILL.md, lint/layout.py, skills/roadmap/build.py.",
+  "updatedAt": "2026-10-31T20:04:00Z"
 }
