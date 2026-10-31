@@ -14,6 +14,7 @@ from guard_core import (
 from guard_pointer import (
     pointer_checkout,
 )
+from shared_names import MERGE_ROLES
 
 
 # ------------------------------------------------------------------ three git acts
@@ -473,6 +474,96 @@ def records_page_hit(stripped: str, cwd: str) -> str:
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
             return "git commit " + RECORDS_PAGE
+    return ""
+
+
+# ---- merge --role: the tier is read from this session's own get_session record
+ROLE_TAG_PREFIX = "cs-build:"
+ROLE_REASON = (
+    "merge-role-proof: this session's own record does not prove the merge tier it claims. "
+    "If this session is a coordinator or batch runner: run get_session (no argument) alone in its own "
+    "turn, then retry. Any other session: hand the branch, head and PR to the batch runner "
+    "(list_sessions, tag cs-build:batch-runner, same cs-repo)."
+)
+
+
+def role_call_of(segment: str):
+    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+
+    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
+    `merge/merge.py` or `merge/launch.py`. A role flag with no value gives ''.
+    """
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return None
+    index = resolve_command(tokens)
+    if index is None:
+        return None
+    word = basename(tokens[index])
+    rest = tokens[index + 1:]
+    if word.startswith("python"):
+        script = next((t for t in rest if not t.startswith("-")), None)
+        if script is None or basename(script) not in ("merge.py", "launch.py") \
+                or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
+            return None
+        rest = rest[rest.index(script) + 1:]
+    elif word != "merge":
+        return None
+    for at, arg in enumerate(rest):
+        if arg == "--role":
+            return rest[at + 1] if at + 1 < len(rest) else ""
+        if arg.startswith("--role="):
+            return arg[len("--role="):]
+    return None
+
+
+def _own_get_session_tags(transcript: str, own_id: str):
+    """The tags of the newest get_session result whose ccr.id is own_id, else None."""
+    uses, newest = set(), None
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
+                    uses.add(block.get("id"))
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    try:
+                        ccr = json.loads(body)["ccr"]
+                        if ccr["id"] == own_id and isinstance(ccr["tags"], list):
+                            newest = ccr["tags"]
+                    except (ValueError, KeyError, TypeError):
+                        continue
+    return newest
+
+
+def role_proof_hit(stripped: str, transcript: str) -> str:
+    """Return the matched call when a segment runs the merge tool with a role the own record does not
+    prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
+    allow rule has no classifier behind it and the guard-wide crash path fails open."""
+    for segment in split_segments(stripped):
+        tier = role_call_of(segment) if segment.strip() else None
+        if tier is None:
+            continue
+        try:  # cost: one transcript read, only on a role-flag call
+            from override import remote_session_id
+            own_id = remote_session_id()
+            if own_id and transcript:
+                tags = _own_get_session_tags(transcript, own_id)
+                if tier in MERGE_ROLES and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                    continue
+        except Exception:
+            pass
+        return "merge role " + tier
     return ""
 
 
