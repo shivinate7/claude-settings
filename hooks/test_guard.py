@@ -7919,6 +7919,7 @@ ROLE_OTHER = "session_ROLEOTHER01"
 ROLE_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_ROLEOWN01"}
 ROLE_DIR = os.path.join(ROOT, "rolerec")
 GET_SESSION = "mcp__claude-code-remote__get_session"
+SET_SESSION_TAGS = "mcp__claude-code-remote__set_session_tags"
 LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
 LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
@@ -7926,10 +7927,10 @@ COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
 MERGE_SHIM = "~/.claude/bin/merge"
 
 
-def role_use(tool_id, name):
+def role_use(tool_id, name, tool_input=None):
     """An assistant line that calls the tool `name`."""
     return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "id": tool_id, "name": name, "input": {}}]}})
+        {"type": "tool_use", "id": tool_id, "name": name, "input": tool_input or {}}]}})
 
 
 def role_result(tool_id, text):
@@ -7947,6 +7948,12 @@ def role_record(tags, session=ROLE_OWN, title="a lane session"):
 def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
     """One paired get_session call whose record carries `tags`."""
     return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
+
+
+def role_tag_call(tool_id, session=ROLE_OWN):
+    """One paired set_session_tags call that adds a tag to `session`."""
+    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [session], "add": ["cs-build:coordinator"]}),
+            role_result(tool_id, "ok")]
 
 
 def role_said(text):
@@ -7976,6 +7983,11 @@ ROLE_LINES = {
     "untagged": role_call("g1", ["cs-repo:o/r"]),
     "other-untagged": role_call("g1", ["cs-repo:o/r"], session=ROLE_OTHER),
     "foreign-lane-newest": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
+    # A session reads its record untagged at start, then tags itself: the untagged read is stale from then on.
+    "untagged-then-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1"),
+    "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
+    "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
+    "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
 }
 
 
@@ -8142,6 +8154,15 @@ for _trust_tool in TRUST_TOOLS:
     # The own-id filter: a newer foreign cs-build:lane record is not this session's tag.
     trust_allow(_trust_word + " beside a newer record of another session that is tagged allows", _trust_tool,
                 role_path("foreign-lane-newest"))
+    # A set_session_tags call after the newest own read makes that read stale: the tags may have changed.
+    trust_deny(_trust_word + " after an untagged read and then a set_session_tags call is refused",
+               _trust_tool, role_path("untagged-then-tags"), carries=("get_session",))
+    trust_allow(_trust_word + " after a set_session_tags call and then a newer untagged read allows",
+                _trust_tool, role_path("tags-then-untagged"))
+    trust_deny(_trust_word + " after a set_session_tags call and then a newer coordinator read is refused",
+               _trust_tool, role_path("tags-then-coordinator"))
+    trust_deny(_trust_word + " after an untagged read and then a newer lane read is refused",
+               _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
 
