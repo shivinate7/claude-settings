@@ -726,3 +726,5 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- reap-log-done-by-margin: janitor/agent_end_reap.py LOG_DONE_BY 58 leaves 2 s, but the hook's 60 s timer starts before `started` (shell, interpreter start, stdin read); 55 was proposed. Decision: c95.
+- log-lock-retries-every-oserror: _log_lock retries on every OSError, so a non-contention error (ENOLCK, EOPNOTSUPP) waits to the deadline; a contention-only retry was proposed but its Windows errno pair (13, 36) for msvcrt.locking is unverified. Decision: c95.
