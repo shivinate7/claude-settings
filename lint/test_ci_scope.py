@@ -137,6 +137,12 @@ class Scope(unittest.TestCase):
         for p in (".github/workflows/checks.yml", ".github/scripts/ci-scope.sh"):
             self.assertFlags(run([p]), want_true=ALL)
 
+    def test_a_test_run_signing_helper_change_runs_everything(self):
+        # Every suite loads the helper, so a change to any of its three twins runs every job.
+        for p in ("lint/_test_git.py", "lint/_test_git.sh", "lint/_test_git.mjs"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p]), want_true=ALL + DERIVED_FLAGS)
+
     def test_unmapped_path_runs_everything(self):
         self.assertFlags(run(["zz-unmapped/blob.bin"]), want_true=ALL)
 
