@@ -1,12 +1,14 @@
 """Bake a repo's roadmap into one read-only page that opens straight from disk.
 
-    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch roadmap] [--out FILE] [--block]
+    python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch NAME] [--out FILE] [--block]
 
 The steps, topics and numbers come from the repo's record branch, under roadmap/data/. In a
 checkout that stands on the record branch, the builder reads the working tree and writes
 roadmap/roadmap.html there. In any other checkout it reads the branch through git (origin's copy
 first, else the local one) and writes to --out. The record homes (decisions, debts, plans and the
-rest) come from the checkout itself, at the paths lint/layout.py gives.
+rest) come from the checkout itself, at the paths lint/layout.py gives. Without --record-branch the
+branch is the one the checkout's extras file names ("record-branch", a fork worktree's own), else
+"roadmap"; the flag wins.
 
 With --block the builder writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
 never ROADMAP_DB) to --out. The one page of a repo is the waiting page: its writer splices that block into
@@ -278,6 +280,28 @@ def homes(repo):
         return found
     except Exception as err:  # the layout is a shared file; any fault in it makes every home unknown
         return {kind: (None, "the layout could not be read: %s" % err) for kind, _ in HOMES}
+    finally:
+        if str(LINT) in sys.path:
+            sys.path.remove(str(LINT))
+
+
+DEFAULT_RECORD_BRANCH = "roadmap"  # the same default as lint/layout.py, for when layout.py cannot be imported
+
+
+def default_record_branch(repo):
+    """The record branch the checkout's extras file names, else "roadmap"."""
+    sys.path.insert(0, str(LINT))
+    try:
+        import layout
+        try:
+            return layout.record_branch(str(repo))
+        except layout.BranchNameError as err:  # a bad key must not read as "roadmap": it would build the wrong record
+            raise SystemExit("The record branch cannot be read from the layout extras file: %s" % err)
+    except SystemExit:
+        raise
+    except Exception as err:  # an extras file that cannot be parsed builds as it did before the key existed
+        print("warning: %s; reading the record branch %s" % (err, DEFAULT_RECORD_BRANCH), file=sys.stderr)
+        return DEFAULT_RECORD_BRANCH
     finally:
         if str(LINT) in sys.path:
             sys.path.remove(str(LINT))
@@ -555,7 +579,8 @@ def render_block(data, info):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Bake a repo's roadmap into one read-only page.")
     ap.add_argument("--repo", default=".", help="the checkout to read (default: the current folder)")
-    ap.add_argument("--record-branch", default="roadmap", help="the branch that holds roadmap/data/")
+    ap.add_argument("--record-branch", default=None,
+                    help="the branch that holds roadmap/data/ (default: the checkout's record-branch key, else roadmap)")
     ap.add_argument("--main-branch", default="main", help="the branch whose merges carry Step: trailers")
     ap.add_argument("--live", help="the publisher's live-work file: project threads, open pull requests and branches")
     ap.add_argument("--out", help="the page to write; needed unless the checkout stands on the record branch")
@@ -563,6 +588,8 @@ def main(argv=None):
                     help="write only the roadmap data block (needs --out), for the waiting-page writer to splice in")
     args = ap.parse_args(argv)
     repo = pathlib.Path(args.repo).resolve()
+    if args.record_branch is None:
+        args.record_branch = default_record_branch(repo)
     source, why = record_source(repo, args.record_branch)
     if args.block and not args.out:
         raise SystemExit("--block writes the data block to a file, so name it with --out FILE.")

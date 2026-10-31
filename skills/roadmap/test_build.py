@@ -67,15 +67,21 @@ def git(repo, *args):
                           env={**os.environ, **GIT_ENV}).stdout
 
 
-def run_build(*argv):
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+def run_build_streams(*argv):
+    """(code, stdout, stderr) of build.main(argv): 0 for a normal return, else the SystemExit code."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
             build.main(list(argv))
             code = 0
         except SystemExit as e:
             code = e.code
-    return code, out.getvalue()
+    return code, out.getvalue(), err.getvalue()
+
+
+def run_build(*argv):
+    code, out, err = run_build_streams(*argv)
+    return code, out + err
 
 
 def build_info(page):
@@ -129,9 +135,11 @@ def tearDownModule():
 
 
 class Fixture(unittest.TestCase):
+    STEPS = None  # extra or replacement step files for make_repo, {stem: step}
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
-        self.repo = make_repo(self.tmp.name)
+        self.repo = make_repo(self.tmp.name, steps=self.STEPS)
         self.data = self.repo / "roadmap" / "data"
         self.out = pathlib.Path(self.tmp.name) / "page.html"
 
@@ -586,6 +594,91 @@ class BlockOnly(Fixture):
         self.assertEqual(block.count("</script>"), 1)
         self.assertEqual(block.count("<!--"), 2, "a comment opener from the data reached the block")
         self.assertEqual(baked(block, "window.ROADMAP_DATA = ")["steps"]["c1"]["note"], note)
+
+
+class ForkRecord(Fixture):
+    """A fork worktree keeps its own waiting page and its own record branch, named in its extras file
+    (owner ruling Oct 31 15:00 CDT, option a). Both record branches sit on one bare origin."""
+    STEPS = {"c1": dict(STEP, title="Main record step")}
+    MAIN_URL = "https://claude.ai/artifact/MAINPAGE111"
+    FORK_URL = "https://claude.ai/artifact/FORKPAGE222"
+    MAIN_TITLE = "Main record step"
+    FORK_TITLE = "Fork record step"
+
+    def setUp(self):
+        super().setUp()
+        self.on_main()
+        self.write_extras(self.repo, self.MAIN_URL)
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-qm", "main extras")
+        origin = pathlib.Path(self.tmp.name) / "origin.git"
+        git(self.tmp.name, "init", "-q", "--bare", str(origin))
+        git(self.repo, "remote", "add", "origin", str(origin))
+        git(self.repo, "branch", "-q", "roadmap-fork", "roadmap")
+        git(self.repo, "checkout", "-q", "roadmap-fork")
+        (self.data / "steps" / "c1.json").write_text(json.dumps(dict(STEP, title=self.FORK_TITLE)), encoding="utf-8")
+        git(self.repo, "commit", "-qam", "fork record")
+        self.on_main()
+        git(self.repo, "push", "-q", "origin", "main", "roadmap", "roadmap-fork")
+        git(self.repo, "fetch", "-q", "origin")
+        self.fork = pathlib.Path(self.tmp.name) / "fork"
+        git(self.repo, "worktree", "add", "-q", "-b", "fork-own-page", str(self.fork), "main")
+        self.write_extras(self.fork, self.FORK_URL, **{"record-branch": "roadmap-fork"})
+        git(self.fork, "commit", "-qam", "fork extras")
+
+    def write_extras(self, root, url, **keys):
+        path = pathlib.Path(root) / ".claude" / "layout-extras.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict({"kinds": {}, "waiting-page": url}, **keys)), encoding="utf-8")
+
+    def page_from(self, root, *extra):
+        code, out = run_build("--repo", str(root), "--out", str(self.out), *extra)
+        self.assertEqual(code, 0, out)
+        return self.out.read_text(encoding="utf-8")
+
+    def test_fork_worktree_with_no_flag_reads_its_own_record_branch(self):
+        page = self.page_from(self.fork)
+        self.assertIn(self.FORK_TITLE, page)
+        self.assertNotIn(self.MAIN_TITLE, page)
+        panels = {p["name"]: p for p in build_info(page)["panels"]}
+        self.assertEqual(panels["Steps"]["read"], git(self.repo, "rev-parse", "--short", "origin/roadmap-fork").strip())
+
+    def test_explicit_record_branch_still_reads_mains(self):
+        page = self.page_from(self.fork, "--record-branch", "roadmap")
+        self.assertIn(self.MAIN_TITLE, page)
+        self.assertNotIn(self.FORK_TITLE, page)
+
+    def broken_extras(self, text):
+        """Put `text` in the fork's extras file, uncommitted, where the build reads it."""
+        (pathlib.Path(self.fork) / ".claude" / "layout-extras.json").write_text(text, encoding="utf-8")
+
+    def test_unreadable_extras_with_no_flag_warns_on_stderr_and_reads_roadmap(self):
+        for text in ("", "{not json", json.dumps({"waiting-page": self.FORK_URL})):
+            with self.subTest(text=text):
+                self.broken_extras(text)
+                if self.out.exists():
+                    self.out.unlink()
+                code, out, err = run_build_streams("--repo", str(self.fork), "--out", str(self.out))
+                self.assertEqual(code, 0, out + err)
+                self.assertIn("layout-extras.json", err)
+                self.assertNotIn("layout-extras.json", out)
+                self.assertNotIn("Traceback", err)
+                page = self.out.read_text(encoding="utf-8")
+                self.assertIn(self.MAIN_TITLE, page)
+                self.assertNotIn(self.FORK_TITLE, page)
+
+    def test_a_readable_extras_file_with_a_bad_record_branch_still_fails(self):
+        # Guard: a bad value is refused, never read as roadmap.
+        self.write_extras(self.fork, self.FORK_URL, **{"record-branch": "two words"})
+        code, out, err = run_build_streams("--repo", str(self.fork), "--out", str(self.out))
+        self.assertNotIn(code, (0, None), out + err)
+        self.assertFalse(self.out.exists())
+
+    def test_a_flag_still_wins_over_an_unreadable_extras_file(self):
+        # Guard: with --record-branch, a broken extras file does not stop the build.
+        self.broken_extras("{not json")
+        page = self.page_from(self.fork, "--record-branch", "roadmap")
+        self.assertIn(self.MAIN_TITLE, page)
 
 
 if __name__ == "__main__":

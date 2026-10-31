@@ -28,6 +28,18 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Owner, 15:03: "triage should always be a standing session that if anything is the first thing a coordinator spawns before it spawns any other orchestrator sessions".
   - Triage may run agents (owner, about 14:55).
   - Triage is the only writer of the roadmap and the waiting page (owner, 2026-10-28, time not given).
+- **A fork's own page and record branch** (owner, 2026-10-31 15:00 CDT, in chat to triage, pick a; roadmap step `fork-own-page`, a fork gets its own page).
+  - A semi-fork is a worktree whose work never reaches main. It makes its own waiting page, with its own `waiting-page` key in `.claude/layout-extras.json`. It never reuses main's key.
+  - It names its own record branch, such as `roadmap-<fork>`, in the extras key `record-branch`. The default is `roadmap`. `lint/layout.py` `record_branch()` reads the key, and `skills/roadmap/build.py` reads it when `--record-branch` is not given.
+  - The page template stays the same.
+  - Known limit: a fork of claude-settings still runs main's hooks and skills. Session start installs `~/.claude` from main, and the writer rebuilds pages from main's `page.html`.
+  - Why: a worktree kept main's `waiting-page` key. Fork and main then shared one page, one database, two writers and one roadmap branch.
+  - Home: no record yet owns the record branch. This record holds the triage role that writes the roadmap and the page.
+- **First triage makes the page** (owner, 2026-10-31 15:02 CDT, in chat to triage, roadmap step `triage-makes-page`).
+  - When a repo has no waiting page, its first triage makes one. The coordinator-and-triage setup is the grant. No separate grant is needed.
+  - Triage follows skill `waiting-page`, "Make a repo's page": the same `page.html`, the repo's colour and icon, and triage writes `meta/page`.
+  - Triage sets the URL once with `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`.
+  - It never marks the repo rolled out (`one-layout-every-repo`, the layout record).
 - **Lane session.** A lane session runs its own lane as an orchestrator. It spawns its own builder and reviewer agents under `agent-model-cap` (the model per role). It reports up to the coordinator. Owner, about 14:52, in short: sessions that spawn under a coordinator are their own orchestrators, reporting up to it.
 - **Lane session model** (owner, 16:15, waiting item 50, pick b). A lane session runs Opus. It keeps itself light, but it needs top reasoning on what it is asked.
   - The helpers it starts, such as a builder or a designer, keep today's model and effort table in `agent-model-cap` (owner, 17:50, waiting item 59, pick a). This holds until step-down cost and quality are measured (see the todo line). The Measured part of that record has their token cost. Their quality against one step down is unmeasured.
