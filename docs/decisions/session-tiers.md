@@ -54,6 +54,17 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - "... you should really be messaging triage for this part to save context, etc, it's a learning experience for me."
   - The line names the session's own tier, the right tier, and why, such as saving context.
   - The session then still handles the message, or routes it.
+- **Tier guards** (owner, 2026-10-31 15:31 and 15:32 CDT). A coordinator stays in its tier, and a guard enforces it.
+  - Owner's words: the coordinator did other tiers' work and asked him too many questions. That goes against the ruling that sessions "kindly point me in the right direction". "It needs to be like an actual fix." Of the refused merge handoff: "also sounds like a fault".
+  - Risk kind (rule `building-guard-needs-incident`, a guard needs an incident): incident. A coordinator session, 2026-10-31 14:49-15:31 CDT:
+    - It asked the owner questions in chat. It never pointed him to triage.
+    - It ran merges in banchi and q_max.
+    - It edited banchi's `CLAUDE.md` and banchi decision records D042 and D307. It ran review agents itself.
+  - Second incident, 15:31 CDT: the auto-mode classifier refused the coordinator's `send_message` that handed banchi pull request #1002 to the batch runner, as "Merge Without Review". The message named neither review round.
+  - Guard `coordinator-scope` (`hooks/guard.py`, lands with lane tier-boundaries-enforced): a cloud coordinator's own writes (no agent) go only to records (the kinds in `COORDINATOR_KINDS`, from `lint/layout.json`), its scratchpad, or paths outside a repo. The guard reads the tier from `~/.claude/state/merge-role.json`, which `merge --role` writes from the session's own `cs-build` tag.
+  - Cost: one small file read per write call by a cloud coordinator's main session. One `git diff --cached` process per coordinator `git commit`. On a refusal, no file is written but the normal `guard.log` line.
+  - Limits: cloud only (a local coordinator has no role file). Its own agents' writes pass. Writes into another repo are not yet judged.
+  - Open: which questions a coordinator may ask in chat, how strong the guards are, and the merge-handoff route wait on the owner. Waiting-page items pending, sent to triage 2026-10-31. The fixed merge handoff form is in `skills/project-ops/templates/operating-model.md` (section "Autopilot").
 - **Triage feeds the lanes** (owner, 2026-10-29 13:45 CDT): "a role that's whole job is to be pushing stuff from triage into more lanes to work ie identify parallelism opportunities and push to you to start them ie a flywheel of sorts".
   - At each wake and each check-in, triage sends the coordinator a ready list. A step is ready when every question it has is answered and its files do not clash with a running lane.
   - The list also names each step that waits only on order, and what it waits on.
