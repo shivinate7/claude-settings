@@ -253,8 +253,11 @@ def writes_to(path: str, cmd: str, written=()) -> bool:
 # Only a segment whose command word is `sed` is read. A wrapped or nested sed (`sudo sed`,
 # `xargs sed`, `bash -c "sed ..."`) and an unquoted `$` word up to the script keep the text match.
 # A script that holds a `w` or `W` command (it writes a file) or an `e` command (it runs one) is
-# judged as text, as before, so the file or command in it still counts.
-_SED_RUNS = re.compile(r"(?:^|[\s;{}!$0-9]|/[gpiImMe0-9]*)[wWe](?:\s|$)")
+# judged as text, as before, so the file or command in it still counts. The command letter follows
+# a space, `;{}!$`, a digit, `=` (`--expression=`), `,` (an `s` flag after another delimiter), the
+# flags of an `s/` or the `-e` or `-f` of a glued option (`-e'w f'`). A letter after any other
+# character reads as text.
+_SED_RUNS = re.compile(r"(?:^|[\s;{}!$0-9=,]|/[gpiImMe0-9]*|^-[A-Za-z]*[ef])[wWe](?:\s|$)")
 _SED_LONG = ("expression", "file", "in-place", "line-length")
 _SED_REDIRECT = re.compile(r"\d*>>?|<{1,3}")   # an operator word whose target is the next word
 _UNQUOTED_EXPANSION = re.compile(r"""'[^']*'|"[^"]*"|([$`])""")
