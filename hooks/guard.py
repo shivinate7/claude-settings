@@ -1954,8 +1954,10 @@ ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
-    "field, or name the role's model. (decision agent-model-cap)"
+    "field, or name the role's model%s. (decision agent-model-cap)"
 )
+# A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
+ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
 ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
@@ -2056,7 +2058,11 @@ def role_model_check(tool: str, tool_input):
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
-            return ROLE_MODEL_REASON, model, False
+            extra = ""
+            if role == "reviewer":
+                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
+                                                    ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
+            return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
