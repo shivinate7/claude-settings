@@ -1,0 +1,9 @@
+{
+  "title": "The guard mutation job takes stage 1's verdict, so it fails by name inside its time limit",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.30496,
+  "why": "Coordinator, Oct 31 23:00 CDT: the guard mutation job hit its 10-minute cap and was cancelled instead of going red by name. staged_suite fell back to the full guard suite (about 450 s serial) whenever stage 1 was not a named kill, and four failing mutants each paid it.",
+  "note": "Fix: when a stage-1 run names the required case, its result is the verdict; only a stage 1 that ran no named case falls back to the full suite. MUTATE_FULL=1 gives the full saw: lines back. Done check: the guard mutation job ends red or green by name inside its cap. Needs no answer. Files: hooks/mutate_shared.py, hooks/mutate_guard.py, hooks/test_mutate_shared.py, janitor/mutate_sweep.py. Built: #924, in batch 41 (draft #925) (coordinator, Oct 31 23:00 CDT).",
+  "updatedAt": "2026-11-01T04:05:00Z"
+}

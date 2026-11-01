@@ -1,9 +1,9 @@
 {
   "title": "A pipe after verdict does not hide its heartbeat",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.30497,
   "why": "Incident, Oct 31 (coordinator, 16:41 and 18:06 CDT): a lane ran `verdict ... | grep`; the pipe hid verdict's heartbeat, the stall watch tripped and stranded the run. Second cause of the wait-for-pid-form incident.",
-  "note": "Likely in normal work: piping a command's output to grep is a common reflex. Fix the cause in one home: the guard refuses `verdict <cmd> | ...` with a remedy that names verdict's own verdict line, or verdict keeps its heartbeat on a channel a pipe does not hide. The lane's lean is a guard change. Done check: a guard case refuses `verdict x | grep y` and allows a bare `verdict x`, red on main and green on the fix; or a stall-watch test with a piped verdict does not trip. Needs no answer. Files: hooks/guard.py or bin/verdict, hooks/stall_watch.py, hooks/test_guard.py.",
-  "updatedAt": "2026-10-31T23:08:00Z"
+  "note": "Likely in normal work: piping a command's output to grep is a common reflex. Fix the cause in one home: the guard refuses `verdict <cmd> | ...` with a remedy that names verdict's own verdict line, or verdict keeps its heartbeat on a channel a pipe does not hide. The lane's lean is a guard change. Done check: a guard case refuses `verdict x | grep y` and allows a bare `verdict x`, red on main and green on the fix; or a stall-watch test with a piped verdict does not trip. Needs no answer. Files: hooks/guard.py or bin/verdict, hooks/stall_watch.py, hooks/test_guard.py. Lane started Oct 31 23:00 CDT (coordinator). It shares hooks/guard.py and hooks/test_guard.py with #899 (spawn-model-check, batch 42 queue); the lane merges main and tests against #899's branch before it hands its head.",
+  "updatedAt": "2026-11-01T04:05:00Z"
 }
