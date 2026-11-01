@@ -3030,24 +3030,31 @@ mergepin4() {
   ok "$name"
 }
 
-# mergepin5: a pointer at the live pin whose clone is no checkout (no settings.json) does not stop a cloud install.
-# The run falls through to the next candidate and exits 0, as the candidate loop did before the live-pin swap.
+# mergepin5: the pointer names a live pin whose clone is no checkout (its settings.json is gone). The candidate loop
+# must fall through to the next candidate, a valid checkout in the cwd. The run takes that checkout as its source and
+# exits 0. Without the loop's continue, the run finds no source and clones from GitHub instead, so the found line
+# names nothing and this case goes red.
 mergepin5() {
-  name="mergepin5: cloud install, pointer at the live pin whose clone is no checkout: the run falls through, does not exit 1"
+  name="mergepin5: pointer at the live pin whose clone is no checkout: the run falls through to the cwd checkout, exits 0"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   if ! live_pin_fixture mergepin5; then bad "$name" "fixture: $lp_msg"; return; fi
   rm -f "$lp_co/settings.json" || { bad "$name" "fixture: cannot remove the clone's settings.json"; return; }
+  cwd_co="$work/mergepin5-cwd"
+  git clone -q "$lp_bare" "$cwd_co" && git -C "$cwd_co" remote set-url origin https://github.com/shivinate7/claude-settings.git \
+    || { bad "$name" "fixture: cannot make the cwd checkout"; return; }
   cfg="$work/mergepin5-cfg"; seed_pointer "$cfg" "$lp_pin"
   h=$(new_home); write_redirect "$h" "$lp_bare"
-  elsewhere="$work/mergepin5-elsewhere"; mkdir -p "$elsewhere"
   stub_bin="$work/mergepin5-bin"; make_curl_stub "$stub_bin"
-  out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+  out=$(cd "$cwd_co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
+  src=$(pinmove_source "$out")
   rm -rf "$h"
   if [ "$rc" -ne 0 ]; then bad "$name" "install exited $rc: $out"
-  elif printf '%s\n' "$out" | grep -q 'is the live pin and its clone'; then bad "$name" "the run stopped at the live pin's clone: $out"
+  elif [ -z "$src" ]; then bad "$name" "no found-checkout line, so no candidate became the source: $out"
+  elif [ "$(normalize_path "$src")" != "$(normalize_path "$cwd_co")" ]; then
+    bad "$name" "the source is [$src], want the cwd checkout [$cwd_co]"
   else ok "$name"; fi
 }
 
