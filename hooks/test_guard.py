@@ -11874,6 +11874,24 @@ sh("debug-port: a multi-line echo that names the flag is allowed",
 sh("debug-port: a WebView2 value without a port is allowed",
    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu ./app.exe", "allow", cwd=NOGIT)
 
+# Review round 2: a PowerShell process start, an array argument list, and a container exec.
+sh("debug-port: a Start-Process argument string with the port asks",
+   "Start-Process -Wait app.exe -ArgumentList \"--disable-gpu --remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a Start-Process array argument list with the port asks",
+   "Start-Process app.exe -ArgumentList '--disable-gpu','--remote-debugging-port=9222'", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a docker exec that launches with the port asks",
+   "docker exec app electron . --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+chained_ask("debug-port: a PowerShell append to the WebView2 value, then a launch, denies as a chained ask command",
+            "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS += \" --remote-debugging-port=9222\"; .\\app.exe",
+            tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a process listing that matches the flag is allowed",
+   "Get-CimInstance Win32_Process | Where-Object CommandLine -match \"--remote-debugging-port\"", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a pgrep of the flag is allowed",
+   "pgrep -af \"--remote-debugging-port\"", "allow", cwd=NOGIT)
+
 
 # --------------------------------------------------------------------------- a port question departs or is not asked
 FAMILY = "port-question"
