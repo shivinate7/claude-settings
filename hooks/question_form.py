@@ -767,17 +767,20 @@ def _git_root_of(cwd):
         here = parent
 
 
-def is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
-    with no page reads as unknown, and its calls are not judged."""
+def waiting_page_root(tool_input, cwd):
+    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
+    home), else None. A repo with no page reads as unknown, and its calls are not judged."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
     root = _git_root_of(cwd)
-    page = layout.waiting_page(root) if root else "unknown"
-    url = str(tool_input.get("url") or "").rstrip("/")
-    return page != "unknown" and url == page.rstrip("/")
+    return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+
+
+def is_waiting_page(tool_input, cwd) -> bool:
+    """True when the call's url is this repo's waiting page."""
+    return waiting_page_root(tool_input, cwd) is not None
 
 
 def page_item_hit(tool_input, cwd=""):

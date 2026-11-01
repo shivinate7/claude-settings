@@ -2741,6 +2741,76 @@ def data_tool_hit(tool_input, cwd=""):
     return question_form.page_item_hit(tool_input, cwd)[0]
 
 
+# ------------------------------------------------------------------ a waiting page behind main is not published
+#
+# Rule `page-stale` (decision page-stale-publish). A publish of this repo's waiting page from a file whose
+# code is not main's skills/waiting-page/page.html is refused. The compare is skills/waiting-page/stale_pages.py
+# `matches`, the one home of "current" (the designData, roadmap block and title text are ignored, so a
+# page the writer's --write built passes). Main is origin/main of the checkout that holds stale_pages.py.
+# A read, a list, an asset upload, a publish of another page, an unreadable file or an unreadable main
+# is not judged: unknown allows and logs one line. A current page writes the stamp
+# (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
+PAGE_TOOL = "Artifact"
+PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
+                     "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
+                     "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url.")
+
+
+def _stale_pages_module():
+    """stale_pages.py from the skill folder beside this hooks folder, else the config folder's copy; None
+    when neither exists. Loaded here and not at the top, so a call that is no waiting-page publish
+    never pays for it."""
+    for folder in (os.path.join(_HERE, "..", "skills", "waiting-page"),
+                   os.path.join(guard_core.config_dir(), "skills", "waiting-page")):
+        if os.path.isfile(os.path.join(folder, "stale_pages.py")):
+            if folder not in sys.path:
+                sys.path.insert(0, folder)  # stale_pages imports splice from its own folder
+            return importlib.import_module("stale_pages")
+    return None
+
+
+def page_stale_hit(tool_input, cwd):
+    """(reason, matched) when the call publishes this repo's waiting page from a file behind main, else
+    None. A call that is no such publish leaves before any import. Fails open: any unread state allows."""
+    path, url = tool_input.get("file_path"), tool_input.get("url")
+    if (tool_input.get("action") not in (None, "", "publish") or tool_input.get("asset") is True
+            or not isinstance(path, str) or not path or not isinstance(url, str) or not url):
+        return None
+    try:
+        import contextlib
+        import io
+        import question_form
+        root = question_form.waiting_page_root(tool_input, cwd)
+        if not root:
+            return None
+        stale_pages = _stale_pages_module()
+        if stale_pages is None:
+            record(PAGE_TOOL, "noted", "page-stale", "unknown: stale_pages.py not found")
+            return None
+        with contextlib.redirect_stderr(io.StringIO()):  # stale_pages says why main is unreadable; the log line does here
+            template = stale_pages.find_template(None)
+        if not template:
+            record(PAGE_TOOL, "noted", "page-stale", "unknown: main's page.html cannot be read")
+            return None
+        with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8", errors="replace", newline="") as handle:
+            live = handle.read()
+    except OSError as err:
+        record(PAGE_TOOL, "noted", "page-stale", "unknown: " + cap_safe(str(err.strerror or err), 100))
+        return None
+    except Exception as err:  # a layout that cannot be read: not judged
+        record(PAGE_TOOL, "noted", "page-stale", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    text, _source, blob = template
+    if not stale_pages.normal(live):  # an empty file is unread, as stale_pages --page reads it
+        record(PAGE_TOOL, "noted", "page-stale", "unknown: the file is empty")
+        return None
+    if not stale_pages.matches(text, live):
+        return PAGE_STALE_REASON, path
+    if blob and not stale_pages.write_stamp(root, blob):
+        record(PAGE_TOOL, "noted", "page-stale", "unknown: the stamp cannot be written")
+    return None
+
+
 # ------------------------------------------------------------------ impeccable is review-only
 #
 # docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
@@ -3325,6 +3395,12 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        return
+
+    if tool == PAGE_TOOL:
+        behind = page_stale_hit(tool_input, cwd)
+        if behind:
+            refuse(tool, "deny", "page-stale", behind[0], behind[1])
         return
 
     if tool in SHELL_TOOLS:

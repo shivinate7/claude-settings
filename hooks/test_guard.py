@@ -104,6 +104,7 @@ FAMILIES = {
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
+    "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, and an allowed publish of main's page writes the stamp",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
@@ -264,8 +265,12 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, **tool_input):
+        max_seconds=None, env=None, guard=None, **tool_input):
     """Register one case.
+
+    `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
+    cases that need a checkout whose origin/main they control (see the page-stale section). None runs
+    this repository's guard.
 
     `env` is the environment the guard run gets on top of the runner's own, for the cases that name a
     session id (see decide, which drops the runner's id first).
@@ -307,6 +312,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "max_seconds": max_seconds,
         # Variables this case sets on the guard's environment. A None value unsets one (see decide).
         "env": env,
+        # The guard copy this case runs (see add), or None for this repository's guard.
+        "guard": guard,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
@@ -1083,7 +1090,7 @@ def materialize(path):
 
 def materialize_for(case):
     """Build every lazy fixture that a case's own fields name, before the case runs."""
-    fields = [case.get(k) for k in ("cwd", "env_path", "config", "transcript", "raw")]
+    fields = [case.get(k) for k in ("cwd", "env_path", "config", "transcript", "raw", "guard")]
     fields += list(case.get("tool_input", {}).values())
     text = slash(" ".join(str(f) for f in fields if f is not None))
     for key, once in list(LAZY.items()):
@@ -11934,6 +11941,8 @@ pq("the incident's own wording is a known limit and is allowed", "allow",
            context="Duo version of the web screen.", holds="Card in Hand plan waits.", departs=True))
 pq("an item with no kind is allowed", "allow", pq_item(kind=None, departs=True))
 pq("an items set to another artifact is allowed", "allow", pq_item(), url="https://claude.ai/artifact/other")
+pq("an items set to the code form of the waiting page is denied", "deny", pq_item(),
+   url="https://claude.ai/code/artifact/pqpage")
 pq("a dev server port is not a port of an app", "allow",
    pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None,
            departs=True))
@@ -12006,6 +12015,190 @@ def port_get_logs_nothing_case():
 
 LOG_CHECKS_EXTRA.append(("port question: an ArtifactData get is allowed and writes no guard.log line",
                          port_get_logs_nothing_case))
+
+
+# --------------------------------------------------------------------------- a waiting page behind main is not published
+FAMILY = "page-stale"
+#
+# Rule page-stale (hooks/guard.py, the Artifact tool). A publish of this repo's waiting page whose file is
+# behind main's skills/waiting-page/page.html is refused. Main is origin/main of the checkout that holds
+# stale_pages.py, so each case runs a copy of the guard in a checkout whose origin/main this suite
+# controls (WP_CHECK), never the real main. The copy finds stale_pages beside itself, as the guard does.
+# An allowed publish of main's page writes its full blob sha to <git common dir>/waiting-page-built.
+# Unknown, when main or the file cannot be read, allows: the rule fails open.
+
+WP_DIR = os.path.join(ROOT, "pagestale")
+WP_CHECK = os.path.join(WP_DIR, "checkout")        # origin/main is its one commit: main's page.html
+WP_NOMAIN = os.path.join(WP_DIR, "nomain")         # the same files, with no origin/main ref
+WP_GUARD = os.path.join(WP_CHECK, "hooks", "guard.py")
+WP_GUARD_NOMAIN = os.path.join(WP_NOMAIN, "hooks", "guard.py")
+WP_CURRENT = os.path.join(WP_DIR, "current.html")  # main's page.html, byte for byte
+WP_BEHIND = os.path.join(WP_DIR, "behind.html")    # main's page with one div after its style block
+WP_WRITER = os.path.join(WP_DIR, "writer.html")    # main's page with the writer's designData, roadmap and title text
+WP_SOURCE = os.path.join(REPO, "skills", "waiting-page", "page.html")  # read at run time, not a fixed text
+WP_STAMP = "waiting-page-built"
+WP_OTHER_URL = "https://claude.ai/artifact/wpother"
+WP_DESIGN = re.compile(r'(<script type="application/json" id="designData">).*?(</script>)', re.S)
+WP_ROADMAP = re.compile(r"<!-- roadmap:data -->.*?<!-- /roadmap:data -->", re.S)
+WP_TITLE = re.compile(r"<title>[^<]*</title>")
+# The writer's parts hold comment openers, a lone quote and a multi-line template literal. The page
+# text must still match main, because the designData body, the roadmap body and the title text are
+# the parts a writer's --write leaves live.
+WP_WRITER_DESIGN = '{"a": "\\u003cp>mock\\u003c/p>", "note": "a // b /* c don\'t"}'
+WP_WRITER_ROADMAP = ("<!-- roadmap:data -->\n"
+                     '<script>window.ROADMAP_DATA = {"steps": {"c1": {"note": "x // y /* z don\'t"}}};\n'
+                     "const sample = `first line\nsecond // line`;\n"
+                     'window.ROADMAP_BUILD = {"repo": "r"};</script>\n'
+                     "<!-- /roadmap:data -->")
+
+
+def wp_must(ok, why):
+    """Stop the run unless a fixture step held. A fixture that did not build proves nothing."""
+    if not ok:
+        sys.exit("fixture setup failed in build_page_checkout: %s" % why)
+
+
+def wp_writer(template):
+    """main's page with the three parts a writer's --write keeps live swapped for new text. Each part
+    must match exactly once in main's page."""
+    def swap(pattern, text, repl):
+        wp_must(len(pattern.findall(text)) == 1, "%s does not match once in main's page" % pattern.pattern[:40])
+        return pattern.sub(repl, text, count=1)
+    text = swap(WP_DESIGN, template, lambda m: m.group(1) + WP_WRITER_DESIGN + m.group(2))
+    text = swap(WP_ROADMAP, text, lambda m: WP_WRITER_ROADMAP)
+    return swap(WP_TITLE, text, lambda m: "<title>Queue, renamed // not a comment</title>")
+
+
+def wp_put(path, text):
+    """Write `text` to `path` byte for byte, so a page keeps its line endings."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
+def wp_write_pages():
+    """The three page files, built from main's page.html as this repository holds it now."""
+    with open(WP_SOURCE, encoding="utf-8", newline="") as handle:
+        template = handle.read()
+    wp_must(template.count("</style>") == 1, "main's page has no single style block to add a div after")
+    behind = template.replace("</style>", "</style>\n<div>x</div>", 1)
+    for path, text in ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template))):
+        wp_put(path, text)
+
+
+def wp_git(where, *args):
+    """One git call in a fixture checkout. A call that fails stops the run."""
+    answer = run_vcs(where, *args)
+    wp_must(answer.returncode == 0, "git %s in %r: %s" % (" ".join(args), where, answer.stderr.strip()))
+    return answer
+
+
+def wp_populate(folder):
+    """The copy's files: the guard family, the layout lint reads, and the skill's scripts and page as this
+    repository holds them. The copy's guard finds stale_pages.py beside its own folder."""
+    os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
+    copy_guard_family(os.path.join(folder, "hooks"))
+    for rel in ("lint/layout.py", "lint/layout.json", "skills/waiting-page/stale_pages.py",
+                "skills/waiting-page/splice.py", "skills/waiting-page/page.html"):
+        dest = os.path.join(folder, *rel.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy(os.path.join(REPO, *rel.split("/")), dest)
+    wp_put(os.path.join(folder, ".claude", "layout-extras.json"),
+             json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
+
+
+def wp_commit(folder, main):
+    wp_git(folder, "init", "-q")
+    wp_git(folder, "add", "-A")
+    wp_git(folder, *IDENT, "commit", "-q", "-m", "fixture: main")
+    if main:
+        wp_git(folder, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+
+def wp_control(folder, main):
+    """The copy's own stale_pages.py gives the verdicts the cases assume: main's page, the behind page and
+    the writer's page against a controlled main, or unknown with no main. A miss stops the run."""
+    script = os.path.join(folder, "skills", "waiting-page", "stale_pages.py")
+    wants = [(WP_CURRENT, 0), (WP_BEHIND, 1), (WP_WRITER, 0)] if main else [(WP_CURRENT, 2)]
+    for page, code in wants:
+        run = subprocess.run([sys.executable, script, "--page", page], capture_output=True, text=True,
+                             cwd=folder, timeout=120)
+        named = ("origin/main" if main else "unknown") in run.stdout
+        wp_must(run.returncode == code and named,
+                "stale_pages in %r exits %d for %s, want %d: %s"
+                % (folder, run.returncode, os.path.basename(page), code, (run.stdout + run.stderr).strip()[:200]))
+
+
+def build_page_checkout():
+    """The checkout whose origin/main is main's page.html: a copy of the guard and what stale_pages reads,
+    committed, with origin/main at that commit. Then the page files, and a control that the copy reads it."""
+    wp_populate(WP_CHECK)
+    wp_commit(WP_CHECK, main=True)
+    wp_write_pages()
+    wp_control(WP_CHECK, main=True)
+
+
+def build_page_nomain():
+    """The same copy with no origin/main ref: main cannot be read, so every publish is unknown and allowed."""
+    wp_populate(WP_NOMAIN)
+    wp_commit(WP_NOMAIN, main=False)
+    wp_write_pages()
+    wp_control(WP_NOMAIN, main=False)
+
+
+lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER], build_page_checkout)
+lazy_fixture([WP_GUARD_NOMAIN], build_page_nomain)
+
+
+def wp_publish(name, expected, page, rule=None, guard=None, url=PQ_URL, **extra):
+    """One Artifact publish of `page` to `url`, judged by a copy of the guard in the controlled checkout."""
+    add("page-stale: " + name, expected, rule, tool="Artifact", cwd=PQ_REPO, guard=guard or WP_GUARD,
+        url=url, file_path=page, **extra)
+
+
+wp_publish("a behind page with no action is refused", "deny", WP_BEHIND, rule="page-stale")
+wp_publish("a behind page with action publish is refused", "deny", WP_BEHIND, rule="page-stale",
+           action="publish")
+wp_publish("a behind page published to the code form of the waiting page is refused", "deny", WP_BEHIND,
+           rule="page-stale", url="https://claude.ai/code/artifact/pqpage")
+wp_publish("a behind page published to another artifact's code form is allowed", "allow", WP_BEHIND,
+           url="https://claude.ai/code/artifact/wpother")
+wp_publish("main's page published to the waiting page is allowed", "allow", WP_CURRENT)
+wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)
+wp_publish("a behind page published to another url is allowed", "allow", WP_BEHIND, url=WP_OTHER_URL)
+wp_publish("a read of the waiting page with a behind file is allowed", "allow", WP_BEHIND, action="read")
+wp_publish("a behind file uploaded as an asset is allowed", "allow", WP_BEHIND, asset=True)
+wp_publish("a file that cannot be read fails open", "allow", os.path.join(WP_DIR, "missing.html"))
+wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHIND, guard=WP_GUARD_NOMAIN)
+
+
+def wp_stamp_case():
+    """An allowed publish of main's page writes main's full blob sha to <git common dir>/waiting-page-built."""
+    materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
+    stamp = os.path.join(WP_CHECK, ".git", WP_STAMP)
+    if os.path.exists(stamp):
+        os.remove(stamp)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    run = subprocess.run([sys.executable, WP_GUARD],
+                         input=json.dumps({"tool_name": "Artifact", "cwd": WP_CHECK,
+                                           "tool_input": {"url": PQ_URL, "file_path": WP_CURRENT}}),
+                         capture_output=True, text=True, env=env, timeout=120)
+    if run.stdout.strip():
+        return False, "the publish of main's page was refused: %r" % run.stdout[:100]
+    if not os.path.isfile(stamp):
+        return False, "no stamp was written at <git common dir>/%s" % WP_STAMP
+    with open(stamp, encoding="utf-8") as handle:
+        got = handle.read().strip()
+    want = wp_git(WP_CHECK, "rev-parse", "origin/main:skills/waiting-page/page.html").stdout.strip()
+    if got != want:
+        return False, "the stamp holds %r, want main's page blob %s" % (got[:40], want)
+    return True, "an allowed publish writes main's page blob sha"
+
+
+FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
+LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of main's page writes the stamp", wp_stamp_case))
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool
@@ -13320,13 +13513,14 @@ def decide(case):
         env["PATH"] = NOPS
     if case["env_path"]:
         env["PATH"] = case["env_path"]
-    command = [sys.executable, GUARD]
+    guard_file = case.get("guard") or GUARD
+    command = [sys.executable, guard_file]
     if case.get("tool") in dict(LB_TOOLS).values():
         # A lane-start call makes the guard read the machine's load. A case about another rule must
         # not meet this host's load, or a busy host turns it red (the load brake refuses a
         # background lane). The lane call runs in the load-brake probe with a neutral reading, unless
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
-        command = [sys.executable, "-c", LB_PROBE, GUARD, os.devnull,
+        command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
     started = time.monotonic()
     result = subprocess.run(
