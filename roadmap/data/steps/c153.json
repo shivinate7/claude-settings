@@ -1,9 +1,9 @@
 {
  "title": "Each GitHub app installed on claude-settings is kept only if it needs the repo",
  "phase": "cleanup",
- "status": "todo",
+ "status": "done",
  "order": 103.76,
  "why": "Your GitHub audit, Oct 27 23:01 CDT (cmsg_01DoF7thf3iq2Srr1UsfXgh211VfMPE9qfHmdrFTC9vz7X): Cloudflare Workers and Pages, Render and Renovate are installed beside Claude, and the repo has no secrets, deploy keys or webhooks.",
- "note": "Checked Nov 1 17:28 CST: Renovate opened 2 PRs here and renovate.json is in the repo, so it stays. Cloudflare Workers and Pages and Render opened none and have no config here. Next: you remove claude-settings from those two apps (waiting page item 145, remove-unused-github-apps). The app access page needs your sign-in, so a session cannot do it. Port: no.",
- "updatedAt": "2026-11-01T23:30:00Z"
+ "note": "Done, no change. Ruling (owner, Oct 28 14:40 CDT, page item 9): keep the apps' access to claude-settings as is, because it makes calling into a repo straightforward; revisit if it gets bloated. Use, checked Nov 1: Renovate opened 2 PRs here; Cloudflare serves joyous (its worker); Render opened none here. Filing miss: the Oct 28 ruling reached the page item but not this note, so triage 5 asked again on Nov 1 (item 145, withdrawn). Fix: step page-ruling-reaches-step.",
+ "updatedAt": "2026-11-01T23:40:00Z"
 }

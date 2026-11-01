@@ -1,0 +1,9 @@
+{
+ "title": "Each parked item on the waiting page can be acted on: unpark it or drop it",
+ "why": "Owner, Nov 1 17:35 CST: the Parked by you list at the bottom of the page has no way to act on it.",
+ "note": "Shape: each parked line gets Unpark and Drop buttons, saved like a page answer and routed by the page writer. Today the list is plain text from meta/page parked. Lane: same page file as page-ask-box and page-stale-asks-sink (skills/waiting-page/page.html), so one lane with a designer, a builder and a design reviewer. Ready: no open question.",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.33763,
+ "updatedAt": "2026-11-01T23:40:00Z"
+}

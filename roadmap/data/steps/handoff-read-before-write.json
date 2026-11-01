@@ -1,0 +1,9 @@
+{
+ "title": "After compaction, a session cannot act until it has read its handoff",
+ "why": "Incident, Nov 1 17:23 CST: triage 5 rewrote its handoff and worked a turn after compaction before reading it back; the Stop hook caught it only at turn end. Owner, 17:35 CST: the slip should not be possible.",
+ "note": "Shape: after compaction, the guard refuses every tool call except a Read of the handoff (and the reads that feed it) until that Read happens. Today the check runs only at Stop. Cost: one marker-file read per tool call inside the guard hook already running; no new process. Guard basis: named incident (Nov 1). Ready: no open question.",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.337625,
+ "updatedAt": "2026-11-01T23:40:00Z"
+}
