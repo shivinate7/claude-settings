@@ -69,13 +69,9 @@ try:
 except ImportError:  # the build has not landed: each case that needs the module fails by name
     question_form = None
 
-# The waiting page of the fixture repo. guard.data_tool_hit judges only a write to this repo's page.
-PAGE_URL = "https://claude.ai/artifact/qfpage"
-PAGE_REPO = os.path.join(RUN_FOLDER, "page-repo")
-os.makedirs(os.path.join(PAGE_REPO, ".git"))
-os.makedirs(os.path.join(PAGE_REPO, ".claude"))
-with open(os.path.join(PAGE_REPO, ".claude", "layout-extras.json"), "w", encoding="utf-8") as _f:
-    json.dump({"kinds": {}, "waiting-page": PAGE_URL}, _f)
+# The waiting page of the fixture repo, built once by test_call_judge.py (its one home). guard.data_tool_hit
+# judges only a write to this repo's page.
+PAGE_URL, PAGE_REPO = tcj.PAGE_URL, tcj.PAGE_REPO
 
 FORM_RULE = "question-form"
 DEPARTS_RULE = "question-departs"
