@@ -56,6 +56,13 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
     home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
     For page, the home is `page:<digits>`: the number of the waiting-page item the owner answers.
 
+Repeat flag: in a git repo, capture may add `> repeat? ` lines after a block's closer, naming older
+  roadmap steps, backlog debts or other sessions' messages that say the same thing (decision
+  owner-feedback-inbox, "Repeats"). The lines are never items: the guard reads only `- fb-` lines.
+  Sources are read from the payload cwd's repo: the step at refs/remotes/origin/roadmap, the layout's
+  backlog files in the working tree, and the sidecar `<sid>.inbox.repo` that binds an inbox to a repo.
+  The repeat cases use rolled-out fixture repos (layout extras file), so debts sit at docs/debts.
+
 Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd, and transcript_path when
   the session has a transcript. It reads the inbox, the handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md
@@ -221,14 +228,16 @@ def new_cfg():
     return cfg
 
 
-def run(path, raw, cfg, args=()):
-    """Runs one hook script the way the harness does. Returns a Proc."""
+def run(path, raw, cfg, args=(), extra_env=None):
+    """Runs one hook script the way the harness does. Returns a Proc. `extra_env` adds variables
+    for one run, such as a git shim's PATH."""
     home = os.path.join(os.path.dirname(cfg), "home")
     os.makedirs(home, exist_ok=True)
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", "LOCAL_TIME_NOW"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
+    env.update(extra_env or {})
     try:
         cp = subprocess.run([sys.executable, path, *args], input=raw, capture_output=True,
                             env=env, cwd=home, timeout=30)
@@ -243,9 +252,10 @@ def payload(obj):
     return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
-def capture(cfg, sid, prompt):
+def capture(cfg, sid, prompt, cwd=None, extra_env=None):
+    """One owner prompt. `cwd` is the payload's folder: the config folder unless a case names a repo."""
     return run(LT_PATH, payload({"hook_event_name": "UserPromptSubmit", "session_id": sid,
-                                 "prompt": prompt, "cwd": cfg}), cfg)
+                                 "prompt": prompt, "cwd": cwd or cfg}), cfg, extra_env=extra_env)
 
 
 def guard(cfg, sid, stop_active=False, cwd=None, transcript=None):
@@ -262,23 +272,30 @@ GIT_ID = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
           "-c", "init.defaultBranch=main")
 
 
-def git(where, *args):
-    cp = subprocess.run(["git", *GIT_ID, "-C", where, *args], capture_output=True, timeout=30)
+def git(where, *args, env=None, stdin=None):
+    """Runs git in `where` with the fixture identity. Returns its stdout; raises when git fails."""
+    cp = subprocess.run(["git", *GIT_ID, "-C", where, *args], capture_output=True, timeout=30,
+                        env=env, input=stdin)
     if cp.returncode != 0:
         raise RuntimeError("git %s: %s" % (" ".join(args), cp.stderr.decode("utf-8", "replace")))
+    return cp.stdout.decode("utf-8", "replace")
 
 
-def make_repo(name, tracked=(), untracked=(), extras=None):
+def make_repo(name, tracked=(), untracked=(), extras=None, texts=None):
     """A git repo under this run's scratch folder. `tracked` files are committed on main, with
-    the text "x"; `untracked` files are written and never added. `extras` (a string) is the
-    repo's .claude/layout-extras.json, committed."""
+    the text "x", or with the text `texts` gives them ({path: text}); `untracked` files are written
+    and never added. `extras` (a string) is the repo's .claude/layout-extras.json, committed."""
     root = os.path.join(ROOT, "repos", name)
     os.makedirs(root)
     git(root, "init", "-q")
-    files = list(tracked) + ([".claude/layout-extras.json"] if extras is not None else [])
+    texts = dict(texts or {})
+    files = list(tracked) + list(texts) + ([".claude/layout-extras.json"] if extras is not None else [])
     for rel in files:
-        write_file(os.path.join(root, *rel.split("/")),
-                   extras if rel == ".claude/layout-extras.json" else "x\n")
+        if rel == ".claude/layout-extras.json":
+            body = extras
+        else:
+            body = texts.get(rel, "x\n")
+        write_file(os.path.join(root, *rel.split("/")), body)
     write_file(os.path.join(root, "README.md"), "fixture\n")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "fixture")
@@ -1804,6 +1821,285 @@ def case_page_note_u2028_in_at_saves_once():
           captured_texts(cfg, sid))
 
 
+# --------------------------------------------------------------------------- repeat cases
+# A repeat flag names older feedback that says what the message just saved says. The sources are
+# the roadmap step at STEP_REF, the layout's backlog files in the working tree, and other
+# sessions' inboxes whose sidecar names this repo. The owner's words are the glossary's Not
+# names: the row for `wheel` lists `carousel`, so the owner's message and the step meet.
+
+STEP_REF = "refs/remotes/origin/roadmap"  # the record branch as last fetched; never fetched here
+STEP_DIR = "roadmap/data/steps/"
+STEP_JSON = json.dumps({"title": "Wheel spins faster", "note": "Sets the wheel speed for each turn."},
+                       indent=2) + "\n"
+DEBT_SLUG = "carousel-speed-cap"
+DEBT_TEXT = ("# Carousel speed cap\n\nThe carousel spins at a fixed rate. Speed is capped in the "
+             "animation loop, so it looks slow.\n")
+REPEAT_GLOSSARY = ("# Glossary\n\n## Terms\n\n"
+                   "| Term | Meaning | Home | Not |\n"
+                   "|---|---|---|---|\n"
+                   "| wheel | The spinning image strip on the home page. | `docs/specs/wheel.md` | carousel |\n")
+ROLLED_OUT = json.dumps({"rolled-out": True, "kinds": {}}) + "\n"  # layout: debts at docs/debts
+REPEAT_MARK = "> repeat? "
+TIME_LABEL = "Local time: "
+REPEAT_PROMPT = "the carousel spins too slow, speed it up"
+REPEAT_BURST = "the carousel spins too slow\nspeed it up for the reader\nthanks"
+UNRELATED = "the kettle needs descaling before lunch tomorrow"
+OLD_SID = "a1b2c3d4-6e5f-4a3b"  # the flag names an inbox by its first eight characters
+OWN_SID = "e5f6a7b8-9c0d-4e1f"
+OLD_TEXT = "the carousel spins too slow, speed it up please"
+
+
+def repeat_repo(name, step=False, debt=False, glossary=True):
+    """A rolled-out fixture repo. `step` puts the roadmap step at STEP_REF only, so a read of the
+    working tree finds nothing. `debt` writes the debt untracked, so the read is of the working tree.
+    `glossary` commits the root GLOSSARY.md."""
+    root = make_repo(name, extras=ROLLED_OUT,
+                     texts={"GLOSSARY.md": REPEAT_GLOSSARY} if glossary else None)
+    if step:
+        put_ref(root, STEP_REF, {STEP_DIR + "wheel-speed.json": STEP_JSON})
+    if debt:
+        write_file(os.path.join(root, "docs", "debts", DEBT_SLUG + ".md"), DEBT_TEXT)
+    return root
+
+
+def put_ref(root, ref, files):
+    """Makes one parentless commit of `files` ({path: text}) and points `ref` at it. The working
+    tree and main never hold these files, so only a read of `ref` finds them. The temp index sits
+    beside the repo, in the run folder."""
+    env = dict(os.environ, GIT_INDEX_FILE=root + ".ref.index")
+    for rel, text in files.items():
+        blob = git(root, "hash-object", "-w", "--stdin", stdin=text.encode("utf-8")).strip()
+        git(root, "update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, rel), env=env)
+    tree = git(root, "write-tree", env=env).strip()
+    commit = git(root, "commit-tree", tree, "-m", "roadmap fixture").strip()
+    git(root, "update-ref", ref, commit)
+
+
+def time_line_first(p):
+    """The hook ran with exit 0, and stdout opens with its one Central line. Flag lines may follow."""
+    lines = p.out.splitlines()
+    return p.code == 0 and bool(lines) and CENTRAL.fullmatch(lines[0].strip()) is not None
+
+
+def stamp_header(p):
+    """The header the capture wrote for its message: the stdout time line without its label."""
+    lines = p.out.splitlines()
+    return lines[0].strip()[len(TIME_LABEL):] if lines else ""
+
+
+def flag_after_block(cfg, sid, prompt, header):
+    """The message's block is in the inbox unchanged, and a `> repeat? ` line follows its closer."""
+    text = read_or_empty(inbox_of(cfg, sid))
+    block = render_block(prompt, header=header)
+    return text.startswith(block) and text[len(block):].lstrip().startswith(REPEAT_MARK)
+
+
+def sidecar_of(cfg, sid):
+    return os.path.join(cfg, "handoffs", sid + ".inbox.repo")
+
+
+def write_old_inbox(cfg, sid, text, sidecar=None):
+    """Another session's inbox: one block of `text`, with one jotted item. `sidecar` (a repo path),
+    when given, writes the session's sidecar the way capture does on its first save."""
+    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-0812-1 [note] -> noted",)))
+    if sidecar is not None:
+        write_file(sidecar_of(cfg, sid), sidecar)
+
+
+def snapshot(folder):
+    """{relative path: (mtime_ns, bytes)} for each file under `folder`."""
+    out = {}
+    for d, _, names in os.walk(folder):
+        for name in names:
+            path = os.path.join(d, name)
+            with open(path, "rb") as f:
+                out[os.path.relpath(path, folder)] = (os.stat(path).st_mtime_ns, f.read())
+    return out
+
+
+def written_between(before, after):
+    """The relative paths that are new, or changed, between two snapshots."""
+    return {rel for rel, state in after.items() if before.get(rel) != state}
+
+
+def git_counter(cfg):
+    """A `git` first on PATH for one case's prompts. Each start appends one line to the log, then
+    runs the real git. Returns the env for run(). It is a POSIX shell script, and CI runs this file
+    on Linux and macOS only."""
+    base = os.path.dirname(cfg)
+    real = shutil.which("git")
+    if real is None:
+        raise RuntimeError("git is not on PATH")
+    script = os.path.join(base, "shim", "git")
+    write_file(script, '#!/bin/sh\necho "$*" >> "$GIT_SHIM_LOG"\nexec "$GIT_SHIM_REAL" "$@"\n')
+    os.chmod(script, 0o755)
+    return {"PATH": os.path.dirname(script) + os.pathsep + os.environ.get("PATH", ""),
+            "GIT_SHIM_LOG": os.path.join(base, "git-starts.log"), "GIT_SHIM_REAL": real}
+
+
+def git_starts(env):
+    """How many git processes the shim has started so far."""
+    return len(read_or_empty(env["GIT_SHIM_LOG"]).splitlines())
+
+
+def plain_folder(base):
+    """A folder outside any git repo, with a glossary and a debt that match the owner's words.
+    Nothing in it may be read: a folder outside a repo has no roadmap, no backlog and no binding."""
+    plain = os.path.join(base, "plain")
+    write_file(os.path.join(plain, "GLOSSARY.md"), REPEAT_GLOSSARY)
+    write_file(os.path.join(plain, "docs", "debts", DEBT_SLUG + ".md"), DEBT_TEXT)
+    return plain
+
+
+def in_a_repo(path):
+    cp = subprocess.run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
+                        capture_output=True, timeout=30)
+    return cp.returncode == 0
+
+
+def case_repeat_roadmap_step_is_flagged():
+    """The owner says `carousel`; the step says `wheel`. The glossary row joins them, so the shared
+    words are carousel~wheel, spin and speed: three. Without the join there are two, and no flag."""
+    root = repeat_repo("repeat-roadmap", step=True)
+    check("repeat roadmap: the step is in the ref only, not the working tree",
+          not os.path.exists(os.path.join(root, "roadmap", "data", "steps", "wheel-speed.json")), root)
+    cfg, sid = new_cfg(), "repeat-roadmap"
+    p = capture(cfg, sid, REPEAT_PROMPT, cwd=root)
+    check("repeat roadmap: hook ran, time line first", time_line_first(p), p.desc())
+    check("repeat roadmap: stdout names roadmap step wheel-speed",
+          "roadmap step wheel-speed" in p.out, p.desc())
+    check("repeat roadmap: the inbox holds the block unchanged, then a > repeat? line",
+          flag_after_block(cfg, sid, REPEAT_PROMPT, stamp_header(p)),
+          read_or_empty(inbox_of(cfg, sid)))
+
+
+def case_repeat_backlog_debt_is_flagged():
+    """A debt in the layout's backlog folder, untracked, flags the message by its slug."""
+    root = repeat_repo("repeat-debt", debt=True)
+    cfg, sid = new_cfg(), "repeat-debt"
+    p = capture(cfg, sid, REPEAT_PROMPT, cwd=root)
+    check("repeat debt: hook ran, time line first", time_line_first(p), p.desc())
+    check("repeat debt: stdout names debt carousel-speed-cap", "debt " + DEBT_SLUG in p.out, p.desc())
+    check("repeat debt: the inbox holds the block unchanged, then a > repeat? line",
+          flag_after_block(cfg, sid, REPEAT_PROMPT, stamp_header(p)),
+          read_or_empty(inbox_of(cfg, sid)))
+
+
+def case_repeat_old_inbox_counts_only_with_a_sidecar_for_this_repo():
+    """An older inbox counts when its sidecar names this repo. Without a sidecar, or with another
+    repo's sidecar, it is not read. This session's own earlier block counts as well."""
+    root = repeat_repo("repeat-old", glossary=False)
+    other = repeat_repo("repeat-elsewhere", glossary=False)
+    cfg = new_cfg()
+    write_old_inbox(cfg, OLD_SID, OLD_TEXT, sidecar=os.path.realpath(root))
+    p = capture(cfg, "repeat-now", REPEAT_PROMPT, cwd=root)
+    check("old inbox, sidecar for this repo: stdout names inbox " + OLD_SID[:8],
+          "inbox " + OLD_SID[:8] in p.out, p.desc())
+
+    cfg = new_cfg()
+    write_old_inbox(cfg, OLD_SID, OLD_TEXT)
+    p = capture(cfg, "repeat-now", REPEAT_PROMPT, cwd=root)
+    check("old inbox, no sidecar: not searched, no flag",
+          "inbox " + OLD_SID[:8] not in p.out, p.desc())
+
+    cfg = new_cfg()
+    write_old_inbox(cfg, OLD_SID, OLD_TEXT, sidecar=os.path.realpath(other))
+    p = capture(cfg, "repeat-now", REPEAT_PROMPT, cwd=root)
+    check("old inbox, sidecar for another repo: not searched, no flag",
+          "inbox " + OLD_SID[:8] not in p.out, p.desc())
+
+    cfg = new_cfg()
+    check("own earlier block: the earlier message is saved",
+          ran_central(capture(cfg, OWN_SID, OLD_TEXT, cwd=root)), read_or_empty(inbox_of(cfg, OWN_SID)))
+    p = capture(cfg, OWN_SID, REPEAT_PROMPT, cwd=root)
+    check("own earlier block: stdout names inbox " + OWN_SID[:8],
+          "inbox " + OWN_SID[:8] in p.out, p.desc())
+
+
+def case_repeat_no_match_changes_nothing():
+    """A message that matches nothing is saved as it is today, and the repo's sidecar is bound."""
+    root = repeat_repo("repeat-nomatch", step=True, debt=True)
+    cfg, sid = new_cfg(), "repeat-nomatch"
+    write_old_inbox(cfg, OLD_SID, OLD_TEXT, sidecar=os.path.realpath(root))
+    p = capture(cfg, sid, UNRELATED, cwd=root)
+    check("no match: stdout is the one time line", ran_central(p), p.desc())
+    check("no match: no repeat text in stdout", "repeat" not in p.out.lower(), p.desc())
+    text = read_or_empty(inbox_of(cfg, sid))
+    check("no match: the inbox holds the plain block only",
+          text == render_block(UNRELATED, header=stamp_header(p)), text)
+    check("no match: the repo's sidecar is still written", os.path.exists(sidecar_of(cfg, sid)), cfg)
+
+
+def case_repeat_outside_a_repo_fails_open():
+    """Outside a git repo the message is saved, no flag is printed, and no error text appears.
+    Nothing in the folder is read, though a glossary and a debt there would match."""
+    cfg, sid = new_cfg(), "repeat-plain"
+    plain = plain_folder(os.path.dirname(cfg))
+    check("outside a repo: the folder is not inside a git repo", not in_a_repo(plain), plain)
+    before = snapshot(cfg)
+    p = capture(cfg, sid, REPEAT_PROMPT, cwd=plain)
+    check("outside a repo: hook ran, stdout is the one time line", ran_central(p), p.desc())
+    text = read_or_empty(inbox_of(cfg, sid))
+    check("outside a repo: the message is saved as it is today",
+          text == render_block(REPEAT_PROMPT, header=stamp_header(p)), text)
+    check("outside a repo: no error text in stdout or stderr",
+          not re.search(r"error|traceback", p.out + p.err, re.I), p.desc())
+    written = written_between(before, snapshot(cfg))
+    check("outside a repo: the files written are the inbox and at most the sidecar",
+          written <= {os.path.join("handoffs", sid + ".inbox.md"),
+                      os.path.join("handoffs", sid + ".inbox.repo")}, sorted(written))
+
+
+def case_repeat_cost_is_bounded_and_writes_two_files():
+    """Per prompt, at most 2 git starts. Outside a repo, none. The bound is proved on a flagged
+    prompt, since a prompt that matches nothing proves little. After the first prompt the files
+    written are the inbox and the sidecar, once; the second prompt writes the inbox only."""
+    root = repeat_repo("repeat-cost", step=True, debt=True)
+    cfg, sid = new_cfg(), "repeat-cost"
+    env = git_counter(cfg)
+    inbox_rel = os.path.join("handoffs", sid + ".inbox.md")
+    side_rel = os.path.join("handoffs", sid + ".inbox.repo")
+    s0 = snapshot(cfg)
+    p1 = capture(cfg, sid, REPEAT_PROMPT, cwd=root, extra_env=env)
+    starts1 = git_starts(env)
+    check("cost: the first prompt is flagged", "roadmap step wheel-speed" in p1.out, p1.desc())
+    check("cost: the first prompt starts at most 2 git processes", starts1 <= 2, "starts=%d" % starts1)
+    s1 = snapshot(cfg)
+    check("cost: the first prompt writes the inbox and one sidecar, nothing else",
+          written_between(s0, s1) == {inbox_rel, side_rel}, sorted(written_between(s0, s1)))
+    p2 = capture(cfg, sid, REPEAT_PROMPT + ", again", cwd=root, extra_env=env)
+    second = git_starts(env) - starts1
+    check("cost: the second prompt ran and starts at most 2 git processes",
+          time_line_first(p2) and second <= 2, "starts=%d %s" % (second, p2.desc()))
+    s2 = snapshot(cfg)
+    check("cost: the second prompt writes the inbox only; the sidecar is not rewritten",
+          written_between(s1, s2) == {inbox_rel}, sorted(written_between(s1, s2)))
+    cfg_plain = new_cfg()
+    env_plain = git_counter(cfg_plain)
+    plain = plain_folder(os.path.dirname(cfg_plain))
+    p3 = capture(cfg_plain, "repeat-cost-plain", REPEAT_PROMPT, cwd=plain, extra_env=env_plain)
+    check("cost: outside a repo, the prompt ran and starts zero git processes",
+          time_line_first(p3) and git_starts(env_plain) == 0,
+          "starts=%d %s" % (git_starts(env_plain), p3.desc()))
+
+
+def case_repeat_flag_lines_are_not_items():
+    """The guard reads a flagged burst as it reads any burst: the flag lines are not items, a jotted
+    item still passes, and no flag line is named malformed."""
+    root = repeat_repo("repeat-parse", step=True)
+    cfg, sid = new_cfg(), "repeat-parse"
+    p = capture(cfg, sid, REPEAT_BURST, cwd=root)
+    check("parse: the burst is flagged, the flag follows the block",
+          flag_after_block(cfg, sid, REPEAT_BURST, stamp_header(p)), read_or_empty(inbox_of(cfg, sid)))
+    first = guard(cfg, sid, cwd=root)
+    reason = block_reason(first) or ""
+    check("parse: the burst with no items still blocks", block_reason(first) is not None, first.desc())
+    check("parse: the reason names no flag line, and calls none malformed",
+          "malformed" not in reason and "repeat?" not in reason, reason)
+    append_file(inbox_of(cfg, sid), "- fb-0958-1 [note] -> noted\n")
+    expect_silent("parse: the flagged burst passes once it is jotted", guard(cfg, sid, cwd=root))
+
+
 # Row tables. A row is one case body from above. A row that raises is red and names
 # itself, so it cannot hide behind its table.
 def run_rows(rows):
@@ -1908,6 +2204,13 @@ CASES = (
     case_page_note_u2028_in_note_saves_verbatim,
     case_page_note_u0085_in_note_saves_verbatim,
     case_page_note_u2028_in_at_saves_once,
+    case_repeat_roadmap_step_is_flagged,
+    case_repeat_backlog_debt_is_flagged,
+    case_repeat_old_inbox_counts_only_with_a_sidecar_for_this_repo,
+    case_repeat_no_match_changes_nothing,
+    case_repeat_outside_a_repo_fails_open,
+    case_repeat_cost_is_bounded_and_writes_two_files,
+    case_repeat_flag_lines_are_not_items,
 )
 
 
