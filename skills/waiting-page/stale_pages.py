@@ -42,7 +42,7 @@ page.html blob sha) differs from main's blob sha, and nothing else: no stamp, or
 nothing. It always exits 0. One python process and one read-only git process.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
-file written without --write, no timer, thread or child left running. It never imports `layout`.
+file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
 """
 import argparse
 import os

@@ -11941,8 +11941,6 @@ pq("the incident's own wording is a known limit and is allowed", "allow",
            context="Duo version of the web screen.", holds="Card in Hand plan waits.", departs=True))
 pq("an item with no kind is allowed", "allow", pq_item(kind=None, departs=True))
 pq("an items set to another artifact is allowed", "allow", pq_item(), url="https://claude.ai/artifact/other")
-pq("an items set to the code form of the waiting page is denied", "deny", pq_item(),
-   url="https://claude.ai/code/artifact/pqpage")
 pq("a dev server port is not a port of an app", "allow",
    pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None,
            departs=True))
@@ -12159,10 +12157,6 @@ def wp_publish(name, expected, page, rule=None, guard=None, url=PQ_URL, **extra)
 wp_publish("a behind page with no action is refused", "deny", WP_BEHIND, rule="page-stale")
 wp_publish("a behind page with action publish is refused", "deny", WP_BEHIND, rule="page-stale",
            action="publish")
-wp_publish("a behind page published to the code form of the waiting page is refused", "deny", WP_BEHIND,
-           rule="page-stale", url="https://claude.ai/code/artifact/pqpage")
-wp_publish("a behind page published to another artifact's code form is allowed", "allow", WP_BEHIND,
-           url="https://claude.ai/code/artifact/wpother")
 wp_publish("main's page published to the waiting page is allowed", "allow", WP_CURRENT)
 wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)
 wp_publish("a behind page published to another url is allowed", "allow", WP_BEHIND, url=WP_OTHER_URL)

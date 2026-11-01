@@ -775,9 +775,7 @@ def waiting_page_root(tool_input, cwd):
         sys.path.append(lint)
     import layout
     root = _git_root_of(cwd)
-    page = layout.waiting_page(root) if root else "unknown"
-    url = str(tool_input.get("url") or "").rstrip("/")
-    return root if page != "unknown" and url == page.rstrip("/") else None
+    return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
 
 
 def is_waiting_page(tool_input, cwd) -> bool:
