@@ -1,0 +1,9 @@
+{
+ "title": "The merge tool's silent-undo scan follows renamed files",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3376,
+ "why": "Incident, Nov 1 17:17 and 17:38 CST (coordinator): joyous PR #53 renamed gates.yml to checks.yml, and the merge tool refused it twice although the line moved unchanged.",
+ "note": "Cause: the silent-undo scan in ~/.claude/bin/merge reads each path on its own and does not follow renames. Fix: diff with rename detection, so a line that moves with its file counts as kept. Red first: a fixture PR that renames a file with an unchanged line is refused today. Guard basis: named incident (Nov 1). Ready: no open question; the coordinator starts it on triage's word.",
+ "updatedAt": "2026-11-01T23:40:00Z"
+}
