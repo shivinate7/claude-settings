@@ -207,6 +207,7 @@
 - plain-diff-secret-file-names: terraform.tfstate, .kube/config, wp-config.php and AuthKey_*.p8 are not caught by name (mods/plain-diff isSecretPath)
 - plain-diff-trimnote-regex: trimNote table-row regex is quadratic on absurd input and was not re-timed after round 3 (mods/plain-diff hooks/lib.mjs)
 - pointer-detach-false-alarm: the pointer guard refuses checkout --detach main though session_start counts that state as on main (hooks/guard_pointer.py)
+- ponytail-why-every-session: ponytail@ponytail is on in settings.json since PR #96 (ba7a11b3, Sep 22), and its SessionStart hook has printed "PONYTAIL MODE ACTIVE" since its first release (Jun 12), so neither is new. With no pin, every session took upstream releases: v5.0.0 rebuilt rules (Oct 8), v5.3.0 band and board hooks (Oct 16), v5.3.3 (Oct 29). Which change the owner saw is unknown. The owner's custom copies of its skills are in neither claude-settings nor claude-sharables git history; look in ~/.claude/skills and ~/.claude/backups/skills on each machine. Turned off Nov 1 (settings.json)
 - pr-checks-watch-unmeasured: gh pr checks --watch is allowed in background with unmeasured API cost; wrapped and captured gh run watch forms are unread (hooks/guard_stream.py)
 - printf-quote-walk-bandaid: walk_quotes reads a quote inside $( ) as the outer string's own; discards_output cuts and rereads to cover it (hooks/guard_core.py, hooks/guard.py)
 - process-record-dead-plan-line: a Kind: process record holds a dead Plan: line that the Kind check ignores (decisions record, lint/check_ruling_kind.py)

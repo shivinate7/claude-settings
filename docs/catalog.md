@@ -83,5 +83,4 @@ Model and effort come from the model table (decision `agent-model-cap`, the mode
 
 These plugins are enabled in `settings.json`. They are not in this repo, so this page gives no description.
 
-- ponytail: not in this repo
 - frontend-design: not in this repo
