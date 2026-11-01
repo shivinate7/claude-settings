@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the cloud tier line. Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -56,6 +56,29 @@ n=$(cd "$cwd" 2>/dev/null && git status --porcelain 2>/dev/null | wc -l | tr -d 
 
 printf 'checkout %s on %s, %s dirty files\n' "$toplevel" "$branch" "$n"
 tier_line
+
+# Decision merge-reinstalls-from-main, ruling 1: no work runs in the live pin. A cwd whose toplevel is the
+# pin says so, and names the clone to cd to. Same test as live_pin_clone in install.sh, repeated here
+# because sh cannot source install.sh. The pin is <clone>-live, or <clone>-live-<12 hex>, as a linked worktree.
+lp_out=$(mktemp 2>/dev/null)
+if [ -n "$lp_out" ]; then
+  if bounded_git "$toplevel" "$lp_out" worktree list --porcelain; then
+    lp_clone=$(sed -n '1s/^worktree //p' "$lp_out" 2>/dev/null)
+    lp_top=$(cd "$toplevel" 2>/dev/null && pwd -P)
+    lp_base=$(cd "$lp_clone" 2>/dev/null && pwd -P)
+    if [ -n "$lp_top" ] && [ -n "$lp_base" ] && [ "$lp_top" != "$lp_base" ]; then
+      lp_is_pin=0
+      case "$lp_top" in
+        "$lp_base"-live-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) lp_is_pin=1 ;;
+        *) [ "$lp_top" = "$(cd "$lp_base-live" 2>/dev/null && pwd -P)" ] && lp_is_pin=1 ;;
+      esac
+      if [ "$lp_is_pin" = 1 ]; then
+        printf 'checkout %s is the live pin: no work runs in it (decision merge-reinstalls-from-main). cd to the clone %s before you change anything.\n' "$lp_top" "$lp_base"
+      fi
+    fi
+  fi
+  rm -f "$lp_out" 2>/dev/null
+fi
 
 # Rule session-home: a resumed session whose recorded worktree folder is gone says so once, before it
 # writes. The record is `<primary>/.git/session-homes/<session_id>` (hooks/guard.py writes it). The
