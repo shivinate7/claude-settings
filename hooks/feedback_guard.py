@@ -9,12 +9,15 @@ Only a burst's messages need items: a lone short message never triggers the guar
 were bursts. Each Stop updates it, even with stop_hook_active, so a message is classed once, in the
 turn it arrived. A missing or damaged state file counts every saved message as this turn's. It blocks
 a turn end in these cases:
-  - a burst's message has no item lines under it;
+  - a burst's message has no item lines under it. The reason gives the inbox file's absolute path, the
+    message's heading line and its line number, and an example item. Items added in any later turn
+    count, because each Stop reads the whole file;
   - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page;
   - a ruling or task item, open or closed, whose home is not a file under a home of its kind
     (HOME_KINDS, paths from lint/layout.py for the repo of the hook's cwd) that some branch's tree
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
-    never count for these two kinds (rule building-memory-is-short-term). When the cwd is in no git
+    never count for these two kinds (rule building-memory-is-short-term). A home outside them is
+    reported as "<path> is not a tracked <kind> home", with the homes listed (kind_homes). When the cwd is in no git
     repo, or the layout cannot be read, these homes pass unchecked and a systemMessage says so;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
@@ -58,7 +61,10 @@ PAGE_HOME = re.compile(r"page:(\d+)")
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
-HEADER = re.compile(r"### \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
+HEADING_PREFIX = "### "  # local_time.py writes it before each message's stamp; the block text quotes it
+HEADER = re.compile(re.escape(HEADING_PREFIX) + r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
+STAMP_HHMM = re.compile(r"\d{4}-\d{2}-\d{2} (\d{2}):(\d{2}) ")
+EXAMPLE_KIND, EXAMPLE_HOME = "note", "noted"  # a kind in KINDS, and the home the decision gives it
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
@@ -98,10 +104,10 @@ def burst_indexes(blocks, turns):
 
 
 def parse(text):
-    """[{stamp, text, items}] from the inbox. Lines inside a fence are never headers or items, and a
+    """[{stamp, line, text, items}] from the inbox, `line` being the heading's 1-based line number. Lines inside a fence are never headers or items, and a
     `### ` line that is not the hook's own Central header is plain text."""
     blocks, fence = [], None
-    for ln in text.split("\n"):
+    for number, ln in enumerate(text.split("\n"), 1):
         ln = ln.rstrip("\r")
         if fence is not None:
             if re.fullmatch(r"`+", ln) and len(ln) >= len(fence):
@@ -109,7 +115,8 @@ def parse(text):
             else:
                 blocks[-1]["text"] = ln if blocks[-1]["text"] is None else blocks[-1]["text"] + "\n" + ln
         elif HEADER.match(ln):
-            blocks.append({"stamp": ln[4:], "text": None, "items": [], "fenced": False})
+            blocks.append({"stamp": ln[len(HEADING_PREFIX):], "line": number, "text": None, "items": [],
+                           "fenced": False})
         elif blocks and not blocks[-1]["fenced"] and re.fullmatch(r"`{3,}", ln):
             fence, blocks[-1]["fenced"] = ln, True
         elif blocks and ln.startswith("- fb-"):
@@ -135,6 +142,32 @@ def open_ids(blocks, kinds=OPEN_KINDS):
             if it and it[2] and not it[3] and it[1].startswith(kinds):
                 ids.append(it[0])
     return ids
+
+
+def example_item(stamp):
+    """An item line the check accepts (ITEM and JOT) for the message at `stamp`: id `fb-HHMM-1`."""
+    m = STAMP_HHMM.match(stamp)
+    return "- fb-%s%s-1 [%s] -> %s" % (m.group(1), m.group(2), EXAMPLE_KIND, EXAMPLE_HOME) if m else None
+
+
+def no_items_problem(block, inbox):
+    """The reason for a burst message with no items: where the items go, and what one looks like."""
+    first = (block["text"] or "").split("\n")[0][:40]
+    where = "add items under the line `%s%s` (line %d of %s)" % (HEADING_PREFIX, block["stamp"], block["line"], inbox)
+    example = example_item(block["stamp"])
+    return "the message at %s (%s) has no items: %s%s" % (
+        block["stamp"], first, where, ", one per line, for example `%s`" % example if example else "")
+
+
+def kind_homes(layout, root, kind):
+    """The paths under `root` that may hold a `kind` item's home: each HOME_KINDS layout key the
+    repo has, as its layout path and its base path, that exist. The check and the block text both use it."""
+    known, base = layout.kinds(root), layout.layout()["kinds"]
+    homes = []
+    for key in HOME_KINDS[kind]:
+        if key in known:
+            homes += [layout.path(root, key)] + ([base[key]["path"].strip("/")] if key in base else [])
+    return [h for h in dict.fromkeys(homes) if os.path.exists(os.path.join(root, *h.split("/")))]
 
 
 def home_word(rest):
@@ -184,20 +217,14 @@ class Homes:
                     return None
                 rel = os.path.normpath(found)
             rel = rel.replace(os.sep, "/")
-            known = layout.kinds(root)
-            base = layout.layout()["kinds"]
-            homes = []
-            for key in HOME_KINDS[kind]:
-                if key in known:
-                    homes += [layout.path(root, key)] + ([base[key]["path"].strip("/")] if key in base else [])
-            homes = [h for h in dict.fromkeys(homes) if os.path.exists(os.path.join(root, *h.split("/")))]
+            homes = kind_homes(layout, root, kind)
             keys = ", ".join(HOME_KINDS[kind])
             if not homes:
                 return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
                         % (item_id, kind, kind, keys))
             if not any(rel == h or rel.startswith(h + "/") for h in homes):
-                return ("%s [%s] needs a home under %s (layout keys %s), never the handoff or memory"
-                        % (item_id, kind, ", ".join(homes), keys))
+                return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home"
+                        % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes)))
             if not ruling_home.value_resolves(rel, root):
                 return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
             return None
@@ -309,13 +336,13 @@ def page_problem(item_id, rest, text, k, stamp, pages):
             " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
 
 
-def problems(blocks, handoff, homes=None, burst=(), pages=None):
+def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
     out, seen = [], {}
     for n, b in enumerate(blocks):
         text = norm(b["text"])
         seen[text] = seen.get(text, 0) + 1
         if not b["items"] and n in burst:
-            out.append("the message at %s (%s) has no items" % (b["stamp"], (b["text"] or "").split("\n")[0][:40]))
+            out.append(no_items_problem(b, inbox))
         for ln in b["items"]:
             it = item(ln)
             if it is None:
@@ -365,15 +392,16 @@ def main():
             except OSError:
                 handoff = ""
             homes, pages = Homes(hook.get("cwd")), Pages(hook.get("transcript_path"))
-            reasons = problems(blocks, handoff, homes, burst, pages)
+            reasons = problems(blocks, handoff, homes, burst, pages, inbox)
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + (
                 [FAIL_OPEN_PAGES % "; ".join(pages.skip)] if pages.skip else [])
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
             out.update(decision="block", reason="Feedback inbox: " + "; ".join(reasons)
-                       + ". Jot each burst message as `- <id> [kind] -> home` under it, file each ruling and task"
-                       " in its tracked home, send each page ruling to the page writer, and put open standing ids in the handoff.")
+                       + ". The check reads the inbox file at each Stop, so items added in any later turn count,"
+                       " and no new heading is needed. Send each page ruling to the page writer, and put open"
+                       " standing ids in the handoff.")
         if out:
             print(json.dumps(out))
     except Exception as e:  # advisory: a crash passes, and says so on stderr

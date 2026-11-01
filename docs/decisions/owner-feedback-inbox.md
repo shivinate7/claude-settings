@@ -40,7 +40,10 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
 - **The guard.** A Stop check refuses to end a turn in four cases. A burst's message has no items. An
   item has no kind or home. A ruling or task, open or closed, names a home that is not a file under its
   kind's layout paths that some branch's tree holds. An open standing item id is missing from the
-  handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. It exits on
+  handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. A message
+  with no items is reported with the inbox file's path, its heading line and line number, and an
+  example item. Items added in any later turn count, so the session needs no new heading. A home outside
+  its kind's paths is reported as not a tracked home of that kind, with the homes listed. It exits on
   `stop_hook_active`, so it cannot loop, but it still counts that turn's messages. When the session's
   folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
   in one line.
