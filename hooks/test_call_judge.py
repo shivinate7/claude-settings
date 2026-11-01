@@ -31,11 +31,12 @@ Interface the hook must match:
   what code cannot (the cases are in hooks/test_question_form.py, which reuses run_hook below).
 - ArtifactData on the waiting page (ruled Nov 1 11:51 CST): a write of an item (set, update, a str_replace, or a
   batch entry) on collection `items` that is not closed and carries `options` or `context` on a decision, or
-  `context`, `steps` or `options` on a task (kind task, coordinator follow-up after the same ruling), or a str_replace
-  on field `context` or `options`, gets one model call, claude-opus-5-5, rule `question-judge`, after
+  `context`, `steps` or `options` on a task (kind task, coordinator follow-up after the same ruling), or any write
+  that carries `steps` (steps are task-only, so no kind is read as a task), or a str_replace on field `context`,
+  `options` or `steps` (a subfield too), gets one model call, claude-opus-5-5, rule `question-judge`, after
   question_form.item_hit passes it. A task's prompt carries the whole-unit replace rule. A str_replace is judged on
   its new_str only, under a fragment preamble. A batch makes one call for all its qualifying writes. An item_hit hit, a read, another collection or url, a delete, a
-  str_replace on another field, and an update with neither field make no call and no refusal from call_judge
+  str_replace on another field, and an update with none of these fields make no call and no refusal from call_judge
   (guard.py refuses a hit). A read, and a write of another collection, never import question_form in the hook.
   The page's url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
@@ -656,6 +657,38 @@ def case_page_task_item_judged():
           ITEM_99_STEP in prompt and PAGE_MARK in prompt, prompt[:200])
 
 
+def case_page_steps_judged():
+    # Coordinator follow-up after the Nov 1 11:51 CST ruling: steps are task-only, so a write that carries `steps` is
+    # judged as a task, even with no kind. A str_replace on `steps` or `steps.N` is judged on its new_str alone.
+    import question_form  # the one form check (hooks/question_form.py)
+    upd = {"steps": [ITEM_99_STEP]}
+    got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "t99", "data": upd})
+    check("task steps fixture: an update of item 99's step with no kind passes question_form.item_hit", got == ("", ""),
+          got)
+    r = run_hook(page_input("update", upd), answer=TASK_FLAG)
+    d = r.deny() or {}
+    check("task steps: an update of item 99's step with no kind is denied by the judge, rule question-judge, one call",
+          r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+          and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("task steps: the one prompt holds item 99's step text", ITEM_99_STEP in prompt, prompt[:200])
+    for field in ("steps", "steps.0"):
+        entry = {"collection": PAGE_ITEMS, "doc_id": "t99", "field": field, "old_str": PAGE_OLD, "new_str": ITEM_99_STEP}
+        got = question_form.item_hit("str_replace", entry)
+        check("task steps fixture: a %s str_replace to item 99's step passes question_form.item_hit" % field,
+              got == ("", ""), got)
+        r = run_hook(page_input("str_replace", None, field=field, old_str=PAGE_OLD, new_str=ITEM_99_STEP),
+                     answer=TASK_FLAG)
+        d = r.deny() or {}
+        check("task steps: a %s str_replace to item 99's step is denied by the judge, rule question-judge, one call"
+              % field, r.code == 0 and d.get("permissionDecision") == "deny"
+              and r.reason().startswith("question-judge: ") and r.log.count("\tdeny\tquestion-judge\t") == 1
+              and len(r.calls) == 1, detail(r))
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        check("task steps: a %s str_replace's prompt holds new_str and not old_str" % field,
+              ITEM_99_STEP in prompt and PAGE_OLD not in prompt, prompt[:200])
+
+
 def case_page_reads_and_other_collections_skip_question_form():
     # Cost proof: a read and a write of another collection exit before the hook imports question_form, the heavy
     # import. The last check is a control: a judged items write imports it, so an empty record means an early exit.
@@ -721,7 +754,8 @@ def main():
                  case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
                  case_page_no_model_call, case_page_batch_one_call, case_page_override,
                  case_page_model_failure_fails_open, case_page_str_replace_judged,
-                 case_page_task_item_judged, case_page_reads_and_other_collections_skip_question_form,
+                 case_page_task_item_judged, case_page_steps_judged,
+                 case_page_reads_and_other_collections_skip_question_form,
                  case_fail_open, case_settings_row):
         try:
             case()
