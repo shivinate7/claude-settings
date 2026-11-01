@@ -19875,6 +19875,10 @@ ROLE_REMEDY = "drop the model field, or name the role's model"
 ROLE_DEFAULT_REMEDY = "name the role's model (sonnet)"
 # A refusal for this rule names its remedy and no other target: not the table, not the agents folder.
 ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
+# A reviewer's refusal also names the `Round N of 3` marker and the rounds that allow it. Those rounds are read from
+# the guard under test (ROLE_REVIEWER_FREE_ROUNDS), never copied here. A refusal for any other role names neither.
+ROUND_MARKER = "Round N of 3"
+FREE_ROUND_MARKERS = tuple("Round %s of 3" % n for n in _load_guard_module().ROLE_REVIEWER_FREE_ROUNDS)
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
 SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
@@ -19951,8 +19955,9 @@ def role_spawn(config, spawn, tool="Agent", env=None):
                    "max_seconds": None, "temp": None, "process_cwd": None})
 
 
-def role_model_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, carries=(ROLE_REMEDY,), env=None):
-    add(name, "deny", ROLE_RULE, tool=tool, config=config, env=env, carries=carries, lacks=ROLE_LACKS,
+def role_model_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, carries=(ROLE_REMEDY,),
+                      lacks=ROLE_LACKS, env=None):
+    add(name, "deny", ROLE_RULE, tool=tool, config=config, env=env, carries=carries, lacks=lacks,
         **role_input(role, model, prompt))
 
 
@@ -19970,8 +19975,14 @@ role_model_refuse("role-model: test-author on sonnet is denied", "test-author", 
           "Write the failing cases.")
 role_model_refuse("role-model: the same spawn as a Task is denied", "test-author", "sonnet",
           "Write the failing cases.", tool="Task")
-role_model_refuse("role-model: reviewer on sonnet with no round line is denied", "reviewer", "sonnet",
-          "Check the diff for typos.")
+role_model_refuse("role-model: reviewer on sonnet with no round line is denied, and names the Round N of 3 marker",
+          "reviewer", "sonnet", "Check the diff for typos.",
+          carries=(ROLE_REMEDY, ROUND_MARKER) + FREE_ROUND_MARKERS)
+# The marker is a reviewer's remedy only: a test-author whose brief opens with a round line is still denied, and its
+# refusal names no round marker, so no agent reads one as a way past its row.
+role_model_refuse("role-model: test-author on sonnet with a Round 2 of 3 line is denied and names no round marker",
+          "test-author", "sonnet", "Round 2 of 3. Write the failing cases.",
+          lacks=ROLE_LACKS + (ROUND_MARKER,) + FREE_ROUND_MARKERS)
 role_model_refuse("role-model: reviewer on sonnet with a Round 1 of 3 line is denied (round 1 runs on the row)",
           "reviewer", "sonnet", "Round 1 of 3. Check the diff for typos.")
 role_model_refuse("role-model: record-writer on sonnet is denied", "record-writer", "sonnet", "Record the decision.")
