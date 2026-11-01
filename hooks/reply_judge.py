@@ -46,6 +46,17 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdlib only; the one home of the gh logins
 
+# The widening words come from question_form.WIDENS_TEXT, the one home. If the import fails, the prompt
+# keeps its sentence without the quoted words, one stderr line says so, and the hook still runs.
+try:
+    from question_form import WIDENS_TEXT  # noqa: E402
+except Exception as exc:
+    WIDENS_TEXT = None
+    print("reply judge: cannot read WIDENS_TEXT (%s: %s); the prompt names the label without its words"
+          % (type(exc).__name__, exc), file=sys.stderr)
+WIDENS_LABEL_SENTENCE = ("Also flag an option that widens a shared tool offered without the owner's widening label"
+                         + (", the words \"%s\". " % WIDENS_TEXT if WIDENS_TEXT else ". "))
+
 OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
 SAMPLE_EVERY = 5  # the judge runs on Stops 1, 6, 11 of a session
@@ -115,7 +126,7 @@ INSTRUCTIONS = (
     "Flag only a limit or rule named as a note on the session's own conduct. "
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
     "such as a second accepted form, an allow-list entry or a per-repo exception. "
-    "Also flag an option that widens a shared tool offered without the words \"Goes against your uniform ruling (t18)\". "
+    + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
