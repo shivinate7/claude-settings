@@ -58,7 +58,8 @@ def parse_line(raw):
 
     The one reader of guard.log lines. Both shapes: five tab fields, or six with the session last.
     The time is ISO 8601, with a UTC offset or without. `at` is the aware instant for an offset
-    time, None for an old one; `when` is naive reader-local either way.
+    time, None for an old one; `when` is naive reader-local: an offset line is
+    converted to the reader's clock, an old line keeps its wall time as written.
     `session` is field 6 alone, or UNKNOWN for a five-field line, an empty field or the
     placeholder. A tab beyond field 6 stays in `matched`, never in `session`. Unreadable: fewer
     than four fields, or a bad timestamp.
