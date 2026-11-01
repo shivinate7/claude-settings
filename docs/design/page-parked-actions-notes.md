@@ -39,13 +39,13 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close" — a new branch 
 
 - 5A (pick): each `meta/page` `parked` entry gets `id`, a slug of 32 characters or fewer, unique in the list, set by the writer. Gain: stable when the writer rewrites `ref` (rule `speak-rewrite-superseded-in-place`), and safe as a store key. Loss: a SKILL.md change, and old entries need an id.
 - 5B: derive the key from `ref`. Loss: `ref` is prose. A rewrite of its plain name orphans a sent act, and it can hold characters a key cannot.
-- An entry with no `id` (`#s=legacy`) shows both buttons off: dashed, focusable, and the reason on hover and focus, "The page's writer has not set up this line yet. Reply in the thread instead." (`ux-control-earns-place`).
+- An entry with no `id` (`#s=legacy`) shows both buttons off: dashed, focusable, and the reason on hover and focus, "The page's writer has not prepared this line yet. Reply in the thread instead." (`ux-control-earns-place`).
 - Owner grant: yes. 5A changes SKILL.md "The database" (`parked` is a list of `{id, ref, note}`).
 
 ## 6. After the press
 
 - Staged (`#s=staged`): the toggle shows ✓. A Drop strikes the line.
-- Sent (`#s=sent`): the line shows the `.ans` badge "Unpark sent 17:42 CST" and Change. The Sent panel lists a parked act by its act ("Unpark", in the `.no` slot) and its ref, cut at 24ch, where an item shows "No. n". Its title is "Goes to triage" (`meta/page.writer`).
+- Sent (`#s=sent`): the line shows the `.ans` badge "Unpark sent 17:42 CST" and Change. The badge shows the time only, so badge and Change fit on one 390px row. Its title gives the day and the writer. "Change" opens the line again. "Undo send" stays in the Sent panel only. The Sent panel lists a parked act by its act ("Unpark", in the `.no` slot) and its ref, cut at 24ch, where an item shows "No. n". Its title is "Goes to triage" (`meta/page.writer`).
 - Pending (`#s=pending`): the same badge and Change after the Undo window. Change brings the toggles back. A cleared line then turns Send into "Withdraw answer", as on a card.
 - The acts row is one 44px cluster in every state, so no state moves the row.
 - 6A (pick, `#s=routed`): when the writer removes the entry, the line keeps its height with the filled badge "Unparked" or "Dropped" until it is off screen. It uses the same hold as a receipt (`releaseHeld`). Gain: the Ask box below does not jump while you type in it. Loss: the page keeps the last act in memory to draw it.
@@ -65,6 +65,8 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close" — a new branch 
 
 ## 9. For the builder
 
+- Drop's dashed edge uses `--faint`, where `.btn.dash` elsewhere uses `--line`. `--line` on the surface is under the 3:1 control-edge floor in `a11y.md`. "Mark done" and "None of these" have the same gap today. That is outside this step.
+- Forced colors: the accent fill of a pressed Unpark goes away. The ✓ in the label stays, so the state still shows.
 - Classes: `.parked` (section), `.pk-hint`, `.pk-list`, `.pk` (line, `.drop` when staged, sent or filed as a Drop), `.pk-txt` with `.ref` and `.nt`, `.pk-acts`, `.btn.pkb` with `.off` and `.on` label spans, `.sent-list .pkref`.
 - Model a park act as a pseudo item `{id: "park-" + p.id, park: p, owner: meta.writer}`, so `staged`, `sendAll`, `undoSend`, `withdrawAll` and `saveDraft` take it with no second path. Keep its draft in `waiting.draft` (`ux-keep-what-was-made`).
 - `noticeText`: a park act's line is "parked <ref> unpark" or "parked <ref> drop", in place of "<n> <choice>". Its owner is `meta/page.writer`.

@@ -752,6 +752,9 @@ body.sentpad { padding-bottom: 300px; }
 .pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
 .pkb[aria-pressed="true"] .on { visibility: visible; }
 .btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
+/* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
+.btn.dash.pkb { border-color: var(--faint); }
+.btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
 /* Off, as .btn.mv at an end of the order: dashed, focusable, and the reason shows on hover and focus. */
 .btn.pkb[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; }
 .btn.pkb[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; width: max-content; max-width: min(320px, 80vw); white-space: normal; text-align: start; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
@@ -806,7 +809,7 @@ function acts(p, words, st, tag) {
   const id = p.id || "noid";
   let inner;
   if (st.filed) inner = `<span class="ans filed">${esc(st.filed === "drop" ? words.dropDone : words.unDone)}</span>`;
-  else if (st.sent) inner = `<span class="ans" title="${esc("Goes to " + WRITER)}">${esc(st.sent === "drop" ? words.dropSent : words.unSent)} <span class="t">${esc(fmt(SENT_AT, false))}</span></span><button class="btn quiet changebtn" type="button" aria-label="${esc("Change " + p.ref)}">Change</button>`;
+  else if (st.sent) inner = `<span class="ans" title="${esc("Sent " + fmt(SENT_AT) + ". Goes to " + WRITER + ".")}">${esc(st.sent === "drop" ? words.dropSent : words.unSent)} <span class="t">${esc(fmt(SENT_AT, false))}</span></span><button class="btn quiet changebtn" type="button" aria-label="${esc("Change " + p.ref)}">Change</button>`;
   else if (st.now) inner = `<span class="ans filed">${esc(words.unDone)}</span><button class="btn alt" type="button">Undo (6)</button>`;
   else if (st.ask) inner = `<p class="pk-ask" id="pk-ask-${id}">Drop this line for good?</p><button class="btn alt" type="button" style="outline: 2px solid var(--acc); outline-offset: 2px">Cancel</button><button class="btn" type="button">Drop</button>`;
   else inner = toggle(p, "unpark", words, st) + toggle(p, "drop", words, st, st.why ? " why" : "") + (st.note != null ? `<button class="btn quiet" type="button" aria-expanded="${!!st.note}">Add a note</button>` : "");
@@ -862,7 +865,7 @@ function screen(s) {
   if (s === "pending") return chrome(parkedBlock([L(P0, { sent: "unpark" }, { acts: "pending: Change withdraws it" }), L(P1, { sent: "drop" }), L(P2)], W), BAR_IDLE);
   if (s === "routed") return chrome(parkedBlock([L(P0, { filed: "unpark" }, { acts: "6A routed: held until off screen" }), L(P1, { sent: "drop" }, { acts: "still pending" }), L(P2)], W), BAR_IDLE);
   if (s === "gone-6b") return chrome(parkedBlock([L(P1, { sent: "drop" }, { acts: "6B: the routed line left at once; all below moved up" }), L(P2)], W), BAR_IDLE);
-  if (s === "legacy") return chrome(parkedBlock([L(P0), L(P1), L(LEGACY, { off: "The page's writer has not set up this line yet. Reply in the thread instead.", why: true }, { acts: "no id: off, says why" })], W), BAR_IDLE);
+  if (s === "legacy") return chrome(parkedBlock([L(P0), L(P1), L(LEGACY, { off: "The page's writer has not prepared this line yet. Reply in the thread instead.", why: true }, { acts: "no id: off, says why" })], W), BAR_IDLE);
   if (s === "nostore") { const off = "This view cannot reach the page's store. Reply in the thread instead."; return chrome(parkedBlock([L(P0, { off, why: true }, { acts: "no store: off, says why" }), L(P1, { off }), L(P2, { off })], W), ["This view cannot reach the page's store. Reply in the thread with your answers instead.", "Send answers", true]); }
   if (s === "now-1b") return chrome(parkedBlock([L(P0, { now: true }, { acts: "1B: saved at once, Undo in the row" }), L(P1), L(P2)], W), BAR_IDLE);
   if (s === "ask-2b") return chrome(parkedBlock([L(P0), L(P1, { ask: true }, { acts: "2B: ask in the row, focus on Cancel" }), L(P2)], W), BAR_IDLE);
