@@ -25,6 +25,8 @@ Interface the hook must match:
   that holds R and the override line, and one guard.log deny line. An override lifts it: no output.
 - Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus.
   Every other refusal is liftable.
+- The Explore remedy: the spawn prompt's fix clause and the Agent fallback reason name the audit marker,
+  EXPLORE_AUDIT_MARKER in hooks/guard.py, read at test time and never copied here.
 - Any model error, or malformed input, fails open: no deny, exit 0, one stderr line.
 - AskUserQuestion: a box that fails the code check (hooks/question_form.py chat_hit) is refused before
   any model call, with the rule chat_hit names. The model sees only a box that passes it, and judges only
@@ -43,6 +45,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 HOOK = os.environ.get("CALL_JUDGE_UNDER_TEST") or os.path.join(HERE, "call_judge.py")
+GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings.json")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
@@ -282,6 +285,50 @@ def case_explore_row_is_vetoed():
               r.code == 0 and r.out == "" and lifted_log(r, "spawn-judge"), detail(r))
 
 
+def load_file_module(path, name):
+    """Load a file as a module, so a case reads its constant at test time, never a copy."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def guard_audit_marker():
+    return load_file_module(GUARD, "guard_marker_probe").EXPLORE_AUDIT_MARKER
+
+
+def fix_clause(prompt):
+    """The spawn prompt's fix clause: from `the fix is` to the end of its sentence, or "" when absent."""
+    start = prompt.find("the fix is")
+    if start < 0:
+        return ""
+    end = prompt.find(". ", start)
+    return prompt[start:end + 1] if end > start else prompt[start:]
+
+
+def case_explore_remedy_names_marker():
+    # Rule agent-role-model (decision agent-model-cap): an audit Explore on sonnet passes only when its brief's
+    # first non-blank line carries the marker. The judge's fix clause names that line and the marker, or a
+    # session fixes one refusal and hits the next.
+    marker = guard_audit_marker()
+    r = run_hook(spawn_input("Explore", model="haiku"), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    clause = fix_clause(prompt)
+    check("explore remedy: the spawn prompt's fix clause names the first non-blank line",
+          "first non-blank line" in clause, clause or detail(r))
+    check("explore remedy: the spawn prompt's fix clause names the audit marker read from guard.py",
+          bool(marker) and marker in clause, clause or detail(r))
+
+
+def case_agent_fallback_names_marker():
+    # The fallback reason is the deny when the model gives no reason, so it names the same marker.
+    marker = guard_audit_marker()
+    fallback = load_file_module(HOOK, "call_judge_under_test").JUDGES["Agent"][4]
+    check("agent fallback: the Agent fallback reason names the audit marker read from guard.py",
+          bool(marker) and marker in fallback, fallback)
+
+
 def case_question():
     r = run_hook(question_input(), answer=FLAG)
     d = r.deny() or {}
@@ -400,7 +447,8 @@ def case_settings_row():
 
 
 def main():
-    for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed, case_question,
+    for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
+                 case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
                  case_question_departs, case_fail_open, case_settings_row):
         try:
             case()
