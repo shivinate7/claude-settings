@@ -105,6 +105,8 @@ parent, or miss a message while busy.
   and tell the owner in one line where it went.
 - Only triage writes new steps, merges, order and closes. Another session sends the item to triage,
   with the owner's message attached.
+- Owner feedback about another repo goes to that repo's triage, with the owner's message attached
+  (decision owner-feedback-inbox, one feedback inbox per repo).
 - A session rewrites the note, status and brief of a step it works on.
 - The roadmap is a current record, not a log. Rewrite a note to what is true now. Keep each ruling
   as one dated line.
