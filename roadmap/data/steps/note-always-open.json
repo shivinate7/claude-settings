@@ -1,9 +1,9 @@
 {
   "title": "The waiting page's note box is always open",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33742,
   "why": "shiv, Oct 30 14:30 CDT (chat): why does the note hide behind an Add a note button? Typing in it should be enough. Read on main (skills/waiting-page/page.html, noteShown): the box opens only after Add a note, None of these, or a saved note; a typed note alone already counts as an answer (draftReady: none plus the note; SKILL.md lines 61-65).",
-  "note": "Fix: show the note box on every open card and drop the Add a note button (noteShown always true, noteOpen state and its button removed). Triage 12 runs the one-line form as a shortcut in the live page (v34, 14:33 CDT) until this lands. Done check: a card renders the box with no button; typing a note and Send writes choice none plus the note; the page's own tests updated. Needs no answer. Port: yes, every repo with a waiting page.",
-  "updatedAt": "2026-10-30T20:10:00Z"
+  "note": "Fix: show the note box on every open card and drop the Add a note button (noteShown always true, noteOpen state and its button removed). Triage 12 runs the one-line form as a shortcut in the live page (v34, 14:33 CDT) until this lands. Done check: a card renders the box with no button; typing a note and Send writes choice none plus the note; the page's own tests updated. Needs no answer. Port: yes, every repo with a waiting page. Landed on main in batch 40, #923 (Oct 31).",
+  "updatedAt": "2026-11-01T04:00:00Z"
 }

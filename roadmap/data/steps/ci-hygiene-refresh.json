@@ -3,7 +3,7 @@
   "status": "doing",
   "order": 103.33745,
   "why": "shiv, Oct 30 15:08 CDT (via coordinator): refresh the ci-hygiene skill and apply it to every repo.",
-  "note": "An audit of all 7 repos runs first; then the skill is refreshed and each repo gets its fixes in its own lane. Done check: each repo's CI passes the refreshed skill's checks.",
+  "note": "An audit of all 7 repos runs first; then the skill is refreshed and each repo gets its fixes in its own lane. Done check: each repo's CI passes the refreshed skill's checks. The skill refresh landed on main in batch 40, #923 (Oct 31); the per-repo fix lanes remain.",
   "phase": "cleanup",
-  "updatedAt": "2026-10-30T20:16:00Z"
+  "updatedAt": "2026-11-01T04:00:00Z"
 }

@@ -1,9 +1,9 @@
 {
   "title": "The feedback inbox skips a subagent's hand-back",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33755,
   "why": "Coordinator 2, Oct 30 17:18 CDT: seen in lanes page-answer-send (10 blocks), c104 (6) and roadmap-matches-lanes. Seen twice more in the coordinator, Oct 31 15:10 CDT.",
-  "note": "Ruled Oct 31 15:44 CDT (shiv, waiting item 108, d): add the agent-message block tag to the inbox's skip list in hooks/local_time.py. It matches decision owner-feedback-inbox (agent text is never captured); no brief marker, no source tags. Lane (started Oct 31 15:12 CDT, coordinator) resumes on this pick; it promotes note feedback-guard-agent-burst (docs/debts/notes.md) to a debt record and cites the ruling in owner-feedback-inbox. Done check: a turn that receives a subagent hand-back adds no inbox entry, red on main and green on the fix.",
-  "updatedAt": "2026-10-31T20:46:00Z"
+  "note": "Ruled Oct 31 15:44 CDT (shiv, waiting item 108, d): add the agent-message block tag to the inbox's skip list in hooks/local_time.py. It matches decision owner-feedback-inbox (agent text is never captured); no brief marker, no source tags. Lane (started Oct 31 15:12 CDT, coordinator) resumes on this pick; it promotes note feedback-guard-agent-burst (docs/debts/notes.md) to a debt record and cites the ruling in owner-feedback-inbox. Done check: a turn that receives a subagent hand-back adds no inbox entry, red on main and green on the fix. Landed on main in batch 40, #923 (Oct 31).",
+  "updatedAt": "2026-11-01T04:00:00Z"
 }
