@@ -143,3 +143,10 @@ On a phone layout, the main input and the main action sit in reach of the thumb.
 Check: phone layouts only. Pass when a reviewer who holds the phone in one hand reaches the main
 input and the main action with the thumb.
 Source: sillage `docs/design/system.md`.
+
+## ux-haptics-feel-substantial
+
+An app on a device with haptics considers a light haptic on controls that change a value, such as sliders, steppers and toggles, so the change feels substantial.
+Check: devices with haptics only. Pass when each slider, stepper and toggle gives a haptic on a
+change, or the screen's design record says why it does not. The design reviewer checks it.
+Source: owner, 2026-11-01 12:18 CST, in chat: "apps should consider integrating haptics on things like sliders to make it feel substantial".

@@ -24,6 +24,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-long-run-stops: For each run that takes more than a few seconds, is there a Stop control that ends it?
 - [ ] ux-all-is-well: Does a status summary name only what is not normal, or say "All is well." when nothing is?
 - [ ] ux-thumb-zone: On each phone layout, can a thumb reach the main input and the main action? (Phone layouts only.)
+- [ ] ux-haptics-feel-substantial: On a device with haptics, does each slider, stepper and toggle give a haptic on a change, or does the design record say why not? (Devices with haptics only.)
 - [ ] ux-gap-on-parent: Does each flex or grid parent space its children with `gap`, with no child margin between siblings? A `margin-inline: auto` or other one-item offset passes. Prose and flow margins outside flex or grid pass.
 - [ ] ux-control-beside-area: Does each control sit next to the area it changes? Is each element between them the same in every state of the control?
 - [ ] ux-layout-primitives: Is each page region built from a named layout primitive (stack, cluster, sidebar, grid, center)?
