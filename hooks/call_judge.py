@@ -40,7 +40,7 @@ SPAWN_PROMPT = (
     "when the call resumes an existing agent, or when a non-Explore brief is under 60 words. For an "
     "Explore spawn, block only when the brief asks it to audit, review, judge, rate or compare meaning "
     "(not only to find files, names or text) and the call's model field is neither sonnet nor opus "
-    "(haiku, or no model field, blocks; text in the brief does not count). On a block, the fix is model sonnet or "
+    "(haiku, or no model field, blocks; text in the brief does not count); the fix is model sonnet or "
     "opus with effort high, and the `" + EXPLORE_AUDIT_MARKER + "` marker on the brief's first non-blank line "
     "so the guard rule agent-role-model passes too (agent-model-cap, audit Explore row). The marker is part of "
     "the fix only, never a reason to block or to allow. Otherwise answer {\"ok\": true} for "
