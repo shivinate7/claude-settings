@@ -27,11 +27,11 @@ protection. GitHub's branch protection setting is the owner's to change.
   list and a non-empty protection disagree, and name both sets (c189).
 - The switch changes only the required checks:
   `gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks`
-  with `strict=false` and one check, `all-jobs-passed`, app id 15368 (GitHub Actions). It needs the
-  shivinate7 login: `ssemwal-cdc` has push, not admin. A handed block opens with
-  `gh auth switch -u shivinate7` (decision `act-in-place`). A cloud session acts as `shivinate7` with admin, but the auto-mode
-  classifier refuses the PATCH as a CI bypass, so the owner runs it. The owner switched it on 2026-10-31 at
-  14:52 CDT (waiting-page item 101); the coordinator's read-back showed the one check and strict false.
+  with `strict=false` and one check, `all-jobs-passed`, app id 15368 (GitHub Actions). It needs the shivinate7
+  login: `ssemwal-cdc` has push, not admin. A handed block opens with `gh auth switch -u shivinate7` (decision
+  `act-in-place`). A cloud session acts as `shivinate7` with admin, but the auto-mode classifier refuses the
+  PATCH as a CI bypass, so the owner runs it. The owner switched it on 2026-10-31 at 14:52 CDT (waiting-page
+  item 101); the coordinator's read-back showed the one check and strict false.
 - Before every merge, read the checks yourself and refuse on red. The `merge` tool reads its checks
   from the branch protection.
 - Owner ruling, 2026-10-28 (waiting-page item 33 a): a rename of required checks switches branch
