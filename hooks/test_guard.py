@@ -49,6 +49,7 @@ import time
 import uuid
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -105,6 +106,7 @@ FAMILIES = {
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
+    "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "rule9": "rule 9, the agent model floor",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
@@ -254,8 +256,11 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, **tool_input):
+        max_seconds=None, env=None, **tool_input):
     """Register one case.
+
+    `env` is the environment the guard run gets on top of the runner's own, for the cases that name a
+    session id (see decide, which drops the runner's id first).
 
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
     approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
@@ -292,6 +297,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "no_root": no_root,
         # A case that must be judged within this many seconds. A slower verdict fails the case.
         "max_seconds": max_seconds,
+        "env": env,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
@@ -307,10 +313,10 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
        carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
-       agent_type=None, transcript=None):
+       agent_type=None, transcript=None, env=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
-        carries=carries, lacks=lacks, config=config, transcript=transcript, command=command)
+        carries=carries, lacks=lacks, config=config, transcript=transcript, env=env, command=command)
 
 
 # ASK ALONE. A shell call that holds a command
@@ -7901,6 +7907,185 @@ sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 
    silent=True, cwd=STAMPREPO)
 
 
+# =========================================================================== 5e. the merge role record
+#
+# Rule merge-role-proof, decision session-tiers. This section proves that a session may record only the
+# tier its own get_session record carries, read from the payload's transcript_path. A lane's `--role`
+# is refused, and the refusal steers it to hand off.
+#
+# The env var names the lane as cse_<x> and the record names it as session_<x> (hooks/override.py,
+# LANE_ENV_PREFIX and LANE_PREFIX). So the cases set the env in its own form. A literal equal test
+# would deny the real coordinator on every call.
+ROLE_RULE = "merge-role-proof"
+ROLE_FLAG = ("--role",)  # the refusal's remedy names no role flag, so it never names `merge --role <tier>`
+ROLE_OWN = "session_ROLEOWN01"
+ROLE_OTHER = "session_ROLEOTHER01"
+ROLE_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_ROLEOWN01"}
+ROLE_DIR = os.path.join(ROOT, "rolerec")
+GET_SESSION = "mcp__claude-code-remote__get_session"
+LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
+LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
+RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
+COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
+MERGE_SHIM = "~/.claude/bin/merge"
+
+
+def role_use(tool_id, name):
+    """An assistant line that calls the tool `name`."""
+    return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": tool_id, "name": name, "input": {}}]}})
+
+
+def role_result(tool_id, text):
+    """The user line that carries the text result of call `tool_id`."""
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}]}})
+
+
+def role_record(tags, session=ROLE_OWN, title="a lane session"):
+    """The text get_session returns: a JSON object whose ccr block holds the record."""
+    return json.dumps({"ccr": {"id": session, "title": title, "tags": list(tags),
+                               "parent_session_id": "session_PARENT01"}})
+
+
+def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
+    """One paired get_session call whose record carries `tags`."""
+    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
+
+
+def role_said(text):
+    """A user message: words typed or pasted, never a tool's result."""
+    return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
+
+
+# A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
+ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
+ROLE_LINES = {
+    "runner": role_call("g1", RUNNER_TAGS),
+    "coordinator": role_call("g1", COORD_TAGS),
+    "lane": role_call("g1", LANE_TAGS),
+    "lane-title": role_call("g1", LANE_TAGS, title="handed to cs-build:batch-runner"),
+    "other-session": role_call("g1", RUNNER_TAGS, session=ROLE_OTHER),
+    "near-miss": role_call("g1", ["cs-build:batch-runner-old", "cs-repo:o/r"]),
+    "list-runner": [role_use("l1", LIST_SESSIONS), role_result("l1", role_record(RUNNER_TAGS))],
+    "quoted": [role_said("the batch runner is cs-build:batch-runner; run merge --role batch-runner")],
+    "no-record": [role_use("b1", "Bash"), role_result("b1", "ok")],
+    "not-json": [role_use("g1", GET_SESSION), role_result("g1", "session not found")],
+    "junk-only": [ROLE_CUT, "not json at all", "{", ""],
+    "junk-then-runner": [ROLE_CUT, "not json at all"] + role_call("g1", RUNNER_TAGS),
+    "newest-wins": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS),
+    "pending-newest": role_call("g1", RUNNER_TAGS) + [role_use("g2", GET_SESSION)],
+    "foreign-newest": role_call("g1", RUNNER_TAGS) + role_call("g2", LANE_TAGS, session=ROLE_OTHER),
+}
+
+
+def role_path(name):
+    """The transcript fixture for one case: a JSONL file under this run's folder."""
+    return os.path.join(ROLE_DIR, name + ".jsonl")
+
+
+def write_role_transcripts():
+    """Write each fixture as JSONL. `unreadable` is a folder, so the guard's open() fails on it."""
+    os.makedirs(ROLE_DIR, exist_ok=True)
+    for name, lines in ROLE_LINES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    os.makedirs(role_path("unreadable"), exist_ok=True)
+
+
+lazy_fixture([role_path(name) for name in ROLE_LINES] + [role_path("unreadable")], write_role_transcripts)
+
+
+def role_refuse(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role` the guard refuses. The reason names its rule, and never the role flag."""
+    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG,
+       transcript=transcript, env=env, cwd=NOGIT, **kw)
+
+
+def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
+    """A `merge --role`, or a command that is not one, that the guard lets through silently."""
+    sh("merge-role-proof: " + name, command, "allow", silent=True, transcript=transcript, env=env,
+       cwd=NOGIT, **kw)
+
+
+# A record's own tier is allowed. Any other tier is refused, both ways round.
+role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
+role_allow("a coordinator records coordinator", MERGE_SHIM + " --role coordinator", role_path("coordinator"))
+role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
+          role_path("runner"))
+role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("coordinator"))
+# A lane is refused, and the reason steers it to hand off: get_session first, then list_sessions for the runner.
+role_refuse("a lane that records batch-runner is refused, and the refusal steers it to hand off",
+          MERGE_SHIM + " --role batch-runner", role_path("lane"),
+          carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch"))
+# Only the own record's tags count. A title, a foreign record, a list, a near miss and a quote do not.
+role_refuse("a lane whose title holds cs-build:batch-runner is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("lane-title"))
+role_refuse("a record of another session is ignored, so a runner record of another id is refused",
+          MERGE_SHIM + " --role batch-runner", role_path("other-session"))
+role_refuse("with no session id in the env, no record matches, so a runner record is refused",
+          MERGE_SHIM + " --role batch-runner", role_path("runner"), env=None)
+role_refuse("a list_sessions result that holds the runner tags is ignored", MERGE_SHIM + " --role batch-runner",
+          role_path("list-runner"))
+role_refuse("a near-miss tag cs-build:batch-runner-old does not allow the runner role",
+          MERGE_SHIM + " --role batch-runner", role_path("near-miss"))
+role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE_SHIM + " --role batch-runner",
+          role_path("quoted"))
+# The other command forms, bare and after `cd somewhere &&`, judge as the shim does.
+for _role_prefix in ("", "cd somewhere && "):
+    for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        for _role_tier, _role_own in (("batch-runner", "runner"), ("coordinator", "coordinator")):
+            _role_cmd = _role_prefix + _role_form + " --role " + _role_tier
+            role_allow(_role_cmd + " allows its own record", _role_cmd, role_path(_role_own))
+            role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
+# Nothing the guard cannot read as an own record allows.
+role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("no-record"))
+role_refuse("a get_session result whose text is not JSON is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("not-json"))
+role_refuse("a transcript_path that names no file is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("missing"))
+role_refuse("a transcript_path that cannot be read is refused", MERGE_SHIM + " --role batch-runner",
+          role_path("unreadable"))
+role_refuse("a payload with no transcript_path is refused", MERGE_SHIM + " --role batch-runner", None)
+role_refuse("a transcript of junk lines is refused, and a record cut short never allows",
+          MERGE_SHIM + " --role batch-runner", role_path("junk-only"))
+role_allow("junk lines are skipped: a runner record after them allows the runner role",
+           MERGE_SHIM + " --role batch-runner", role_path("junk-then-runner"))
+# The newest own record counts. A newer foreign record, or a call with no result yet, does not.
+role_refuse("the newest own record wins: an older runner record, then a newer lane record, is refused",
+          MERGE_SHIM + " --role batch-runner", role_path("newest-wins"))
+role_allow("a newer get_session call with no result is skipped, so the older runner record allows",
+           MERGE_SHIM + " --role batch-runner", role_path("pending-newest"))
+role_allow("a newer record of another session is ignored, so the older own runner record allows",
+           MERGE_SHIM + " --role batch-runner", role_path("foreign-newest"))
+# The clause fires only on `merge --role`. Other merge commands, and text that names one, pass.
+role_allow("merge 12 --confirm does not fire the role clause, beside a lane record", "merge 12 --confirm",
+           role_path("lane"))
+role_allow("merge --unlock does not fire the role clause, beside a lane record", "merge --unlock",
+           role_path("lane"))
+role_allow("a grep that names the role form is text", "grep -n 'merge --role batch-runner' notes.md",
+           role_path("lane"))
+role_allow("a comment that names the role form is text", "echo done # " + MERGE_SHIM + " --role batch-runner",
+           role_path("lane"))
+role_allow("a heredoc body that names the role form is data",
+           "cat > notes.txt <<'EOF'\n" + MERGE_SHIM + " --role batch-runner\nEOF", role_path("lane"))
+role_allow("quoted text that names the role form is text", "echo '" + MERGE_SHIM + " --role batch-runner'",
+           role_path("lane"))
+role_allow("a multi-line quoted string that names the role form is text",
+           'echo "first line\n' + MERGE_SHIM + ' --role batch-runner"', role_path("lane"))
+# The scanner respects strings and comments: a `#`, a quote or a newline in text never hides the real call.
+role_refuse("a comment opener inside a string does not hide the real call",
+          'echo "# note" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+role_refuse("a multi-line quoted string does not hide the real call after it",
+          'echo "first\nline" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+role_refuse("a lone quote inside a string does not hide the real call",
+          'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+role_refuse("a lone quote in a comment does not hide the call on the next line",
+          "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
@@ -12176,6 +12361,279 @@ wp_write("owner judge: a port with no Departs from line and the form lines is re
          "deny", "port-question", oj_item(context=oj_ctx(tail=PQ_CTX)), doc_id=OJ_DOC)
 wp_write("owner judge: a press with no link and the form lines is refused by press-link", "deny",
          "press-link", oj_item(context=OJ_GOOD, options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
+
+
+# --------------------------------------------------------------------------- an item field the page renders
+FAMILY = "item-field-rendered"
+#
+# docs/decisions/item-field-rendered.md, rule item-field-rendered, built against a named incident
+# (incident in the record): live items carried `reply`, and page.html never showed it. A write of a waiting item is refused when it names a
+# top-level field the page does not render. The page lists those fields in one block,
+# <script type="application/json" id="itemFields">[...]</script>. The page and the guard both read that
+# block, so no copy of the list lives anywhere else. An update may remove a field with
+# {"__delete__": true}, which passes. A key inside options or steps is not judged. A page with no block,
+# a block that is no JSON list of strings, or an empty list reads as unknown and the write passes. IF_SEAM names the
+# page.html the guard reads in place of the repo's own, so a case can hand the guard any page.
+
+IF_SEAM = "GUARD_ITEM_FIELDS_PAGE"
+IF_PAGE = os.path.join(REPO, "skills", "waiting-page", "page.html")
+IF_DOC = "logo-colour"
+IF_BOGUS = "zzUnrenderedField"
+# The fields the real page must list: the incident's three, the ten the guard's own rules read, and every
+# other top-level key an item case in this file writes. A field dropped from the page goes red by name.
+IF_REQUIRED = ("reply", "lastAnswer", "lane",
+               "port", "stands", "kind", "holds", "group", "rank", "by", "pick", "options", "context",
+               "id", "status", "title", "why", "steps", "links", "command", "multi", "ranked")
+# lastAnswer is an object, as the writer stores it.
+IF_LAST = {"choice": "b", "note": "n", "at": "2026-10-29T19:05:00Z"}
+IF_VALUE = {"port": False, "stands": True, "rank": 3, "multi": True, "ranked": True, "kind": "decision",
+            "status": "open", "options": [{"key": "a", "label": "Keep the blue"}], "pick": "a",
+            "steps": ["Open the page."], "links": [{"label": "Page", "url": "https://example.com/p"}],
+            "lastAnswer": IF_LAST}
+IF_OWN = '["id", "kind", "status", "title", "context", "zzCustom"]'   # a block of a page of its own
+os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
+
+
+def if_item(**over):
+    """A decision that every other waiting-page rule passes, with `over` on top. A None value drops a key."""
+    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None, **over})
+
+
+def if_page(slug, body):
+    """The path of a page.html of its own, in this run's folder. A body of None writes no file."""
+    path = os.path.join(ROOT, "ifr", slug + ".html")
+    if body is not None:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("<!doctype html>\n<html><head><title>Waiting</title></head><body>\n" + body + "\n</body></html>\n")
+    return path
+
+
+def if_block(text):
+    return '<script type="application/json" id="itemFields">' + text + "</script>"
+
+
+def ifr(name, expected, item, action="set", doc_id=IF_DOC, **extra):
+    """One write of an item to the waiting page of the fixture repo, judged against the real page.html."""
+    wp_write("item field: " + name, expected, "item-field-rendered", item, action=action, doc_id=doc_id, **extra)
+
+
+def ifr_seam(name, expected, page, item, action="set", **extra):
+    """ifr, with the guard reading `page` through IF_SEAM in place of the real page.html."""
+    ifr(name, expected, item, action=action, **extra)
+    CASES[-1]["env"] = {IF_SEAM: page}
+
+
+def ifr_replace(name, expected, field):
+    ifr("a str_replace " + name, expected, None, action="str_replace", field=field, old_str="blue", new_str="green")
+
+
+def ifr_batch(name, expected, writes):
+    add("item field: " + name, expected, "item-field-rendered" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", writes=writes)
+
+
+def ifr_write(data, op="set", collection="items"):
+    return {"op": op, "collection": collection, "doc_id": IF_DOC, "data": data}
+
+
+# The real page.html: a field the block lists is allowed, and one it omits is refused.
+ifr("a set with a field the page does not render is denied", "deny", if_item(**{IF_BOGUS: "x"}))
+ifr("the refusal names the list to add the field to", "deny", if_item(**{IF_BOGUS: "x"}), carries=("itemFields",))
+ifr("an update with a field the page does not render is denied", "deny", {IF_BOGUS: "x"}, action="update")
+ifr("an update with one unlisted field among listed ones is denied", "deny", {"rank": 3, IF_BOGUS: "x"},
+    action="update")
+ifr("a field that differs from a listed one only in case is denied", "deny", {"Reply": "x"}, action="update")
+ifr("a set of listed fields only is allowed", "allow", if_item())
+ifr("a set that carries reply, lastAnswer and lane is allowed", "allow",
+    if_item(reply="Use the blue.", lastAnswer=IF_LAST, lane="page-shows-last-answer", group="logo", rank=2, by="owner"))
+for _field in IF_REQUIRED:
+    ifr("an update of %s is allowed once the page lists it" % _field, "allow", {_field: IF_VALUE.get(_field, "x")},
+        action="update")
+
+# __delete__ removes a field, so it passes on an update, and only there.
+ifr("an update that deletes an unlisted field is allowed", "allow", {IF_BOGUS: {"__delete__": True}}, action="update")
+ifr("an update that deletes an unlisted field and sets a listed one is allowed", "allow",
+    {IF_BOGUS: {"__delete__": True}, "reply": "x"}, action="update")
+ifr("an update that deletes one unlisted field and sets another is denied", "deny",
+    {IF_BOGUS: {"__delete__": True}, "zzOtherField": "x"}, action="update")
+ifr("an update whose delete marker is false is denied", "deny", {IF_BOGUS: {"__delete__": False}}, action="update")
+ifr("a set that carries a delete marker on an unlisted field is denied", "deny",
+    if_item(**{IF_BOGUS: {"__delete__": True}}))
+
+# Only a top-level key is judged.
+ifr("an unlisted key inside an option is not judged", "allow",
+    {"options": [{"key": "a", "label": "Keep the blue", IF_BOGUS: 1}]}, action="update")
+ifr("an unlisted key inside a step is not judged", "allow",
+    {"steps": [{"text": "Open the page.", IF_BOGUS: 1}]}, action="update")
+ifr("an unlisted key inside a listed field is not judged", "allow", {"reply": {IF_BOGUS: 1}}, action="update")
+
+ifr_replace("on a field the page does not render is denied", "deny", IF_BOGUS)
+ifr_replace("on reply is allowed once the page lists it", "allow", "reply")
+ifr_replace("on context is allowed", "allow", "context")
+ifr_replace("on the title is allowed", "allow", "title")
+
+# A batch is judged entry by entry, whatever the entry's position or op.
+ifr_batch("a batch with an unlisted field in its last write is denied", "deny",
+          [ifr_write(if_item()), ifr_write({"rank": 3}, "update"), ifr_write({IF_BOGUS: "x"}, "update")])
+ifr_batch("a batch with an unlisted field in its first write is denied", "deny",
+          [ifr_write(if_item(**{IF_BOGUS: "x"})), ifr_write({"rank": 3}, "update")])
+ifr_batch("a batch with a str_replace on an unlisted field is denied", "deny",
+          [ifr_write(if_item()),
+           {"op": "str_replace", "collection": "items", "doc_id": IF_DOC, "field": IF_BOGUS,
+            "old_str": "blue", "new_str": "green"}])
+ifr_batch("a batch of listed fields and a delete of an unlisted one is allowed", "allow",
+          [ifr_write(if_item(reply="x")), ifr_write({IF_BOGUS: {"__delete__": True}, "lane": "x"}, "update")])
+ifr_batch("a batch with an unlisted field in another collection is allowed", "allow",
+          [ifr_write({IF_BOGUS: "x"}, collection="answers"), ifr_write(if_item())])
+
+# file_path data is read as the data of the write.
+IF_FILE_BAD = os.path.join(ROOT, "ifr", "bad.json")
+IF_FILE_GOOD = os.path.join(ROOT, "ifr", "good.json")
+with open(IF_FILE_BAD, "w", encoding="utf-8") as _f:
+    json.dump(if_item(**{IF_BOGUS: "x"}), _f)
+with open(IF_FILE_GOOD, "w", encoding="utf-8") as _f:
+    json.dump(if_item(reply="x"), _f)
+ifr("file_path data with an unlisted field is denied", "deny", None, file_path=IF_FILE_BAD)
+ifr("file_path data of listed fields is allowed", "allow", None, file_path=IF_FILE_GOOD)
+ifr("an unreadable file_path is not judged", "allow", None, file_path=os.path.join(ROOT, "ifr", "missing.json"))
+
+# Only a write of an item to this repo's waiting page is judged.
+ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="answers")
+ifr("a set to another artifact is not judged", "allow", if_item(**{IF_BOGUS: "x"}),
+    url="https://claude.ai/artifact/other")
+add("item field: a repo with no waiting page is not judged", "allow", tool="ArtifactData", cwd=NOGIT, url=PQ_URL,
+    action="set", collection="items", doc_id=IF_DOC, data=if_item(**{IF_BOGUS: "x"}))
+add("item field: a read is not judged", "allow", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="get",
+    collection="items", doc_id=IF_DOC)
+
+# The guard reads the block of the page it is handed, so no copy of the list sits in the guard. The
+# block spans lines here, as a hand-edited page may.
+IF_PRETTY = if_page("pretty", if_block('[\n  "id",\n  "kind",\n  "status",\n  "title",\n  "context",\n  "zzCustom"\n]'))
+ifr_seam("a page of its own lists zzCustom, so a set that carries it is allowed", "allow", IF_PRETTY,
+         if_item(zzCustom="x"))
+ifr_seam("a page of its own omits reply, so a set that carries it is denied", "deny", IF_PRETTY,
+         if_item(reply="x"))
+
+# A page with no block, a block that is no JSON list of strings, or an empty list reads as unknown: the write passes.
+for _slug, _body in (("no-block", "<p>No list here.</p>"),
+                     ("object-block", if_block('{"id": true}')),
+                     ("number-member", if_block('["id", 3]')),
+                     ("broken-json", if_block('["id", ')),
+                     ("empty-list", if_block("[]")),
+                     ("no-file", None)):
+    ifr_seam("a page with %s is not judged" % _slug.replace("-", " "), "allow", if_page(_slug, _body),
+             if_item(**{IF_BOGUS: "x"}))
+
+# An empty block lists no field, so it reads as unknown for every op, as the set above does for a set. The
+# update, the str_replace and the batch each pass on it.
+IF_EMPTY = if_page("empty-list-ops", if_block("[]"))
+ifr_seam("an empty itemFields block is not judged: an update with an unlisted field is allowed", "allow",
+         IF_EMPTY, {IF_BOGUS: "x"}, action="update")
+ifr_seam("an empty itemFields block is not judged: a str_replace on an unlisted field is allowed", "allow",
+         IF_EMPTY, None, action="str_replace", field=IF_BOGUS, old_str="blue", new_str="green")
+add("item field: an empty itemFields block is not judged: a batch with an unlisted field is allowed", "allow",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[ifr_write({IF_BOGUS: "x"}, "update"), ifr_write(if_item(**{IF_BOGUS: "x"}))])
+CASES[-1]["env"] = {IF_SEAM: IF_EMPTY}
+
+# The scanner cases: the block is found, and its list read, whatever text sits around it.
+# Comment openers sit inside strings, and their closers come after the block.
+IF_SCAN_PAGES = {
+    "comment openers in strings": '<script>var a = "<!--", b = "//", c = "/*";</script>\n'
+                                  + if_block(IF_OWN) + '\n<p>end --> and */</p>',
+    # A decoy block inside a multi-line template literal comes first, and is no block of the page.
+    "a multi-line template literal": '<script>\nconst tpl = `\n  <script type="application/json" id="itemFields">'
+                                     '["reply", "zzCustom"]<\\/script>\n`;\n</script>\n' + if_block(IF_OWN),
+    "a lone quote in text": "<p>Don't forget the list.</p>\n" + if_block(IF_OWN) + "\n<p>It's the list.</p>",
+}
+for _what, _body in IF_SCAN_PAGES.items():
+    _page = if_page("scan-" + _what.replace(" ", "-"), _body)
+    ifr_seam("a block after " + _what + " is read: reply is denied", "deny", _page, if_item(reply="x"))
+    ifr_seam("a block after " + _what + " is read: zzCustom is allowed", "allow", _page, if_item(zzCustom="x"))
+
+
+def item_fields_page_case():
+    """The real page.html holds one itemFields block: type application/json, a JSON list of strings with
+    no repeats, naming every field in IF_REQUIRED. An HTML parser finds it, as a browser does."""
+    class Blocks(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=False)
+            self.found, self.open = [], None
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script" and dict(attrs).get("id") == "itemFields":
+                self.open = (dict(attrs).get("type"), [])
+
+        def handle_data(self, data):
+            if self.open:
+                self.open[1].append(data)
+
+        def handle_endtag(self, tag):
+            if tag == "script" and self.open:
+                self.found.append((self.open[0], "".join(self.open[1])))
+                self.open = None
+
+    try:
+        with open(IF_PAGE, encoding="utf-8") as f:
+            blocks = Blocks()
+            blocks.feed(f.read())
+            blocks.close()
+    except OSError as err:
+        return False, "page.html does not read: %s" % err
+    if len(blocks.found) != 1:
+        return False, "page.html holds %d itemFields blocks, want 1" % len(blocks.found)
+    kind, text = blocks.found[0]
+    if kind != "application/json":
+        return False, "the itemFields block has type %r, want application/json" % kind
+    try:
+        fields = json.loads(text)
+    except ValueError as err:
+        return False, "the itemFields block is no JSON: %s" % err
+    if not isinstance(fields, list) or not all(isinstance(f, str) for f in fields):
+        return False, "the itemFields block is no list of strings"
+    if len(set(fields)) != len(fields):
+        return False, "the itemFields block repeats a field"
+    missing = [f for f in IF_REQUIRED if f not in fields]
+    if missing:
+        return False, "the itemFields block does not list %s" % ", ".join(missing)
+    return True, "one block of %d fields, and it lists every field a write needs" % len(fields)
+
+
+def item_field_hit_case():
+    """question_form.item_field_hit(op, entry, data) answers truthy for a write it refuses and falsy for one it
+    passes, on a page of its own (IF_SEAM). The four shapes: set, update, a delete, a str_replace."""
+    page = if_page("unit", if_block('["id", "reply", "context"]'))
+    code = ("import json, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import question_form\n"
+            "hit, bogus = question_form.item_field_hit, sys.argv[2]\n"
+            "entry = {'collection': 'items', 'doc_id': 'd'}\n"
+            "swap = dict(entry, field=bogus, old_str='a', new_str='b')\n"
+            "print(json.dumps([bool(x) for x in (\n"
+            "    hit('set', entry, {bogus: 1}), hit('set', entry, {'context': 'x', 'reply': 'x'}),\n"
+            "    hit('update', entry, {bogus: 1}), hit('update', entry, {bogus: {'__delete__': True}}),\n"
+            "    hit('update', entry, None), hit('str_replace', swap, None),\n"
+            "    hit('str_replace', dict(swap, field='reply'), None))]))\n")
+    env = dict(os.environ, **{IF_SEAM: page})
+    run = subprocess.run([sys.executable, "-c", code, os.path.dirname(GUARD), IF_BOGUS],
+                         capture_output=True, text=True, env=env, timeout=60)
+    if run.returncode != 0:
+        return False, "question_form.item_field_hit does not run: %s" % run.stderr.strip()[-120:]
+    got = json.loads(run.stdout.strip().splitlines()[-1])
+    want = [True, False, True, False, False, True, False]
+    if got != want:
+        names = ("set, unlisted", "set, listed", "update, unlisted", "update, delete", "update, no data",
+                 "str_replace, unlisted", "str_replace, listed")
+        return False, "item_field_hit is wrong for: " + ", ".join(n for n, g, w in zip(names, got, want) if g != w)
+    return True, "item_field_hit refuses an unlisted field and passes a listed one, a delete and no data"
+
+
+LOG_CHECKS_EXTRA.append(("item field: the real page.html holds one itemFields block that lists every field a "
+                         "write needs", item_fields_page_case))
+LOG_CHECKS_EXTRA.append(("item field: question_form.item_field_hit refuses an unlisted field and passes the rest",
+                         item_field_hit_case))
+FIXTURELESS_CHECKS.update((item_fields_page_case, item_field_hit_case))
+FAMILY = "owner-judge"   # the family the cases after this section have always run in
 
 
 # --------------------------------------------------------------------------- the runner
