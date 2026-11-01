@@ -14,11 +14,16 @@ Owner, 2026-10-28 13:01 CDT (waiting-page gripe on item 47): when an item asks t
 - Both rules judge only a call whose `url` is this repo's waiting page (`layout.waiting_page`). Both are built against the named incidents below. They landed 2026-10-29; the shell checks of `command-in-item` landed 2026-10-30.
   - Cost: no new process. They run inside the guard process that every `ArtifactData` call already starts. They write no file unless they deny.
   - Known limit: the guard reads words, not meaning. A press verb outside the list (such as enable auto-merge, select or close) passes. An unnumbered press passes with any link.
+- Owner, 2026-10-31 14:55 CDT (see Incidents): "shivinate7 should be the default unless if it's a repo that shivinate7 doesn't have access too of course". The act: a gh command handed to the owner opens its block with `gh auth switch -u <login>`. The login is shivinate7 by default, and ssemwal-cdc only where shivinate7 has no access. The switch is the first gh line. A `# open Git Bash` comment and the `cd` may come before it. Rule `output-never-hand-off-doable-step` keeps the `cd` first.
+- Guard rule `gh-login-switch` (`hooks/question_form.py`, run by `hooks/guard.py`) refuses a waiting-page task whose `command` runs a gh command other than `gh auth ...`, with no `gh auth switch -u <known login>` before it. It also refuses a command that names `shivinate7/` when a gh command other than `gh auth ...` runs after a switch to `-u ssemwal-cdc`. A switch to ssemwal-cdc with no gh command after it passes. Each shell in `command` is judged on its own, with its own reader, and needs its own switch: `powershell` by PowerShell rules, `mac` by bash rules. A `str_replace` on `command` is judged on its `new_str` alone, because the guard cannot see the stored command. That text is read as bash, or as PowerShell when only PowerShell can read it. The known logins are `GH_DEFAULT_LOGIN` (shivinate7) and `GH_FALLBACK_LOGIN` (ssemwal-cdc), in `hooks/shared_names.py`. The Stop reply judge (`hooks/reply_judge.py`) gets the same rule for chat blocks. It is a sampled model, not a guard. Built against the 2026-10-31 incident below. Landed: 2026-10-31.
+  - Cost, as designed: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.
+  - Known limit: no check knows which repos shivinate7 can reach. So it does not judge a switch to ssemwal-cdc on another owner's repo.
 
 Incidents:
 
 - 2026-10-28 13:01 CDT, waiting-page item 47: option a asked him to mark home#374 ready and press Merge, with no link to it.
 - Waiting-page item 39: the steps sent him to `plans/c152-stale-branch-deletes.md` for the command.
+- 2026-10-31 14:52 CDT: a session handed the owner a branch-protection PATCH that needs admin. His PC has two gh logins: shivinate7 (owns the repos, admin) and ssemwal-cdc (work, push only). He did not know which login was active until `gh auth switch` printed it.
 - 2026-10-30 14:40 CDT, waiting-page item 78: a bash-only command under "any terminal works" failed in his Windows PowerShell 5.1 on `&&` and `<<<`.
 
 Kind: process

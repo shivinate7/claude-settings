@@ -20,6 +20,11 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
                   "Another Claude session sent a message while you were working:")
     for tag in _HAND_BACK_TAGS)
 
+# The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
+# the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).
+GH_DEFAULT_LOGIN = "shivinate7"
+GH_FALLBACK_LOGIN = "ssemwal-cdc"
+
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
 

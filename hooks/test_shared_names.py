@@ -50,6 +50,7 @@ MACHINE_TAGS = (  # pinned; shared_names.py holds the one copy
     "Another Claude session sent a message while you were working:\n<agent-message\n",
     "Another Claude session sent a message while you were working:\n<agent-message\r",
 )
+GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN = "shivinate7", "ssemwal-cdc"  # the default and fallback gh logins (decision `act-in-place`)
 CLOCK = "2026-07-04T10:30:00-05:00"
 TIME_LINE = "Local time: 2026-07-04 10:30 CDT (UTC-05:00)\n"
 # What local_time may load beyond the standard library: itself, shared_names, and the light
@@ -101,6 +102,16 @@ def case_values_pinned():
     ok = got == FROZEN_FILES and callable(getattr(shared, "config_dir", None))
     return ok, "PROJECT_FROZEN_FILES=%r config_dir callable=%s" % (
         got, callable(getattr(shared, "config_dir", None)))
+
+
+def case_gh_logins_pinned():
+    """shivinate7 is the default gh login; ssemwal-cdc is the fallback, for a
+    repo shivinate7 cannot reach (decision `act-in-place`). Both names live here, once, for the guard and the reply judge."""
+    shared = _shared()
+    default = getattr(shared, "GH_DEFAULT_LOGIN", None)
+    fallback = getattr(shared, "GH_FALLBACK_LOGIN", None)
+    return (default == GH_DEFAULT_LOGIN and fallback == GH_FALLBACK_LOGIN,
+            "GH_DEFAULT_LOGIN=%r GH_FALLBACK_LOGIN=%r" % (default, fallback))
 
 
 def case_config_dir_answers_as_guard():
@@ -261,6 +272,7 @@ CASES = [
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
     ("(b) shared_names holds today's watched names and config_dir", case_values_pinned),
     ("(b) shared_names.config_dir answers as the guard's does", case_config_dir_answers_as_guard),
+    ("(b2) shared_names holds the gh login pair: shivinate7 default, ssemwal-cdc fallback", case_gh_logins_pinned),
     ("(c) the guard's names are shared_names' own objects", case_guard_reexports_same_objects),
     ("(d) config_watch.py holds no literal watched name", case_config_watch_has_no_literal_copy),
     ("(e) guard_frozen.py and guard_core.py hold no literal copy of a watched name or config_dir",
