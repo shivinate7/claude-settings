@@ -461,7 +461,7 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
       elif cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
         [ "$own_head" != "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ] || own_how="the $REF tip"
       else
-        log "WARN: could not fetch $REF into $SRC; the checkout is kept only against the last fetched $REF, which may be older"
+        log "WARN: could not fetch $REF into $SRC"
         [ "$own_head" != "$own_ref" ] || own_how="the last fetched $REF"
       fi
     fi
