@@ -11878,9 +11878,10 @@ sh("debug-port: a WebView2 value without a port is allowed",
 sh("debug-port: a Start-Process argument string with the port asks",
    "Start-Process -Wait app.exe -ArgumentList \"--disable-gpu --remote-debugging-port=9222\"", "ask",
    "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a Start-Process array argument list with the port asks",
-   "Start-Process app.exe -ArgumentList '--disable-gpu','--remote-debugging-port=9222'", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+# detached-launch denies this form before debug-port-ask could ask. Asking would widen that deny.
+sh("debug-port: a Start-Process array argument list with the port is denied by detached-launch",
+   "Start-Process app.exe -ArgumentList '--disable-gpu','--remote-debugging-port=9222'", "deny",
+   "detached-launch", tool="PowerShell", cwd=NOGIT)
 sh("debug-port: a docker exec that launches with the port asks",
    "docker exec app electron . --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
 chained_ask("debug-port: a PowerShell append to the WebView2 value, then a launch, denies as a chained ask command",
