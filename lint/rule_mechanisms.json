@@ -461,9 +461,8 @@
     },
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
-        "kind": "check",
-        "ref": "lint/stale_cites.py",
-        "test": "lint/test_stale_cites.py::MoveTests.test_moved_file_named_by_a_line_the_range_adds_is_flagged_with_its_new_home"
+        "kind": "unmechanized",
+        "reason": "Partly checked: lint/stale_cites.py (in the ste-lint CI step) refuses a Markdown line that names a file or Python def the same PR removed. A claim wrong in meaning is judged only by hooks/prose_judge.py, inside a decisions folder."
       }
     },
     "output-write-in-ste": {

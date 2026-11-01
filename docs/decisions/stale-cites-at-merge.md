@@ -6,10 +6,13 @@ The ste-lint step refuses a pull request that leaves stale prose of one kind. Th
 
 Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that stale prose never makes it anymore".
 
-- Codes: STALE001, a path the range removed. STALE002, `<file.py> <name>` on one line, where `name` was a def or class in that file at base and is not at head. Python is read with `ast`. JavaScript and shell names are not checked.
+- Codes: STALE001, a path the range removed. STALE002, a name cited as "`file.py` `name`" (backticked name) or "(file.py name)" on one line, where `name` was a def or class in that file at base and is not at head. A bare word after a path is never a cite. Python is read with `ast`. A name counts when it is module-level (also under a module-level if or try) or a def directly in a module-level class; a def nested in a function does not. JavaScript and shell names are not checked.
 - Only names the range removed count. A line already stale at base, for a name the range did not touch, never fires. So the check is never red on work the PR did not do.
 - A path matches only at a path boundary. `mods/session-board/hooks/lib.mjs` does not match `hooks/lib.mjs`.
 - Left out: `docs/records.md` (generated at merge), each file `.ste-lint-exclude` names, and a line marked `<!-- ste-disable-line STALE001 -->` or `STALE002`. A record that names a removed file on purpose takes the mark.
+- Each Markdown file is read as committed at head, never from the working tree, through the same `git cat-file --batch` process. A byte that is not UTF-8 reads as a replacement character and the file is still checked.
+- A base that does not resolve (a shallow clone with no history) is unknown, not a finding. The check prints `stale-cites: unknown, ...`, names fetch-depth 0, and exits 0, so a repo that pins the action and checks out shallow is not red at its pin move (owner-lane call, 2026-11-01).
+- `FAIL=false` is honored: the findings print and the step exits 0.
 - Findings have their own exit path. The STE split step makes a finding on an untouched line report-only, and every stale line is untouched by design.
 - Cost: one `python3` start and one `git cat-file --batch` start per ste-lint changed-scope run (each PR CI run and each `bin/ste-changed` call). It reads each tracked Markdown file once. It writes no file and starts no lasting process.
 

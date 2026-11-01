@@ -105,14 +105,16 @@ LOG_OUT="$(mktemp)"
 
 # Stale prose (lint/stale_cites.py, decision stale-cites-at-merge): a Markdown line that names a path or
 # function this range removed. Scope changed only. It runs before the "no markdown changed" exit, so a
-# code-only PR is checked. Its findings never go through the split step below: every stale line is
-# untouched by the range, and the split makes an untouched line report-only.
+# code-only PR is checked. Its findings never go through the split script below: every stale line is
+# untouched by the range, and the split makes an untouched line report-only. FAIL=false prints them and
+# keeps the exit 0, as it does for the STE findings.
 STALE_EXIT=0
 if [ "$SCOPE" != "all" ]; then
   set +e
   python3 "$STALE_CITES" --range "$RANGE"
   STALE_EXIT=$?
   set -e
+  [ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
 fi
 
 if [ ${#FILES[@]} -eq 0 ]; then

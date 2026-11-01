@@ -287,6 +287,10 @@
 - stamp-blank-line-quote-fence: a blank line with no > inside a quoted fence does not end the quote (actions/stamp/stamp.mjs)
 - stamp-html-comment-hides-file: a fence inside an HTML comment hides the rest of the file from the scan (actions/stamp/stamp.mjs)
 - stamp-list-fence-not-seen: a blockquote fence in a list item at 4 or more columns is not seen as a fence (actions/stamp/stamp.mjs)
+- stale-cites-backslash: a Windows path with backslashes in prose is not matched (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)

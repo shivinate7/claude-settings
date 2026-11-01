@@ -6,17 +6,22 @@
 Refuses a range that leaves a tracked Markdown line naming a name the range removed.
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
             A rename names its new home.
-  STALE002  the line holds `<file.py> <name>`, and `name` was a def or class in that file at base
-            (read with `ast`) and is not one at head.
+  STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was a
+            def or class in that file at base (read with `ast`) and is not one at head. A name counts
+            when it is module-level (also under a module-level if or try) or a def directly in a
+            module-level class.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
+Each Markdown file is read as committed at head, never from the working tree.
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
-2 a read that could not run (unknown is red in CI).
+2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
+`stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
+checks out shallow is not red at its pin move.
 
-Cost, per ste-lint changed-scope run: one python3 start, one `git cat-file --batch` start (base blobs and
-head existence), and a few one-shot git reads (rev-parse, merge-base, diff, ls-files). Each tracked .md is
-read once. It writes no file and leaves no process running.
+Cost, per ste-lint changed-scope run: one python3 start, one `git cat-file --batch` start (base blobs, head
+blobs and head existence), and a few one-shot git reads (rev-parse, merge-base, diff, ls-tree). Each tracked
+.md is read once. It writes no file and leaves no process running.
 """
 import argparse
 import ast
@@ -29,9 +34,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 RECORDS_PAGE = "docs/records.md"
-RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one run, or one suffix of a run
+RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
+NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
-PAIR_RE = re.compile(r"(?<![\w/])(%s\.py)[`'\"]?\s+[`'\"]?([A-Za-z_]\w*)" % RUN)
+PAIR_RES = (  # "`file.py` `name`" and "(file.py name)"
+    re.compile(NOT_BEFORE + r"`?(%s\.py)`?\s+`([A-Za-z_]\w*)`" % RUN),
+    re.compile(r"\(`?(%s\.py)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % RUN),
+)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
 
@@ -40,14 +49,18 @@ class Unknown(Exception):
     """A read that could not run."""
 
 
-def git(*args, check=True):
+class BaseUnknown(Unknown):
+    """The base of the range does not resolve, as in a shallow clone. Not a finding."""
+
+
+def git(*args, on_fail=Unknown):
     done = _nowindow.run(["git", *args], capture_output=True)
-    if check and done.returncode != 0:
-        raise Unknown("git %s failed: %s" % (" ".join(args[:2]), done.stderr.decode("utf-8", "replace").strip()))
+    if done.returncode != 0:
+        raise on_fail("git %s failed: %s" % (" ".join(args[:2]), done.stderr.decode("utf-8", "replace").strip()))
     return done.stdout
 
 
-class Batch:
+class BlobReader:
     """One `git cat-file --batch` process for every blob read."""
 
     def __init__(self):
@@ -108,7 +121,7 @@ def parse_range(text):
     """(diff arguments, base spec, head spec). A three-dot range reads base blobs at the merge base."""
     if "..." in text:
         left, right = text.split("...", 1)
-        base = git("merge-base", left, right).decode().strip()
+        base = git("merge-base", left, right, on_fail=BaseUnknown).decode().strip()
         return [text], base, right
     if ".." in text:
         left, right = text.split("..", 1)
@@ -118,7 +131,7 @@ def parse_range(text):
 
 def changed_paths(diff_args):
     """(removed, renamed, modified): removed paths, {old: new}, and paths changed in place."""
-    tokens = git("diff", "-M", "--name-status", "-z", *diff_args).decode("utf-8", "replace").split("\0")
+    tokens = git("diff", "-M", "--name-status", "-z", *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace").split("\0")
     removed, renamed, modified = [], {}, []
     i = 0
     while i < len(tokens) and tokens[i]:
@@ -137,19 +150,29 @@ def changed_paths(diff_args):
 
 
 def defs_in(source):
-    """Names a prose line can cite: each module-level def and class, and each def directly in a module-level
-    class. A def nested in a function is no public name. Read with `ast`; None when it does not parse."""
+    """Names a prose line can cite: each module-level def and class (also under a module-level if or try),
+    and each def directly in a module-level class. A def nested in a function is no public name. Read with
+    `ast`; None when it does not parse."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
     kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
     names = set()
-    for node in tree.body:
-        if isinstance(node, kinds):
-            names.add(node.name)
-            if isinstance(node, ast.ClassDef):
-                names.update(n.name for n in node.body if isinstance(n, kinds))
+
+    def collect(body, into_classes):
+        for node in body:
+            if isinstance(node, kinds):
+                names.add(node.name)
+                if isinstance(node, ast.ClassDef) and into_classes:
+                    collect(node.body, False)
+            else:
+                for field in ("body", "orelse", "finalbody"):
+                    collect(getattr(node, field, None) or [], into_classes)
+                for handler in getattr(node, "handlers", None) or []:
+                    collect(handler.body, into_classes)
+
+    collect(tree.body, True)
     return names
 
 
@@ -165,23 +188,19 @@ def path_cites(line, gone, exotic):
     hits = []
     for run in RUN_RE.finditer(line):
         text = run.group(0)
-        for start in range(len(text)):
-            if start and (text[start - 1] == "/" or text[start - 1].isalnum() or text[start - 1] == "_"):
-                continue
-            candidate = text[start:].rstrip(".-")
-            if candidate in gone and candidate not in hits:
-                hits.append(candidate)
+        candidate = text.rstrip(".-")
+        if candidate in gone and candidate not in hits:
+            hits.append(candidate)
     for path in exotic:
-        for match in re.finditer(r"(?<![\w/])%s(?![\w/]|[.-]\w)" % re.escape(path), line):
-            if path not in hits:
-                hits.append(path)
+        if re.search(NOT_BEFORE + r"%s(?![\w/]|[.-]\w)" % re.escape(path), line) and path not in hits:
+            hits.append(path)
     return hits
 
 
 def scan(range_text):
     diff_args, base, head = parse_range(range_text)
     removed, renamed, modified = changed_paths(diff_args)
-    batch = Batch()
+    batch = BlobReader()
     try:
         gone = {}  # path -> new home or None
         for path in removed + list(renamed):
@@ -193,7 +212,9 @@ def scan(range_text):
         py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
 
         excludes = exclude_patterns(".")
-        tracked = git("ls-files", "-z", "--", "*.md").decode("utf-8", "replace").split("\0")
+        tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
+        tracked = [e.split("\t", 1)[1] for e in tree if "\t" in e and e.split(" ", 1)[0] in ("100644", "100755")]
+        tracked = [t for t in tracked if t.endswith(".md")]
         found = {}  # (path, line, code) -> [messages]
         removed_names = {}  # file -> names the range removed, read once per file
 
@@ -212,12 +233,11 @@ def scan(range_text):
         for md in tracked:
             if not md or md == RECORDS_PAGE or any(rx.match(md) for rx in excludes):
                 continue
-            try:
-                with open(md, encoding="utf-8", errors="replace") as f:
-                    lines = f.read().splitlines()
-            except OSError:
-                continue
-            for number, line in enumerate(lines, 1):
+            blob = batch.get("%s:%s" % (head, md))
+            if blob is None:
+                raise Unknown("%s is in the tree at %s but cannot be read" % (md, head))
+            text = blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
+            for number, line in enumerate(text.split("\n"), 1):
                 off = disabled(line) if "ste-disable-line" in line else set()
                 cited = path_cites(line, simple, exotic) if gone and "STALE001" not in off else []
                 for path in cited:
@@ -226,11 +246,12 @@ def scan(range_text):
                             else "%s was deleted in this range" % path)
                     found.setdefault((md, number, "STALE001"), []).append(text)
                 if py_files and ".py" in line and "STALE002" not in off:
-                    for match in PAIR_RE.finditer(line):
-                        path, name = match.group(1), match.group(2)
-                        if path in py_files and path not in cited and name in removed_in(path):
-                            found.setdefault((md, number, "STALE002"), []).append(
-                                "%s no longer defines %s at head; find its new home" % (path, name))
+                    for pair in PAIR_RES:
+                        for match in pair.finditer(line):
+                            path, name = match.group(1), match.group(2)
+                            if path in py_files and path not in cited and name in removed_in(path):
+                                found.setdefault((md, number, "STALE002"), []).append(
+                                    "%s no longer defines %s at head; find its new home" % (path, name))
     finally:
         batch.close()
     return found
@@ -244,6 +265,10 @@ def main(argv):
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
         found = scan(args.range)
+    except BaseUnknown as exc:
+        print("stale-cites: unknown, the base of %s does not resolve (%s). Check out with fetch-depth 0 "
+              "(actions/checkout) so the range has history. Nothing was checked." % (args.range, exc))
+        return 0
     except (Unknown, OSError) as exc:
         print("stale-cites: UNKNOWN, %s" % exc)
         return 2
