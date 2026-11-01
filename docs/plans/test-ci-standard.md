@@ -48,9 +48,9 @@ Read on 2026-11-01 from each repo's main head. "unmeasured" means that the read 
 | S7 | Mutation score on product code | guards only, off CI | none | none | none | none | none | none |
 | S8 | Skips shown | 9 skips, 2 are shelved guards; no `forbidOnly` | met: conditional skips, `forbidOnly` in CI | met: 0 skips | keychain tests skip on each CI run | met | met | 17 skips |
 | S9 | Flakes fixed at cause | a 1-in-10 red with no record | 6 fixed sleeps (debt) | a wait raised to 120 s with no record | met | met | 319 real-time sleeps; a flake and a hang open | 3 flaky debts |
-| S10 | Screens at each size and theme | 390 and 720 px never run (debt DEBT77, which holds the owner's ruling to keep the phone specs off) | 2 sizes, 2 themes, geometry only | no screen test | no screen test | light only; no width 415-1279 | Chromium only; no WebKit | browser tier runs on dispatch only; its one run was cancelled |
+| S10 | Screens at each size and theme | 390 and 720 px never run (banchi debt DEBT77) | 2 sizes, 2 themes, geometry only | no screen test | no screen test | light only; no width 415-1279 | Chromium only; no WebKit | browser tier runs on dispatch only; its one run was cancelled |
 | S11 | About 10 min | shard claim 140-297 s, unmeasured | median 15.6 min | met: 5.4 min | met: 6.2 min | met: 7 min; build peak 8.25 of 10 min | repo claim 670 s for screens, unmeasured | median 24.1 min; shards 12-23 min against 4-8 documented |
-| S12 | One required rollup | rollup met; required check unmeasured; records disagree | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; records disagree (q_max decision D-537) |
+| S12 | One required rollup | rollup met; required check unmeasured; records disagree | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; required unmeasured | rollup met; records disagree (q_max id D-537, not read here) |
 | S13 | SHA pins | met; shared pins 2026-10-29 | met; shared pins 2026-10-29 | met; two shared pins | met; shared pins 2026-10-29 | met; four shared pins | met; shared pins 2026-10-29 | met; two shared pins |
 
 claude-settings itself meets S1, S12 and S13 by guard and CI. Its own gaps:
