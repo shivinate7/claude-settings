@@ -37,24 +37,6 @@ bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 has_bak() { for e in "$1"/*.bak.*; do [ -e "$e" ] && return 0; done; return 1; }
 skip() { SKIP=$((SKIP + 1)); printf 'SKIP - %s: %s\n' "$1" "$2"; }
 
-# Detect once whether this account can create a real symbolic link, and reuse the answer
-# everywhere below. Windows needs SeCreateSymbolicLinkPrivilege for `ln -s`. Developer Mode,
-# or an elevated account, grants it. Without that privilege, MSYS/git-bash's `ln -sfn` still
-# exits 0. It copies the target's bytes into a plain file instead of linking it. A case that
-# only checks the exit code never sees this. Checking `[ -L ]` on the result does. This is a
-# capability probe, never an OS-name check. A Windows machine with Developer Mode on still
-# runs every case below for real.
-probe_dir=$(mktemp -d)
-printf 'probe\n' > "$probe_dir/target"
-ln -sfn "$probe_dir/target" "$probe_dir/link" 2>/dev/null
-if [ -L "$probe_dir/link" ]; then
-  SYMLINK_CAPABLE=1
-else
-  SYMLINK_CAPABLE=0
-fi
-rm -rf "$probe_dir"
-NO_SYMLINK_REASON="this account cannot create a real symlink (SeCreateSymbolicLinkPrivilege is not held, turn on Developer Mode or run elevated on Windows)"
-
 # Canonicalize: on macOS, mktemp -d returns a /var/folders/... path where /var is itself
 # a symlink to /private/var. install.sh's checkout detection goes through
 # `git rev-parse --show-toplevel`, which resolves that symlink, so the pointer it writes
@@ -88,9 +70,31 @@ landed_dirs() {
   sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$REPO_ROOT/landed-dirs.txt" | grep -v '^$'
 }
 
-work=$(mktemp -d); work=$(realpwd "$work")
+# One run folder per test run (test-temp-standard): lint/_test_temp.py makes it under the repo's one temp
+# root and sweeps sibling run folders older than a day. Every temp path in this file sits under it.
+work=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())' "$REPO_ROOT/lint") || work=""
+[ -n "$work" ] || { echo "FAIL - run folder: lint/_test_temp.py made no run folder"; exit 1; }
+work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
+
+# Detect once whether this account can create a real symbolic link, and reuse the answer
+# everywhere below. Windows needs SeCreateSymbolicLinkPrivilege for `ln -s`. Developer Mode,
+# or an elevated account, grants it. Without that privilege, MSYS/git-bash's `ln -sfn` still
+# exits 0. It copies the target's bytes into a plain file instead of linking it. A case that
+# only checks the exit code never sees this. Checking `[ -L ]` on the result does. This is a
+# capability probe, never an OS-name check. A Windows machine with Developer Mode on still
+# runs every case below for real.
+probe_dir=$(mktemp -d "$work/probe.XXXXXX")
+printf 'probe\n' > "$probe_dir/target"
+ln -sfn "$probe_dir/target" "$probe_dir/link" 2>/dev/null
+if [ -L "$probe_dir/link" ]; then
+  SYMLINK_CAPABLE=1
+else
+  SYMLINK_CAPABLE=0
+fi
+rm -rf "$probe_dir"
+NO_SYMLINK_REASON="this account cannot create a real symlink (SeCreateSymbolicLinkPrivilege is not held, turn on Developer Mode or run elevated on Windows)"
 
 # A stub uname for one answer: its dir goes first on PATH for the run that needs it.
 make_uname_stub() {
@@ -2236,9 +2240,10 @@ pinned_wt1() {
 # pin_fixture TAG BEHIND AT KIND: a bare origin on main, a clone whose main is one commit past its
 # first commit, origin/main BEHIND commits past that main, and a pin at main (AT=main) or at the
 # commit before it (AT=old). KIND=worktree makes the pin a linked worktree, KIND=clone a full clone.
-# Sets pf_pin, pf_cfg, and pf_msg (the reason it failed, when it returns 1).
+# INSTALL=install tracks install.sh and merge/install_from_main.sh in the clone's second commit, so the pin
+# holds them as a real pin does. Sets pf_pin, pf_cfg, and pf_msg (the reason it failed, when it returns 1).
 pin_fixture() {
-  pf_tag="$1"; pf_behind="$2"; pf_at="$3"; pf_kind="$4"; pf_msg=""
+  pf_tag="$1"; pf_behind="$2"; pf_at="$3"; pf_kind="$4"; pf_install="${5:-}"; pf_msg=""
   pf_co="$work/$pf_tag-clone"; pf_pin="$work/$pf_tag-clone-live"
   pf_cfg="$work/$pf_tag-cfg"; pf_bare="$work/$pf_tag-origin.git"; pf_extra="$work/$pf_tag-extra"
   git init -q --bare "$pf_bare"
@@ -2246,6 +2251,14 @@ pin_fixture() {
   make_checkout "$pf_co" "# $pf_tag content" "$pf_bare"
   force_main_branch "$pf_co"
   printf '# %s second\n' "$pf_tag" >> "$pf_co/CLAUDE.md"
+  if [ "$pf_install" = install ]; then
+    # The install files are tracked in the commit, as a real pin has them: an untracked copy makes the pin dirty.
+    mkdir -p "$pf_co/merge" "$pf_co/hooks" && cp "$INSTALL_SH" "$pf_co/install.sh" \
+      && cp "$REPO_ROOT/merge/install_from_main.sh" "$pf_co/merge/install_from_main.sh" \
+      && printf 'main hook\n' > "$pf_co/hooks/probe_hook.sh" \
+      || { pf_msg="cannot copy the install files into the clone"; return 1; }
+    ( cd "$pf_co" && git add install.sh merge/install_from_main.sh hooks/probe_hook.sh ) || { pf_msg="cannot stage the install files"; return 1; }
+  fi
   if ! ( cd "$pf_co" && git add CLAUDE.md && git commit -q -m second && git push -q origin main ); then
     pf_msg="clone setup failed"; return 1
   fi
@@ -2752,8 +2765,11 @@ pinlive2() {
 # Decision merge-reinstalls-from-main, ruling 1: no work runs in the pin. The pin is <clone>-live-<12 hex>, a
 # locked worktree detached at main, and <clone>-live is an absolute link to it (merge/install_from_main.sh).
 # install.sh's candidate loop takes the pointer dir first, so a pointer at either form makes the pin the source.
-# The cloud own-checkout block then moves that pin to origin/main, and the pointer is written to the pin.
-# Each case points the pointer at one form (pin, link or the clone) and asserts that the source is the clone.
+# The cloud own-checkout block never moves that pin, and the pointer is never written to it.
+# Each case points the pointer at one form (pin, link or the clone). pinmove1, pinmove2 and pinmove5 assert the candidate
+# pick, the clone. pinmove4 and pinmove5 assert what the install writes: the pointer is the clone or the mirror, never the
+# pin or its link, and the pin keeps its HEAD. The final source may be the clone or a mirror of main: a clone on a branch
+# takes the mirror.
 
 # live_pin_fixture TAG: pin_fixture's clone and bare origin, with origin/main 2 commits past the clone's main.
 # Its pin at main is renamed to <clone>-live-<12 hex>, locked, and <clone>-live is made a link to it. The clone's
@@ -2762,7 +2778,7 @@ pinlive2() {
 # it failed, when it returns 1).
 live_pin_fixture() {
   lp_msg=""
-  if ! pin_fixture "$1" 2 main worktree; then lp_msg="$pf_msg"; return 1; fi
+  if ! pin_fixture "$1" 2 main worktree "${2:-}"; then lp_msg="$pf_msg"; return 1; fi
   lp_co="$pf_co"; lp_bare="$pf_bare"; lp_link="$pf_co-live"
   lp_pin="$lp_co-live-$(git -C "$pf_pin" rev-parse --short=12 HEAD 2>/dev/null)"
   git -C "$lp_co" worktree move "$pf_pin" "$lp_pin" >/dev/null 2>&1 \
@@ -2808,6 +2824,7 @@ pinmove_run() {
   pm_rc=$?
   pm_head_after=$(git -C "$pm_pin" rev-parse HEAD 2>/dev/null)
   pm_ptr=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  pm_home="$h"; pm_cfg="$cfg"
   rm -rf "$h"
   return 0
 }
@@ -2857,31 +2874,221 @@ pinmove3() {
   ok "$name"
 }
 
-# pinmove4: the pointer install.sh writes names the clone, never the pin, for either pointer form.
+# pointer_names_pin PTR: true when PTR names the live pin of the last pinmove_run or its link, literally, or by a path
+# that resolves to the pin. A "~/" pointer names neither: its HOME is not under the pin.
+pointer_names_pin() {
+  pnp_n=$(normalize_path "$1")
+  pnp_r=$(realpwd "$1" 2>/dev/null)
+  if [ "$pnp_n" = "$(normalize_path "$pm_pin")" ] || [ "$pnp_n" = "$(normalize_path "$lp_link")" ]; then return 0; fi
+  if [ -n "$pnp_r" ] && [ "$pnp_r" = "$(realpwd "$pm_pin")" ]; then return 0; fi
+  return 1
+}
+
+# pointer_is_source CFG HOME CLONE: true when the pointer in CFG names exactly the clone CLONE, or exactly the mirror of main
+# at HOME/claude-settings-main. installed_src expands a "~/" pointer. The check compares text, never realpath, because
+# pinmove_run has removed HOME by the time it runs. It is a separate predicate on purpose: pointer_names_pin is a negative
+# test (true when the pointer names the pin), and a positive arm inside it would invert every use of it.
+pointer_is_source() {
+  pis_p=$(normalize_path "$(installed_src "$1" "$2")")
+  [ -n "$pis_p" ] || return 1
+  [ "$pis_p" = "$(normalize_path "$3")" ] || [ "$pis_p" = "$(normalize_path "$2/claude-settings-main")" ]
+}
+
+# pinmove4: for either pointer form, the pointer install.sh writes never names the live pin or its link, and the pin keeps
+# its HEAD. The pointer may name the clone or a mirror of main, so the case does not fix which source is picked; it does
+# fix that the pointer is one of those two.
 pinmove4() {
-  name="pinmove4: pointer at the live pin or its link: the written pointer names the clone, not the pin"
+  name="pinmove4: pointer at the live pin or its link: the written pointer names neither the pin nor its link, is the clone or the mirror, and the pin keeps its HEAD"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   for form in pin link; do
     if ! pinmove_run "pinmove4-$form" "$form"; then bad "$name" "fixture ($form): $pm_msg"; return; fi
     if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc ($form): $pm_out"; return; fi
-    if [ "$(normalize_path "$pm_ptr")" != "$(normalize_path "$pm_co")" ]; then
-      bad "$name" "a $form run wrote the pointer [$pm_ptr], want the clone [$pm_co]"; return
+    if pointer_names_pin "$pm_ptr"; then bad "$name" "a $form run wrote the pointer [$pm_ptr], which names the live pin"; return; fi
+    if ! pointer_is_source "$pm_cfg" "$pm_home" "$pm_co"; then
+      bad "$name" "a $form run wrote the pointer [$pm_ptr], neither the clone [$pm_co] nor [$pm_home/claude-settings-main]"; return
+    fi
+    if [ "$pm_head_after" != "$pm_head_before" ]; then
+      bad "$name" "a $form run moved the pin from $pm_head_before to $pm_head_after"; return
     fi
   done
   ok "$name"
 }
 
-# pinmove5: control. The pointer at the clone itself still picks the clone, on the same fixture.
+# pinmove5: the pointer at the clone itself. The candidate pick is still the clone. The written pointer never names the
+# live pin or its link, and the pin keeps its HEAD. The clone is on a branch here, so the source may be a mirror of main.
 pinmove5() {
-  name="pinmove5: control: pointer at the clone itself: the log names the clone and the pointer keeps it"
+  name="pinmove5: pointer at the clone itself: the log names the clone, the written pointer is the clone or the mirror and names neither the pin nor its link"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   if ! pinmove_run pinmove5 clone; then bad "$name" "fixture: $pm_msg"; return; fi
   src=$(pinmove_source "$pm_out")
   if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc: $pm_out"
   elif [ "$(normalize_path "$src")" != "$(normalize_path "$pm_co")" ]; then
     bad "$name" "log names [$src] as the source, want the clone [$pm_co]"
-  elif [ "$(normalize_path "$pm_ptr")" != "$(normalize_path "$pm_co")" ]; then
-    bad "$name" "pointer [$pm_ptr] is not the clone [$pm_co]"
+  elif pointer_names_pin "$pm_ptr"; then bad "$name" "pointer [$pm_ptr] names the live pin"
+  elif ! pointer_is_source "$pm_cfg" "$pm_home" "$pm_co"; then
+    bad "$name" "pointer [$pm_ptr] is neither the clone [$pm_co] nor [$pm_home/claude-settings-main]"
+  elif [ "$pm_head_after" != "$pm_head_before" ]; then
+    bad "$name" "the run moved the pin from $pm_head_before to $pm_head_after"
+  else ok "$name"; fi
+}
+
+# ---- mergepin cases: a cloud merge run from the clone never moves the live pin off local main ----------
+# Decision merge-reinstalls-from-main, ruling 4: only merge/install_from_main.sh moves the pin. That run takes
+# the install lock and runs install.sh from the pin. In a cloud run install.sh takes the pin as its source (its
+# SCRIPT_DIR branch), so its cloud blocks see the pin, and they must leave it at local main. The one move is the
+# rename in merge/install_from_main.sh, and that runs only when local main is past the pin.
+# Each case runs the clone's own merge/install_from_main.sh from the clone, as the coordinator's merge does.
+
+s12() { printf '%.12s' "$1"; }
+
+# merge_run TAG SETUP: one cloud run of the clone's merge/install_from_main.sh, from live_pin_fixture TAG built
+# with its install files tracked. SETUP is plain; mirror (the clone carries claude-settings.cloudMirror, as a
+# clone install.sh made does); or local (main gets one commit that origin/main lacks). Sets mr_co, mr_pin, mr_link,
+# mr_origin, mr_want (the clone's local main after SETUP, before the run), mr_path_before (the link's resolved
+# path before the run), mr_out, mr_rc, mr_head_after (the pin's HEAD after) and mr_path_after (the link's resolved
+# path after). Returns 1 with mr_msg when the fixture or SETUP failed.
+merge_run() {
+  mr_msg=""
+  if ! live_pin_fixture "$1" install; then mr_msg="$lp_msg"; return 1; fi
+  mr_co="$lp_co"; mr_pin="$lp_pin"; mr_link="$lp_link"; mr_origin="$lp_origin"
+  case "$2" in
+    plain) ;;
+    mirror) git -C "$mr_co" config claude-settings.cloudMirror true || { mr_msg="cannot set the cloudMirror marker"; return 1; } ;;
+    local) git -C "$mr_co" commit -q --allow-empty -m "local main commit" || { mr_msg="cannot commit to the clone's main"; return 1; } ;;
+    lane)
+      # A lane branch whose hook differs from main, and one uncommitted edit. Neither may reach the install.
+      git -C "$mr_co" switch -c lane >/dev/null 2>&1 \
+        && printf 'lane hook\n' > "$mr_co/hooks/probe_hook.sh" \
+        && git -C "$mr_co" commit -q -am "lane edit" \
+        && printf 'uncommitted edit\n' >> "$mr_co/CLAUDE.md" \
+        || { mr_msg="cannot set up the lane checkout"; return 1; }
+      mr_lane_head=$(git -C "$mr_co" rev-parse HEAD 2>/dev/null)
+      mr_lane_status=$(git -C "$mr_co" status --porcelain 2>/dev/null)
+      ;;
+    *) mr_msg="unknown setup $2"; return 1 ;;
+  esac
+  mr_want=$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)
+  mr_path_before=$(realpwd "$mr_link")
+  h=$(new_home); write_redirect "$h" "$lp_bare"
+  cfg="$work/$1-cfg"; mr_cfg="$cfg"; stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
+  mr_out=$(cd "$mr_co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
+        GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash ./merge/install_from_main.sh 2>&1)
+  mr_rc=$?
+  mr_head_after=$(git -C "$mr_link" rev-parse HEAD 2>/dev/null)
+  mr_path_after=$(realpwd "$mr_link")
+  rm -rf "$h"
+  return 0
+}
+
+# merge_pin_check NAME: after mr's run the pin keeps local main, the clone's main did not move, and the pin keeps
+# its path. A HEAD at origin/main is the defect's own mark, so it is named first. Returns 1 after a bad line.
+merge_pin_check() {
+  if [ "$mr_head_after" = "$mr_origin" ] && [ "$mr_origin" != "$mr_want" ]; then
+    bad "$1" "the cloud merge moved the live pin to origin/main ($(s12 "$mr_origin")), not local main ($(s12 "$mr_want"))"; return 1
+  fi
+  if [ "$mr_head_after" != "$mr_want" ]; then
+    bad "$1" "the live pin HEAD is ${mr_head_after:-unreadable} after the run, want local main $(s12 "$mr_want")"; return 1
+  fi
+  if [ "$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)" != "$mr_want" ]; then
+    bad "$1" "the run moved the clone's local main off $(s12 "$mr_want")"; return 1
+  fi
+  if [ "$mr_path_after" != "$mr_path_before" ]; then
+    bad "$1" "the live pin path moved from $mr_path_before to ${mr_path_after:-nothing}"; return 1
+  fi
+  return 0
+}
+
+# merge_run_check NAME: the run reached install.sh and exited 0. A run that stopped earlier leaves the pin where it
+# was, so that alone would pass for the wrong reason. Returns 1 after a bad line.
+merge_run_check() {
+  if [ "$mr_rc" -ne 0 ]; then bad "$1" "merge/install_from_main.sh exited $mr_rc: $mr_out"; return 1; fi
+  case "$mr_out" in *"Installing from "*) return 0 ;; esac
+  bad "$1" "install.sh did not run (no 'Installing from' line): $mr_out"; return 1
+}
+
+# mergepin1: a cloud merge from a plain clone leaves the live pin at local main, at its own path.
+mergepin1() {
+  name="mergepin1: cloud merge, plain clone: the live pin keeps local main and its own path"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin1 plain; then bad "$name" "fixture: $mr_msg"; return; fi
+  if merge_pin_check "$name" && merge_run_check "$name"; then ok "$name"; fi
+}
+
+# mergepin2: the same with the clone marked cloudMirror. The mirror resume is the other cloud block that can move the pin.
+mergepin2() {
+  name="mergepin2: cloud merge, clone marked cloudMirror: the live pin keeps local main and its own path"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin2 mirror; then bad "$name" "fixture: $mr_msg"; return; fi
+  if merge_pin_check "$name" && merge_run_check "$name"; then ok "$name"; fi
+}
+
+# mergepin3: control. Local main is one commit past origin/main, a commit origin/main lacks, so the cloud blocks
+# cannot move the pin to origin/main. The rename in merge/install_from_main.sh is the only move: the pin path
+# becomes <clone>-live-<new 12 hex> and its HEAD is the new local main.
+mergepin3() {
+  name="mergepin3: control: local main one commit past origin: the cloud merge moves the pin to it by the rename"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin3 local; then bad "$name" "fixture: $mr_msg"; return; fi
+  want_path=$(realpwd "$mr_co-live-$(git -C "$mr_co" rev-parse --short=12 "$mr_want")")
+  if ! merge_run_check "$name"; then return; fi
+  if [ -z "$want_path" ] || [ "$mr_path_after" != "$want_path" ]; then
+    bad "$name" "the pin path is ${mr_path_after:-nothing}, want the rename target ${want_path:-not made}"
+  elif [ "$mr_head_after" != "$mr_want" ]; then
+    bad "$name" "the pin HEAD is ${mr_head_after:-unreadable}, want the new local main $(s12 "$mr_want")"
+  else ok "$name"; fi
+}
+
+# mergepin4: a cloud merge takes its files from main, never from the clone's lane branch. The clone keeps its branch,
+# head and uncommitted edit. Source pick: a checkout's branch must not be the install's source.
+mergepin4() {
+  name="mergepin4: cloud merge, clone on a lane branch with an edit: the install takes main's files and the clone keeps its state"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin4 lane; then bad "$name" "fixture: $mr_msg"; return; fi
+  if ! git -C "$mr_co" show "$mr_want:hooks/probe_hook.sh" > "$work/mergepin4-main-hook" 2>/dev/null; then
+    bad "$name" "fixture: main has no probe hook"; return
+  fi
+  if ! merge_run_check "$name"; then return; fi
+  if ! cmp -s "$mr_cfg/hooks/probe_hook.sh" "$work/mergepin4-main-hook"; then
+    bad "$name" "the installed hook is [$(cat "$mr_cfg/hooks/probe_hook.sh" 2>/dev/null)], want main's copy"; return
+  fi
+  if [ "$(git -C "$mr_co" symbolic-ref -q --short HEAD 2>/dev/null)" != lane ]; then
+    bad "$name" "the run moved the clone off its lane branch"; return
+  fi
+  if [ "$(git -C "$mr_co" rev-parse HEAD 2>/dev/null)" != "$mr_lane_head" ]; then
+    bad "$name" "the run moved the clone's lane head off $(s12 "$mr_lane_head")"; return
+  fi
+  if [ "$(git -C "$mr_co" status --porcelain 2>/dev/null)" != "$mr_lane_status" ]; then
+    bad "$name" "the run changed the clone's uncommitted edit"; return
+  fi
+  ok "$name"
+}
+
+# mergepin5: the pointer names a live pin whose clone is no checkout (its settings.json is gone). The candidate loop
+# must fall through to the next candidate, a valid checkout in the cwd. The run takes that checkout as its source and
+# exits 0. Without the loop's continue, the run finds no source and clones from GitHub instead, so the found line
+# names nothing and this case goes red.
+mergepin5() {
+  name="mergepin5: pointer at the live pin whose clone is no checkout: the run falls through to the cwd checkout, exits 0"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! live_pin_fixture mergepin5; then bad "$name" "fixture: $lp_msg"; return; fi
+  rm -f "$lp_co/settings.json" || { bad "$name" "fixture: cannot remove the clone's settings.json"; return; }
+  cwd_co="$work/mergepin5-cwd"
+  git clone -q "$lp_bare" "$cwd_co" && git -C "$cwd_co" remote set-url origin https://github.com/shivinate7/claude-settings.git \
+    || { bad "$name" "fixture: cannot make the cwd checkout"; return; }
+  cfg="$work/mergepin5-cfg"; seed_pointer "$cfg" "$lp_pin"
+  h=$(new_home); write_redirect "$h" "$lp_bare"
+  stub_bin="$work/mergepin5-bin"; make_curl_stub "$stub_bin"
+  out=$(cd "$cwd_co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+  src=$(pinmove_source "$out")
+  rm -rf "$h"
+  if [ "$rc" -ne 0 ]; then bad "$name" "install exited $rc: $out"
+  elif [ -z "$src" ]; then bad "$name" "no found-checkout line, so no candidate became the source: $out"
+  elif [ "$(normalize_path "$src")" != "$(normalize_path "$cwd_co")" ]; then
+    bad "$name" "the source is [$src], want the cwd checkout [$cwd_co]"
   else ok "$name"; fi
 }
 
@@ -3021,7 +3228,8 @@ make_github_fixture() {
   git clone -q --bare "$1/src" "$1/bare.git"
 }
 # Commit one change, named $2, to the fixture's main and push it to the bare repo. With $3 = merge, the
-# change is a merge of a two-commit branch named $2, so the history under main is merge-based.
+# change is a merge of a two-commit branch named $2, so the history under main is merge-based. With $3 = claudemd,
+# the change appends a line to CLAUDE.md, the file a pointer reads back, so a copy left at the old main shows.
 advance_github_fixture() {
   if [ "${3:-}" = merge ]; then
     git -C "$1/src" checkout -q -b "side-$2"
@@ -3036,8 +3244,12 @@ advance_github_fixture() {
     git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
     return
   fi
-  printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"
-  git -C "$1/src" add RESUME.txt
+  if [ "${3:-}" = claudemd ]; then
+    printf 'advance %s\n' "$2" >> "$1/src/CLAUDE.md"; adv_file=CLAUDE.md
+  else
+    printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"; adv_file=RESUME.txt
+  fi
+  git -C "$1/src" add "$adv_file"
   git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "advance $2"
   git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
 }
@@ -3068,7 +3280,7 @@ write_redirect() {
 # clone or fetch fails at once instead of reaching github.com.
 default_home() { mkdir -p "$1"; write_redirect "$1" "$work/no-such-github.git"; }
 # new_home: a fresh temp HOME with the default .gitconfig. Prints its physical path.
-new_home() { d=$(mktemp -d); d=$(realpwd "$d"); default_home "$d"; printf '%s\n' "$d"; }
+new_home() { d=$(mktemp -d "$work/home.XXXXXX"); d=$(realpwd "$d"); default_home "$d"; printf '%s\n' "$d"; }
 # The entries a run left under a fake HOME, not counting its default .gitconfig.
 home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
 # One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
@@ -3501,17 +3713,29 @@ caseL3() {
 }
 
 # ---- caseM: a cloud install moves a clean, detached session checkout to main, and only that one ----------------
-# move_fixture NAME: a GitHub fixture whose main went: the repo, then commit OLD without merge/cloud_allow.json,
+# move_fixture NAME [stale]: a GitHub fixture whose main went: the repo, then commit OLD without merge/cloud_allow.json,
 # then the file back. A session's own checkout at $work/NAME-co (unmarked, origin the GitHub URL) sits detached at
 # OLD, as a cloud session left on its creation commit. HOME $h sends GitHub to the fixture. Sets fx, h, co, old, want.
+# stale: OLD also holds a stale CLAUDE.md and a stale hooks/session_start.sh, so a checkout on OLD differs from main in
+# its settings, its hook and its CLAUDE.md. Main is the repo's own tree either way: the rules, CLAUDE.md and the hook come
+# back from the copy of the repo this run already made.
 move_fixture() {
   fx="$work/$1-fx"; h="$work/$1-home"; co="$work/$1-co"
   mkdir -p "$h"
   make_github_fixture "$fx"
   gc() { git -C "$fx/src" -c user.email=t@example.com -c user.name=t "$@"; }
-  gc rm -q merge/cloud_allow.json; gc commit -q -m "before the rules"
+  cp "$fx/src/merge/cloud_allow.json" "$work/$1-rules.json"
+  gc rm -q merge/cloud_allow.json
+  if [ "${2:-}" = stale ]; then
+    printf '# stale CLAUDE.md on an old merged branch\n' > "$fx/src/CLAUDE.md"
+    printf '# stale hook on an old merged branch\n' > "$fx/src/hooks/session_start.sh"
+  fi
+  gc add -A; gc commit -q -m "before the rules"
   old=$(git -C "$fx/src" rev-parse HEAD)
-  gc checkout -q HEAD~1 -- merge/cloud_allow.json; gc commit -q -m "the rules"
+  cp "$work/$1-rules.json" "$fx/src/merge/cloud_allow.json"
+  cp "$work/tarsrc/claude-settings-main/CLAUDE.md" "$fx/src/CLAUDE.md"
+  cp "$work/tarsrc/claude-settings-main/hooks/session_start.sh" "$fx/src/hooks/session_start.sh"
+  gc add -A; gc commit -q -m "the rules"
   git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
   want=$(fixture_sha "$fx")
   git clone -q "$fx/bare.git" "$co"
@@ -3521,7 +3745,8 @@ move_fixture() {
 }
 move_install() {
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
@@ -3550,23 +3775,26 @@ caseM1() {
   fi
 }
 
+# caseM2: a detached checkout with an uncommitted change. The install takes main's files, and the checkout stays at its
+# commit with its change exactly as it was. The log wording for the dirty checkout is not asserted here.
 caseM2() {
-  name="caseM2: a detached checkout with uncommitted changes stays where it is, with a WARN"
+  name="caseM2: a detached checkout with uncommitted changes: the install takes main's files, the checkout and its change stay"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
-  move_fixture m2
+  move_fixture m2 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
   printf 'local edit\n' >> "$co/README.md"
+  m2_status=$(git -C "$co" status --porcelain)
+  m2_diff=$(git -C "$co" diff HEAD)
+  if [ -z "$m2_status" ]; then bad "$name" "FIXTURE the local edit did not make the checkout dirty"; return; fi
   move_install
-  if [ $rc -ne 0 ]; then
-    bad "$name" "install.sh exited $rc: $(install_problems)"
-  elif [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || ! grep -q 'local edit' "$co/README.md"; then
-    bad "$name" "the dirty checkout was moved or its edit lost"
-  elif ! printf '%s\n' "$out" | grep -q "WARN: the checkout $co has uncommitted changes; left as is"; then
-    bad "$name" "no WARN names the dirty checkout: $(install_problems)"
-  elif [ "$(merge_rule_count)" != 0 ]; then
-    bad "$name" "settings.json got $(merge_rule_count) merge allow rules from a checkout without the file"
-  else
-    ok "$name"
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm; the install's source is [$(installed_src "$h/.claude-cfg" "$h")], the checkout is [$co]"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || [ "$(git -C "$co" status --porcelain)" != "$m2_status" ] \
+     || [ "$(git -C "$co" diff HEAD)" != "$m2_diff" ]; then
+    bad "$name" "the dirty checkout was moved or its change changed"; return
   fi
+  ok "$name"
 }
 
 caseM3() {
@@ -3602,6 +3830,228 @@ caseM4() {
   else
     ok "$name"
   fi
+}
+
+# ---- caseM5-M7: a cloud install takes main's files, whatever branch or change the session checkout holds ----------
+# The defect: the own-checkout block leaves a checkout on a branch, or a dirty one, or at a commit main lacks, and the
+# install takes settings.json, hooks and CLAUDE.md from that checkout. move_fixture NAME stale makes the checkout's commit
+# and main differ in all three, so a red case shows the source the install took. Each case first checks the fixture's
+# facts with stale_fixture_ok, so a fixture fault never reads as an install result.
+
+# stale_fixture_ok: prints the first fact of a stale fixture that does not hold, and returns 1. Uses fx, old and want.
+stale_fixture_ok() {
+  if [ "$(git -C "$fx/bare.git" rev-parse "$old:CLAUDE.md")" = "$(git -C "$fx/bare.git" rev-parse "$want:CLAUDE.md")" ]; then
+    printf 'old and main hold the same CLAUDE.md'; return 1
+  fi
+  if [ "$(git -C "$fx/bare.git" rev-parse "$old:hooks/session_start.sh")" = "$(git -C "$fx/bare.git" rev-parse "$want:hooks/session_start.sh")" ]; then
+    printf 'old and main hold the same hooks/session_start.sh'; return 1
+  fi
+  if git -C "$fx/bare.git" cat-file -e "$old:merge/cloud_allow.json" 2>/dev/null; then
+    printf 'old holds merge/cloud_allow.json'; return 1
+  fi
+  if ! git -C "$fx/bare.git" merge-base --is-ancestor "$old" "$want"; then
+    printf 'old is not an ancestor of main'; return 1
+  fi
+  if [ "$(want_merge_count)" -le 0 ]; then printf 'main has no merge allow rules'; return 1; fi
+  return 0
+}
+
+# installed_src CFG HOME: the source the CLAUDE.md pointer in CFG names, with ~/ expanded. Empty when there is no pointer.
+installed_src() {
+  ist_p=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$1/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$ist_p" in "~"/*) ist_p="$2${ist_p#\~}";; esac
+  printf '%s\n' "$ist_p"
+}
+
+# main_allow WANT: the allow rules a cloud install of commit WANT writes, sorted: its settings.json rules, then merge/cloud_allow.json's.
+main_allow() {
+  { git -C "$fx/bare.git" show "$1:settings.json" | jq -r '.permissions.allow[]?'
+    git -C "$fx/bare.git" show "$1:merge/cloud_allow.json" | jq -r '.permissions.allow[]?'; } | sort
+}
+
+# main_mismatch WANT CFG HOME: prints the first installed file that differs from origin/main at WANT, or nothing. The
+# settings and the hook are read from CFG. CLAUDE.md is read through the pointer, so the check holds for any source the
+# install picks (the checkout, a worktree or a mirror). Files are compared by blob sha, never by a copy.
+main_mismatch() {
+  if [ "$(jq -r '.permissions.allow[]?' "$2/settings.json" 2>/dev/null | sort)" != "$(main_allow "$1")" ]; then
+    printf 'settings.json allow rules differ from origin/main (merge rules %s, origin/main %s)' "$(merge_rule_count)" "$(want_merge_count)"; return 0
+  fi
+  if [ "$(git hash-object "$2/hooks/session_start.sh" 2>/dev/null)" != "$(git -C "$fx/bare.git" rev-parse "$1:hooks/session_start.sh")" ]; then
+    printf 'hooks/session_start.sh differs from origin/main'; return 0
+  fi
+  mm_src=$(installed_src "$2" "$3")
+  if [ -z "$mm_src" ] || [ ! -f "$mm_src/CLAUDE.md" ]; then
+    printf 'the CLAUDE.md pointer names no file [%s]' "$mm_src"; return 0
+  fi
+  if [ "$(git hash-object "$mm_src/CLAUDE.md")" != "$(git -C "$fx/bare.git" rev-parse "$1:CLAUDE.md")" ]; then
+    printf 'CLAUDE.md differs from origin/main, read through the pointer to [%s]' "$mm_src"; return 0
+  fi
+}
+
+# caseM5: a checkout on an old merged branch whose head main holds, clean.
+caseM5() {
+  name="caseM5: a checkout on an old merged branch whose head main holds, clean: the install takes main's files"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m5 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  git -C "$co" checkout -q -b old-merged
+  if [ "$(git -C "$co" symbolic-ref --short HEAD)" != old-merged ] || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "FIXTURE the checkout is not a clean branch at old"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm; the install's source is [$(installed_src "$h/.claude-cfg" "$h")], the checkout is [$co]"; return; fi
+  ok "$name"
+}
+
+# caseM6: a checkout on a branch with an unmerged commit and an uncommitted change. The install takes main's files, and
+# the checkout keeps its branch, head and change exactly.
+caseM6() {
+  name="caseM6: a checkout on a branch with unmerged commits and a change: the install takes main's files, the checkout keeps them"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m6 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  git -C "$co" checkout -q -b lane
+  printf 'lane work\n' > "$co/lane.txt"
+  git -C "$co" add lane.txt
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -m "lane work"
+  printf 'local edit\n' >> "$co/README.md"
+  lane_head=$(git -C "$co" rev-parse HEAD)
+  lane_status=$(git -C "$co" status --porcelain)
+  lane_diff=$(git -C "$co" diff HEAD)
+  if [ "$(git -C "$co" symbolic-ref --short HEAD)" != lane ] || [ -z "$lane_status" ] \
+     || git -C "$co" merge-base --is-ancestor "$lane_head" refs/remotes/origin/main; then
+    bad "$name" "FIXTURE the checkout is not a dirty branch with an unmerged commit"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm; the install's source is [$(installed_src "$h/.claude-cfg" "$h")], the checkout is [$co]"; return; fi
+  if [ "$(git -C "$co" symbolic-ref --short HEAD 2>/dev/null)" != lane ] || [ "$(git -C "$co" rev-parse HEAD)" != "$lane_head" ] \
+     || [ "$(git -C "$co" status --porcelain)" != "$lane_status" ] || [ "$(git -C "$co" diff HEAD)" != "$lane_diff" ]; then
+    bad "$name" "the checkout's branch, head or change was moved or lost"; return
+  fi
+  ok "$name"
+}
+
+# caseM7: control. A clean, detached checkout at a commit main holds moves to origin/main and installs from it.
+caseM7() {
+  name="caseM7: control: a clean, detached checkout at a commit main holds moves to origin/main and installs its files"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m7 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null \
+     || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "FIXTURE the checkout is not a clean detached checkout at old"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
+    bad "$name" "the checkout is not detached at origin/main [$want]: $(git -C "$co" rev-parse HEAD)"; return
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm"; return; fi
+  ok "$name"
+}
+
+# m8_check LABEL: after the install named LABEL, the mirror is at main ($want), refreshed in place (the sentinel survives),
+# the install's source is the mirror, the installed files match main, and the checkout keeps its branch and head. Prints the
+# first failure and returns 1. Reads mirror, want, co_head and co_branch from caseM8.
+m8_check() {
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
+    printf '%s: the mirror is at %s, want main %s' "$1" "$(git -C "$mirror" rev-parse HEAD)" "$want"; return 1
+  fi
+  if [ ! -e "$mirror/.git/caseM8-sentinel" ]; then printf '%s: the mirror was cloned again, not refreshed in place' "$1"; return 1; fi
+  if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$mirror")" ]; then
+    printf '%s: the install source is [%s], want the mirror [%s]' "$1" "$(installed_src "$h/.claude-cfg" "$h")" "$mirror"; return 1
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then printf '%s: %s' "$1" "$mm"; return 1; fi
+  if [ "$(git -C "$co" symbolic-ref -q HEAD)" != "$co_branch" ] || [ "$(git -C "$co" rev-parse HEAD)" != "$co_head" ]; then
+    printf '%s: the checkout branch or head was moved' "$1"; return 1
+  fi
+  return 0
+}
+
+# caseM8: later cloud installs in the same HOME, after origin/main gains a commit, take the mirror by two routes, and the mirror
+# refreshes in place each time. The second install finds the mirror through the pointer the first one wrote, so its refresh
+# runs from the pointer candidate (install.sh, the top mirror_refresh "$SRC"). The third install is pointed back at the
+# checkout, so it reaches the mirror through the checkout fallback in use_main_mirror, the refresh the second install never
+# runs. The checkout stays on its branch throughout. CLAUDE.md is the file each new commit changes, so a mirror left at an
+# old commit fails m8_check.
+caseM8() {
+  name="caseM8: later cloud installs in the same HOME, after origin/main gains commits: the mirror refreshes in place by the pointer route and by the checkout fallback, and the installed files match it"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m8
+  git -C "$co" checkout -q -b lane
+  co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
+  move_install
+  first=$want; mirror="$h/claude-settings-main"
+  if [ "$rc" -ne 0 ]; then bad "$name" "FIXTURE the first install exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD 2>/dev/null)" != "$first" ] \
+     || [ "$(git -C "$mirror" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "FIXTURE the first install did not leave a marked mirror at main [$first]"; return
+  fi
+  # A file inside the mirror's .git that only an in-place refresh keeps: a mirror that is cloned again loses it.
+  : > "$mirror/.git/caseM8-sentinel"
+
+  # The second install: main gains a commit, and the pointer the first install wrote names the mirror.
+  advance_github_fixture "$fx" second claudemd; want=$(fixture_sha "$fx")
+  if [ "$want" = "$first" ]; then bad "$name" "FIXTURE main did not move, so the second install has nothing new to take"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
+  if ! msg=$(m8_check "the second install (pointer route)"); then bad "$name" "$msg"; return; fi
+
+  # The third install: main gains another commit, and the pointer is set back to the checkout, so the install
+  # takes the checkout as its candidate, leaves it on its branch, and refreshes the mirror through use_main_mirror.
+  advance_github_fixture "$fx" third claudemd; want=$(fixture_sha "$fx")
+  seed_pointer "$h/.claude-cfg" "$co"
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the third install: $(install_problems)"; return; fi
+  if ! msg=$(m8_check "the third install (checkout fallback route)"); then bad "$name" "$msg"; return; fi
+  ok "$name"
+}
+
+# caseM9: no mirror can be made on a first start, because the origin redirect names a repo that is not there. The install
+# falls back to the checkout, with exactly one WARN that names the fallback, and the checkout is left as it was.
+caseM9() {
+  name="caseM9: no mirror on a first start: the install falls back to the checkout with one WARN naming it, and the checkout is untouched"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m9 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  git -C "$co" checkout -q -b lane
+  printf 'lane work\n' > "$co/lane.txt"
+  git -C "$co" add lane.txt
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -m "lane work"
+  printf 'local edit\n' >> "$co/README.md"
+  lane_head=$(git -C "$co" rev-parse HEAD)
+  lane_status=$(git -C "$co" status --porcelain)
+  lane_diff=$(git -C "$co" diff HEAD)
+  if [ "$(git -C "$co" symbolic-ref --short HEAD)" != lane ] || [ -z "$lane_status" ]; then
+    bad "$name" "FIXTURE the checkout is not a dirty branch"; return
+  fi
+  write_redirect "$h" "$work/m9-no-such-repo.git"
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  n_fallback=$(printf '%s\n' "$out" | grep -c 'WARN: no mirror of')
+  fallback=$(printf '%s\n' "$out" | grep 'WARN: no mirror of')
+  if [ "$n_fallback" -ne 1 ]; then bad "$name" "want one WARN naming the fallback, got $n_fallback: $(install_problems)"; return; fi
+  case "$fallback" in *"$co"*) ;; *) bad "$name" "the fallback WARN does not name the checkout [$co]: $fallback"; return ;; esac
+  if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$co")" ]; then
+    bad "$name" "the install's source is [$(installed_src "$h/.claude-cfg" "$h")], want the checkout [$co]"; return
+  fi
+  if [ -e "$h/claude-settings-main" ] || [ -n "$(find "$h" -maxdepth 1 -name 'claude-settings.clone.*' 2>/dev/null)" ]; then
+    bad "$name" "a mirror or a temp clone was left in the HOME after the failed clone"; return
+  fi
+  if [ "$(git hash-object "$h/.claude-cfg/hooks/session_start.sh" 2>/dev/null)" != "$(git -C "$co" rev-parse "$lane_head:hooks/session_start.sh")" ]; then
+    bad "$name" "the installed hooks/session_start.sh is not the checkout's committed copy"; return
+  fi
+  if [ "$(git -C "$co" symbolic-ref --short HEAD 2>/dev/null)" != lane ] || [ "$(git -C "$co" rev-parse HEAD)" != "$lane_head" ] \
+     || [ "$(git -C "$co" status --porcelain)" != "$lane_status" ] || [ "$(git -C "$co" diff HEAD)" != "$lane_diff" ]; then
+    bad "$name" "the checkout's branch, head or change was moved or lost"; return
+  fi
+  ok "$name"
 }
 
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
@@ -3718,11 +4168,21 @@ run caseM1
 run caseM2
 run caseM3
 run caseM4
+run caseM5
+run caseM6
+run caseM7
+run caseM8
+run caseM9
 run pinmove1
 run pinmove2
 run pinmove3
 run pinmove4
 run pinmove5
+run mergepin1
+run mergepin2
+run mergepin3
+run mergepin4
+run mergepin5
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
