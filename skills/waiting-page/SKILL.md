@@ -169,7 +169,10 @@ gives no page URL: no item exists yet.
 - No timer counts the 5 minutes. At each wake, check the age of each chat question still open.
   Gap: a session with no wake after 5 minutes (one in an open box with nothing running) sends the
   question only when the owner answers or the session wakes.
-- A chat answer: still send the question and the answer, with its time, to the writer.
+- A chat answer: still send the question and the answer, with its time, to the writer. Jot
+  `- <id> [page] -> page:<n>` under the owner's message in the inbox; the Stop guard blocks until
+  the transcript shows that send. The writer puts the item's `n` in every items write, set or update,
+  so the guard can match it.
   - No item yet: the writer writes the item closed (`status: "closed"`), with the answer and its
     time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
     close" step 1) and writes `receipts/<id>`. The writer never writes receipts.

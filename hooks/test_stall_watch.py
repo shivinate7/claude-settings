@@ -32,8 +32,9 @@ Report format the tests read: `pid=<a>,<b>,...` on the STALL line lists the pids
 Its absolute path, ending in .log, names the log. Pids are found by regex, so spacing around `=` is
 tolerant.
 
-Scratch files live in one temp directory, removed at exit. Every process a report names is killed
-at exit, with its descendants. The tests start those processes themselves.
+Scratch files, and each log the hook names (it reads TMPDIR), live in one temp directory, removed
+at exit. Every process a report names is killed at exit, with its descendants. The tests start
+those processes themselves.
 """
 
 import atexit
@@ -191,7 +192,9 @@ def hook(command, os_name=None):
         "tool_name": "Bash",
         "tool_input": {"command": command, "description": "test", "run_in_background": True},
     }
-    env = dict(os.environ, STALL_WATCH_QUIET="2")
+    # TMPDIR makes the hook name its log under SCRATCH (case 7b): a stalled job's log is never
+    # removed by the wrapper, so the run's cleanup must remove it. Every caller goes through here.
+    env = dict(os.environ, STALL_WATCH_QUIET="2", TMPDIR=SCRATCH)
     if os_name is None:
         argv = [PY, MODULE, "--hook"]
     else:
@@ -806,6 +809,22 @@ def log_keeps_growing_after_watcher_exits():
     problems += expect("second" in body, "log lacks output printed after the watcher exited")
     reap()
     return problems
+
+
+@posix_case
+def rewrite_log_lies_under_scratch():
+    """7b. the log the rewrite names lies under SCRATCH, so the run's cleanup removes it"""
+    # A stalled job skips the wrapper's own `rm -f` (case 7), so only the folder's removal clears its
+    # log. The check reads the path off the rewrite, never a count of files in the system temp dir.
+    cmd, _hso = rewrite("echo hi")
+    tail = cmd.split(" --log ", 1)
+    if len(tail) != 2:
+        return ["the rewrite has no --log"]
+    log = shlex.split(tail[1])[0]
+    scratch = os.path.realpath(SCRATCH)
+    return expect(os.path.isabs(log) and os.path.realpath(log).startswith(scratch + os.sep),
+                  f"--log {log} lies outside {scratch}: the hook took the system temp dir, "
+                  "so each stalled job leaves a log behind")
 
 
 def growing_log_job(log, steps=5):
