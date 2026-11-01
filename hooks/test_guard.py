@@ -11874,7 +11874,7 @@ sh("debug-port: a multi-line echo that names the flag is allowed",
 sh("debug-port: a WebView2 value without a port is allowed",
    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu ./app.exe", "allow", cwd=NOGIT)
 
-# Review round 2: a PowerShell process start, an array argument list, and a container exec.
+# a PowerShell process start, an array argument list, and a container exec.
 sh("debug-port: a Start-Process argument string with the port asks",
    "Start-Process -Wait app.exe -ArgumentList \"--disable-gpu --remote-debugging-port=9222\"", "ask",
    "debug-port-ask", tool="PowerShell", cwd=NOGIT)
@@ -11893,7 +11893,7 @@ sh("debug-port: a process listing that matches the flag is allowed",
 sh("debug-port: a pgrep of the flag is allowed",
    "pgrep -af \"--remote-debugging-port\"", "allow", cwd=NOGIT)
 
-# Review round 3: a launcher's argument array or parenthesised list, a call operator, and text-only matches.
+# a launcher's argument array or parenthesised list, a call operator, and text-only matches.
 sh("debug-port: a Start-Process argument array with the port asks",
    "Start-Process -Wait app.exe -ArgumentList @(\"--remote-debugging-port=9222\")", "ask",
    "debug-port-ask", tool="PowerShell", cwd=NOGIT)

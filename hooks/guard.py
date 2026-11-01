@@ -2851,7 +2851,7 @@ def impeccable_command_hit(raw: str) -> str:
 
 # ------------------------------------------------------------------ a debug port asks
 #
-# docs/decisions/design-skills.md, rule `debug-port-ask` (a likely risk, 2026-11-01): impeccable 4.8.0
+# docs/decisions/design-skills.md, rule `debug-port-ask`: impeccable 4.8.0
 # tells an agent to open a DevTools port on a desktop app. The port lets any local process drive the
 # app, so the owner answers first. A launch ASKS when a token of its own arguments is the flag, or
 # when a WebView2 environment value holds it. Text that only names the flag is no launch: the flag
