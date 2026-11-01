@@ -872,3 +872,7 @@
 - vitals-tbt-source: rule ux-vitals-measured accepts lab Total Blocking Time, but its Source page gives only the LCP, INP and CLS lines. Cite web.dev's TBT page (docs/design/principles.md). Decision: ux-house-rules
 - full-height-lvh-grep: rule ux-full-height-fits greps `[0-9]vh`, which skips `lvh`, a unit that acts like `vh` (docs/design/principles.md, checklist.md). Decision: ux-house-rules
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
+- guard-log-kolkata-needs-tzdata: the forced-zone `when` test sets TZ=Asia/Kolkata, so a machine with no tzdata falls back to UTC and the test goes red with nothing wrong. Fix: a POSIX zone string such as "IST-5:30" (lint/test_guard_log_report.py). Step: guard-log-time-offset.
+- unread-early-line-east-blind: the early +05:00 line in the unread test can fail only on a clock at or west of UTC+3; CI on UTC covers it (hooks/test_decision_watch.py, mods/decision-watch/decision-watch.test.mjs). Step: guard-log-time-offset.
+- guard-log-between-untested: `--between` in main() has no test, only window(); a `Z` bound fails before Python 3.11, so a pace read passes `+00:00` (lint/guard_log_report.py). Step: guard-log-time-offset.
+- decision-watch-long-comment: a comment line near hooks/decision_watch.py:875 runs to 154 characters. Cosmetic. Step: guard-log-time-offset.
