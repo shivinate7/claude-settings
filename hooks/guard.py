@@ -2532,7 +2532,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
 DATA_TOOL = "ArtifactData"
 WAITING_ITEMS = "items"
