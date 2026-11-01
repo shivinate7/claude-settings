@@ -59,10 +59,12 @@ Short and plain are one goal. Never trade one for the other.
   names their cleanup in the same ask, so one yes covers both. When the act is mine, give
   the most direct way: the exact button path, or each command as its own fenced block. The block
   runs as is: it starts with its `cd` (Git Bash: after the comment `# open Git Bash`), has no
-  blank lines, and needs no admin. On Windows, a pasted block is PowerShell 5.1-safe. A Mac
-  block is bash or zsh. Never mix shells in one block. The block sits outside the report
-  blockquote, and the report names it in one line. Where a screen tool can do it, offer to take
-  over the screen.<!-- rule:output-never-hand-off-doable-step -->
+  blank lines, and needs no admin. A gh command block opens, after its `cd`, with
+  `gh auth switch -u shivinate7`, or `-u ssemwal-cdc` where shivinate7 has no access (decision
+  `act-in-place`: the owner acts where he reads). On Windows, a pasted block is PowerShell
+  5.1-safe. A Mac block is bash or zsh. Never mix shells in one block. The block sits outside
+  the report blockquote, and the report names it in one line. Where a screen tool can do it,
+  offer to take over the screen.<!-- rule:output-never-hand-off-doable-step -->
 - An option or step that asks the owner to press in a web app carries a link to that exact page,
   on the option or task that presses.<!-- rule:style-press-has-link -->
 - A step never sends the owner to a file for a command. The command sits in the item's `command`
