@@ -823,7 +823,7 @@ prune_case5() {
 }
 
 prune_case6() {
-  name="prune6: cloud mode does not prune a stale copy (documented, not fixed)"
+  name="prune6: cloud mode prunes a recorded copy whose source is gone"
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune6-checkout"
   make_checkout "$co" "# prune6 content"
   cp "$INSTALL_SH" "$co/install.sh"
@@ -837,8 +837,8 @@ prune_case6() {
 
   if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
     bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
-  elif [ ! -f "$cfg/hooks/cloud_hook.sh" ]; then
-    bad "$name" "cloud_hook.sh was pruned; cloud mode is documented to leave stale copies in place"
+  elif [ -e "$cfg/hooks/cloud_hook.sh" ] || [ -L "$cfg/hooks/cloud_hook.sh" ]; then
+    bad "$name" "cloud_hook.sh survived the second cloud run; run 1 recorded it and its source is gone"
   else
     ok "$name"
   fi
@@ -846,10 +846,17 @@ prune_case6() {
 }
 
 # ---- retired files: a file main stopped shipping is removed; an owner's file is never touched ----
-# The manifest is $CLAUDE_DIR/backups/install-manifest.txt. A file is shipped when git tracks it under
-# $SRC. A retired local link needs `git rm --cached`: the file stays on disk, so the link does not
-# dangle (a dangling link is already pruned today). A retired cloud copy takes a plain `git rm`.
+# The manifest is $CLAUDE_DIR/backups/install-manifest.txt. A file is shipped when git lists it under
+# $SRC. An untracked file that no ignore rule covers still lands, so a retired local file must also be
+# ignored (retired_untrack). A dangling link is already pruned today. A retired cloud copy takes a plain `git rm`.
 retired_commit() { ( cd "$1" && git add -A && git commit -q -m "$2" ); }
+
+# Retire tracked file $2 of checkout $1 the way the incident looks: git stops tracking it, an ignore
+# rule keeps it on disk, and the link into it does not dangle.
+retired_untrack() {
+  printf '%s\n' "$2" >> "$1/.gitignore"
+  git -C "$1" rm -q --cached -- "$2" && git -C "$1" add .gitignore && git -C "$1" commit -q -m "retire $2"
+}
 
 # A checkout with the files every retired case keeps: one hook and one skill, both shipped, so no
 # landed folder is ever empty. $1 is the checkout, $2 names the case in its commit message.
@@ -890,7 +897,7 @@ retired_case1() {
   retired_commit "$co" "ship retired_hook"
   out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
   recorded=$(grep -c '^hooks/retired_hook.sh' "$cfg/backups/install-manifest.txt" 2>/dev/null)
-  git -C "$co" rm -q --cached hooks/retired_hook.sh && git -C "$co" commit -q -m "retire retired_hook"
+  retired_untrack "$co" hooks/retired_hook.sh
   out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
 
   if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
@@ -1026,25 +1033,33 @@ retired_case6() {
 }
 
 retired_case7() {
-  name="retired7: a local run with a failed landing removes no retired link"
+  name="retired7: a failed link in a folder removes no retired link in that same folder"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then
     skip "$name" "$NO_SYMLINK_REASON"
     return
   fi
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired7-checkout"
   retired_checkout "$co" retired7
-  mkdir -p "$co/skills/gone-skill"; printf 'gone\n' > "$co/skills/gone-skill/SKILL.md"
-  retired_commit "$co" "ship gone-skill"
+  printf '#!/bin/sh\necho gone\n' > "$co/hooks/gone_hook.sh"
+  retired_commit "$co" "ship gone_hook"
   out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
-  git -C "$co" rm -q -r skills/gone-skill && git -C "$co" commit -q -m "retire gone-skill"
-  # The next hooks landing fails: a plain file sits where the hooks folder must be.
-  rm -rf "$cfg/hooks"; printf 'a plain file, not a folder\n' > "$cfg/hooks"
-  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+  # main drops gone_hook.sh: git stops tracking it and deletes it, so its link dangles.
+  git -C "$co" rm -q hooks/gone_hook.sh && git -C "$co" commit -q -m "retire gone_hook"
+  # main adds fail_hook.sh. A stub ln refuses any link whose name holds fail_hook: a failed landing in hooks.
+  printf '#!/bin/sh\necho fail\n' > "$co/hooks/fail_hook.sh"
+  retired_commit "$co" "ship fail_hook"
+  fake="$work/retired7-bin"; mkdir -p "$fake"
+  real_ln=$(command -v ln)
+  printf '#!/bin/sh\ncase "$*" in *fail_hook*) echo "ln: injected failure" >&2; exit 1;; esac\nexec %s "$@"\n' "$real_ln" > "$fake/ln"
+  chmod +x "$fake/ln"
+  out2=$( PATH="$fake:$PATH"; export PATH; retired_run "$co" "$h" "$cfg" local ); rc2=$?
 
   if [ $rc1 -ne 0 ]; then
     bad "$name" "run 1 exited $rc1: $out1"
-  elif [ ! -L "$cfg/skills/gone-skill" ]; then
-    bad "$name" "the link to the retired skill was removed by a run whose hooks landing failed (run 2 exit $rc2)"
+  elif [ -e "$cfg/hooks/fail_hook.sh" ] || [ -L "$cfg/hooks/fail_hook.sh" ]; then
+    bad "$name" "the injected ln failure did not happen: fail_hook.sh was landed"
+  elif [ ! -L "$cfg/hooks/gone_hook.sh" ]; then
+    bad "$name" "the link to gone_hook.sh was removed in a folder whose landing failed (run 2 exit $rc2)"
   else
     ok "$name"
   fi
@@ -1087,7 +1102,7 @@ retired_case8() {
   printf '#!/bin/sh\necho retired\n' > "$co/hooks/retired_hook.sh"
   retired_commit "$co" "ship retired_hook"
   out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
-  git -C "$co" rm -q --cached hooks/retired_hook.sh && git -C "$co" commit -q -m "retire retired_hook"
+  retired_untrack "$co" hooks/retired_hook.sh
   out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
   before=$(find "$cfg" | sort)
   out3=$(retired_run "$co" "$h" "$cfg" local); rc3=$?
@@ -1116,8 +1131,8 @@ retired_case9() {
   printf '#!/bin/sh\necho old\n' > "$co/hooks/listed_gone.sh"
   retired_list "$co" 'hooks/listed_gone.sh' 'hooks/keep_hook.sh' "$(printf 'hooks/crlf_listed.py\r')" \
     '# hooks/commented.py'
-  # Now main stops tracking listed_gone.sh. The file stays on disk, and an old link still points at it.
-  git -C "$co" rm -q --cached hooks/listed_gone.sh && git -C "$co" commit -q -m "retire listed_gone"
+  # Now main stops tracking listed_gone.sh and ignores it. The file stays on disk, and an old link still points at it.
+  retired_untrack "$co" hooks/listed_gone.sh
   mkdir -p "$cfg/hooks"
   ln -s "$co/hooks/listed_gone.sh" "$cfg/hooks/listed_gone.sh"
   printf 'listed owner\n' > "$cfg/hooks/crlf_listed.py"
@@ -1128,7 +1143,7 @@ retired_case9() {
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $out"
   elif [ -L "$cfg/hooks/listed_gone.sh" ]; then
-    bad "$name" "the listed link to an untracked file survived"
+    bad "$name" "the listed link to an ignored, retired file survived"
   elif [ -e "$cfg/hooks/crlf_listed.py" ] || [ -z "$(grep -rl 'listed owner' "$cfg/backups/retired" 2>/dev/null)" ]; then
     bad "$name" "the listed file (CRLF line) is not moved to backups/retired"
   elif [ "$(cat "$cfg/hooks/commented.py" 2>/dev/null)" != 'commented owner' ]; then

@@ -1038,7 +1038,7 @@ if (-not $IsWin) {
 
 # ---- retired files: ps1 twins of hooks/test_install_src.sh retired2, 3, 4, 5, 6 -----------------
 # Copy mode (CLAUDE_SETTINGS_FORCE_COPY=1) lands every file as a copy, the mode the incident hit.
-# Shipped = git tracks the file under the clone. The manifest is $CLAUDE_DIR\backups\install-manifest.txt.
+# Shipped = git lists the file under the clone (tracked, or untracked and not ignored). The manifest is $CLAUDE_DIR\backups\install-manifest.txt.
 # Red on the current install.ps1 is unmeasured locally: no pwsh runs in the authoring session.
 # The cases use a fresh clone each, built here: New-WtFixture makes a worktree pair, not one clone.
 function New-RetiredClone([string]$Root) {
