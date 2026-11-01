@@ -1957,7 +1957,7 @@ ROLE_DEFAULT = "general-purpose"
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
 # Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
-EXPLORE_AUDIT_MARKER = "Audit:"
+from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
