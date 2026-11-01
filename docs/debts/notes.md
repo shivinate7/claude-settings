@@ -797,3 +797,5 @@
 - draft-step-stands-wording: the draft step prints "The green run stands." on a draft, where CI skipped the run. Wording only (review round 3 of PR #895). Decision: records-index-at-merge.
 - frozen-redirect-and-word: `echo x >&settings.json` from the config dir writes the file `settings.json` and the frozen-path rule allows it; same on main (hooks/guard_frozen.py).
 - frozen-copy-read-amp-redirect: `cp /tmp/x <frozen> &> /dev/null` is allowed because `_copy_reads` reads the bare `&` of `&>` as an operand, so the frozen DEST counts as a source; same on main (hooks/guard_frozen.py).
+- verdict-heartbeat-stderr-hidden: `verdict x 2>&1 | grep` and `verdict x 2>/dev/null` still hide the heartbeat now on stderr; no incident (review round 1 of PR #927). Decision: stall-watch.
+- test-verdict-temp-half: lint/test_verdict.py uses the run-folder temp standard only in `run()` and the pipe case; its other `TemporaryDirectory()` calls keep the default (review round 1 of PR #927).
