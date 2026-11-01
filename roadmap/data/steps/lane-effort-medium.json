@@ -1,9 +1,9 @@
 {
   "title": "Lane sessions run Opus at medium effort",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33749,
   "why": "shiv, Oct 30 15:11 CDT (via coordinator): lane sessions run Opus at medium effort.",
-  "note": "Lane lane-effort-medium (session_013NEJL28Sky6HBLLehmziKH). Done check: a new lane session reports Opus at medium effort.",
-  "updatedAt": "2026-10-30T21:25:00Z"
+  "note": "Lane lane-effort-medium (session_013NEJL28Sky6HBLLehmziKH). Done check: a new lane session reports Opus at medium effort. Landed on main in batch 42, #930 (lane lane-effort-medium, Nov 1).",
+  "updatedAt": "2026-11-01T06:12:00Z"
 }

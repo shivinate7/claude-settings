@@ -1,9 +1,9 @@
 {
   "title": "Merging or dropping stderr after verdict does not hide its heartbeat",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.304975,
   "why": "Lane verdict-pipe-heartbeat (#927, via coordinator, Oct 31 23:17 CDT): its fix moves verdict's heartbeat to stderr, but `verdict x 2>&1 | grep` and `verdict x 2>/dev/null` still hide it, so the stall watch trips and strands the run. Triage judged it a debt (roles-findings-are-debts-or-notes): likely in normal work, since `2>&1` is in many commands and the coordinator used `2>&1 | grep` itself on Oct 31; the harm is the stranded run of the wait-for-pid-form incident.",
-  "note": "Fix the cause in one home: either the heartbeat reaches the stall watch on a path no redirect hides, or the guard refuses `verdict ... 2>&1 |` and `verdict ... 2>/dev/null` with a remedy that names verdict's own verdict line. The lane writes the debt record (verdict-heartbeat-stderr-merge) in docs/debts and closes it with the fix. Done check: a stall-watch test with `verdict x 2>&1 | grep y` and with `2>/dev/null` does not trip, or the guard refuses both and allows a bare `verdict x`; red on main and green on the fix. Needs no answer. Starts after #927 merges (same files). Files: bin/verdict, hooks/stall_watch.py, or hooks/guard.py and hooks/test_guard.py (#899 also touches the guard files).",
-  "updatedAt": "2026-11-01T04:18:00Z"
+  "note": "Fix the cause in one home: either the heartbeat reaches the stall watch on a path no redirect hides, or the guard refuses `verdict ... 2>&1 |` and `verdict ... 2>/dev/null` with a remedy that names verdict's own verdict line. The lane writes the debt record (verdict-heartbeat-stderr-merge) in docs/debts and closes it with the fix. Done check: a stall-watch test with `verdict x 2>&1 | grep y` and with `2>/dev/null` does not trip, or the guard refuses both and allows a bare `verdict x`; red on main and green on the fix. Needs no answer. Starts after #927 merges (same files). Files: bin/verdict, hooks/stall_watch.py, or hooks/guard.py and hooks/test_guard.py (#899 also touches the guard files). Lane started Nov 1 after batch 42 (coordinator, 01:09 CDT).",
+  "updatedAt": "2026-11-01T06:12:00Z"
 }
