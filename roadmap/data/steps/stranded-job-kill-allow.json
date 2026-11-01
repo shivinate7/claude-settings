@@ -1,9 +1,9 @@
 {
   "title": "The main session may stop its own stuck job under a shell that lost its label",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33776,
   "why": "shiv, Nov 1 11:53 CST, page item 114 pick b: from the main session only, a job that carries this session's label counts as its own when the shell above it lost its label (an orphan shell adopted by the machine), not only when the machine adopted the job itself. It widens the kill guard by one process shape, by the owner's choice.",
-  "note": "Fix in hooks/guard_kill.py foreign_pid_kill, one home; decision a-kill-by-pid-needs-an-owned-pid records the ruling beside the Oct 10, 21 and 26 rulings. Agents stay excluded (the label is shared). Done check: a guard test stops a labelled job under an unlabelled orphan shell from the main session, and still refuses it from an agent and refuses an unlabelled job; red on main and green on the fix. Needs no answer. Files: hooks/guard_kill.py, hooks/test_guard.py, docs/decisions/a-kill-by-pid-needs-an-owned-pid.md.",
-  "updatedAt": "2026-11-01T18:02:00Z"
+  "note": "Fix in hooks/guard_kill.py foreign_pid_kill, one home; decision a-kill-by-pid-needs-an-owned-pid records the ruling beside the Oct 10, 21 and 26 rulings. Agents stay excluded (the label is shared). Done check: a guard test stops a labelled job under an unlabelled orphan shell from the main session, and still refuses it from an agent and refuses an unlabelled job; red on main and green on the fix. Needs no answer. Files: hooks/guard_kill.py, hooks/test_guard.py, docs/decisions/a-kill-by-pid-needs-an-owned-pid.md. Lane session_013NEJL21CwjRZ8EXjsXhXCJ, started Nov 1 11:56 CST (coordinator).",
+  "updatedAt": "2026-11-01T18:05:00Z"
 }
