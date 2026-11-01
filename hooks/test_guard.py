@@ -58,6 +58,8 @@ REPO = os.path.dirname(HERE)
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 

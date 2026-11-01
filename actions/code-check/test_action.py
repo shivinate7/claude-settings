@@ -10,6 +10,8 @@ skip and say so, except under CI, where they fail."""
 import json, os, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 RUNNER = os.path.join(HERE, "code_check.py")
 STANDARD = os.path.join(HERE, "standard.json")
 GOOD_PY = "def add(a: int, b: int) -> int:\n    return a + b\n"

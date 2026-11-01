@@ -1,6 +1,6 @@
 {
   "name": "decision-watch",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Decision watch: judges each completed turn (turn.complete) with the session's own model login, logs the verdict, and shows a FLAG or UNKNOWN. Adds /dw. Never blocks.",
   "author": { "name": "shivinate7" }
 }

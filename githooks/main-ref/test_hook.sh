@@ -3,6 +3,7 @@
 # commit, a feature-branch commit and the escape hatch are allowed.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
+. "$here/../../lint/_test_git.sh"  # test-run signing opt-out (lint/_test_git.sh)
 tmp="$(mktemp -d)"; cd "$tmp" || exit 1
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 git init -q --bare -b main origin.git
