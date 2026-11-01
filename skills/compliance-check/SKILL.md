@@ -44,6 +44,8 @@ Some groups read the tree, not a rule prefix. Each comes after the rule groups:
 - `iOS`: drift from the iOS standard of the `ios-apps` skill. A child with no iOS app is `n/a`.
 - `Words`: each retired word the child uses, read live from the glossary check (`probes.md`, Words). Name the
   parent commit whose glossary the run read.
+- `Supersede`: child text that departs from a shared rule with no known exemption named (`probes.md`,
+  Supersede). A claude-settings rule wins over it. The fix goes in the child.
 - `Caution`: listing only, for the owner to prune. It has no grade. Run `python3 <parent>/lint/layout.py caution <child>`
   and print the level it resolves. Then list each rule in the child's `CLAUDE.md` and `.claude/rules/` that
   restricts what Claude does with a password, a token, a login, a secret or a private datum, as
@@ -62,14 +64,14 @@ not repeat its steps.
 
 ## 4. Scorecard
 
-One line per group, in the order of step 2, then Layout, Design, Copies, iOS, Words and the Caution listing:
+One line per group, in the order of step 2, then Layout, Design, Copies, iOS, Words, Supersede and the Caution listing:
 
 ```
 <Group>: <in shape | partial | out | parent-covered | not rolled out | n/a | unknown> - <finding> (<file:line or command>)
 ```
 
 Each finding cites a file or a command result. A group with mixed probes takes its worst
-known score, and lists each unknown probe after it. Layout, Design, iOS and Words list each item under the
+known score, and lists each unknown probe after it. Layout, Design, iOS, Words and Supersede list each item under the
 group line, with its own grade, so one score never hides a finding. A child with no extras file, or one without `"rolled-out": true`,
 scores Layout `not rolled out`, not `out`, and its preview lines feed the roll-out lane. Under the group lines, name each parent rule
 that no probe and no mechanism covers.

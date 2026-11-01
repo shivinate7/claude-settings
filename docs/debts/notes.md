@@ -297,6 +297,9 @@
 - ste-eg-in-fence-reported: the lint reports e.g. inside a blockquote fence or pre block as a warning; a false alarm (lint/ste_lint.py LATIN)
 - ste-exclude-star-crosses-dir: the bash re-match in run.sh lets * cross /, so skills/*.md also skips skills/x/y.md (actions/ste-lint/run.sh)
 - stream-guard-quadratic: the stream guard slices the word list per bare word; a 20,000-word segment takes 8.2 s (hooks/guard_stream.py)
+- supersede-share-unpinned: no check ties the 90% n/a share and 160-character cut in docs/decisions/compliance-defined.md and skills/compliance-check/probes.md to NA_SHARE and the cut in lint/compliance_probes.py. A code change leaves the docs stale. Decision: compliance-defined.
+- supersede-subbullet-exemption: an exemption in a sub-bullet, or in a second paragraph of the same bullet, does not pass the parent bullet. Put it in the same bullet (lint/compliance_probes.py). Decision: compliance-defined.
+- supersede-wording-false-alarm: the supersede probe flags child prose that is not a departure, such as "CSS rules are not inherited by the shadow DOM", "The global lint rules do not apply to generated code", or a child ESLint id after "Known exemption: rule:no-console" (lint/compliance_probes.py). Cues carry no direction, so agreeing text is flagged too, such as "We use the shared rules instead of repo-local copies." or "Unlike claude-settings, this repo ships screens." Decision: compliance-defined.
 - sweep-anchor-first-match: mutate_sweep apply path replaces the first anchor match, so a second copy in one file passes silently (janitor/mutate_sweep.py)
 - sweep-no-deadline-many-trees: SessionEnd sweep calls already running are not capped by the deadline; a kill mid worktree remove can leave a half-removed tree (janitor/sweep.py, session_end_sweep.py)
 - sweep-test-symlink-privilege: two tests in janitor/test_sweep.py error with WinError 1314 on a Windows host with no symlink right instead of skipping (janitor)
