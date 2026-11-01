@@ -275,6 +275,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`docs/debts/ci-wake-export-gh-repo-unread.md`](../docs/debts/ci-wake-export-gh-repo-unread.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
+| `cloud-merge-moves-live-pin` | In a cloud session, `merge/install_from_main.sh` runs `bash "$pin/install.sh"` without a pipe, after each coordinator merge. | [`docs/debts/cloud-merge-moves-live-pin.md`](../docs/debts/cloud-merge-moves-live-pin.md) |
+| `departs-word-list-limits` | `question-departs` reads a no-change word in the first clause of the change side. | [`docs/debts/departs-word-list-limits.md`](../docs/debts/departs-word-list-limits.md) |
 | `exit-worktree-hook-unmeasured` | The guard clears a session-home record on an ExitWorktree call. | [`docs/debts/exit-worktree-hook-unmeasured.md`](../docs/debts/exit-worktree-hook-unmeasured.md) |
 | `explain-accessvbom` | The owner wants to be talked through AccessVBOM, the Office setting "Trust access to the VBA project object model": what it does, its risk, and whether to turn it on. | [`docs/debts/explain-accessvbom.md`](../docs/debts/explain-accessvbom.md) |
 | `ff-first-lane-not-a-tip` | `lane_tips` reads merge commits only. | [`docs/debts/ff-first-lane-not-a-tip.md`](../docs/debts/ff-first-lane-not-a-tip.md) |
@@ -284,7 +286,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `gitignore-skips-map-tests` | `ci-scope.sh` turns on only `code` for a `.gitignore` change. | [`docs/debts/gitignore-skips-map-tests.md`](../docs/debts/gitignore-skips-map-tests.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
-| `inbox-saves-agent-reports` | A subagent's hand-back reaches the session as a prompt that starts with `<agent-message`. | [`docs/debts/inbox-saves-agent-reports.md`](../docs/debts/inbox-saves-agent-reports.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
 | `install-checkout-flake` | On Windows CI two session-start freshness cases failed, then passed on rerun, twice on 2026-10-20: caseF1 in the morning (#527), and caseG1 at 23:00 (#533, run 39528566602; "expected ... | [`docs/debts/install-checkout-flake.md`](../docs/debts/install-checkout-flake.md) |
 | `install-set-reads-held-file` | On Windows the install-set test reads a hook run's output file while another process still holds it, so the job fails with an IOException though the install is correct. | [`docs/debts/install-set-reads-held-file.md`](../docs/debts/install-set-reads-held-file.md) |

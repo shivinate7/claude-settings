@@ -2748,6 +2748,143 @@ pinlive2() {
   rm -rf "$h"
 }
 
+# ---- pinmove cases: a cloud install whose pointer names the live pin takes the clone as its source ----
+# Decision merge-reinstalls-from-main, ruling 1: no work runs in the pin. The pin is <clone>-live-<12 hex>, a
+# locked worktree detached at main, and <clone>-live is an absolute link to it (merge/install_from_main.sh).
+# install.sh's candidate loop takes the pointer dir first, so a pointer at either form makes the pin the source.
+# The cloud own-checkout block then moves that pin to origin/main, and the pointer is written to the pin.
+# Each case points the pointer at one form (pin, link or the clone) and asserts that the source is the clone.
+
+# live_pin_fixture TAG: pin_fixture's clone and bare origin, with origin/main 2 commits past the clone's main.
+# Its pin at main is renamed to <clone>-live-<12 hex>, locked, and <clone>-live is made a link to it. The clone's
+# origin is the GitHub URL, which the case's HOME redirects to the bare repo (write_redirect). checkout_at then
+# accepts the clone, and the cloud fetch stays local. Sets lp_co, lp_bare, lp_pin, lp_link and lp_msg (the reason
+# it failed, when it returns 1).
+live_pin_fixture() {
+  lp_msg=""
+  if ! pin_fixture "$1" 2 main worktree; then lp_msg="$pf_msg"; return 1; fi
+  lp_co="$pf_co"; lp_bare="$pf_bare"; lp_link="$pf_co-live"
+  lp_pin="$lp_co-live-$(git -C "$pf_pin" rev-parse --short=12 HEAD 2>/dev/null)"
+  git -C "$lp_co" worktree move "$pf_pin" "$lp_pin" >/dev/null 2>&1 \
+    || { lp_msg="cannot rename the pin to $lp_pin"; return 1; }
+  git -C "$lp_co" worktree lock --reason "claude-settings live pin" "$lp_pin" >/dev/null 2>&1 \
+    || { lp_msg="cannot lock the pin"; return 1; }
+  ln -s "$lp_pin" "$lp_link" && [ -L "$lp_link" ] || { lp_msg="cannot make the link"; return 1; }
+  git -C "$lp_co" remote set-url origin https://github.com/shivinate7/claude-settings.git \
+    || { lp_msg="cannot set origin to the GitHub URL"; return 1; }
+  lp_head=$(git -C "$lp_pin" rev-parse HEAD 2>/dev/null)
+  lp_main=$(git -C "$lp_co" rev-parse --verify -q refs/heads/main 2>/dev/null)
+  lp_origin=$(git -C "$lp_bare" rev-parse --verify -q refs/heads/main 2>/dev/null)
+  if [ "$lp_head" != "$lp_main" ]; then lp_msg="the pin is not at the clone's main"; return 1; fi
+  if [ "$lp_head" = "$lp_origin" ] || ! git -C "$lp_bare" merge-base --is-ancestor "$lp_head" "$lp_origin"; then
+    lp_msg="origin/main does not hold the pin's commit as an ancestor, so the move cannot happen"; return 1
+  fi
+  if [ -n "$(git -C "$lp_pin" status --porcelain 2>/dev/null)" ]; then lp_msg="the pin has changes"; return 1; fi
+  if git -C "$lp_pin" symbolic-ref -q HEAD >/dev/null 2>&1; then lp_msg="the pin is on a branch"; return 1; fi
+  return 0
+}
+
+# pinmove_run TAG WHERE: one cloud install, piped as the setup script runs it, from a folder that is no checkout,
+# with the pointer at WHERE: pin, link or clone. Builds live_pin_fixture TAG first. Sets pm_co, pm_pin, pm_out,
+# pm_rc, pm_ptr (the pointer target after the run), and pm_head_before and pm_head_after (the pin's HEAD around the
+# run). Returns 1 with pm_msg when the fixture failed.
+pinmove_run() {
+  pm_msg=""
+  if ! live_pin_fixture "$1"; then pm_msg="$lp_msg"; return 1; fi
+  pm_co="$lp_co"; pm_pin="$lp_pin"
+  case "$2" in
+    pin) pm_target="$lp_pin" ;;
+    link) pm_target="$lp_link" ;;
+    clone) pm_target="$lp_co" ;;
+  esac
+  pm_head_before=$(git -C "$pm_pin" rev-parse HEAD 2>/dev/null)
+  h=$(new_home); write_redirect "$h" "$lp_bare"
+  cfg="$work/$1-cfg"; seed_pointer "$cfg" "$pm_target"
+  elsewhere="$work/$1-elsewhere"; mkdir -p "$elsewhere"
+  stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
+  pm_out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  pm_rc=$?
+  pm_head_after=$(git -C "$pm_pin" rev-parse HEAD 2>/dev/null)
+  pm_ptr=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  rm -rf "$h"
+  return 0
+}
+
+# pinmove_source OUT: the path the "found existing checkout" line of OUT names as the source, or nothing.
+pinmove_source() {
+  printf '%s\n' "$1" | sed -n 's|^.*found existing checkout of [^ ]* at \(.*\); using it as source$|\1|p' | head -n1
+}
+
+# pinmove1, pinmove2: the pointer at the pin, then at the link. The log must name the clone as the source.
+pinmove1() {
+  name="pinmove1: pointer at the live pin <clone>-live-<12 hex>: the log names the clone as the source"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! pinmove_run pinmove1 pin; then bad "$name" "fixture: $pm_msg"; return; fi
+  src=$(pinmove_source "$pm_out")
+  if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc: $pm_out"
+  elif [ -z "$src" ]; then bad "$name" "no found-checkout line: $pm_out"
+  elif [ "$(normalize_path "$src")" != "$(normalize_path "$pm_co")" ]; then
+    bad "$name" "log names [$src] as the source, want the clone [$pm_co]"
+  else ok "$name"; fi
+}
+
+pinmove2() {
+  name="pinmove2: pointer at the link <clone>-live: the log names the clone as the source"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! pinmove_run pinmove2 link; then bad "$name" "fixture: $pm_msg"; return; fi
+  src=$(pinmove_source "$pm_out")
+  if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc: $pm_out"
+  elif [ -z "$src" ]; then bad "$name" "no found-checkout line: $pm_out"
+  elif [ "$(normalize_path "$src")" != "$(normalize_path "$pm_co")" ]; then
+    bad "$name" "log names [$src] as the source, want the clone [$pm_co]"
+  else ok "$name"; fi
+}
+
+# pinmove3: the pin is not moved, by either pointer form. A run that moves it leaves HEAD at origin/main.
+pinmove3() {
+  name="pinmove3: pointer at the live pin or its link: the pin keeps its HEAD and its place"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  for form in pin link; do
+    if ! pinmove_run "pinmove3-$form" "$form"; then bad "$name" "fixture ($form): $pm_msg"; return; fi
+    if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc ($form): $pm_out"; return; fi
+    if [ ! -d "$pm_pin" ]; then bad "$name" "the pin is gone after a $form run"; return; fi
+    if [ "$pm_head_after" != "$pm_head_before" ]; then
+      bad "$name" "a $form run moved the pin from $pm_head_before to $pm_head_after"; return
+    fi
+  done
+  ok "$name"
+}
+
+# pinmove4: the pointer install.sh writes names the clone, never the pin, for either pointer form.
+pinmove4() {
+  name="pinmove4: pointer at the live pin or its link: the written pointer names the clone, not the pin"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  for form in pin link; do
+    if ! pinmove_run "pinmove4-$form" "$form"; then bad "$name" "fixture ($form): $pm_msg"; return; fi
+    if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc ($form): $pm_out"; return; fi
+    if [ "$(normalize_path "$pm_ptr")" != "$(normalize_path "$pm_co")" ]; then
+      bad "$name" "a $form run wrote the pointer [$pm_ptr], want the clone [$pm_co]"; return
+    fi
+  done
+  ok "$name"
+}
+
+# pinmove5: control. The pointer at the clone itself still picks the clone, on the same fixture.
+pinmove5() {
+  name="pinmove5: control: pointer at the clone itself: the log names the clone and the pointer keeps it"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! pinmove_run pinmove5 clone; then bad "$name" "fixture: $pm_msg"; return; fi
+  src=$(pinmove_source "$pm_out")
+  if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc: $pm_out"
+  elif [ "$(normalize_path "$src")" != "$(normalize_path "$pm_co")" ]; then
+    bad "$name" "log names [$src] as the source, want the clone [$pm_co]"
+  elif [ "$(normalize_path "$pm_ptr")" != "$(normalize_path "$pm_co")" ]; then
+    bad "$name" "pointer [$pm_ptr] is not the clone [$pm_co]"
+  else ok "$name"; fi
+}
+
 # ---- guardset1, guardset2: shared_names.py lands inside the atomic guard set -------------------------
 # Owner ruling: hooks/shared_names.py is the one home of PROJECT_FROZEN_FILES and config_dir. The guard
 # imports it with no fallback copy, so a guard run that loads guard.d/<id>/ must find it there. The flat
@@ -3581,6 +3718,11 @@ run caseM1
 run caseM2
 run caseM3
 run caseM4
+run pinmove1
+run pinmove2
+run pinmove3
+run pinmove4
+run pinmove5
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
