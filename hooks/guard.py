@@ -2854,14 +2854,15 @@ def impeccable_command_hit(raw: str) -> str:
 # docs/decisions/design-skills.md, rule `debug-port-ask` (a likely risk, 2026-11-01): impeccable 4.8.0
 # tells an agent to open a DevTools port on a desktop app. The port lets any local process drive the
 # app, so the owner answers first. A launch ASKS when a token of its own arguments is the flag, or
-# when a WebView2 environment value holds it. Text that only names the flag is no launch: a token
-# that holds the flag inside longer text never matches, and a text command's arguments are skipped.
-# The limits: a flag inside a longer `-ArgumentList` string, a `docker exec` and an interpreter
-# body (Python, Node) are not read.
+# when a WebView2 environment value holds it. Text that only names the flag is no launch: the flag
+# must be a launched program's argument and carry a value, and a text command's arguments are skipped.
+# A `-ArgumentList` string is read word by word. The limit: the guard reads no script file, so
+# `bash launch.sh` that holds the flag passes.
 DEBUG_PORT_REASON = ("this command opens a remote-debugging port on an app. Any local process can "
                      "then drive that app. Answer yes only if you want the port open.")
 DEBUG_PORT_FLAG = "--remote-debugging-port"
-DEBUG_PORT_ENV = re.compile(r"^(?:\$env:)?WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=(.*)$", re.I | re.S)
+DEBUG_PORT_ENV = re.compile(r"^(?:\$env:)?WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS(?:\+?=(.*))?$", re.I | re.S)
+DEBUG_PORT_ARGUMENT_LISTS = ("-argumentlist", "-args")   # PowerShell's launcher takes its arguments as one string
 DEBUG_PORT_TEXT_COMMANDS = {
     "echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "ag", "ack", "git", "gh", "sed", "awk",
     "head", "tail", "less", "more", "wc", "diff", "ls", "find", "write-host", "write-output",
@@ -2884,17 +2885,34 @@ def debug_port_segment_hit(segment: str) -> str:
                      if (hit := debug_port_segment_hit(part))), "")
     index = resolve_command(tokens)
     # A value set ahead of the command (`NAME=v cmd`, `env NAME=v cmd`), alone (`$env:NAME=v`) or by `export`.
-    words = list(tokens if index is None else tokens[:index + 1])   # PowerShell's `$env:NAME=v` is the command word itself
+    scope = len(tokens) if index is None else index + 1   # PowerShell's `$env:NAME=v` is the command word itself
     if index is not None and debug_port_name(tokens[index]) in ("export", "declare", "typeset"):
-        words += tokens[index + 1:]
-    for word in words:
+        scope = len(tokens)
+    for at, word in enumerate(tokens[:scope]):
         found = DEBUG_PORT_ENV.match(word)
-        if found and "remote-debugging-port" in found.group(1).lower():
+        if not found:
+            continue
+        # `NAME=v`, or PowerShell's `$env:NAME = v` and `$env:NAME += v` as three tokens
+        value = found.group(1)
+        if value is None and tokens[at + 1:at + 2] in (["="], ["+="]):
+            value = "".join(tokens[at + 2:at + 3])
+        if value is not None and "remote-debugging-port" in value.lower():
             return segment.strip()[:100]
     if index is None or debug_port_name(tokens[index]) in DEBUG_PORT_TEXT_COMMANDS:
         return ""
-    for word in tokens[index + 1:]:
-        if word == DEBUG_PORT_FLAG or word.startswith(DEBUG_PORT_FLAG + "="):
+    # The launched program's own arguments; a launcher's argument string is read word by word.
+    arguments = []
+    for at, word in enumerate(tokens[index + 1:], index + 1):
+        if tokens[at - 1].lower() in DEBUG_PORT_ARGUMENT_LISTS:
+            arguments += [part.strip("'\"") for part in re.split(r"[\s,]+", word) if part]
+        else:
+            arguments.append(word)
+    # A launch gives the flag a value. A flag with none (`pgrep -f "--remote-debugging-port"`, a
+    # `-match` pattern) is a search for the text, never a launch.
+    for at, word in enumerate(arguments):
+        following = arguments[at + 1:at + 2]
+        if (word == DEBUG_PORT_FLAG and following and not following[0].startswith("-")) \
+                or (word.startswith(DEBUG_PORT_FLAG + "=") and len(word) > len(DEBUG_PORT_FLAG) + 1):
             return segment.strip()[:100]
     return ""
 
