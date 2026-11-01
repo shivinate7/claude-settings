@@ -407,7 +407,7 @@ class SymbolTests(StaleCase):
     def test_a_module_level_def_removed_from_the_cited_file_is_flagged_on_the_same_line(self):
         base_sweep = "def stop(*a, **k):\n    return 1\n"
         head_sweep = "def keep():\n    return 2\n"
-        notes = "# Notes\n\ntwo tests in `janitor/test_sweep.py` stop with WinError 1314.\n"
+        notes = "# Notes\n\ntwo tests in `janitor/test_sweep.py` `stop` with WinError 1314.\n"
 
         def change(repo):
             write(repo, "janitor/test_sweep.py", head_sweep)
