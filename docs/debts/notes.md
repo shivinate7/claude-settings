@@ -872,3 +872,5 @@
 - vitals-tbt-source: rule ux-vitals-measured accepts lab Total Blocking Time, but its Source page gives only the LCP, INP and CLS lines. Cite web.dev's TBT page (docs/design/principles.md). Decision: ux-house-rules
 - full-height-lvh-grep: rule ux-full-height-fits greps `[0-9]vh`, which skips `lvh`, a unit that acts like `vh` (docs/design/principles.md, checklist.md). Decision: ux-house-rules
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
+- report-guard-bash-gh-unseen: the report guard reads only git and four GitHub tools, so a `gh pr create` or `gh pr merge` run through Bash lands with no report (lint/report_guard.py). Found in PR #966 round 3.
+- report-guard-head-omits-pr: BLOCK_REASON_HEAD says "commit, push, or merge" and leaves out an opened PR, which the guard also checks (lint/report_guard.py). Found in PR #966 round 3.
