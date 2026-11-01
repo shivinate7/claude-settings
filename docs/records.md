@@ -275,6 +275,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`docs/debts/ci-wake-export-gh-repo-unread.md`](../docs/debts/ci-wake-export-gh-repo-unread.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
+| `cloud-merge-moves-live-pin` | In a cloud session, `merge/install_from_main.sh` runs `bash "$pin/install.sh"` without a pipe, after each coordinator merge. | [`docs/debts/cloud-merge-moves-live-pin.md`](../docs/debts/cloud-merge-moves-live-pin.md) |
+| `departs-word-list-limits` | `question-departs` reads a no-change word in the first clause of the change side. | [`docs/debts/departs-word-list-limits.md`](../docs/debts/departs-word-list-limits.md) |
 | `exit-worktree-hook-unmeasured` | The guard clears a session-home record on an ExitWorktree call. | [`docs/debts/exit-worktree-hook-unmeasured.md`](../docs/debts/exit-worktree-hook-unmeasured.md) |
 | `explain-accessvbom` | The owner wants to be talked through AccessVBOM, the Office setting "Trust access to the VBA project object model": what it does, its risk, and whether to turn it on. | [`docs/debts/explain-accessvbom.md`](../docs/debts/explain-accessvbom.md) |
 | `ff-first-lane-not-a-tip` | `lane_tips` reads merge commits only. | [`docs/debts/ff-first-lane-not-a-tip.md`](../docs/debts/ff-first-lane-not-a-tip.md) |

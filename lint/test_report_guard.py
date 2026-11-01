@@ -92,10 +92,25 @@ def write_transcript(records, tmpdir, name="transcript.jsonl"):
     return path
 
 
-def run_guard(guard, hook, raw_stdin=None, env=None):
+# A guard run with the modules named in `block` set to None in sys.modules, so `import <name>` raises
+# ImportError in that process. The guard's folder leads sys.path, as it does when run as a script.
+BLOCK_IMPORTS_CODE = (
+    "import json, os, runpy, sys\n"
+    "sys.path.insert(0, os.path.dirname(sys.argv[1]))\n"
+    "for name in json.loads(sys.argv[2]):\n"
+    "    sys.modules[name] = None\n"
+    "sys.argv = sys.argv[1:2]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
+
+
+def run_guard(guard, hook, raw_stdin=None, env=None, block=()):
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
+    argv = [sys.executable, guard]
+    if block:
+        argv = [sys.executable, "-c", BLOCK_IMPORTS_CODE, guard, json.dumps(list(block))]
     run = subprocess.run(
-        [sys.executable, guard],
+        argv,
         input=stdin_text,
         capture_output=True,
         text=True,
@@ -1070,9 +1085,18 @@ class PickGuardTests(unittest.TestCase):
 
     PAGE = "https://claude.ai/artifact/waitpage1"
     OTHER = "https://claude.ai/artifact/otherrepo9"
-    PICK = ("> **Done** OTHER read the code\n"
-            "> **Input Needed** Two ways:\n> A (my pick): fold the guard\n> B: add a second hook\n"
-            "> **Next** wait")
+    # The line a pick carries in its Input Needed item (rule question-departs): what is on main, and what changes.
+    DEPARTS_LINE = "Departs from: lint/report_guard.py pick check — it also needs a Departs from line"
+    PICK_BARE = ("> **Done** OTHER read the code\n"
+                 "> **Input Needed** Two ways:\n> A (my pick): fold the guard\n> B: add a second hook\n"
+                 "> **Next** wait")
+    PICK = PICK_BARE.replace("> **Next** wait", "> " + DEPARTS_LINE + "\n> **Next** wait")
+    # The page link sits inside the report, on the Next line: a landed turn's report ends the reply.
+    PICK_LINKED = PICK.replace("> **Next** wait", "> **Next** wait " + PAGE)
+    PICK_BARE_LINKED = PICK_BARE.replace("> **Next** wait", "> **Next** wait " + PAGE)
+    FORM_LINES = ["Goal: the stamp check runs in the lint job",
+                  "Problem (risk): the pick needs your word",
+                  "Based on (read): the report guard reads the Input Needed item"]
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1083,7 +1107,7 @@ class PickGuardTests(unittest.TestCase):
         with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as f:
             json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
 
-    def verdict(self, reply, calls=(), landed=False, repo=None):
+    def verdict(self, reply, calls=(), landed=False, repo=None, block=()):
         records = [human("decide")]
         if landed:
             records.append(tool_use_msg("Bash", {"command": "git commit -m x"}))
@@ -1095,7 +1119,7 @@ class PickGuardTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                 "cwd": repo or self.repo}
-        run = run_guard(REPORT_GUARD, hook)
+        run = run_guard(REPORT_GUARD, hook, block=block)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -1197,8 +1221,8 @@ class PickGuardTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 reply = ("> **Done** OTHER read the code\n"
                          "> **Input Needed** Two ways. Ask in chat; after %s unanswered it goes to the "
-                         "waiting page.\n> A (my pick): fold the guard\n> B: add a second hook\n"
-                         "> **Next** wait") % phrase
+                         "waiting page.\n> A (my pick): fold the guard\n> B: add a second hook\n> "
+                         + self.DEPARTS_LINE + "\n> **Next** wait") % phrase
                 self.assertIsNone(self.verdict(reply))
 
     def test_pk_red_wait_needs_both_words_blocks(self):
@@ -1279,6 +1303,115 @@ class PickGuardTests(unittest.TestCase):
         for row in rows:
             with self.subTest(row=row):
                 self.assertIsNone(self.verdict(row))
+
+
+    # question-departs: a pick in Input Needed says how it departs from main, on the landed and the unlanded turn.
+    # The line is judged by question_form, the one home of the rule, whatever the calls and the link.
+
+    def test_dp_red_pick_with_no_departs_line_blocks(self):
+        # Catches: a pick with a box or a link and no Departs from line, which the form never judges.
+        for landed in (False, True):
+            for calls, reply in (([("AskUserQuestion", {}, False)], self.PICK_BARE),
+                                 ([], self.PICK_BARE_LINKED)):
+                with self.subTest(landed=landed, control=calls or "link"):
+                    out = self.verdict(reply, calls, landed=landed)
+                    self.assertIsNotNone(out, "the pick passed with no Departs from line")
+                    self.assertEqual(out["decision"], "block")
+                    self.assertRegex(out["reason"], r"(?i)departs from")
+
+    def test_dp_red_bad_line_blocks(self):
+        # Catches: an empty line, a side left empty, no separator, and a line that restates main.
+        rows = ("> Departs from:",
+                "> Departs from: lint/report_guard.py pick check —",
+                "> Departs from: — the check reads the box",
+                "> Departs from: lint/report_guard.py pick check",
+                "> Departs from: agent-model-cap — Opus above the row stays the existing ask")
+        for line in rows:
+            for landed in (False, True):
+                with self.subTest(line=line, landed=landed):
+                    reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
+                    out = self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed)
+                    self.assertIsNotNone(out, "the pick passed with a line that is not a departure")
+                    self.assertEqual(out["decision"], "block")
+                    self.assertRegex(out["reason"], r"(?i)departs from")
+
+    def test_dp_red_line_outside_input_needed_blocks(self):
+        # Catches: a Departs from line in Done or Next, not in the Input Needed item the pick sits in.
+        in_done = self.PICK_BARE.replace("> **Input Needed**", "> " + self.DEPARTS_LINE + "\n> **Input Needed**")
+        in_next = self.PICK_BARE + "\n> " + self.DEPARTS_LINE
+        for reply in (in_done, in_next):
+            with self.subTest(reply=reply):
+                out = self.verdict(reply, [("AskUserQuestion", {}, False)])
+                self.assertIsNotNone(out, "the pick passed with its line outside Input Needed")
+                self.assertEqual(out["decision"], "block")
+
+    def test_dp_green_valid_line_passes(self):
+        # Catches: a valid line refused, on either turn, with the box or the link, and with a hyphen separator.
+        hyphen = self.PICK_BARE.replace("> **Next** wait",
+                                        "> Departs from: lint/report_guard.py pick check - it also needs a line\n"
+                                        "> **Next** wait")
+        for landed in (False, True):
+            with self.subTest(landed=landed):
+                self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], landed=landed))
+                self.assertIsNone(self.verdict(self.PICK_LINKED, [self.page_set()], landed=landed))
+        self.assertIsNone(self.verdict(hyphen, [("AskUserQuestion", {}, False)]))
+
+    def test_dp_green_no_pick_needs_no_line(self):
+        # Catches: an Input Needed item with no pick refused for its missing line (out of scope).
+        rows = ("> **Done** OTHER read it\n> **Input Needed** Should the guard also cover Codex? I wait.\n> **Next** wait",
+                "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait")
+        for row in rows:
+            for landed in (False, True):
+                with self.subTest(row=row, landed=landed):
+                    self.assertIsNone(self.verdict(row, landed=landed))
+
+    def test_dp_one_predicate_for_the_report_and_the_chat_box(self):
+        # Catches: a report copy of the rule that judges a line the chat box does not. Both read question_form.
+        import question_form  # the one home of the rule (hooks/ is on sys.path)
+        bad = ["> Departs from:", "> Departs from: agent-model-cap — Opus above the row stays the existing ask"]
+        for line in bad:
+            with self.subTest(line=line):
+                reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
+                out = self.verdict(reply, [("AskUserQuestion", {}, False)])
+                box = {"questions": [{"question": "\n".join(self.FORM_LINES + [line[2:]]), "header": "Ship",
+                                      "multiSelect": False,
+                                      "options": [{"label": "Keep it", "description": "Gain: a. Lose: b."},
+                                                  {"label": "Drop it", "description": "Gain: c. Lose: d."}]}]}
+                self.assertEqual(question_form.chat_hit(box)[0], "question-departs")
+                self.assertIsNotNone(out, "the report passed a line the chat box refuses")
+        good = "> " + self.DEPARTS_LINE
+        self.assertIsNone(self.verdict(self.PICK_BARE.replace("> **Next** wait", good + "\n> **Next** wait"),
+                                       [("AskUserQuestion", {}, False)]))
+
+    def test_dp_no_copy_the_report_imports_question_form(self):
+        # A presence check only: the verdict cases above pin the behaviour. The report reads the form's
+        # predicate by import, so one edit to question_form moves both routes.
+        with open(REPORT_GUARD, encoding="utf-8") as f:
+            source = f.read()
+        self.assertRegex(source, r"(?m)^\s*(?:import question_form|from question_form import)")
+
+    def test_dp_import_failure_keeps_the_pick_refusal(self):
+        # Catches: question_form cannot import, so the Departs from check raises. On the unlanded turn the
+        # pick refusal and that check share one try, so the error drops the pick refusal too. The Departs
+        # from check fails open: no Departs-from reason prints, and the pick refusal still does.
+        for label, reply in (("valid line", self.PICK), ("no line", self.PICK_BARE)):
+            for landed in (False, True):
+                with self.subTest(line=label, landed=landed):
+                    out = self.verdict(reply, landed=landed, block=("question_form",))
+                    self.assertIsNotNone(out, "the pick passed with question_form unable to import")
+                    self.assertEqual(out["decision"], "block")
+                    self.assertIn("Pick guard", out["reason"])
+                    self.assertNotIn("Departs-from guard", out["reason"])
+
+    def test_dp_green_line_forms_in_input_needed_pass(self):
+        # Catches: a Departs from line written as a bullet or a bold label refused as missing. A bold label
+        # reads as a new report label, which ends the Input Needed item at that line.
+        text = "lint/report_guard.py pick check — it also needs a Departs from line"
+        for line in ("> - Departs from: " + text, "> **Departs from:** " + text, "> * Departs from: " + text):
+            for landed in (False, True):
+                with self.subTest(line=line, landed=landed):
+                    reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
+                    self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
 
 
 class ConfigReportTests(unittest.TestCase):

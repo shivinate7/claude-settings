@@ -755,6 +755,7 @@
 - owner-message-default-priority: whether `send_message` with no `priority` interrupts the target's running turn is unverified. Decision: auto-mode-owner-acts.
 - owner-pr-close-any-author: the PR bound is the `shivinate7` repo, not the PR author, so a contributor's named PR can be closed. A reopen undoes it. Decision: auto-mode-owner-acts.
 - auto-mode-entries-unrun: the tests pin entry text only. No classifier run shows an incident allowed or a "Never covers" form refused. Decision: auto-mode-owner-acts.
+- question-departs-edges: `lint/report_guard.py` LABEL_RE skips a bold "**Departs from:**" line, so one outside Input Needed can give a Done item its PR ref or sit before Done. A change side of only "<what changes>." with a period passes. A `str_replace` with no label in old or new is not judged. A label in mid-line is refused. Decision: port-keeps-behaviour.
 - trust-card-in-build-same-message-order: a `get_session` and a `set_session_tags` in one message can be read in the wrong order, so the guard misjudges the tags. Decision: session-tiers.
 - trust-card-in-build-denial-no-cause: a fail-closed denial logs no cause in guard.log, so the reason is lost. Decision: session-tiers.
 - set-waiting-page-usage-exit: `layout.py set-waiting-page` with the wrong number of arguments exits 1, the code that also means "already set". Decision: session-tiers.
@@ -797,3 +798,6 @@
 - draft-step-stands-wording: the draft step prints "The green run stands." on a draft, where CI skipped the run. Wording only (review round 3 of PR #895). Decision: records-index-at-merge.
 - frozen-redirect-and-word: `echo x >&settings.json` from the config dir writes the file `settings.json` and the frozen-path rule allows it; same on main (hooks/guard_frozen.py).
 - frozen-copy-read-amp-redirect: `cp /tmp/x <frozen> &> /dev/null` is allowed because `_copy_reads` reads the bare `&` of `&>` as an operand, so the frozen DEST counts as a source; same on main (hooks/guard_frozen.py).
+- stale-stamped-tree-called-live-pin: session_start.sh calls an old `<clone>-live-<hex>` tree "the live pin" after the link has moved on, though hooks/guard_frozen.py leaves it writable; the cd advice still holds (hooks/session_start.sh)
+- pin-line-silent-on-failed-listing: when the worktree listing fails inside a pin, no pin line prints and the unknown line names only the agent count (hooks/session_start.sh)
+- pin-name-fifth-copy: install.ps1 also builds `<clone>-live`, which the copy list in install.sh's comment omits (install.sh, install.ps1)
