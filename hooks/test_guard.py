@@ -103,6 +103,7 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
+    "debug-port-ask": "a launch that opens a remote-debugging port, or a WebView2 env value that holds one, asks; text that only names the flag is allowed",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
@@ -11803,6 +11804,75 @@ def run_folder_sweep_case():
 FIXTURELESS_CHECKS.add(run_folder_sweep_case)
 LOG_CHECKS_EXTRA.append(("temp: the sweep removes an old sibling run folder and keeps a new one",
                          run_folder_sweep_case))
+
+
+# --------------------------------------------------------------------------- a debug port asks
+FAMILY = "debug-port-ask"
+#
+# Rule debug-port-ask: a launch that opens a remote-debugging port (either flag form, any value), or a
+# WebView2 environment value that holds one, ASKS. Impeccable 4.8.0's reference steps tell an agent to
+# start such a port, and main opens none without the owner (rule building-port-keeps-behaviour). Text
+# that only names the flag is no launch, so it stays an allow.
+
+sh("debug-port: electron with an equals-form port asks", "electron . --remote-debugging-port=9222",
+   "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: an app bundle with a space-form port asks",
+   "/Applications/Foo.app/Contents/MacOS/Foo --remote-debugging-port 9222", "ask",
+   "debug-port-ask", cwd=NOGIT)
+sh("debug-port: chromium headless on port zero asks",
+   "chromium --headless --remote-debugging-port=0 about:blank", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a WebView2 value on the launch line asks",
+   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 ./app.exe", "ask",
+   "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a WebView2 value with other arguments asks",
+   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--disable-gpu --remote-debugging-port=9222\" ./app.exe",
+   "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: an export of a WebView2 value that holds the port asks",
+   "export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a PowerShell set of a WebView2 value alone asks",
+   "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+# ask-alone (ask-commands-run-alone) denies a chained ask command, and `$env:NAME=value;` is no harmless
+# lead, so this chained form asks only once that lead is added. The lone form above pins the ask itself.
+sh("debug-port: a PowerShell set of a WebView2 value, then a launch, asks",
+   "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"; .\\app.exe", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a launch inside bash -c asks",
+   "bash -c 'electron . --remote-debugging-port=9222'", "ask", "debug-port-ask", cwd=NOGIT)
+
+# A quoted argument is text, so a comment opener, a lone apostrophe or a line break in it does not
+# end the scan. Each case is one command, so ask-alone does not apply to it.
+sh("debug-port: a hash opener in a quoted argument does not hide the port",
+   "electron . --title \"# dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a double-slash opener in a quoted argument does not hide the port",
+   "electron . --title \"// dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a block opener in a quoted argument does not hide the port",
+   "electron . --title \"/* dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a lone apostrophe in a quoted argument does not hide the port",
+   "electron . --title \"it's dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a line break in a quoted argument does not hide the port",
+   "electron . --title \"dev\nbuild\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+
+# Text that names the flag is no launch, and it stays an allow.
+sh("debug-port: a grep of the skills folder for the flag is allowed",
+   "grep -rn remote-debugging-port skills/", "allow", cwd=NOGIT)
+sh("debug-port: an echo that names the flag is allowed",
+   "echo \"use --remote-debugging-port to attach\"", "allow", cwd=NOGIT)
+sh("debug-port: a commit message that names the flag is allowed",
+   "git commit -m \"note --remote-debugging-port\"", "allow", cwd=NOGIT)
+sh("debug-port: a cat of the impeccable audit reference is allowed",
+   "cat skills/impeccable/reference/audit.md", "allow", cwd=NOGIT)
+sh("debug-port: an impeccable detect over CDP is allowed",
+   "npx impeccable detect --cdp 9222 src/pages", "allow", cwd=NOGIT)
+sh("debug-port: a hash opener in an echo that names the flag is allowed",
+   "echo \"# --remote-debugging-port=9222\"", "allow", cwd=NOGIT)
+sh("debug-port: a lone apostrophe in an echo that names the flag is allowed",
+   "echo \"it's --remote-debugging-port text\"", "allow", cwd=NOGIT)
+sh("debug-port: a multi-line echo that names the flag is allowed",
+   "echo \"start\nuse --remote-debugging-port to attach\nend\"", "allow", cwd=NOGIT)
+sh("debug-port: a WebView2 value without a port is allowed",
+   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu ./app.exe", "allow", cwd=NOGIT)
 
 
 # --------------------------------------------------------------------------- a port question departs or is not asked
