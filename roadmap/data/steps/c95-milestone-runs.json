@@ -1,9 +1,9 @@
 {
   "title": "Full CI runs at milestones, once enough has landed, not on every merge",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "done",
   "order": 103.3031,
   "why": "Step 3 of shiv's ruling on c95, Oct 27 12:07 CDT (item 31, e): trust first, then cut in steps, each only past its measured bar, stepping back on a miss; step 3 is milestone runs. Split out of c95 on Oct 31 (coordinator, 18:12 CDT): no PR covers it.",
-  "note": "Starts after c95 part 2 (#896) lands and the bar for step 3 is measured. Rulings that bound it: item 38 a (Oct 28 13:23 CDT), no Actions minutes are billed in claude-settings ($0); item 34 b (13:40 CDT), step 2 stays off here and ports to repos that pay for minutes. So step 3 may also be off here and port to paying repos; the lane reads the escapes plan (plans/c95-step2-escapes.md) and names its bar before any build. A cut that needs a pick the rulings do not give goes to the waiting page. Done check: the lane names the measured bar and either builds the milestone trigger (a full run once N lanes or a named milestone has landed, red on a fixture where it skips too long) or records that step 3 stays off here, with the reason. Port: to repos that pay for minutes.",
-  "updatedAt": "2026-10-31T23:12:00Z"
+  "note": "Starts after c95 part 2 (#896) lands and the bar for step 3 is measured. Rulings that bound it: item 38 a (Oct 28 13:23 CDT), no Actions minutes are billed in claude-settings ($0); item 34 b (13:40 CDT), step 2 stays off here and ports to repos that pay for minutes. So step 3 may also be off here and port to paying repos; the lane reads the escapes plan (plans/c95-step2-escapes.md) and names its bar before any build. A cut that needs a pick the rulings do not give goes to the waiting page. Done check: the lane names the measured bar and either builds the milestone trigger (a full run once N lanes or a named milestone has landed, red on a fixture where it skips too long) or records that step 3 stays off here, with the reason. Port: to repos that pay for minutes. Outcome (coordinator, Oct 31 20:08 CDT; lane session_013NEJKzLPYtL4vUt7Fwmuio measured the bar Oct 31): step 3 stays off in claude-settings. 39 main runs since Oct 28: 33 green first try, 3 green on re-run, 3 red that only a main run caught. Minutes cost $0. About 0 wait is saved: merges never wait on the main run (median 29.7 min, 26 runs), and the main run feeds the red-main check. Port: to repos that pay for minutes, with the same read and that repo's price.",
+  "updatedAt": "2026-11-01T01:08:00Z"
 }
