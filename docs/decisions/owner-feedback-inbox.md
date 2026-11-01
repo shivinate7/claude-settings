@@ -75,9 +75,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
 - **Repos.** `repo` items (feedback about another repo): the home is `repo:<owner>/<name>`. The guard
   checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
   It blocks until the transcript shows, after the owner's message, a send_message or SendMessage whose
-  text names `<owner>/<name>` as a whole token. Letter case does not count, and a trailing period or a
-  URL path after the name still counts; each part of the home is letters, digits, `.`, `_` or `-`, and
-  any other home is malformed and blocks. Same anchoring and owner-record rules as Pages; same
+  text names `<owner>/<name>` as a whole token. Letter case is ignored; a trailing period or URL path
+  still counts; a home part that is not letters, digits, `.`, `_` or `-` is malformed and blocks. Same
+  anchoring and owner-record rules as Pages; same
   stand-downs. Cost: the one transcript read Pages makes, per Stop, only while an open page or repo item
   exists. No file written, no process started. Risk kind: likely risk (owner-named gap, 2026-11-01).
   Landed 2026-11-01. Known gap: the guard cannot tell the send went to that repo's triage, only that it
