@@ -437,7 +437,8 @@ use_main_mirror() {
 
 # Cloud, a session's own checkout (no marker): a cloud session starts it detached at its creation commit, so its
 # hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
-# holds moves to origin/$REF, so nothing is lost. A branch, a dirty tree or a commit main lacks stays as it is and is
+# holds moves to origin/$REF, so nothing is lost. A clean branch checkout at the tip of origin/$REF stays the source as it is.
+# Another branch, a dirty tree or a commit main lacks stays as it is and is
 # not the source: use_main_mirror takes the install's files from $REF, so no old branch's hooks go live.
 # When $REF cannot be fetched, the checkout stays the source as before, with a WARN.
 # The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
@@ -446,8 +447,19 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
    && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
   own_not_source=0
   if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
-    log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
-    own_not_source=1
+    # A clean branch checkout at the tip of origin/$REF already holds $REF's files: it stays the source, untouched.
+    # A failed fetch (or no origin remote) compares with the origin/$REF ref the checkout already has.
+    own_tip=
+    if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
+      cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null
+      own_tip=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
+    fi
+    if [ -n "$own_tip" ] && [ "$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)" = "$own_tip" ]; then
+      log "the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD) at the $REF tip; it stays the source"
+    else
+      log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
+      own_not_source=1
+    fi
   elif [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
     log "WARN: the checkout $SRC has uncommitted changes; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
     own_not_source=1
