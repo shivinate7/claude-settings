@@ -738,9 +738,10 @@ def case_guard_reads_only_its_own_session():
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked"
 
 
-def homed(cfg, sid, items, handoff_ids=(), cwd=None):
-    """Writes one jotted message and a handoff that holds `handoff_ids`, then runs the guard."""
-    write_file(inbox_of(cfg, sid), render_block("homes burst", items=items))
+def homed(cfg, sid, items, handoff_ids=(), cwd=None, text="homes burst"):
+    """Writes one jotted message and a handoff that holds `handoff_ids`, then runs the guard. A
+    multi-line `text` makes the message a burst."""
+    write_file(inbox_of(cfg, sid), render_block(text, items=items))
     write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s\n" % i for i in handoff_ids))
     return guard(cfg, sid, cwd=cwd)
 
@@ -855,7 +856,7 @@ APPLE_LATER = "2026-10-31 21:05 CDT (UTC-05:00)"
 APPLE_BURST = ("Router note for the handoff:\n"
                "filed the ruling in router.md\n"
                "and the handoff, not the inbox.")
-FIXTURE_RULING_HOMES = ("decisions/", "CLAUDE.md")  # the fixture's tracked ruling homes
+FIXTURE_RULING_HOME = "CLAUDE.md"  # a ruling home the fixture tracks; the guard prints it in the list
 
 
 def example_item_in(reason):
@@ -894,18 +895,15 @@ def case_guard_apple_tv_burst_names_where_items_go():
 def case_guard_router_home_names_the_tracked_ruling_homes():
     """A ruling homed to a tracked file that is no ruling home. The reason says so, and names a
     ruling home the fixture repo has."""
-    cfg, sid = new_cfg(), "router-home"
-    write_file(inbox_of(cfg, sid),
-               render_block("Ruling filed in the router.\nSee the handoff.\nDone for now.",
-                            items=("- fb-2021-1 [ruling] -> router.md",)))
-    write_file(handoff_of(cfg, sid), "# Handoff\n")
-    p = guard(cfg, sid)
+    cfg = new_cfg()
+    p = homed(cfg, "router-home", ("- fb-2021-1 [ruling] -> router.md",),
+              text="Ruling filed in the router.\nSee the handoff.\nDone for now.")
     expect_block("router home: a ruling homed to router.md blocks", p, named=("fb-2021-1",))
     reason = block_reason(p) or ""
     check("router home: the reason says router.md is not a tracked ruling home",
           "router.md is not a tracked ruling home" in reason, reason)
     check("router home: the reason names a ruling home path the fixture repo has",
-          any(h in reason for h in FIXTURE_RULING_HOMES), reason)
+          FIXTURE_RULING_HOME in reason, reason)
 
 
 # --------------------------------------------------------------------------- page cases
