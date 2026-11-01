@@ -4311,6 +4311,10 @@ sh("detached: Start-Process with neither -Wait nor -PassThru",
 sh("detached: Start-Process -WindowStyle Hidden still denies without -Wait or -PassThru",
    "Start-Process notepad.exe -WindowStyle Hidden", "deny", "detached-launch",
    tool="PowerShell", cwd=NOGIT)
+# The array form of a launch with a debug port is a detached launch, so detached-launch owns the deny.
+sh("detached: a Start-Process array argument list with a remote-debugging port is denied",
+   "Start-Process app.exe -ArgumentList '--disable-gpu','--remote-debugging-port=9222'", "deny",
+   "detached-launch", tool="PowerShell", cwd=NOGIT)
 sh("detached: a PowerShell assignment ahead of Start-Process is still read, MEASURED wrongly "
    "missed before _skip_assignments_and_keywords learned $name =",
    '$bad = Start-Process npx -ArgumentList "server.js"', "deny", "detached-launch",
