@@ -3743,10 +3743,18 @@ move_fixture() {
   git -C "$co" checkout -q --detach "$old"
   write_redirect "$h" "$fx/bare.git"
 }
+# move_install [file]: one cloud install in $co. With "file", the checkout's own install.sh runs by path, so the install
+# takes the checkout as its folder, as test_action.py runs it. Without it, install.sh is piped, as a cloud setup runs it.
 move_install() {
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  if [ "${1:-}" = file ]; then
+    out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
+          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
+          bash "$co/install.sh" --cloud 2>&1)
+  else
+    out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
+          CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
+          bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  fi
   rc=$?
 }
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
@@ -4054,6 +4062,48 @@ caseM9() {
   ok "$name"
 }
 
+# caseM10: a clean checkout on branch main, at its origin/main tip, already holds main's files, so it is the install's
+# source and no mirror is cloned. The defect: the own-checkout block sends any checkout on a branch to the mirror before it
+# checks the head. Two forms: the origin fetch succeeds through the redirect; or the clone has no origin remote and
+# refs/remotes/origin/main is HEAD, as test_action.py sets up its scratch clone. m10_run FORM prints the first failure and
+# returns 1. FORM is fetch or noremote. Reads co, want, h and fx from move_fixture.
+m10_run() {
+  move_fixture "m10$1" stale
+  if ! msg=$(stale_fixture_ok); then printf 'FIXTURE %s' "$msg"; return 1; fi
+  git -C "$co" checkout -q main
+  if [ "$1" = noremote ]; then
+    git -C "$co" remote remove origin
+    git -C "$co" update-ref refs/remotes/origin/main HEAD
+    # Without an origin remote, install.sh finds the checkout only by its own folder, so the install runs from the file.
+    if ! cmp -s "$INSTALL_SH" "$co/install.sh"; then printf 'FIXTURE the checkout holds another install.sh than the one under test'; return 1; fi
+  fi
+  if [ "$(git -C "$co" symbolic-ref --short HEAD)" != main ] || [ -n "$(git -C "$co" status --porcelain)" ] \
+     || [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$co" rev-parse refs/remotes/origin/main)" != "$want" ]; then
+    printf 'FIXTURE the checkout is not a clean main at its origin/main tip [%s]' "$want"; return 1
+  fi
+  if [ "$1" = noremote ]; then move_install file; else move_install; fi
+  if [ $rc -ne 0 ]; then printf 'install.sh exited %s: %s' "$rc" "$(install_problems)"; return 1; fi
+  if [ -e "$h/claude-settings-main" ]; then printf 'a mirror was cloned at %s' "$h/claude-settings-main"; return 1; fi
+  if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$co")" ]; then
+    printf 'the install source is [%s], want the checkout [%s]' "$(installed_src "$h/.claude-cfg" "$h")" "$co"; return 1
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then printf '%s' "$mm"; return 1; fi
+  if [ "$(git -C "$co" symbolic-ref --short HEAD 2>/dev/null)" != main ] || [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] \
+     || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    printf 'the checkout was moved or changed'; return 1
+  fi
+  return 0
+}
+
+caseM10() {
+  if ! command -v jq >/dev/null 2>&1; then skip "caseM10" "jq not found"; return; fi
+  name="caseM10 (fetch): a clean checkout on main at its origin/main tip is the source, the origin fetch succeeds, and no mirror is cloned"
+  if msg=$(m10_run fetch); then ok "$name"; else bad "$name" "$msg"; fi
+  name="caseM10 (noremote): a clean checkout on main at refs/remotes/origin/main, with no origin remote, is the source, and no mirror is cloned"
+  if msg=$(m10_run noremote); then ok "$name"; else bad "$name" "$msg"; fi
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -4173,6 +4223,7 @@ run caseM6
 run caseM7
 run caseM8
 run caseM9
+run caseM10
 run pinmove1
 run pinmove2
 run pinmove3
