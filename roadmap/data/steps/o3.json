@@ -1,9 +1,9 @@
 {
-  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Checked Oct 26: mailaudit's CLAUDE.md is 478 lines (37d4e7d) and banchi's 399 (e910e8a); q_max 182 (b47bd00), claude-settings 106, home-app 30. Two repos are over 200 lines. The method comes from o14: move sections that govern one folder into path-scoped rules. banchi's docs-audit 'rule enforcement' row parses CLAUDE.md, so a move there changes that check too. Merged in from o14 (triage, Oct 26): the banchi or mailaudit pilot. In Roll out (triage, Oct 26). Due after: o2's claude-settings half, then the roll-out visits in order, c42 first (triage, Oct 27: not a cloud lane today).",
-  "order": 345,
-  "phase": "rollout",
-  "status": "todo",
-  "title": "Shrink each CLAUDE.md toward 200 lines",
-  "updatedAt": "2026-10-27T17:52:00Z",
-  "why": "Long files cost context and lower how well rules are followed. Keep AGENTS.md as a symlink."
+ "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Checked Oct 26: mailaudit's CLAUDE.md is 478 lines (37d4e7d) and banchi's 399 (e910e8a); q_max 182 (b47bd00), claude-settings 106, home-app 30. Two repos are over 200 lines. The method comes from o14: move sections that govern one folder into path-scoped rules. banchi's docs-audit 'rule enforcement' row parses CLAUDE.md, so a move there changes that check too. Merged in from o14 (triage, Oct 26): the banchi or mailaudit pilot. In Roll out (triage, Oct 26). Due after: o2's claude-settings half, then the roll-out visits in order, c42 first (triage, Oct 27: not a cloud lane today).\nDoing, Nov 1: banchi session_013NEJL3SffaYSu5tzgYVhAv; mailaudit session_013NEJKzn1fifK4dRyquE9WH. home held. Owner go, Nov 1 17:26 CST (coordinator chat): every repo but home may start; home is held while the owner works there. This answers the pause warning (page item 16 a) for every repo but home.",
+ "order": 345,
+ "phase": "rollout",
+ "status": "doing",
+ "title": "Shrink each CLAUDE.md toward 200 lines",
+ "updatedAt": "2026-11-01T23:29:00Z",
+ "why": "Long files cost context and lower how well rules are followed. Keep AGENTS.md as a symlink."
 }

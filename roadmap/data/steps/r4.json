@@ -1,9 +1,9 @@
 {
-  "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Checked Oct 26 at q_max b47bd00: all six homes still hold design truth. design/ (mockups, w15-layers), specs/ (design-audit, engine-design, grouping-design and more), docs/design.md (1,534 lines), docs/rules/ (ui-primitives among 14 files), src/styles.md (189 lines) and brand/ (four logo files). This is q_max's part of o2 (one layout, one DESIGN.md per repo). Not started. Due after: o2's claude-settings half, then the roll-out visits in order, c42 first (triage, Oct 27: not a cloud lane today).",
-  "order": 340,
-  "phase": "rollout",
-  "status": "todo",
-  "title": "q_max: merge its six design homes into one DESIGN.md",
-  "updatedAt": "2026-10-27T17:52:00Z",
-  "why": "design/, specs/, docs/design.md, docs/rules/, src/styles.md and brand/ all hold design truth today. One home is how its agents find the look."
+ "note": "Ruling, Oct 26 (shiv, page item 16, a): roll out one visit per repo, after o2's layout move, with c42 first; before each visit, warn you which sessions in that repo to pause. Waits on o2. Checked Oct 26 at q_max b47bd00: all six homes still hold design truth. design/ (mockups, w15-layers), specs/ (design-audit, engine-design, grouping-design and more), docs/design.md (1,534 lines), docs/rules/ (ui-primitives among 14 files), src/styles.md (189 lines) and brand/ (four logo files). This is q_max's part of o2 (one layout, one DESIGN.md per repo). Not started. Due after: o2's claude-settings half, then the roll-out visits in order, c42 first (triage, Oct 27: not a cloud lane today).\nDoing, Nov 1: q_max lane session_013NEJL2hUNJQEdygCh3zSxo. Owner go, Nov 1 17:26 CST (coordinator chat): every repo but home may start; home is held while the owner works there. This answers the pause warning (page item 16 a) for every repo but home.",
+ "order": 340,
+ "phase": "rollout",
+ "status": "doing",
+ "title": "q_max: merge its six design homes into one DESIGN.md",
+ "updatedAt": "2026-11-01T23:29:00Z",
+ "why": "design/, specs/, docs/design.md, docs/rules/, src/styles.md and brand/ all hold design truth today. One home is how its agents find the look."
 }
