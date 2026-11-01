@@ -68,11 +68,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
     recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
     Never use the key `none`. The page adds its own "None of these" option
-    with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
       `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
       On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
-      A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
+      A `pick` that does not fit the kind of item is not shown: no star. A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
     `gain` and `lose`. The writer refuses a decision without it (guard rules `question-form` and `owner-judge`). A decision with
@@ -109,9 +109,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
-  a note with no `done`. "Take my pick", and a pick that
-  stands, write `choice` equal to `pick`, with the note `accepted pick`. On a `multi` item `choice` is a
-  list of option keys, in rank order when `ranked` and in option order otherwise. "Take my pick" writes the whole `pick` list in that order. "None of these" writes
+  a note with no `done`. A pick that stands writes `choice` equal to `pick`, with the note
+  `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
+  list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `pick` list in that order. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
@@ -236,7 +236,7 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
      and a one-sentence `why`. Set `group` on both items.
    - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
-     The page hides "Take my pick" when the ticks equal `pick`, and shows none when `pick` is not valid.
+     The page stars no option when `pick` is not valid.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
