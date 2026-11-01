@@ -748,7 +748,7 @@ def _real_process_start_ms(pid):
             return value // 10000 - 11644473600000
         finally:
             kernel32.CloseHandle(handle)
-    now_ms = time.time() * 1000  # read before ps runs, so ps's own latency does not count as run time
+    now_ms = time.time() * 1000  # ps latency inflates etime, so this reads early by that latency
     result = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
                              capture_output=True, text=True, timeout=5)
     text = result.stdout.strip()
@@ -14692,7 +14692,7 @@ def process_start_ms_case():
     got_alive = guard._process_start_ms(self_pid)
     if not isinstance(got_alive, int) or isinstance(got_alive, bool):
         problems.append("alive: did not return an int: %r" % (got_alive,))
-    # Both reads floor to whole seconds, so a fresh child can differ by over 2 s; an hour is 3600000 ms.
+    # lstart (boot time) and etime (uptime) each floor to whole seconds on different clocks, so a fresh child can differ by over 2 s; an hour is 3600000 ms.
     elif abs(got_alive - want_alive) > 5000:
         problems.append("alive: got %r want near %r" % (got_alive, want_alive))
 
