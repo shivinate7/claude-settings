@@ -1,9 +1,9 @@
 {
-  "title": "ponytail stops on shiv's computer too, not only in the cloud",
-  "phase": "cleanup",
-  "status": "todo",
-  "order": 103.3377,
-  "why": "Incident (shiv's bridge session \"Ponytail plugin setup audit\", Nov 1 16:34 CST, via coordinator): ponytail 4.10.0 is still active on his computer although enabledPlugins sets it false; cloud sessions stopped printing its banner after #951 merged (12:38 CST).",
-  "note": "Follow-up of ponytail-off-deep-dive (done, #951). Find why a false enabledPlugins entry does not stop ponytail locally: a second settings file that enables it (user, project or local scope), a plugin install scope the repo's settings do not reach, or a hook copied outside the plugin; then turn it off in its one home. Done check: a fresh local session prints no ponytail banner. Needs a session on his computer: the cloud cannot read his install scope. His bridge sessions run there, so one can read it. Needs no answer. Placed after playwright-cache-os-key (triage 5). On the page as task item 140 (Nov 1 16:57 CST): no folder of his is shared through Remote Control, so no session here can reach his computer.",
-  "updatedAt": "2026-11-01T23:06:00Z"
+ "title": "ponytail stops on shiv's computer too, not only in the cloud",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.3377,
+ "why": "Incident (shiv's bridge session \"Ponytail plugin setup audit\", Nov 1 16:34 CST, via coordinator): ponytail 4.10.0 is still active on his computer although enabledPlugins sets it false; cloud sessions stopped printing its banner after #951 merged (12:38 CST).",
+ "note": "Follow-up of ponytail-off-deep-dive (done, #951). Find why a false enabledPlugins entry does not stop ponytail locally: a second settings file that enables it (user, project or local scope), a plugin install scope the repo's settings do not reach, or a hook copied outside the plugin; then turn it off in its one home. Done check: a fresh local session prints no ponytail banner. Needs a session on his computer: the cloud cannot read his install scope. His bridge sessions run there, so one can read it. Needs no answer. Placed after playwright-cache-os-key (triage 5). On the page as task item 140 (Nov 1 16:57 CST): no folder of his is shared through Remote Control, so no session here can reach his computer.\nNov 1 17:56 CST: the owner removed ponytail on the PC and confirmed it gone in the desktop app (page item 140 done). Open: why the shared off setting did not stop it.",
+ "updatedAt": "2026-11-01T23:59:00Z"
 }

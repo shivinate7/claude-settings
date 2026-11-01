@@ -4,6 +4,6 @@
  "status": "todo",
  "order": 103.21,
  "why": "shiv, Oct 30 16:14 CDT (via coordinator): pick a on the setup gaps.",
- "note": "Waits on shiv sharing a folder through Remote Control. Then a session attached to that folder runs the acts cloud sessions are refused. Done check: one such act runs from the Mac session with no hand-off to shiv.\nPlaced first among build steps (triage, c55 pass Nov 1): one folder share unblocks about ten steps that need the owner's computer (page item 144, share-folder-remote-control).",
- "updatedAt": "2026-11-01T23:32:00Z"
+ "note": "Waits on shiv sharing a folder through Remote Control. Then a session attached to that folder runs the acts cloud sessions are refused. Done check: one such act runs from the Mac session with no hand-off to shiv.\nPlaced first among build steps (triage, c55 pass Nov 1): one folder share unblocks about ten steps that need the owner's computer (page item 144, share-folder-remote-control).\nNov 1 17:56 CST: the app's Add folder is offered only on local sessions, so the owner could not add one. Path left: run claude remote-control in the folder from a terminal (page item 144). The owner reports cloud sessions working on his folders before; not yet explained.",
+ "updatedAt": "2026-11-01T23:59:00Z"
 }
