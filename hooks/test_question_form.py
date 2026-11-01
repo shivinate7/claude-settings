@@ -95,6 +95,7 @@ WIDE = getattr(question_form, "WIDENS_TEXT", None) or "<WIDENS_TEXT missing from
 WIDENS_HOMES = ("skills/waiting-page/page.html", "skills/waiting-page/SKILL.md", "output-styles/shiv-stylisms.md",
                 "docs/decisions/uniform-over-variants.md", "docs/decisions/question-form.md")
 OLD_WIDENS_CARD = "uniform ruling (t18)"
+OLD_WIDENS_WORDS = "Goes against your " + OLD_WIDENS_CARD  # the card text before the plain words
 
 # Waiting item 92 as the writer sent it (Oct 30): a decision with a Goal line and no Problem line, no Based
 # on line, and a widening option 'b' not marked widens. It holds no personal data.
@@ -929,6 +930,14 @@ def case_departs_str_replace_forms():
 
 # ------------------------------------------------------------------ call_judge
 
+def refused_as_widening(name, label, description):
+    options = tcj.good_options()
+    options[0] = {"label": label, "description": description}
+    r = tcj.run_hook(tcj.question_input(box=tcj.good_box(options=options)), answer=tcj.ALLOW)
+    check(name, r.code == 0 and "uniform-pick" in r.reason() and r.log.count("\tdeny\tuniform-pick\t") == 1
+          and r.calls == [], tcj.detail(r))
+
+
 def case_call_judge():
     bad = tcj.good_box(problem=None)
     r = tcj.run_hook(tcj.question_input(box=bad), answer=tcj.ALLOW)
@@ -955,6 +964,19 @@ def case_call_judge():
     check("call_judge: a Recommended option that goes against the uniform ruling is refused as uniform-pick",
           r.code == 0 and "uniform-pick" in r.reason() and r.log.count("\tdeny\tuniform-pick\t") == 1
           and r.calls == [], tcj.detail(r))
+    # The old card words still mark a widening option, and the new words still mark it with a double space or a
+    # line break after "ruling:". Each is refused on the same path as the case above.
+    gain = "Gain: it lands today. Lose: two forms stay. "
+    refused_as_widening("call_judge: old card words in a Recommended option's description are refused as uniform-pick",
+                        "Allow the second form (Recommended)", gain + OLD_WIDENS_WORDS + ".")
+    refused_as_widening("call_judge: old card words in a Recommended option's label are refused as uniform-pick",
+                        "Allow the second form, " + OLD_WIDENS_WORDS + " (Recommended)", gain.rstrip())
+    refused_as_widening("call_judge: the new words with a double space after 'ruling:' are refused as uniform-pick",
+                        "Allow the second form (Recommended)",
+                        gain + WIDE.replace("ruling: ", "ruling:  ") + ".")
+    refused_as_widening("call_judge: the new words with a line break after 'ruling:' are refused as uniform-pick",
+                        "Allow the second form (Recommended)",
+                        gain + WIDE.replace("ruling: ", "ruling:\n") + ".")
     r = tcj.run_hook(tcj.question_input(), answer=tcj.ALLOW)
     check("call_judge: a good box is not refused by code and reaches the model once",
           r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, tcj.detail(r))
