@@ -130,7 +130,7 @@ def this_process_start_ms():
     return started
 
 
-# The repeated hour of 2026-11-01 in America/Chicago: the two 01:30s, as UTC epochs in ms.
+# The repeated hour of a fall-back night in America/Chicago: the two 01:30s, as UTC epochs in ms.
 REPEATED_HOUR_CDT_MS = int(datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc).timestamp()) * 1000
 REPEATED_HOUR_CST_MS = int(datetime(2026, 11, 1, 7, 30, tzinfo=timezone.utc).timestamp()) * 1000
 

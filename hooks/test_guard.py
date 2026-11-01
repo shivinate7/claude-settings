@@ -14744,7 +14744,7 @@ def process_start_ms_case():
     return (not problems), "; ".join(problems) if problems else "alive/dead/unreadable read apart"
 
 
-# The repeated hour of 2026-11-01 in America/Chicago: 01:00 to 02:00 happens twice. These are the
+# The repeated hour of a fall-back night in America/Chicago: 01:00 to 02:00 happens twice. These are the
 # two 01:30s. Both render as the same `ps` text, so the read alone decides which instant it gets.
 REPEATED_HOUR_CDT_MS = int(datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc).timestamp()) * 1000
 REPEATED_HOUR_CST_MS = int(datetime(2026, 11, 1, 7, 30, tzinfo=timezone.utc).timestamp()) * 1000
