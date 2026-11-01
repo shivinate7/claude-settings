@@ -62,7 +62,8 @@ ships in. Give a verdict per screen, never a description.<!-- rule:verification-
 Prefer a headless or isolated browser over my own, and use my login only when needed.<!-- rule:verification-browser-login-only-needed --> Before
 a window or a screen capture lands on my screen, say so in one line.<!-- rule:verification-announce-own-screen --> Trust a guard only once it goes red on
 the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
-spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
+spent, because the reader learns to scroll past it. Before you route around a refusal, read the
+guard's record. If it seems to allow the act, your report flags a possible false alarm.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
 and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
 on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-independent-of-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never dry-run a refusal list.<!-- rule:verification-never-dry-run-refusal-list --> Take the newest version that passes its checks. Read its changelog
 first. If it breaks a check, pin the newest one that passes and say why.<!-- rule:verification-newest-that-passes --> If this repo lints markdown, give every
