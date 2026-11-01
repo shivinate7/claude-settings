@@ -206,25 +206,91 @@ MUTATING_COMMAND = (
 )
 
 
-def writes_to(path: str, cmd: str) -> bool:
+def writes_to(path: str, cmd: str, written=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
-    mutates its arguments. Everything else is a mention.
+    mutates its arguments. Everything else is a mention. `written` holds the words a parsed
+    command writes (`_sed_operands`: the files of a `sed -i`), so a write the text match misses
+    still counts.
 
     Reading the TARGET of the redirect is what separates
     `echo x > .claude/settings.json` from `cat .claude/settings.json 2>/dev/null`. The second
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
     counting as a write to a path named in a comment.
     """
+    if path in written:
+        return True
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):   # a wrapped or nested sed
         return True
     return False
+
+
+# SED OPERANDS. `sed [OPTION]... [SCRIPT] [FILE]...`: the script is code, not a path, and each FILE
+# is what an in-place sed writes. The script is each `-e`/`--expression` value and each `-f`/`--file`
+# value (a file sed reads); with none of those it is the first operand. GNU sed reorders options
+# after operands, `--` ends them, an `i` in a cluster takes the rest of it as a backup suffix
+# (`-Ei`, `-ni`, `-i.bak`, but `-in` is suffix `n`), and a long name may be cut short.
+# Read on the shell words of one segment (`_quoted_words`), so a `|`, `;`, `&`, `#` or line break
+# inside a quoted script stays in it, and the files after it still count.
+# Only a segment whose command word is `sed` is read. A wrapped or nested sed (`sudo sed`,
+# `xargs sed`, `bash -c "sed ..."`) and an unquoted `$` word up to the script keep the text match.
+# RESIDUAL GAP: a `w` file or an `e` command inside the script writes or runs what is not judged.
+_SED_LONG = ("expression", "file", "in-place", "line-length")
+_SED_REDIRECT = re.compile(r"\d*>>?|<{1,3}")   # an operator word whose target is the next word
+_UNQUOTED_EXPANSION = re.compile(r"""'[^']*'|"[^"]*"|([$`])""")
+
+
+def _sed_operands(raw):
+    """(script indexes, file indexes, in place?) of a `sed` segment's shell words, else None."""
+    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+    if start >= len(raw) or _name(raw[start]) != "sed":
+        return None
+    scripts, operands, in_place, given, options = set(), [], False, False, True
+    index = start + 1
+    while index < len(raw):
+        word = _unquoted(raw[index])
+        operator = _SED_REDIRECT.fullmatch(raw[index])
+        if operator or raw[index][0] in "<>&":   # a redirect: an operator word skips its target too
+            index += 2 if operator else 1
+            continue
+        if options and word == "--":
+            options = False
+        elif options and word.startswith("--"):
+            name, equals, _value = word[2:].partition("=")
+            full = next((long for long in _SED_LONG if name and long.startswith(name)), "")
+            in_place = in_place or full == "in-place"
+            if full in ("expression", "file"):
+                given = True
+                scripts.add(index if equals else index + 1)
+            if full in ("expression", "file", "line-length") and not equals:
+                index += 1
+        elif options and word.startswith("-") and len(word) > 1:
+            for at, letter in enumerate(word[1:], 2):
+                if letter == "i":
+                    in_place = True
+                    break
+                if letter in "efl":
+                    glued = at < len(word)
+                    if letter != "l":
+                        given = True
+                        scripts.add(index if glued else index + 1)
+                    index += 0 if glued else 1
+                    break
+        else:
+            operands.append(index)
+        index += 1
+    if not given and operands:
+        scripts.add(operands.pop(0))
+    last = max(scripts, default=start)
+    if any(m.group(1) for word in raw[start:last + 1] for m in _UNQUOTED_EXPANSION.finditer(word)):
+        return None   # an unquoted expansion may add or drop a word: the script cannot be placed
+    return scripts, set(operands), in_place
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -571,6 +637,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
+        sed = None if closed else _sed_operands(raw)
+        files = set()
+        if sed:
+            data = data | sed[0]   # a sed script is code: it names no path
+            files = sed[1] if sed[2] else set()
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -580,13 +651,15 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, stood_in = [], set()
+        words, stood_in, written = [], set(), set()
         for index, word in enumerate(raw):
             if index in data:
                 stood_in.add(len(words))
-                words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
+                words.append('""')   # data, a `cp` source or a sed script: no redirect or `tee` in it runs
             else:
                 words.extend(_words_of(word) if "'" in word or '"' in word else [word])
+                if index in files:
+                    written.add(_unquoted(word))
         text = " ".join(words)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         for place, word in enumerate(words):
@@ -595,9 +668,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if not word or word in (">", ">>") or place in stood_in:
                 continue   # a stand-in names no path: judged, it would resolve to the cwd
             if writes_first:
-                if writes_to(word, text) and predicate(word, at):
+                if writes_to(word, text, written) and predicate(word, at):
                     return word
-            elif predicate(word, at) and writes_to(word, text):
+            elif predicate(word, at) and writes_to(word, text, written):
                 return word
     return ""
 
