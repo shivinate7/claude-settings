@@ -1,9 +1,9 @@
 {
   "title": "An Explore runs Sonnet only when its brief says it is an audit",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33772,
   "why": "shiv, Nov 1 11:43 CST, page item 107 pick a: the guard lets an Explore run Sonnet only when its brief carries an audit marker line; any other Explore runs below Sonnet. It closes the Oct 30 class (a role whose row says Haiku ran on Sonnet). Decision agent-model-cap named this point as unruled.",
-  "note": "Fix in one home: hooks/guard.py rule agent-role-model. Explore leaves ROLE_ABOVE_ROW_ROLES; an Explore brief whose first line carries the audit marker may run Sonnet, read from one constant (rule building-allow-list-is-the-constant), and the refusal's remedy names the marker. Decision agent-model-cap records the ruling. Done check: a guard test refuses an Explore on sonnet with no marker and passes one with it, red on main and green on the fix. Needs no answer. Files: hooks/guard.py, hooks/test_guard.py, docs/decisions/agent-model-cap.md. Lane session_013NEJL1W9hdjvYuy1gvkVEz, started Nov 1 11:47 CST (coordinator).",
-  "updatedAt": "2026-11-01T17:55:00Z"
+  "note": "Fix in one home: hooks/guard.py rule agent-role-model. Explore leaves ROLE_ABOVE_ROW_ROLES; an Explore brief whose first line carries the audit marker may run Sonnet, read from one constant (rule building-allow-list-is-the-constant), and the refusal's remedy names the marker. Decision agent-model-cap records the ruling. Done check: a guard test refuses an Explore on sonnet with no marker and passes one with it, red on main and green on the fix. Needs no answer. Files: hooks/guard.py, hooks/test_guard.py, docs/decisions/agent-model-cap.md. Lane session_013NEJL1W9hdjvYuy1gvkVEz, started Nov 1 11:47 CST (coordinator). Landed on main in batch 55, #963 (merge d361b238, Nov 1 15:02 CST). Follow-up #960 (the spawn judge's remedy names the Audit: marker; text only) was dropped to batch 56. Page item 127 (Opus Explore and the marker) is open; main keeps option a.",
+  "updatedAt": "2026-11-01T21:06:00Z"
 }
