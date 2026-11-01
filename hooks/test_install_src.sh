@@ -3729,23 +3729,26 @@ caseM1() {
   fi
 }
 
+# caseM2: a detached checkout with an uncommitted change. The install takes main's files, and the checkout stays at its
+# commit with its change exactly as it was. The log wording for the dirty checkout is not asserted here.
 caseM2() {
-  name="caseM2: a detached checkout with uncommitted changes stays where it is, with a WARN"
+  name="caseM2: a detached checkout with uncommitted changes: the install takes main's files, the checkout and its change stay"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
-  move_fixture m2
+  move_fixture m2 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
   printf 'local edit\n' >> "$co/README.md"
+  m2_status=$(git -C "$co" status --porcelain)
+  m2_diff=$(git -C "$co" diff HEAD)
+  if [ -z "$m2_status" ]; then bad "$name" "FIXTURE the local edit did not make the checkout dirty"; return; fi
   move_install
-  if [ $rc -ne 0 ]; then
-    bad "$name" "install.sh exited $rc: $(install_problems)"
-  elif [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || ! grep -q 'local edit' "$co/README.md"; then
-    bad "$name" "the dirty checkout was moved or its edit lost"
-  elif ! printf '%s\n' "$out" | grep -q "WARN: the checkout $co has uncommitted changes; left as is"; then
-    bad "$name" "no WARN names the dirty checkout: $(install_problems)"
-  elif [ "$(merge_rule_count)" != 0 ]; then
-    bad "$name" "settings.json got $(merge_rule_count) merge allow rules from a checkout without the file"
-  else
-    ok "$name"
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm; the install's source is [$(installed_src "$h/.claude-cfg" "$h")], the checkout is [$co]"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || [ "$(git -C "$co" status --porcelain)" != "$m2_status" ] \
+     || [ "$(git -C "$co" diff HEAD)" != "$m2_diff" ]; then
+    bad "$name" "the dirty checkout was moved or its change changed"; return
   fi
+  ok "$name"
 }
 
 caseM3() {
