@@ -20017,7 +20017,9 @@ ROLE_TABLE_TEST_AUTHOR_SONNET = ROLE_TABLE_HEAD + "| test-author | sonnet | high
 # The qualifier rows (`reviewer, rounds 2 and 3`, `builder, try 3 after`, `... that audits`) name no role.
 ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
     "| Explore, claude-code-guide | haiku | xhigh |\n"
-    "| Explore that audits or judges meaning, not a plain search | sonnet, or opus on the owner's grant | high |\n"
+    "| Explore that audits or judges meaning, not a plain search | sonnet, when its brief's first non-blank line "
+    "carries the `Audit:` marker; or opus on the owner's grant (2026-10-21 ruling, class level); set per spawn, "
+    "which overrides the frontmatter `haiku` | high |\n"
     "| test-author | haiku | xhigh |\n"
     "| reviewer | haiku | xhigh |\n"
     "| reviewer, rounds 2 and 3 | sonnet, the ceiling | high |\n"
@@ -20146,10 +20148,14 @@ role_model_refuse("role-model: Explore on sonnet whose first line is plain prose
           "Explore", "sonnet", "Audit the glossary for meaning drift.", carries=(EXPLORE_MARKER,))
 role_model_refuse("role-model: Explore on sonnet with lowercase audit: on line 1 is denied (case-sensitive)",
           "Explore", "sonnet", "audit: check the glossary for meaning drift.", carries=(EXPLORE_MARKER,))
+# The marker lifts only a Sonnet Explore. A model the table does not rank is still refused, and its reason names no
+# marker.
+role_model_refuse("role-model: Explore on fable with Audit: on line 1 is denied, reason names no marker",
+          "Explore", "fable", "Audit: check the glossary for meaning drift.", lacks=ROLE_LACKS + (EXPLORE_MARKER,))
 
 # ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
-# An Explore on Sonnet passes with the marker on line 1, with or without markup ahead of it. An Explore on Haiku or
-# Opus passes with no marker. (shiv, Nov 1 11:43 CST, page item 107, pick a)
+# An Explore on Sonnet passes with the marker on line 1, leftmost on line 1, with anything ahead of it. An Explore on
+# Haiku or Opus passes with no marker. (shiv, Nov 1 11:43 CST, page item 107, pick a)
 role_model_allow("role-model: Explore on sonnet with Audit: on line 1 is allowed", "Explore", "sonnet",
            "Audit: check the glossary for meaning drift.")
 role_model_allow("role-model: Explore on sonnet with **Audit:** on line 1 is allowed (markup ahead of the marker)",
