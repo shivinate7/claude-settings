@@ -47,6 +47,10 @@ guard rule, so the watcher does the waiting and the session is told once.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
   the push. `verdict` prints a `still running` line to stderr every 120 seconds, so a pipe on stdout does not hide it.
+  It also appends the line to the beat file, which the hook names next to its log, exports to the job as
+  `STALL_WATCH_BEAT`, and passes to the watcher as `--beat`. The watcher relays the file's new bytes to its
+  own output, the harness output file. So a redirect in the command (`2>&1 | grep`, `2>/dev/null`)
+  hides the line from neither the watcher nor the Stop check.
 - A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
   2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
   `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to
@@ -58,8 +62,9 @@ guard rule, so the watcher does the waiting and the session is told once.
   relative path after a `cd` resolves against the shell's directory, so that job can still stall falsely.
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
-  Cost: no new process, timer or file. Each named log gets one stat a second in the watcher's own loop,
-  one more before each stall report, and one at each Stop check.
+  Cost: no new process or timer. Each named log gets one stat a second in the watcher's own loop,
+  one more before each stall report, and one at each Stop check. The beat file costs one append per
+  heartbeat. The watcher reads it on each 0.2 s loop pass, and tries one open a second until it exists. The wrapper removes it with the log.
 
 ## The Stop-time check
 
