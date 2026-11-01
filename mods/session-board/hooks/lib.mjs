@@ -367,7 +367,7 @@ export function taskNotice(text) {
 // The id a TaskStop call stopped: the output's task_id, else the input's task_id or deprecated shell_id,
 // else the id in the output message "Successfully stopped task: <id>" (hooks/stall_watch.py STOPPED).
 export function stoppedTaskId(out, input) {
-  const pick = ...vals => vals.find(v => typeof v === 'string' && v)
+  const pick = (...vals) => vals.find(v => typeof v === 'string' && v)
   const msg = out && typeof out.message === 'string' ? /^\s*Successfully stopped task: (\S+)/.exec(out.message) : null
   return pick(out && out.task_id, input && input.task_id, input && input.shell_id, msg && msg[1])
 }
