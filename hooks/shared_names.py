@@ -23,6 +23,10 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
                   "Another Claude session sent a message while you were working:")
     for tag in _HAND_BACK_TAGS) + _PEER_FRAME_TAGS
 
+# An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
+# (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
+EXPLORE_AUDIT_MARKER = "Audit:"
+
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).
 GH_DEFAULT_LOGIN = "shivinate7"
