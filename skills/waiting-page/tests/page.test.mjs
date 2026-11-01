@@ -2792,7 +2792,7 @@ test("an option that widens a shared tool says it goes against the uniform rulin
   const page = await open(t, { items: [it] }); if (!page) return;
   const a = card(page, it).locator('label.opt[for="o-wide-q-a"]'), b = card(page, it).locator('label.opt[for="o-wide-q-b"]');
   assert.equal(await a.locator(".widens").count(), 1, "the widening option carries no label");
-  assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your uniform ruling (t18)");
+  assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo");
   assert.equal(await b.locator(".widens").count(), 0, "an option that does not widen is labelled");
 });
 
