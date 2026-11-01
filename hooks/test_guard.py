@@ -14129,6 +14129,10 @@ add("floor step-up: reviewer with no round line on haiku is allowed", "allow",
 add("floor step-up: round line after a lone quote on line two is denied", "deny", STEP_UP,
     tool="Agent", prompt="Don't skip the check.\nRound 2 of 3. Re-check the diff.",
     model="haiku", subagent_type="reviewer")
+# A round line on line three steps up too: the step-up reads every line that starts with the marker.
+add("floor step-up: reviewer Round 2 of 3 on line three on haiku is denied", "deny", STEP_UP,
+    tool="Agent", prompt="Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.",
+    model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on opus asks (the grant is per spawn, not standing)", "ask",
@@ -20087,6 +20091,9 @@ role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is all
            "Round 2 of 3. Re-check the diff.")
 role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
            "Round 3 of 3. Re-check the diff.")
+# The row reads a round line on line three too: the same scan the step-up reads.
+role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line three is allowed", "reviewer", "sonnet",
+           "Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.")
 role_model_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
            "Fix the failing case.")
 role_model_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
@@ -20231,6 +20238,128 @@ for _label, _check in (
     ("role-model: a missing decision file logs one unread line and allows the spawn", role_unread_missing_check),
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
 ):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
+
+
+# ---- B3: one brief-marker table and one scanner. The table is shared_names.BRIEF_MARKERS, rows of (kind, regex text,
+# position). The scanner is guard.marker_hits(brief), a set of (kind, n). Both names are new, so every read happens
+# inside its check: a guard without them fails that check with its reason, and the run goes on.
+def _marker_hits_fn():
+    """guard.marker_hits from the guard under test, or None while the name is absent."""
+    return getattr(_load_guard_module(), "marker_hits", None)
+
+
+def _shared_names_under_test():
+    """shared_names.py beside the guard under test, loaded under its own name so no cached copy answers."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "shared_names_under_test", os.path.join(os.path.dirname(GUARD), "shared_names.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def brief_marker_table_check():
+    """Each row is (kind, regex text, position). The kinds round, try and audit each have a row, and an audit row holds
+    EXPLORE_AUDIT_MARKER, read from the constant."""
+    try:
+        names = _shared_names_under_test()
+    except Exception as exc:
+        return False, "shared_names.py does not load: %r" % (exc,)
+    rows = getattr(names, "BRIEF_MARKERS", None)
+    if rows is None:
+        return False, "shared_names has no BRIEF_MARKERS yet"
+    if not isinstance(rows, tuple):
+        return False, "BRIEF_MARKERS is a %s, want a tuple of rows" % type(rows).__name__
+    problems, kinds, audit_texts = [], set(), []
+    for row in rows:
+        if not (isinstance(row, tuple) and len(row) == 3 and all(isinstance(f, str) for f in row)):
+            problems.append("row %r is not (kind, regex text, position) of strings" % (row,))
+            continue
+        kind, text, position = row
+        kinds.add(kind)
+        if position not in ("line-start", "first-line"):
+            problems.append("%s row has position %r" % (kind, position))
+        try:
+            re.compile(text)
+        except re.error as exc:
+            problems.append("%s row does not compile: %s" % (kind, exc))
+        if kind == "audit":
+            audit_texts.append(text)
+    problems += ["no %s row" % kind for kind in ("round", "try", "audit") if kind not in kinds]
+    marker = getattr(names, "EXPLORE_AUDIT_MARKER", "")
+    if not marker or not any(marker in text for text in audit_texts):
+        problems.append("no audit row holds EXPLORE_AUDIT_MARKER")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "BRIEF_MARKERS has round, try and audit rows, each positioned; the audit row holds the constant"
+
+
+def marker_rows_check(*rows):
+    """Each row is (brief, kind, n, holds): marker_hits(brief) holds (kind, n) when holds is True, and lacks it when
+    False. The note names each row that is wrong."""
+    def check():
+        marker_hits = _marker_hits_fn()
+        if marker_hits is None:
+            return False, "guard.py has no marker_hits(brief) yet"
+        wrong = []
+        for brief, kind, n, holds in rows:
+            try:
+                got = marker_hits(brief)
+            except Exception as exc:
+                return False, "marker_hits(%r) raised %r" % (brief, exc)
+            if not isinstance(got, set):
+                return False, "marker_hits(%r) returned a %s, want a set" % (brief, type(got).__name__)
+            if ((kind, n) in got) != holds:
+                wrong.append("marker_hits(%r) %s (%s, %r)" % (brief, "lacks" if holds else "holds", kind, n))
+        if wrong:
+            return False, "; ".join(wrong)
+        return True, "%d marker_hits rows as ruled" % len(rows)
+    return check
+
+
+def marker_none_check():
+    marker_hits = _marker_hits_fn()
+    if marker_hits is None:
+        return False, "guard.py has no marker_hits(brief) yet"
+    try:
+        got = marker_hits(None)
+    except Exception as exc:
+        return False, "marker_hits(None) raised %r" % (exc,)
+    if not isinstance(got, set) or got:
+        return False, "marker_hits(None) is %r, want an empty set" % (got,)
+    return True, "marker_hits(None) is an empty set"
+
+
+_BRIEF_MARKER_CHECKS = (
+    ("brief markers: BRIEF_MARKERS has round, try and audit rows, each positioned, and the audit row holds "
+     "EXPLORE_AUDIT_MARKER", brief_marker_table_check),
+    ("brief markers: a Round line on line two counts as round 2",
+     marker_rows_check(("Find X.\nRound 2 of 3", "round", "2", True))),
+    ("brief markers: Audit: on the first line counts as audit, with no n",
+     marker_rows_check(("Audit: check", "audit", None, True))),
+    ("brief markers: Audit: on line two does not count as audit",
+     marker_rows_check(("Find X.\nAudit: y", "audit", None, False))),
+    ("brief markers: Audit: after prose on the first line counts as audit",
+     marker_rows_check(("Please read the Audit: docs", "audit", None, True))),
+    ("brief markers: a lowercase audit: does not count as audit (case-sensitive)",
+     marker_rows_check(("audit: x", "audit", None, False))),
+    ("brief markers: marker_hits(None) is an empty set", marker_none_check),
+    ("brief markers: a lone quote in the prose ahead does not hide a Round line on line two",
+     marker_rows_check(("Don't skip the check.\nRound 2 of 3.", "round", "2", True))),
+    ("brief markers: a markdown heading or a // line ahead does not hide a Round line on line two",
+     marker_rows_check(("## Lane c204\nRound 2 of 3.", "round", "2", True),
+                       ("// lane c204\nRound 2 of 3.", "round", "2", True))),
+    ("brief markers: a backtick span open across lines does not hide a Round line that starts a line",
+     marker_rows_check(("Check `a\nRound 2 of 3` now.", "round", "2", True))),
+    ("brief markers: first-line Round counts with a role word ahead, first-line Try does not, "
+     "a Try line at line start counts",
+     marker_rows_check(("Builder, Round 3 of 3. Fix.", "round", "3", True),
+                       ("Builder, Try 3 of 3. Fix.", "try", "3", False),
+                       ("Find X.\nTry 3 of 3.", "try", "3", True))),
+)
+for _label, _check in _BRIEF_MARKER_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)
 
