@@ -4143,10 +4143,11 @@ class _AgentEndFixture(unittest.TestCase):
         out = run_vcs(self.primary, "worktree", "list", "--porcelain").stdout
         return {_norm_path(line[len("worktree "):]) for line in out.splitlines() if line.startswith("worktree ")}
 
-    def assertRemoved(self, path):
-        """Gone from disk AND from `git worktree list`, so a leftover prunable entry also fails."""
-        self.assertFalse(os.path.exists(path), "%s was not removed" % path)
-        self.assertNotIn(_norm_path(path), self.listed(), "%s is still a git worktree" % path)
+    def assertRemoved(self, path, detail=""):
+        """Gone from disk AND from `git worktree list`, so a leftover prunable entry also fails.
+        DETAIL, when given, is added to each message."""
+        self.assertFalse(os.path.exists(path), "%s was not removed%s" % (path, detail))
+        self.assertNotIn(_norm_path(path), self.listed(), "%s is still a git worktree%s" % (path, detail))
 
     def assertKept(self, path):
         self.assertTrue(os.path.isdir(path), "%s was removed" % path)
@@ -4517,6 +4518,14 @@ class AgentEndRulingTests(_AgentEndFixture):
                 return row
         return None
 
+    def row_detail(self, record, path):
+        """The decision row for PATH as text, for a failure message. A kept tree shows its reason
+        here, and a failed removal shows its error."""
+        row = self.row_for(record, path)
+        if row is None:
+            return "; the run wrote no decision row for it"
+        return "; row: action=%s reason=%s error=%s" % (row.get("action"), row.get("reason"), row.get("error"))
+
     def lock_reason(self, path):
         """The text after `locked` for PATH in `git worktree list --porcelain`, or None when unlocked."""
         out = run_vcs(self.primary, "worktree", "list", "--porcelain").stdout
@@ -4530,15 +4539,6 @@ class AgentEndRulingTests(_AgentEndFixture):
                 if line == "locked" or line.startswith("locked "):
                     return line[len("locked"):].strip()
         return None
-
-    @staticmethod
-    def dead_pid():
-        gone = subprocess.Popen([sys.executable, "-c", "pass"])
-        gone.wait()
-        pid = gone.pid
-        del gone  # Windows reads an exited pid as live while this process still holds its handle
-        gc.collect()
-        return pid
 
     def sleeper(self, cwd):
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
@@ -4635,13 +4635,18 @@ class AgentEndRulingTests(_AgentEndFixture):
         idle first, decide_worktree reads a stale lock early, and remove_worktree unlocks by
         name later. The injection runs inside processes_in: after the lock read, before the
         unlock. The lock names a separate child, never a host pid. The own tree is always kept,
-        so only another tree reaches the unlock. The control twin has the same dead-pid lock
-        with no injection, and must be removed, so the case reaches the unlock path."""
+        so only another tree reaches the unlock. The control twin has the same stale lock with
+        no injection, and must be removed, so the case reaches the unlock path."""
         ending = self.add("relend")
         control, subject = self.control_tree("reltwin"), self.control_tree("relock")
-        dead = self.dead_pid()
-        self.lock(control, "claude agent agent-reltwin (pid %d)" % dead)
-        self.lock(subject, "claude agent agent-relock (pid %d)" % dead)
+        # The stale lock names a live sleeper with a start time no process has, so the verdict reads
+        # it stale for as long as the sleeper runs, whatever the pid does. A dead pid would not do:
+        # Windows reuses a freed pid, and a lock with no start time keeps a tree whose pid a live
+        # process now holds (stale_agent_lock_verdict's LIMIT).
+        stale_host = self.sleeper(self.root)
+        stale = "pid %d start Sat Jan 15 00:00:00 2000" % stale_host.pid
+        self.lock(control, "claude agent agent-reltwin (%s)" % stale)
+        self.lock(subject, "claude agent agent-relock (%s)" % stale)
         holder = self.sleeper(self.root)
         live = "claude agent agent-relock (pid %d)" % holder.pid
         real_processes_in = sweep.processes_in
@@ -4660,9 +4665,9 @@ class AgentEndRulingTests(_AgentEndFixture):
         self.age_control(control)
         self.age_control(subject)
         with mock.patch.object(sweep, "processes_in", new=take_live_lock):
-            self.run_in_process("relend", ending)
-        with self.subTest(control="dead-pid lock, no injection, is removed"):
-            self.assertRemoved(control)
+            record = self.run_in_process("relend", ending)
+        with self.subTest(control="stale start-time lock, no injection, is removed"):
+            self.assertRemoved(control, self.row_detail(record, control))
         with self.subTest(arm="live lock taken between the lock read and the unlock"):
             self.assertTrue(injected, "the fault never landed: processes_in was not read for the subject")
             self.assertKept(subject)
