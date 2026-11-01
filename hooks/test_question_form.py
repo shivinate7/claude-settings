@@ -61,6 +61,7 @@ os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
+import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 
 try:
@@ -90,8 +91,9 @@ MISSING = ("MISSING", "hooks/question_form.py has no such function yet")
 # words once; every other case takes WIDE from the module.
 WIDENS_WORDS = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDE = getattr(question_form, "WIDENS_TEXT", None) or "<WIDENS_TEXT missing from hooks/question_form.py>"
+# The reply judge's prompt is read from its module constant in case_widens_words_in_the_reply_judge_prompt.
 WIDENS_HOMES = ("skills/waiting-page/page.html", "skills/waiting-page/SKILL.md", "output-styles/shiv-stylisms.md",
-                "hooks/reply_judge.py", "docs/decisions/uniform-over-variants.md", "docs/decisions/question-form.md")
+                "docs/decisions/uniform-over-variants.md", "docs/decisions/question-form.md")
 OLD_WIDENS_CARD = "uniform ruling (t18)"
 
 # Waiting item 92 as the writer sent it (Oct 30): a decision with a Goal line and no Problem line, no Based
@@ -988,6 +990,13 @@ def case_widens_words_in_every_home():
               OLD_WIDENS_CARD)
 
 
+def case_widens_words_in_the_reply_judge_prompt():
+    # The reply judge's prompt is built from reply_judge.INSTRUCTIONS: it holds the words and no topic id.
+    text = re.sub(r"\s+", " ", reply_judge.INSTRUCTIONS)
+    check("widens prompt: reply_judge.INSTRUCTIONS carries question_form.WIDENS_TEXT", WIDE in text, WIDE)
+    check("widens prompt: reply_judge.INSTRUCTIONS carries no 't18'", "t18" not in text, "t18")
+
+
 def main():
     for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
@@ -1000,7 +1009,7 @@ def main():
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
                  case_call_judge, case_widens_text_is_the_owner_words, case_widens_reasons_carry_no_topic_id,
-                 case_widens_words_in_every_home):
+                 case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
         try:
             case()
         except Exception as exc:
