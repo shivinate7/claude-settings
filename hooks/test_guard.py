@@ -115,6 +115,7 @@ FAMILIES = {
     "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
+    "page-item-design": "the waiting-page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
@@ -12172,21 +12173,28 @@ wp_publish("a file that cannot be read fails open", "allow", os.path.join(WP_DIR
 wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHIND, guard=WP_GUARD_NOMAIN)
 
 
+def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
+    """One Artifact publish of `file_path` to `url`, judged by the copy of the guard in the controlled checkout.
+    Returns the printed stdout, empty when the guard allowed the call."""
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    run = subprocess.run([sys.executable, WP_GUARD],
+                         input=json.dumps({"tool_name": "Artifact", "cwd": cwd,
+                                           "tool_input": {"url": url, "file_path": file_path}}),
+                         capture_output=True, text=True, env=env, timeout=120)
+    return run.stdout.strip()
+
+
 def wp_stamp_case():
     """An allowed publish of main's page writes main's full blob sha to <git common dir>/waiting-page-built."""
     materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
     stamp = os.path.join(WP_CHECK, ".git", WP_STAMP)
     if os.path.exists(stamp):
         os.remove(stamp)
-    env = dict(os.environ, CLAUDE_CONFIG_DIR=CFG, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
-    env.pop("CLAUDE_CODE_SESSION_ID", None)
-    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
-    run = subprocess.run([sys.executable, WP_GUARD],
-                         input=json.dumps({"tool_name": "Artifact", "cwd": WP_CHECK,
-                                           "tool_input": {"url": PQ_URL, "file_path": WP_CURRENT}}),
-                         capture_output=True, text=True, env=env, timeout=120)
-    if run.stdout.strip():
-        return False, "the publish of main's page was refused: %r" % run.stdout[:100]
+    out = wp_publish_run(WP_CURRENT)
+    if out:
+        return False, "the publish of main's page was refused: %r" % out[:100]
     if not os.path.isfile(stamp):
         return False, "no stamp was written at <git common dir>/%s" % WP_STAMP
     with open(stamp, encoding="utf-8") as handle:
@@ -12199,6 +12207,246 @@ def wp_stamp_case():
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
 LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of main's page writes the stamp", wp_stamp_case))
+
+
+# --------------------------------------------------------------------------- a design picture is checked at write
+#
+# Rule page-item-design (decision page-item-checked-at-write). An ArtifactData set or update of a waiting item
+# whose data carries `designs` or an option with `design` runs skills/waiting-page/check_designs.mjs against the
+# published file recorded at <git common dir>/waiting-page-published. A miss denies, with the page's own
+# sentence. Unknown (no record, the file gone, exit 3) allows and logs one `noted` line. A write with no designs
+# never runs the checker: `_run_check_designs` is the seam, and the seam's call count is what the case reads.
+# Each case gets a checkout and a config folder of its own, so no case reads another case's record.
+FAMILY = "page-item-design"
+
+PD_RECORD = "waiting-page-published"  # the record file, in the git common dir
+PD_DOC = "fill-of-volume-card"
+PD_PAGE = os.path.join(ROOT, "pd", "design-page.html")  # main's page, with the mockups the cases name
+PD_SLOT = '<script type="application/json" id="designData">{}</script>'
+PD_MOCKS = {
+    "m1": '<div id="vol" data-state="full" style="width:390px;height:844px">Don\'t // /* # full</div>',
+    "m2": '<div id="vol" data-state="full" style="width:2400px;height:300px">x</div>',  # a strip, drawn at 2400
+}
+with open(WP_SOURCE, encoding="utf-8", newline="") as _handle:
+    _pd_template = _handle.read()
+wp_must(_pd_template.count(PD_SLOT) == 1, "main's page holds its designData slot once")
+wp_put(PD_PAGE, _pd_template.replace(
+    PD_SLOT, '<script type="application/json" id="designData">'
+    + json.dumps(PD_MOCKS).replace("<", "\\u003c") + "</script>", 1))
+
+
+def pd_node_ready():
+    """True when node can launch a Chromium through playwright, with the environment the guard's checker gets."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    probe = subprocess.run([node, "-e", "require('playwright').chromium.launch().then(b => b.close())"],
+                           capture_output=True, text=True, env=dict(os.environ), timeout=120)
+    return probe.returncode == 0
+
+
+# Skip locally, fail in CI (the rule of testing/skip-locally-fail-in-ci.mjs): a laptop without node and
+# Chromium leaves out the cases that need the checker to render. In CI they stay in, and a missing node
+# turns them red, because the guard then answers unknown and allows.
+PD_NODE = pd_node_ready()
+PD_NEEDS_NODE = PD_NODE or bool(os.environ.get("CI"))
+if not PD_NODE:
+    print("page-item-design: no node with playwright and Chromium here, so the checker's deny cases are skipped"
+          " (CI runs them)", file=sys.stderr)
+
+
+def pd_repo(name, record):
+    """A real checkout for one case: the waiting page's layout extras and one commit. `record` is the path the
+    record file holds, or None for no record. The record resolves as the stamp does: <git common dir>/PD_RECORD."""
+    where = os.path.join(ROOT, "pd", name)
+    wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
+    wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
+    wp_git(where, "init", "-q")
+    wp_git(where, "add", "-A")
+    wp_git(where, *IDENT, "commit", "-q", "-m", "fixture: waiting page")
+    if record is not None:
+        wp_put(os.path.join(where, ".git", PD_RECORD), record + "\n")
+    return where
+
+
+def pd_item(designs=None, **over):
+    """A decision that every other waiting-page rule passes. Option a carries the picture, option b has none."""
+    item = {"id": PD_DOC, "kind": "decision", "status": "open", "title": "Which fill should the volume card show?",
+            "context": "The volume card shows the stock level.",
+            "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
+                        {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
+            "designs": designs if designs is not None else
+            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]}
+    item.update(over)
+    return with_stake(item, departs=True)
+
+
+def pd_plain():
+    """A decision with no picture. Its text says design, so a check that reads words would run the checker."""
+    return with_stake({"id": PD_DOC, "kind": "decision", "status": "open",
+                       "title": "Which design review comes first?", "context": "The design review of the volume card is due.",
+                       "options": [{"key": "a", "label": "Review first", "how": "A design review before the build."},
+                                   {"key": "b", "label": "Build first", "how": "The build before any design review."}]},
+                      departs=True)
+
+
+def pd_body(repo, data, action="set"):
+    return {"tool_name": "ArtifactData", "cwd": repo,
+            "tool_input": {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC, "data": data}}
+
+
+def pd_run(name, body):
+    """One guard run on `body`, with a config folder of the case's own. Returns (decision, reason, guard.log rows)."""
+    folder = os.path.join(ROOT, "pd", "cfg-" + name)
+    os.makedirs(folder, exist_ok=True)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=folder, CLAUDE_GUARD_ROOT_PID=str(os.getpid()))
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
+                         env=env, timeout=120)
+    if got.returncode != 0:
+        return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200]), []
+    decision, reason = read_decision(got.stdout)
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return decision, reason, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def pd_case(label, name, record, data, want, fragment="", action="set", note=False):
+    """Register one check: a checkout with `record`, one ArtifactData write of `data`, and the verdict wanted.
+    A deny's reason must carry `fragment` and no forbidden target. `note` wants one noted line for the rule."""
+    def check():
+        repo = pd_repo(name, record)
+        decision, reason, rows = pd_run(name, pd_body(repo, data, action))
+        problems = []
+        if decision != want:
+            problems.append("want %s, got %s: %s" % (want, decision, reason[:160]))
+        if want == "deny" and fragment and fragment not in reason:
+            problems.append("the reason does not carry %r: %s" % (fragment, reason[:160]))
+        leak = names_the_target(reason, "page-item-design") if want == "deny" else ""
+        if leak:
+            problems.append("the reason names the forbidden target %r" % leak)
+        if note:
+            noted = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "page-item-design"]
+            if len(noted) != 1:
+                problems.append("want one noted/page-item-design line, found %d" % len(noted))
+        return (not problems), ("; ".join(problems) or "%s, as wanted" % want)
+    LOG_CHECKS_EXTRA.append(("page-item-design: " + label, check))
+
+
+# The deny cases read the checker's answer, so they run only where the checker can render.
+if PD_NEEDS_NODE:
+    pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names")
+    pd_case("a state the mockup does not draw is denied, with the page's sentence", "state", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty"}]),
+            "deny", fragment="a state its mockup does not draw")
+    pd_case("a strip mockup below the picture floor is denied, naming option A", "strip", PD_PAGE,
+            pd_item(designs=[{"slug": "m2", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
+                              "drawn": 2400}]),
+            "deny", fragment="option A")
+    pd_case("an update that carries a missed picture is denied, with the page's sentence", "update", PD_PAGE,
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            "deny", fragment="shows nothing the focus names", action="update")
+
+pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
+pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,
+        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]),
+        "allow")
+pd_case("no record is allowed, with one noted line", "norecord", None, pd_item(), "allow", note=True)
+pd_case("a record of a file that is gone is allowed, with one noted line", "gone", os.path.join(ROOT, "pd", "gone.html"),
+        pd_item(), "allow", note=True)
+
+
+def pd_record_case():
+    """An allowed publish of this repo's waiting page writes the absolute path of the published file to
+    <git common dir>/waiting-page-published. A relative file path resolves against the checkout, and a refused
+    publish leaves the record as it was."""
+    materialize(WP_GUARD)  # builds the one copy this check runs, not every lazy fixture
+    record = os.path.join(WP_CHECK, ".git", PD_RECORD)
+
+    def recorded():
+        return open(record, encoding="utf-8").read().strip() if os.path.isfile(record) else None
+
+    def names(got):
+        return got is not None and os.path.isabs(got) and os.path.realpath(got) == os.path.realpath(WP_CURRENT)
+
+    if os.path.exists(record):
+        os.remove(record)
+    if wp_publish_run(WP_CURRENT):
+        return False, "the publish of main's page was refused"
+    if not names(recorded()):
+        return False, "after an allowed publish the record holds %r, want the absolute path of %s" % (recorded(), WP_CURRENT)
+    os.remove(record)
+    if wp_publish_run(os.path.relpath(WP_CURRENT, WP_CHECK)):
+        return False, "the publish by a relative file path was refused"
+    if not names(recorded()):
+        return False, "after a relative publish the record holds %r, want the absolute path of %s" % (recorded(), WP_CURRENT)
+    behind = wp_publish_run(WP_BEHIND)
+    if "page-stale" not in behind:
+        return False, "a behind publish was not refused by page-stale: %r" % behind[:100]
+    if not names(recorded()):
+        return False, "a refused publish changed the record to %r" % recorded()
+    return True, "an allowed publish records its absolute path, and a refused one leaves the record"
+
+
+FIXTURELESS_CHECKS.add(pd_record_case)  # builds only the copy it runs, as wp_stamp_case does
+LOG_CHECKS_EXTRA.append(("page-item-design: an allowed publish of the waiting page records the published file",
+                         pd_record_case))
+
+
+def pd_seam_case():
+    """The guard calls _run_check_designs once for a write with designs, and never for a write without them."""
+    from unittest import mock
+    module = _load_guard_module()
+    if not hasattr(module, "_run_check_designs"):
+        return False, "the guard has no _run_check_designs seam"
+    real = module._run_check_designs
+    repo = pd_repo("seam", PD_PAGE)
+    folder = os.path.join(ROOT, "pd", "cfg-seam")
+    os.makedirs(folder, exist_ok=True)
+
+    def judged(data):
+        """(calls to the seam, printed output) for one write, judged in this process."""
+        calls = []
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return real(*args, **kwargs)
+        saved = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = folder
+        try:
+            with mock.patch.object(module, "_run_check_designs", spy), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                try:
+                    module.judge(pd_body(repo, data))
+                except SystemExit:
+                    pass
+        finally:
+            if saved is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = saved
+        return len(calls), out.getvalue()
+
+    with_calls, with_out = judged(pd_item())
+    without_calls, without_out = judged(pd_plain())
+    problems = []
+    if with_calls != 1:
+        problems.append("a write with designs called the seam %d times, want 1" % with_calls)
+    if with_out.strip():
+        problems.append("a good write with designs was refused: %s" % with_out[:120])
+    if without_calls != 0:
+        problems.append("a write with no designs called the seam %d times, want 0" % without_calls)
+    if without_out.strip():
+        problems.append("a write with no designs was refused: %s" % without_out[:120])
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the seam runs once for a write with designs, and never for one without"
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: the checker runs only for a write with designs", pd_seam_case))
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool
