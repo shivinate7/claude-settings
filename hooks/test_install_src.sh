@@ -4064,22 +4064,35 @@ caseM9() {
 
 # caseM10: a clean checkout on branch main, at its origin/main tip, already holds main's files, so it is the install's
 # source and no mirror is cloned. The defect: the own-checkout block sends any checkout on a branch to the mirror before it
-# checks the head. Two forms: the origin fetch succeeds through the redirect; or the clone has no origin remote and
-# refs/remotes/origin/main is HEAD, as test_action.py sets up its scratch clone. m10_run FORM prints the first failure and
-# returns 1. FORM is fetch or noremote. Reads co, want, h and fx from move_fixture.
+# checks the head. Three forms. fetch: the checkout's record of origin/main is stale, at $old, while HEAD is at $want and
+# the redirected origin's main is $want, so only a fetch that lands makes HEAD the tip. noremote: the clone has no origin
+# remote and refs/remotes/origin/main is HEAD, as test_action.py sets up its scratch clone. stalefetch: the fetch form's local
+# state with the origin unreachable, so one WARN must name the failed fetch and no tip is claimed. m10_run FORM prints the
+# first failure and returns 1. FORM is fetch, noremote or stalefetch. Reads co, want, old, h and fx from move_fixture.
 m10_run() {
-  move_fixture "m10$1" stale
+  tag=$1; [ "$1" = stalefetch ] && tag=stale  # the folder names must not contain "fetch": the WARN count reads them
+  move_fixture "m10$tag" stale
   if ! msg=$(stale_fixture_ok); then printf 'FIXTURE %s' "$msg"; return 1; fi
   git -C "$co" checkout -q main
-  if [ "$1" = noremote ]; then
-    git -C "$co" remote remove origin
-    git -C "$co" update-ref refs/remotes/origin/main HEAD
-    # Without an origin remote, install.sh finds the checkout only by its own folder, so the install runs from the file.
-    if ! cmp -s "$INSTALL_SH" "$co/install.sh"; then printf 'FIXTURE the checkout holds another install.sh than the one under test'; return 1; fi
-  fi
+  tip_before=$old; tip_after=$want
+  case "$1" in
+    fetch) git -C "$co" update-ref refs/remotes/origin/main "$old" ;;
+    stalefetch)
+      git -C "$co" update-ref refs/remotes/origin/main "$old"
+      tip_after=$old
+      write_redirect "$h" "$work/m10stale-no-such.git"
+      ;;
+    noremote)
+      tip_before=$want
+      git -C "$co" remote remove origin
+      git -C "$co" update-ref refs/remotes/origin/main HEAD
+      # Without an origin remote, install.sh finds the checkout only by its own folder, so the install runs from the file.
+      if ! cmp -s "$INSTALL_SH" "$co/install.sh"; then printf 'FIXTURE the checkout holds another install.sh than the one under test'; return 1; fi
+      ;;
+  esac
   if [ "$(git -C "$co" symbolic-ref --short HEAD)" != main ] || [ -n "$(git -C "$co" status --porcelain)" ] \
-     || [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$co" rev-parse refs/remotes/origin/main)" != "$want" ]; then
-    printf 'FIXTURE the checkout is not a clean main at its origin/main tip [%s]' "$want"; return 1
+     || [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$co" rev-parse refs/remotes/origin/main)" != "$tip_before" ]; then
+    printf 'FIXTURE the checkout is not a clean main at [%s] with origin/main at [%s]' "$want" "$tip_before"; return 1
   fi
   if [ "$1" = noremote ]; then move_install file; else move_install; fi
   if [ $rc -ne 0 ]; then printf 'install.sh exited %s: %s' "$rc" "$(install_problems)"; return 1; fi
@@ -4093,15 +4106,25 @@ m10_run() {
      || [ -n "$(git -C "$co" status --porcelain)" ]; then
     printf 'the checkout was moved or changed'; return 1
   fi
+  if [ "$(git -C "$co" rev-parse refs/remotes/origin/main)" != "$tip_after" ]; then
+    printf 'the checkout origin/main is [%s], want [%s]: the fetch did not land or moved it' "$(git -C "$co" rev-parse refs/remotes/origin/main)" "$tip_after"; return 1
+  fi
+  if [ "$1" = stalefetch ]; then
+    n_fetch=$(printf '%s\n' "$out" | grep WARN | grep -c fetch)
+    if [ "$n_fetch" -ne 1 ]; then printf 'want one WARN line naming the fetch, got %s: %s' "$n_fetch" "$(install_problems)"; return 1; fi
+    if printf '%s\n' "$out" | grep -q 'at the tip'; then printf 'the install claims the checkout is at the tip: %s' "$(printf '%s\n' "$out" | grep 'at the tip' | head -n 1)"; return 1; fi
+  fi
   return 0
 }
 
 caseM10() {
   if ! command -v jq >/dev/null 2>&1; then skip "caseM10" "jq not found"; return; fi
-  name="caseM10 (fetch): a clean checkout on main at its origin/main tip is the source, the origin fetch succeeds, and no mirror is cloned"
+  name="caseM10 (fetch): a clean checkout on main at its origin/main tip is the source, the fetch lands, and no mirror is cloned"
   if msg=$(m10_run fetch); then ok "$name"; else bad "$name" "$msg"; fi
   name="caseM10 (noremote): a clean checkout on main at refs/remotes/origin/main, with no origin remote, is the source, and no mirror is cloned"
   if msg=$(m10_run noremote); then ok "$name"; else bad "$name" "$msg"; fi
+  name="caseM10 (stalefetch): origin unreachable with a stale origin/main record: one WARN names the failed fetch, the checkout is untouched, and no tip is claimed"
+  if msg=$(m10_run stalefetch); then ok "$name"; else bad "$name" "$msg"; fi
 }
 
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
