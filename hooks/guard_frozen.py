@@ -94,6 +94,10 @@ _LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<sta
 _CLONE_MARKER = os.path.join("merge", "install_from_main.sh")
 from shared_names import PROJECT_FROZEN_FILES  # noqa: E402  the one home, shared with the config watch
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
+# THE MAIN MIRROR IS FROZEN TOO. A cloud install whose session checkout is on a branch takes its files from a mirror of
+# main at `$HOME/claude-settings-main`, and the CLAUDE.md pointer names it, so a write there changes what every session
+# runs. install.sh's MAIN_MIRROR builds the same name and must stay equal to this one.
+MAIN_MIRROR_NAME = "claude-settings-main"
 
 FROZEN_REASON = (
     "Rule (configuration): this file decides what a session is allowed to do, so a session "
@@ -134,9 +138,15 @@ def _in_live_pin(target: str) -> bool:
         target = parent
 
 
+def _in_main_mirror(target: str) -> bool:
+    """True when the path is the main mirror folder directly under the home directory, or inside it."""
+    root = os.path.normcase(os.path.normpath(os.path.join(os.path.expanduser("~"), MAIN_MIRROR_NAME)))
+    return target == root or target.startswith(root + os.sep)
+
+
 def is_frozen(path: str, cwd: str) -> bool:
     """True when the path is part of the harness configuration under the config directory, or is
-    the live pinned checkout (`_in_live_pin`).
+    the live pinned checkout (`_in_live_pin`), or the main mirror (`_in_main_mirror`).
 
     A path is frozen when EITHER its literal spelling (no symlink followed) OR its fully
     resolved spelling (every symlink followed) sits under the config directory. The literal
@@ -160,6 +170,8 @@ def is_frozen(path: str, cwd: str) -> bool:
     except Exception:
         return False
     if _in_live_pin(literal) or _in_live_pin(resolved):
+        return True
+    if _in_main_mirror(literal) or _in_main_mirror(resolved):
         return True
     for target, root in ((literal, literal_root), (resolved, resolved_root)):
         if not target.startswith(root + os.sep):
