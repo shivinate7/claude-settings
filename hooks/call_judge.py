@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""PreToolUse judge for an Agent spawn and an AskUserQuestion call. One command hook replaces the
-settings.json `prompt` hook on Agent and the `agent` hook on AskUserQuestion: a hook of those types
-sees only the call's JSON and cannot read the override file, so no owner override reached it
-(decision owner-override).
+"""PreToolUse judge for an Agent spawn, an AskUserQuestion call and an ArtifactData write of a
+waiting-page item. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
+hook on AskUserQuestion: a hook of those types sees only the call's JSON and cannot read the override
+file, so no owner override reached it (decision owner-override).
 
 An AskUserQuestion box runs hooks/question_form.py chat_hit first. A hit refuses with the rule it
 names, through the same refuse(), and makes no model call; the model sees only a box that passes.
 Each call that passes gets one model verdict through decision_watch.invoke_model, the one model caller.
 A verdict {"ok": false, "reason": R} refuses through guard_core.refuse(), the one home of the override
 check, the override line and the guard.log line. The rules are `spawn-judge` and `question-judge`.
+
+An ArtifactData call exits first unless its action is set, update or batch, before any heavy import.
+For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
+that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options or
+context (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
+many writes a batch holds. The page and the chat box share the seven judge items, so both places get the
+same review. A str_replace is not model-judged: it holds only the replaced text, not the item.
 
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
@@ -22,6 +29,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+
+from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -45,11 +54,8 @@ SPAWN_PROMPT = (
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
     "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
-QUESTION_PROMPT = (
-    "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
-    "or none. Otherwise judge the question box alone. Code has already checked the form lines and the "
-    "marks on each option, so judge only these. Block only on a clear miss; when unsure answer "
-    "{\"ok\": true}.\n"
+# The seven items a question to the owner is judged on: one text, for the chat box and the page.
+JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
     "2. The Problem is one plain sentence that says why it needs his word.\n"
     "3. Each premise is in plain words.\n"
@@ -60,13 +66,33 @@ QUESTION_PROMPT = (
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
     "one line>\"}."
 )
+QUESTION_PROMPT = (
+    "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
+    "or none. Otherwise judge the question box alone. Code has already checked the form lines and the "
+    "marks on each option, so judge only these. Block only on a clear miss; when unsure answer "
+    "{\"ok\": true}.\n" + JUDGE_ITEMS
+)
+# A page write carries only the fields it changes, so the prompt names the fields and judges only those.
+PAGE_PROMPT = (
+    "Review these writes of a waiting-page item, each as {op, doc_id, data}: %s\nThe item is a question to "
+    "the owner. Its `context` holds the Goal, Problem and Based on lines. Each entry of `options` has a "
+    "label, a `gain` and a `lose`. `pick` is the recommendation. Code has already checked the form lines "
+    "and the marks on each option, so judge only the items below, and only the fields a write carries: a "
+    "write with no `options` is not flagged for options, one with no `context` is not flagged for the "
+    "Goal, Problem or premises, and one with no `pick` is not flagged for item 7, because the stored item "
+    "is unseen. Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
+)
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
               "the spawn brief breaks roles-brief-contents or the Explore row of agent-model-cap."),
     "AskUserQuestion": (QUESTION_PROMPT, QUESTION_MODEL, QUESTION_TIMEOUT, QUESTION_RULE,
                         "the question box misses an item of the question format."),
+    DATA_TOOL: (PAGE_PROMPT, QUESTION_MODEL, QUESTION_TIMEOUT, QUESTION_RULE,
+                "the waiting-page item misses an item of the question format."),
 }
+# The ArtifactData actions that write an item. Any other action exits before a heavy import.
+PAGE_WRITE_ACTIONS = ("set", "update", "batch")
 
 
 def invoke_model(*args, **kwargs):
@@ -118,7 +144,18 @@ def main():
             if code_rule:
                 reason = "%s (%s)" % (question_form.CHAT_REASONS[code_rule], matched)
                 return refuse(payload, tool, args, code_rule, reason)
-        shown = json.dumps(args, ensure_ascii=False)
+            shown = json.dumps(args, ensure_ascii=False)
+        elif tool == DATA_TOOL:
+            if args.get("action") not in PAGE_WRITE_ACTIONS:
+                return 0
+            import question_form
+            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "")
+            judged = [] if hit[0] else question_form.judged_item_writes(writes)
+            if not judged:  # guard.py refuses a hit; no write carries options or context
+                return 0
+            shown = json.dumps(judged, ensure_ascii=False)
+        else:
+            shown = json.dumps(args, ensure_ascii=False)
         verdict, error = invoke_model(prompt % shown, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),

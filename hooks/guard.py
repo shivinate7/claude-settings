@@ -2719,52 +2719,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-DATA_TOOL = "ArtifactData"
-WAITING_ITEMS = "items"
-
-
-def _is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
-    with no page reads as unknown, and its calls are not judged."""
-    lint = os.path.join(_HERE, "..", "lint")
-    if lint not in sys.path:
-        sys.path.append(lint)
-    import layout
-    root = _git_root_of(cwd)
-    page = layout.waiting_page(root) if root else "unknown"
-    url = str(tool_input.get("url") or "").rstrip("/")
-    return page != "unknown" and url == page.rstrip("/")
-
-
-def _git_root_of(cwd):
-    here = os.path.realpath(cwd or os.getcwd())
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
 def data_tool_hit(tool_input, cwd=""):
-    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
-    if not isinstance(tool_input, dict):
-        return "", ""
-    if tool_input.get("action") == "batch":
-        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
-    else:
-        entries = [(tool_input.get("action"), tool_input)]
-    writes = [(op, e) for op, e in entries
-              if op in ("set", "update", "str_replace") and e.get("collection") == WAITING_ITEMS]
-    if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
-        return "", ""
+    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
+    filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
     import question_form
-    for op, entry in writes:
-        hit = question_form.item_hit(op, entry)
-        if hit[0]:
-            return hit
-    return "", ""
+    return question_form.page_item_hit(tool_input, cwd)[0]
 
 
 # ------------------------------------------------------------------ impeccable is review-only

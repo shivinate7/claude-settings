@@ -736,6 +736,74 @@ def item_hit(op, entry):
     return PASS
 
 
+# ------------------------------------------------------------------ the writes of a waiting page, one filter
+#
+# The one home of "which ArtifactData writes are waiting-page item writes". hooks/guard.py (the form
+# check) and hooks/call_judge.py (the model review) both read it, so the two never disagree on a write.
+WAITING_ITEMS = "items"
+ITEM_OPS = ("set", "update", "str_replace")
+
+
+def _git_root_of(cwd):
+    here = os.path.realpath(cwd or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def is_waiting_page(tool_input, cwd) -> bool:
+    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
+    with no page reads as unknown, and its calls are not judged."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    root = _git_root_of(cwd)
+    page = layout.waiting_page(root) if root else "unknown"
+    url = str(tool_input.get("url") or "").rstrip("/")
+    return page != "unknown" and url == page.rstrip("/")
+
+
+def page_item_hit(tool_input, cwd=""):
+    """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
+    this repo's waiting page, empty for a read, another collection or another page. The hit is the first
+    write that a rule refuses, else ("", "")."""
+    if not isinstance(tool_input, dict):
+        return PASS, []
+    if tool_input.get("action") == "batch":
+        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
+    else:
+        entries = [(tool_input.get("action"), tool_input)]
+    writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
+    if not writes or not is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
+        return PASS, []
+    for op, entry in writes:
+        hit = item_hit(op, entry)
+        if hit[0]:
+            return hit, writes
+    return PASS, writes
+
+
+def judged_item_writes(writes):
+    """The writes of a page item that the model review reads: [{"op", "doc_id", "data"}]. A write is read
+    when it sets or updates a decision (an update with no kind is read, as decision_form_hit cannot see the
+    stored kind), is not closed, and carries `options` or `context`. A str_replace is not read: it holds
+    only the replaced text, not the item."""
+    judged = []
+    for op, entry in writes:
+        data = _write_data(entry)
+        if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
+            continue
+        if data.get("kind", "decision") != "decision" or not (data.get("options") or data.get("context")):
+            continue
+        judged.append({"op": op, "doc_id": entry.get("doc_id"), "data": data})
+    return judged
+
+
 # ------------------------------------------------------------------ an option's key is its position's letter
 #
 # docs/decisions/option-keys-are-letters.md, rule `option-letter-keys`, built against a named incident
