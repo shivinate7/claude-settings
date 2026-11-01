@@ -21,7 +21,7 @@ An item write whose picture the page would refuse, or would draw as a thin strip
   - Per waiting-page publish allowed: one small file write.
   - A write with no picture, a read, and any other call: no cost beyond the `ArtifactData` read the guard already does.
   - No timer, no long-lived process, no new log beyond the one `noted` line on unknown.
-- Known limit: an `update` is judged on the fields it carries. An update with `designs` but no `options` runs only what `pictureProblem` checks on that, so a pair check or a floor on an option the update leaves out is not run.
+- Known limit: an `update` is judged on the fields it carries. An update with `designs` but no `options` runs only what `pictureProblem` checks on that. A pair check or a floor on an option the update leaves out is not run.
 - Known limit: the record holds the last allowed publish from this clone, not the live page. A publish from another machine, or by hand, moves the page without moving the record.
 - Known limit: the floor is measured at 390 px wide, one viewport. A picture that is a strip at another width is not seen.
 - Known limit: an unknown allows, so a machine with no Chromium never gets the check. CI runs the cases.
