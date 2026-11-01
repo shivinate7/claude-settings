@@ -63,7 +63,7 @@ Short and plain are one goal. Never trade one for the other.
 - An option or step that asks the owner to press in a web app carries a link to that exact page,
   on the option or task that presses.<!-- rule:style-press-has-link -->
 - A step never sends the owner to a file for a command. The command sits in the item's `command`
-  field, and the step says "paste the command below".<!-- rule:style-command-in-item -->
+  field as `{powershell, mac}`, and the step says "paste the command below".<!-- rule:style-command-in-item -->
 - A table that compares things carries a column for what good looks like: the gold standard or
   the target. Each row then shows its gap.<!-- rule:style-table-gold-column -->
 - Give times in US Central, 24-hour clock, with the zone named once, such as 21:40 CDT. Never

@@ -75,6 +75,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
+  merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
+                       record (read from the transcript) does not show in its cs-build tags.
+  trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
+                       get_session record (read from the transcript) proves no cs-build tag. No record,
+                       no transcript or no env id is a refusal.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -258,9 +263,9 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, gh_call_of, git_call_of,
-            merge_call_of, merge_check, merge_check_reason, records_page_hit, settings_roots,
-            undrafted_pr_create, uses_merge_tool,
+            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
+            merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
+            TRUST_REASON, trust_card_hit, undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1410,6 +1415,7 @@ def disables_tests(new_lines, old_lines) -> bool:
 BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
+    " A merge conflict in a test file takes the same route."
 )
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
@@ -2513,6 +2519,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if cite_where and uses_merge_tool(cite_where):
             ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
 
+    # 6a. A merge-tool call with a role flag its own get_session record does not prove (rule merge-role-proof).
+    matched = role_proof_hit(stripped, transcript)
+    if matched:
+        refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
+
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
@@ -3135,6 +3146,12 @@ def judge(payload) -> None:
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
+    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
+    trust_transcript = payload.get("transcript_path")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    if matched:
+        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
         if matched:
@@ -3158,6 +3175,10 @@ def judge(payload) -> None:
             refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
+        if rule == "option-letter-keys":
+            refuse(tool, "deny", "option-letter-keys", question_form.PAGE_REASONS["option-letter-keys"], matched)
+        if rule == "rework-off-page":
+            refuse(tool, "deny", "rework-off-page", question_form.PAGE_REASONS["rework-off-page"], matched)
         if rule == "question-form":
             refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
         if rule == "item-field-rendered":
