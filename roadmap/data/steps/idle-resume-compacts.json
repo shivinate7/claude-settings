@@ -1,0 +1,9 @@
+{
+ "title": "A session idle for a couple of hours does not compact on the next reply",
+ "phase": "cleanup",
+ "status": "doing",
+ "order": 103.33757,
+ "why": "Owner report, Nov 1 17:54 CST: sessions idle a couple of hours compact first thing on his reply, whatever the context used.",
+ "note": "Lane idle-resume-compacts (session_013NEJL2ehSMhrT9M1quHUvf) finds the cause: Claude Code itself, our hooks, or the compact settings. Related: steps c203 (compaction size per session) and handoff-checkpoint-before-compact.",
+ "updatedAt": "2026-11-01T23:56:00Z"
+}
