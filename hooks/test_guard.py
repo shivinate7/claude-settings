@@ -11912,6 +11912,23 @@ sh("debug-port: a process listing that matches the flag with a port value is all
    "Get-CimInstance Win32_Process | Where-Object CommandLine -match \"--remote-debugging-port=9222\"",
    "allow", tool="PowerShell", cwd=NOGIT)
 
+# PowerShell's short aliases (`?`, `%`, `sls`, `gc`) and `ForEach-Object` only search. A search of a
+# process listing or a log is text, so it is an allow. A launch with the flag still asks.
+sh("debug-port: a ? alias search of a process listing for the flag is allowed",
+   "Get-Process | ? { $_.CommandLine -match \"--remote-debugging-port=9222\" }", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a % alias and sls search of a process listing for the flag is allowed",
+   "Get-CimInstance Win32_Process | % { $_.CommandLine } | sls \"--remote-debugging-port=9222\"", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a ForEach-Object search of a process listing for the flag is allowed",
+   "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine -match \"--remote-debugging-port=9222\" }",
+   "allow", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a gc and sls search of a log for the flag is allowed",
+   "gc launch.log | sls \"--remote-debugging-port=9222\"", "allow", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a Start-Process argument string with the port alone asks",
+   "Start-Process -Wait app.exe -ArgumentList \"--remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+
 
 # --------------------------------------------------------------------------- a port question departs or is not asked
 FAMILY = "port-question"
