@@ -694,8 +694,7 @@ prune_case1() {
     return
   fi
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune1-checkout"
-  make_checkout "$co" "# prune1 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  retired_checkout "$co" prune1
   printf '#!/bin/sh\necho hi\n' > "$co/hooks/temp_hook.sh"
 
   out1=$(run_local_install "$co" "$h" "$cfg"); rc1=$?
@@ -825,8 +824,7 @@ prune_case5() {
 prune_case6() {
   name="prune6: cloud mode prunes a recorded copy whose source is gone"
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/prune6-checkout"
-  make_checkout "$co" "# prune6 content"
-  cp "$INSTALL_SH" "$co/install.sh"
+  retired_checkout "$co" prune6
   printf '#!/bin/sh\necho cloud\n' > "$co/hooks/cloud_hook.sh"
 
   out1=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
@@ -2241,7 +2239,7 @@ orig_case3() {
 
 # ---- bin case: the shim lands, and only the three stale Banchi files go ------------------------
 bin_case1() {
-  name="bin1: claude-janitor shim lands; janitor.py, reap.py, session-teardown.sh removed; others kept"
+  name="bin1: claude-janitor shim lands; listed janitor files leave bin/ (reap.py, session-teardown.sh moved to backups/retired); janitor.py and decoys kept"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then
     skip "$name" "$NO_SYMLINK_REASON"
     return
@@ -2250,10 +2248,12 @@ bin_case1() {
   make_checkout "$co" "# bin1 content"
   cp "$INSTALL_SH" "$co/install.sh"
   cp "$REPO_ROOT/bin/claude-janitor" "$co/bin/claude-janitor"
+  cp "$REPO_ROOT/retired-files.txt" "$co/retired-files.txt"
   mkdir -p "$cfg/bin"
   printf 'old shim\n' > "$cfg/bin/claude-janitor"
-  # Stale: reap.py is a foreign symlink, janitor.py is a repo link (kept), session-teardown.sh
-  # is a plain file. Decoys that must all survive: foo.sh, claude-janitor-old, a dir named
+  # Listed in the real retired-files.txt: reap.py is a link to a file outside the clone (moved to
+  # backups/retired), session-teardown.sh a plain file (moved). janitor.py is listed but the clone still
+  # ships it, so it stays. Decoys that must all survive: foo.sh, claude-janitor-old, a dir named
   # janitor-dir. bin2 covers a dir named janitor.py.
   printf 'x\n' > "$cfg/bin/session-teardown.sh"
   printf 'x\n' > "$cfg/bin/foo.sh"
@@ -2273,6 +2273,10 @@ bin_case1() {
     bad "$name" "claude-janitor is not a link to the repo shim"
   elif [ "$got" != "$want" ]; then
     bad "$name" "bin/ holds [$got], expected [$want]"
+  elif [ -z "$(find "$cfg/backups/retired" -name '*reap.py*' 2>/dev/null)" ]; then
+    bad "$name" "reap.py, a listed link to a file outside the clone, is not under backups/retired"
+  elif [ -z "$(find "$cfg/backups/retired" -name '*session-teardown.sh*' 2>/dev/null)" ]; then
+    bad "$name" "session-teardown.sh, a listed plain file, is not under backups/retired"
   elif [ "$(readlink "$cfg/bin/janitor.py")" != "$co/bin/janitor.py" ]; then
     bad "$name" "repo-linked janitor.py was changed"
   else
