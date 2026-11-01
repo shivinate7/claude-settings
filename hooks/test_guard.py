@@ -8939,6 +8939,12 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+# The `sed -i` script is code, not a path. From inside a frozen folder every relative word resolves to a frozen path, so a
+# script judged as a path would refuse a write to a file outside the config folder. The deny beside it holds the same cwd.
+sh("frozen: sed -i on a config hook, from a frozen folder", 'sed -i "s/a/b/" ' + CFG_HOOK, "deny", "frozen-path",
+   cwd=os.path.join(CFG, "hooks"))
+sh("frozen: sed -i on a file outside the config folder, from a frozen folder, is allowed",
+   'sed -i "s/a/b/" ' + slash(os.path.join(NOGIT, "f.txt")), "allow", cwd=os.path.join(CFG, "hooks"))
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -18158,6 +18164,41 @@ for _command in ("echo x >> docs/todo.md",
                  'echo "first\nsecond > README.md"', "echo \"it's > README.md\"",
                  "cat > docs/todo.md <<'EOF'\n# heading > README.md\nEOF"):
     cs_shell("shell_write_allowed", "allow", _command)
+
+# ---- `sed -i`: the script is code, and the file operands that follow it are what it writes. A script that holds `|`, `;`,
+# `&`, `#`, `//`, a lone quote or a line break must not be judged as a path (a false deny) and must not hide the file
+# after it (a false allow: `writes_to` stops reading at `;`, `|` and `&`, so a judge that skips the script alone passes
+# `sed -i 's|a|b|' hooks/a.py`). Each script runs on a product file (denied) and on a record (allowed).
+CS_SED_SCRIPTS = (
+    ("slash", '"s/a/b/"'), ("pipe", "'s|a|b|'"), ("semicolon", '"s/a/b/;s/c/d/"'), ("ampersand", '"s/a/&&/"'),
+    ("line_break", '"s/a/b/\ns/c/d/"'),
+    ("hash_in_pattern", '"s/#/x/"'), ("hash_comment", '"s/a/b/ # note"'), ("double_slash", '"s,//,/,"'),
+    ("lone_quote", '"s/it\'s/it is/"'), ("multi_line_with_comment", '"s/a/b/\n# c\ns/d/e/"'))
+for _name, _script in CS_SED_SCRIPTS:
+    cs_shell("sed_script_%s_product_file_denied" % _name, "deny", "sed -i %s hooks/a.py" % _script, "a.py")
+    cs_shell("sed_script_%s_record_allowed" % _name, "allow", "sed -i %s docs/todo.md" % _script)
+for _command in ('sed -i -e "s/a/b/" -e "s/c/d/" hooks/a.py',               # each -e script is code
+                 'sed -i -e "s/a/b/" -e "s|c|d|" hooks/a.py',
+                 'sed -i "s/a/b/" docs/todo.md hooks/a.py',                  # one product path among the files
+                 "sed -i 's|a|b|' docs/todo.md hooks/a.py",
+                 "sed -i.bak 's/a/b/' hooks/a.py",
+                 'sed -i "/foo/d" hooks/a.py',                               # the script reads as an absolute word today
+                 'sed "s/a/b/" docs/todo.md > hooks/a.py'):                  # no -i: the redirect writes
+    cs_shell("sed_product_file_denied", "deny", _command, "a.py")
+for _command in ('sed -i "s/a/b/" docs/decisions/a.md',
+                 'sed -i -e "s/a/b/" docs/decisions/a.md',
+                 'sed -i -e "s/a/b/" -e "s|c|d|" docs/todo.md',
+                 'sed -i.bak "s/a/b/" docs/todo.md',                         # the backup lands beside the record
+                 'sed -i "/foo/d" docs/todo.md',
+                 'sed "s/a/b/" hooks/a.py',                                  # no -i: a read
+                 'sed -n "s/a/b/p" hooks/a.py'):
+    cs_shell("sed_record_or_read_allowed", "allow", _command)
+# A script beside a path in no repo. Like a `cp` source, a script stood in by an empty word would resolve to the cwd, so
+# each runs at a repo root, in a folder of the repo, and at the root of a worktree nested in the repo.
+for _where, _cwd in (("repo root", GITMAIN), ("repo folder", os.path.join(GITMAIN, "src")), ("nested worktree root", AGENTWT)):
+    for _script in ('"s/a/b/"', '"1,3d"', "'s|a|b|'", '"/foo/d"'):
+        cs_shell("sed_script_beside_a_path_in_no_repo_allowed (%s)" % _where, "allow",
+                 "sed -i %s %s" % (_script, slash(OUTSIDE_TEMP)), cwd=_cwd)
 
 # ---- a commit holds the staged paths: `git commit -m x` in a worktree whose index holds them
 CS_COMMIT_FILES = dict(BASE_FILES, **{"docs/decisions/a.md": "a\n", "docs/todo.md": "- a\n"})
