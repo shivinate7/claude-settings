@@ -8,7 +8,7 @@
 import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { removeRunFolder, runFolder } from './temp-root.mjs';
@@ -66,6 +66,12 @@ export const gitIn = (dir, ...a) =>
 export const scratchRepo = ({ commit = false } = {}) => {
   const dir = tmpFolder('pemap-repo-');
   cpSync(FIXTURE, dir, { recursive: true });
+  // A Windows checkout (core.autocrlf) holds the fixture with CRLF. The cases edit it by `\n` and by exact text, so the copy is LF on every platform.
+  // Every fixture file is text. The product reads CRLF fine, and format-version.test.mjs builds its CRLF repositories itself.
+  for (const rel of readdirSync(dir, { recursive: true })) {
+    const p = join(dir, rel);
+    if (statSync(p).isFile()) writeFileSync(p, readFileSync(p, 'utf8').replace(/\r\n/g, '\n'));
+  }
   const git = (...a) => gitIn(dir, ...a);
   git('init', '-q');
   if (commit) {
