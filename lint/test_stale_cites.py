@@ -337,6 +337,32 @@ class SymbolTests(StaleCase):
             commit(repo)
         self.assert_passes(self.make_range(base_files(notes), change))
 
+    def test_a_nested_def_in_a_test_method_is_not_a_module_level_name(self):
+        # From a history replay: a test method's local def was read as a module-level name.
+        base_sweep = ("import unittest\n\n\nclass SweepTests(unittest.TestCase):\n"
+                      "    def test_two(self):\n        def stop(*a, **k):\n            return 1\n"
+                      "        return stop\n")
+        head_sweep = ("import unittest\n\n\nclass SweepTests(unittest.TestCase):\n"
+                      "    def test_two(self):\n        return None\n")
+        notes = "# Notes\n\ntwo tests in `janitor/test_sweep.py` stop with WinError 1314.\n"
+
+        def change(repo):
+            write(repo, "janitor/test_sweep.py", head_sweep)
+            commit(repo)
+        extra = {"janitor/test_sweep.py": base_sweep}
+        self.assert_passes(self.make_range(base_files(notes, extra=extra), change))
+
+    def test_a_module_level_def_removed_from_the_cited_file_is_flagged_on_the_same_line(self):
+        base_sweep = "def stop(*a, **k):\n    return 1\n"
+        head_sweep = "def keep():\n    return 2\n"
+        notes = "# Notes\n\ntwo tests in `janitor/test_sweep.py` stop with WinError 1314.\n"
+
+        def change(repo):
+            write(repo, "janitor/test_sweep.py", head_sweep)
+            commit(repo)
+        extra = {"janitor/test_sweep.py": base_sweep}
+        self.assert_flags(self.make_range(base_files(notes, extra=extra), change), [(NOTES, 3, "STALE002")])
+
 
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
