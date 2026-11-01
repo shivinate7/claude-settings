@@ -14,20 +14,22 @@ Hook: stall_watch.py --hook
     { export STALL_WATCH_BEAT=BEAT
     { <original>
     }
-    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --also BEAT;
+    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --beat BEAT;
     rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG BEAT; exit $rc
 
   BEAT is stall-watch-<id>.beat next to LOG; the hook does not create it. A tool that is quiet by
-  design (bin/verdict) appends its heartbeat there too, so a redirect in the command cannot hide it.
+  design (bin/verdict) appends its heartbeat there too, and the watcher relays it to its stdout (the
+  harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
-  Cost: one append per heartbeat by the tool, and one stat a second of BEAT in the watcher's loop.
+  Cost: one append per heartbeat by the tool, and one open or read of BEAT a second in the watcher's loop.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
 
-Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS]
-  Streams LOG to stdout. Any new byte, also a bare \\r, resets the timer. After SECS (default
+Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [--also F]...
+  Streams LOG to stdout. Any new byte, also a bare \\r, resets the timer. It streams each new byte
+  of BEAT (a file that need not exist yet) to stdout too, and it resets the timer the same way. After SECS (default
   300) without new bytes, and with no change to any --also log, it prints a STALL report and exits 3,
   and the job keeps running. The
   STALL line lists the job's shell and every process under it, parent first. Stopping them in that
@@ -188,7 +190,7 @@ def job_tree(pid):
     return found
 
 
-def report(pid, quiet, log, also=()):
+def report(pid, quiet, log, also=(), beat=None):
     rows = job_tree(pid)
     pids = ",".join(r[0] for r in rows) or str(pid)
     lines = ["STALL: no output for %ss; pid=%s is still running" % (quiet, pids),
@@ -215,13 +217,17 @@ def report(pid, quiet, log, also=()):
     lines += ["Last %d output lines:" % TAIL_LINES] + ["  " + l for l in tail or ["(no output)"]]
     lines.append("Log: " + log)
     lines += ["Named log, no growth either: " + os.path.abspath(p) for p in also]
+    if beat:
+        lines.append("Beat file (verdict heartbeat), no growth: " + os.path.abspath(beat))
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()
 
 
-def watch(pid, log, quiet, also=()):
-    """Stream LOG; report a stall after quiet seconds with no new byte on it and no change to any
-    named log (named_logs). The named logs cost one stat each a second, in this loop."""
+def watch(pid, log, quiet, also=(), beat=None):
+    """Stream LOG and BEAT; report a stall after quiet seconds with no new byte on either and no
+    change to any named log (named_logs). The named logs cost one stat each a second, in this loop.
+    BEAT is where a quiet-by-design tool (bin/verdict) appends its heartbeat; it may not exist at
+    start, so it is opened at the first check that finds it."""
     last = time.monotonic()
     marks = log_marks(also)
     next_check = 0.0
@@ -232,6 +238,7 @@ def watch(pid, log, quiet, also=()):
         if waited % 10 == 0 and ended_state(job_state(pid)):  # a dead job with no log: stop
             return 0
         time.sleep(0.05)
+    bf = None
     with open(log, "rb") as f:
         while True:
             now = time.monotonic()
@@ -244,18 +251,29 @@ def watch(pid, log, quiet, also=()):
                     seen = log_marks(also)
                     if seen != marks:  # the job still writes to a log it named
                         marks, last = seen, time.monotonic()
+                if beat and bf is None:
+                    try:
+                        bf = open(beat, "rb")
+                    except OSError:
+                        pass
             data = f.read()  # read after the state check, so the last output is not lost
+            if bf is not None:
+                data += bf.read()
             if data:
                 sys.stdout.buffer.write(data)
                 sys.stdout.buffer.flush()
                 last = time.monotonic()
             if ended:
+                if bf is not None:
+                    bf.close()
                 return 0
             if time.monotonic() - last >= quiet:
                 if not checked:  # the last sample may be a second old: sample again, then decide
                     recheck = True
                     continue
-                report(pid, quiet, log, also)
+                report(pid, quiet, log, also, beat)
+                if bf is not None:
+                    bf.close()
                 return STALL_EXIT
             time.sleep(0.2)
 
@@ -294,7 +312,7 @@ def hook():
     wrapped = (
         "{ export STALL_WATCH_BEAT=" + q(beat) + "\n{ " + original + "\n\n}\n} > " + q(log) + " 2>&1 & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
-        + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + " --also " + q(beat)
+        + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + " --beat " + q(beat)
         + "".join(" --also " + q(p) for p in named_logs(original))
         + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + " " + q(beat) + "; exit $rc"
@@ -438,7 +456,7 @@ def main(argv):
         return hook()
     if argv[:1] == ["--stop"]:
         return stop()
-    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None}
+    opts = {"--quiet": DEFAULT_QUIET, "--watch-pid": None, "--log": None, "--beat": None}
     also = []
     for i in range(0, len(argv) - 1, 2):
         if argv[i] == "--also":
@@ -448,7 +466,7 @@ def main(argv):
     if not opts["--watch-pid"] or not opts["--log"]:
         print(__doc__)
         return 2
-    return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]), also)
+    return watch(int(opts["--watch-pid"]), opts["--log"], float(opts["--quiet"]), also, opts["--beat"])
 
 
 if __name__ == "__main__":

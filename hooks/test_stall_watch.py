@@ -9,11 +9,15 @@ Design under test: the PreToolUse hook rewrites a background Bash command into s
 runs in the harness shell. The original stays unquoted, as top-level code inside `{ ... }`, so a
 settings deny rule still sees it:
 
+    { export STALL_WATCH_BEAT=BEAT
     { <original>
-    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N; rc=$?;
-    [ $rc -eq 3 ] && exit 3; wait $pid
+    }
+    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --beat BEAT;
+    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG BEAT; exit $rc
 
-The watcher streams LOG to stdout. After N silent seconds it prints one report that starts with a
+The watcher streams LOG, and any new byte of BEAT, to stdout (the harness output file). A tool that
+is quiet by design (bin/verdict) appends its heartbeat to BEAT, so a redirect in the command cannot
+hide it. After N silent seconds it prints one report that starts with a
 line `STALL:`, and exits 3. The command keeps running. If the pid ends first, the watcher exits 0,
 and `wait` returns the command's code.
 
@@ -1001,6 +1005,18 @@ def verdict_heartbeat_through_grep_is_no_stall():
 def verdict_heartbeat_to_devnull_is_no_stall():
     """24b. verdict sleep N 2>/dev/null: the child's stderr is dropped, yet the heartbeat reaches the watch"""
     return verdict_stall_problems(f"{shlex.quote(VERDICT)} sleep {VERDICT_SLEEP} 2>/dev/null", want_rc=0)
+
+
+@posix_case
+def verdict_heartbeat_reaches_the_harness_output():
+    """24e. verdict sleep N 2>/dev/null: the watcher relays the heartbeat to the harness output, where the Stop check reads"""
+    orig = f"{shlex.quote(VERDICT)} sleep {VERDICT_SLEEP} 2>/dev/null"
+    rc, text, _secs, _cmd = run_rewritten(orig, timeout=30, env=verdict_job_env(), quiet=VERDICT_QUIET)
+    reap()
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect("verdict: still running" in text,
+                       "the heartbeat is not in the harness output: " + text[:200])
+    return problems
 
 
 @posix_case
