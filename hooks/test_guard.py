@@ -3407,14 +3407,17 @@ else:
        "kill -- -%d" % TAG_LEADER, "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
        transcript=SUB_TRANSCRIPT)
 # A STRANDED JOB. After a stall the stub shell is under init, and the job is its child. In a real
-# stall the stub holds no tag, and the job holds the session tag. In the main session, a job that
-# holds this session's id is owned for `kill` when its direct parent is an untagged shell whose
-# parent is init (owner ruling, 2026-11-01 11:53 CST: waiting-page item 114, the stranded-job pick).
-# An agent call stays refused, and so does a job with no id, a job with another session's id, or an
-# untagged job under a tagged stub. The wait form, bin/wait-pid, owns these shapes by its own test
-# (lint/test_wait_pid.py).
+# stall the stub holds no tag, and the job holds the session tag. In the main session, the guard owns
+# a pid that holds this session's id when its parent is init, or its parent's parent is init
+# (owner ruling, 2026-11-01 11:53 CST: waiting-page item 114, the stranded-job pick). So a tagged job
+# under a stub is owned whether the stub is tagged or not. An agent call stays refused, and so does a
+# job with no id, a job with another session's id, or an untagged job under a tagged stub. The wait
+# form, bin/wait-pid, owns these shapes by its own test (lint/test_wait_pid.py).
 tag_case("kill: a job under an untagged PPID-1 stub, holding this session's id, from the main session",
          "allow", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True)
+tag_case("kill: a job under a tagged PPID-1 stub, holding this session's id, from the main session",
+         "allow", env_entries=[TAG + "=" + SUB_SESSION],
+         holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True)
 for _who, _kw in AGENT_CALLS:
     tag_case("kill: a job under an untagged PPID-1 stub, holding this session's id, called by an agent (%s)"
              % _who, "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
