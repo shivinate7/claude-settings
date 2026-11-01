@@ -28,6 +28,9 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
 GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
 
+# The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
+DATA_TOOL = "ArtifactData"
+
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
 

@@ -12057,7 +12057,7 @@ add("uniform pick: a batch with today's item among the sets is denied", "deny", 
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles", "data": up_item()}])
 add("uniform pick: the refusal names the ruling and what to pick", "deny", "uniform-pick",
-    carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
+    carries=("shared tool, never the tool to fit a repo", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="banchi-titles", data=up_item())
 
 # Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
@@ -12122,7 +12122,7 @@ add("uniform pick: a batch with a multi item whose list pick holds the widening 
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
              "data": up_item(multi=True, options=UP_THREE, pick=["a", "b"])}])
 add("uniform pick: the refusal of a widening list pick names the ruling and what to pick", "deny",
-    "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    "uniform-pick", carries=("shared tool, never the tool to fit a repo", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
     action="set", collection="items", doc_id="banchi-titles",
     data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
 
@@ -19921,6 +19921,9 @@ ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
 # the guard under test (ROLE_REVIEWER_FREE_ROUNDS), never copied here. A refusal for any other role names neither.
 ROUND_MARKER = "Round N of 3"
 FREE_ROUND_MARKERS = tuple("Round %s of 3" % n for n in _load_guard_module().ROLE_REVIEWER_FREE_ROUNDS)
+# The Explore audit marker (shiv, Nov 1 11:43 CST, page item 107, pick a). A literal, not the guard's EXPLORE_AUDIT_MARKER:
+# that constant is new, and a read at import time would fail every case on the old code.
+EXPLORE_MARKER = "Audit:"
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
 SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
@@ -19931,7 +19934,9 @@ ROLE_TABLE_TEST_AUTHOR_SONNET = ROLE_TABLE_HEAD + "| test-author | sonnet | high
 # The qualifier rows (`reviewer, rounds 2 and 3`, `builder, try 3 after`, `... that audits`) name no role.
 ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
     "| Explore, claude-code-guide | haiku | xhigh |\n"
-    "| Explore that audits or judges meaning, not a plain search | sonnet, or opus on the owner's grant | high |\n"
+    "| Explore that audits or judges meaning, not a plain search | sonnet, when its brief's first non-blank line "
+    "carries the `Audit:` marker; or opus on the owner's grant (2026-10-21 ruling, class level); set per spawn, "
+    "which overrides the frontmatter `haiku` | high |\n"
     "| test-author | haiku | xhigh |\n"
     "| reviewer | haiku | xhigh |\n"
     "| reviewer, rounds 2 and 3 | sonnet, the ceiling | high |\n"
@@ -20048,9 +20053,36 @@ role_model_refuse("role-model: role with a trailing space on sonnet is denied, m
 role_model_refuse("role-model: role Reviewer on sonnet with no round line is denied, matched to its row",
           "Reviewer", "sonnet", "Check the diff for typos.")
 
+# ---- B2: an Explore on Sonnet is denied unless the first `Audit:` on the brief's first non-blank line counts,
+# with any text ahead of it (case-sensitive). Shiv's ruling: Nov 1 11:43 CST, page item 107, pick a.
+role_model_refuse("role-model: Explore on sonnet with no marker is denied, and names the Audit: marker",
+          "Explore", "sonnet", "Find where X is defined.", carries=(EXPLORE_MARKER,))
+role_model_refuse("role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)",
+          "Explore", "sonnet", "Find where X is defined.\nAudit: check the glossary for meaning drift.",
+          carries=(EXPLORE_MARKER,))
+# Re-pointed from an allow case (shiv, Nov 1 11:43 CST, page item 107, pick a): plain prose on line 1 is not the marker.
+role_model_refuse("role-model: Explore on sonnet whose first line is plain prose is denied",
+          "Explore", "sonnet", "Audit the glossary for meaning drift.", carries=(EXPLORE_MARKER,))
+role_model_refuse("role-model: Explore on sonnet with lowercase audit: on line 1 is denied (case-sensitive)",
+          "Explore", "sonnet", "audit: check the glossary for meaning drift.", carries=(EXPLORE_MARKER,))
+# The marker lifts only a Sonnet Explore. A model the table does not rank is still refused, and its reason names no
+# marker.
+role_model_refuse("role-model: Explore on fable with Audit: on line 1 is denied, reason names no marker",
+          "Explore", "fable", "Audit: check the glossary for meaning drift.", lacks=ROLE_LACKS + (EXPLORE_MARKER,))
+
 # ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
-role_model_allow("role-model: Explore on sonnet is allowed (an audit Explore)", "Explore", "sonnet",
-           "Audit the glossary for meaning drift.")
+# An Explore on Sonnet passes when the first `Audit:` on the brief's first non-blank line counts, with any text ahead
+# of it. An Explore on Haiku or Opus passes with no marker. (shiv, Nov 1 11:43 CST, page item 107, pick a)
+role_model_allow("role-model: Explore on sonnet with Audit: on line 1 is allowed", "Explore", "sonnet",
+           "Audit: check the glossary for meaning drift.")
+role_model_allow("role-model: Explore on sonnet with **Audit:** on line 1 is allowed (markup ahead of the marker)",
+           "Explore", "sonnet", "**Audit:** check the glossary for meaning drift.")
+role_model_allow("role-model: Explore on sonnet with prose ahead of Audit: on line 1 is allowed", "Explore", "sonnet",
+           "Please read the Audit: docs section.")
+role_model_allow("role-model: Explore on haiku is allowed, with no marker", "Explore", "haiku",
+           "Find where X is defined.")
+role_model_allow("role-model: Explore on opus is allowed, with no marker (standing grant, unchanged)", "Explore", "opus",
+           "Find where X is defined.")
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
            "Round 2 of 3. Re-check the diff.")
 role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",

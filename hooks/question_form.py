@@ -6,8 +6,8 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     chat_hit(tool_input) -> (rule, matched)   an AskUserQuestion input; judges each question with 2+ options
     item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
 
-("", "") is a pass. hooks/call_judge.py calls chat_hit; hooks/guard.py data_tool_hit calls item_hit after
-its url and collection guard. Nothing here writes a file or starts a process.
+("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
+page_item_hit, which filters the ArtifactData writes by url and collection and then calls item_hit. Nothing here writes a file or starts a process.
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
 
@@ -244,13 +244,25 @@ def _write_data(entry):
 # option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`. In the
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
-                 "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
-                 "match the shared format, or leave pick out.")
-CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: it goes against the "
-                      "owner's uniform ruling (t18). Recommend an option where the repo changes to match "
-                      "the shared format, and give the widening option no (Recommended) label.")
-WIDENS_MARK = re.compile(r"Goes against your uniform ruling \(t18\)", re.I)
+WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
+WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
+                 "where the repo changes to match the shared format, or leave pick out.")
+CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
+                      "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
+                      "where the repo changes to match the shared format, and give the widening option no "
+                      "(Recommended) label.")
+# Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
+# reason carries them.
+LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
+
+
+def _words_pattern(text):
+    # Any run of whitespace between words, so a reflowed or wrapped sentence still matches.
+    return r"\s+".join(re.escape(w) for w in text.split())
+
+
+WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGACY_WIDENS_TEXT)), re.I)
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
@@ -734,6 +746,91 @@ def item_hit(op, entry):
     if hit:
         return "rework-off-page", hit
     return PASS
+
+
+# ------------------------------------------------------------------ the writes of a waiting page, one filter
+#
+# The one home of "which ArtifactData writes are waiting-page item writes". hooks/guard.py (the form
+# check) and hooks/call_judge.py (the model review) both read it, so the two never disagree on a write.
+WAITING_ITEMS = "items"
+ITEM_OPS = ("set", "update", "str_replace")
+
+
+def _git_root_of(cwd):
+    here = os.path.realpath(cwd or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def is_waiting_page(tool_input, cwd) -> bool:
+    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
+    with no page reads as unknown, and its calls are not judged."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    root = _git_root_of(cwd)
+    page = layout.waiting_page(root) if root else "unknown"
+    url = str(tool_input.get("url") or "").rstrip("/")
+    return page != "unknown" and url == page.rstrip("/")
+
+
+def page_item_hit(tool_input, cwd=""):
+    """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
+    this repo's waiting page, empty for a read, another collection or another page. The hit is the first
+    write that a rule refuses, else ("", "")."""
+    if not isinstance(tool_input, dict):
+        return PASS, []
+    if tool_input.get("action") == "batch":
+        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
+    else:
+        entries = [(tool_input.get("action"), tool_input)]
+    writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
+    if not writes or not is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
+        return PASS, []
+    for op, entry in writes:
+        hit = item_hit(op, entry)
+        if hit[0]:
+            return hit, writes
+    return PASS, writes
+
+
+def _judged_fragment(field):
+    """True for a str_replace field the model review reads: `context`, `options`, or a subfield of `options`.
+    The ArtifactData str_replace `field` is one top-level string key, so `steps` (a list) never reaches it."""
+    return field in ("context", "options") or str(field).startswith("options.")
+
+
+def judged_item_writes(writes):
+    """The writes of a page item that the model review reads. A set or update is read as
+    {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
+    read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
+    task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
+    `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
+    read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
+    item is unseen."""
+    judged = []
+    for op, entry in writes:
+        if op == "str_replace":
+            if _judged_fragment(entry.get("field")) and isinstance(entry.get("new_str"), str):
+                judged.append({"op": op, "doc_id": entry.get("doc_id"), "field": entry.get("field"),
+                               "new_str": entry["new_str"]})
+            continue
+        data = _write_data(entry)
+        if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
+            continue
+        if data.get("kind") == "task" or data.get("steps"):
+            if not (data.get("context") or data.get("steps") or data.get("options")):
+                continue
+        elif data.get("kind", "decision") != "decision" or not (data.get("options") or data.get("context")):
+            continue
+        judged.append({"op": op, "doc_id": entry.get("doc_id"), "data": data})
+    return judged
 
 
 # ------------------------------------------------------------------ an option's key is its position's letter

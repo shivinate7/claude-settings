@@ -114,8 +114,9 @@ Other tools, in `judge` order:
                        override lifts it. It adds no git spawn beyond what the call already spends.
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
-                       pin and no default model is set. Explore, a reviewer on a later-round brief
-                       and every Opus spawn pass it. An unread record
+                       pin and no default model is set. An Explore whose brief's first line
+                       carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
+                       spawn pass it. An unread record
                        passes and is noted as `agent-role-model-unread`. No override lifts it.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
@@ -1880,6 +1881,13 @@ FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 BUILDER_MARKERS = ("round", "try")
 
 
+def brief_first_line(brief) -> str:
+    """A brief's first non-blank line, or "" for a brief that is not text. The one home of the first-line pick."""
+    if not isinstance(brief, str):
+        return ""
+    return next((line for line in brief.split("\n") if line.strip()), "")
+
+
 def brief_markers(brief) -> list:
     """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
     marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
@@ -1887,7 +1895,7 @@ def brief_markers(brief) -> list:
     if not isinstance(brief, str):
         return []
     found = STEP_UP_MARKER.findall(brief)
-    first = next((line for line in brief.split("\n") if line.strip()), "")
+    first = brief_first_line(brief)
     lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
     return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
 
@@ -1945,9 +1953,12 @@ ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
-# Two points the owner has not ruled yet, each one line to flip. A role in ROLE_ABOVE_ROW_ROLES may name a model above its row.
-# A reviewer brief with a `Round N of 3` marker, N in ROLE_REVIEWER_FREE_ROUNDS, may too; add "1" there to let a reviewer on its first marker run above its row.
-ROLE_ABOVE_ROW_ROLES = ("Explore",)
+# One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
+# ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
+# An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
+# Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
+EXPLORE_AUDIT_MARKER = "Audit:"
+EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 ROLE_MODEL_REASON = (
@@ -1956,6 +1967,9 @@ ROLE_MODEL_REASON = (
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+# An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
+# does not lift a model the table does not rank.
+ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
 ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
@@ -2031,8 +2045,8 @@ def role_name(table, subagent_type) -> str:
 def role_model_check(tool: str, tool_input):
     """(reason, matched, unread) for an Agent or Task spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
-    opus_spawn_hit. Explore and a reviewer on a
-    later-round brief run above the row by the table's own rows. Pure, so never_lifted may call it too."""
+    opus_spawn_hit. An Explore on an audit brief
+    (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too."""
     if tool not in SPAWN_TOOLS:
         return "", "", False
     pointer = pointer_checkout()
@@ -2050,13 +2064,18 @@ def role_model_check(tool: str, tool_input):
         if named is None:
             # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
-        if named == top or row is None or role in ROLE_ABOVE_ROW_ROLES:
+        if named == top or row is None:
+            return "", "", False
+        if role == EXPLORE_ROLE and named < top and re.search(r"\b%s" % re.escape(EXPLORE_AUDIT_MARKER),
+                                                              brief_first_line(tool_input.get("prompt"))):
             return "", "", False
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
+            if role == EXPLORE_ROLE and named < top:
+                extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
@@ -2712,52 +2731,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-DATA_TOOL = "ArtifactData"
-WAITING_ITEMS = "items"
-
-
-def _is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
-    with no page reads as unknown, and its calls are not judged."""
-    lint = os.path.join(_HERE, "..", "lint")
-    if lint not in sys.path:
-        sys.path.append(lint)
-    import layout
-    root = _git_root_of(cwd)
-    page = layout.waiting_page(root) if root else "unknown"
-    url = str(tool_input.get("url") or "").rstrip("/")
-    return page != "unknown" and url == page.rstrip("/")
-
-
-def _git_root_of(cwd):
-    here = os.path.realpath(cwd or os.getcwd())
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
 def data_tool_hit(tool_input, cwd=""):
-    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
-    if not isinstance(tool_input, dict):
-        return "", ""
-    if tool_input.get("action") == "batch":
-        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
-    else:
-        entries = [(tool_input.get("action"), tool_input)]
-    writes = [(op, e) for op, e in entries
-              if op in ("set", "update", "str_replace") and e.get("collection") == WAITING_ITEMS]
-    if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
-        return "", ""
+    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
+    filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
     import question_form
-    for op, entry in writes:
-        hit = question_form.item_hit(op, entry)
-        if hit[0]:
-            return hit
-    return "", ""
+    return question_form.page_item_hit(tool_input, cwd)[0]
 
 
 # ------------------------------------------------------------------ impeccable is review-only

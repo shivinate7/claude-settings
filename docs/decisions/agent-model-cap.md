@@ -22,7 +22,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 |---|---|---|
 | `CLAUDE_CODE_SUBAGENT_MODEL` | sonnet | n/a |
 | Explore, claude-code-guide | haiku | xhigh |
-| Explore that audits or judges meaning, not a plain search | sonnet, or opus on the owner's grant (2026-10-21 ruling, class level); set per spawn, which overrides the frontmatter `haiku` | high |
+| Explore that audits or judges meaning, not a plain search | sonnet, when its brief's first non-blank line carries the `Audit:` marker; or opus on the owner's grant (2026-10-21 ruling, class level); set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
 | reviewer, rounds 2 and 3 | sonnet, the ceiling; round 3 may run opus on the owner's grant for that spawn; set per spawn, which overrides the frontmatter `haiku` | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus: high, set per spawn |
@@ -60,7 +60,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | prose judge (`hooks/prose_judge.py`, PreToolUse on Edit and Write; a model call only for a path with a `decisions` folder segment) | haiku, through `decision_watch.invoke_model` | xhigh |
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
-| question reviewer (the same script, on AskUserQuestion) | claude-opus-5-5, through `decision_watch.invoke_model`, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default: the call passes no effort |
+| question reviewer (the same script, on AskUserQuestion and on an ArtifactData write of a waiting-page item) | claude-opus-5-5, through `decision_watch.invoke_model`, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default: the call passes no effort |
 | SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | SendMessage wording judge (the same script, one call on every send, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
@@ -70,7 +70,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
-Haiku role, so Sonnet is the floor for the judge only. Opus for an audit Explore is the owner's grant,
+Haiku role, so Sonnet is the floor for the judge only. An audit Explore on Sonnet also carries the `Audit:` first-line marker, or guard rule `agent-role-model` refuses it. Opus for an audit Explore is the owner's grant,
 given at class level on 2026-10-21; the judge and the guard pass it. A plain search passes on the Haiku default. The caller
 spot-checks findings before it acts on an audit.
 
@@ -87,7 +87,7 @@ unless the file is a Haiku role. `agents/plan.md` pins Plan.
 
 **The role row.** Guard rule `agent-role-model` reads this table at each `Agent` or `Task` spawn, from the pointer checkout (the one `~/.claude/CLAUDE.md` names; `role_model_table` in `hooks/guard.py` is the one reader). A row names a role in its first cell and a model in the first word of its second cell. A first cell that holds more than role words (a qualifier such as `reviewer, rounds 2 and 3`, a skill, a hook) names no role, and the first row for a role wins.
 - A spawn that names a model above its role's row is denied, with the remedy "drop the model field, or name the role's model". A reviewer's refusal also says that a brief for a later review round (the rounds in `ROLE_REVIEWER_FREE_ROUNDS`) opens its first line with a `Round N of 3` marker; it offers no way past round 1. Ranks run haiku, sonnet, opus. A model with no rank counts as above every row below opus, so it is denied there; its own rank is unruled. A role with no row passes. A role matches its row without case and without surrounding space.
-- Exempt: Explore, a reviewer whose brief holds a `Round 2 of 3` or `Round 3 of 3` marker (the same marker scan as the step-up), and every Opus spawn, which the ask above judges. Two points are unruled: the Explore exemption and the refusal of a reviewer's round 1 on sonnet. `ROLE_ABOVE_ROW_ROLES` and `ROLE_REVIEWER_FREE_ROUNDS` in `hooks/guard.py` each flip one.
+- Exempt: an `Agent` or `Task` Explore spawn whose brief's first non-blank line carries the audit marker `Audit:` (`EXPLORE_AUDIT_MARKER` in `hooks/guard.py`; case-sensitive, the first `Audit:` on the brief's first non-blank line, with any text ahead of it, so `**Audit:**` counts; the same first-line pick as the step-up marker scan). Any other such Explore that names a model runs on its haiku row. The guard passes an Explore that names no model whenever `CLAUDE_CODE_SUBAGENT_MODEL` is set (`agents/explore.md` pins haiku, so it also passes without the variable; see the no-model bullet). A Workflow `agent()` Explore is not read: debt `workflow-agent-model-unchecked`. Owner ruling: shiv, 2026-11-01 11:43 CST, waiting-page item 107, pick a. The refusal names the marker. Also exempt: a reviewer whose brief holds a `Round 2 of 3` or `Round 3 of 3` marker (the same marker scan as the step-up), and every Opus spawn, which the ask above judges. One point is unruled: the refusal of a reviewer's round 1 on sonnet. `ROLE_REVIEWER_FREE_ROUNDS` in `hooks/guard.py` flips it.
 - A spawn that names no model is denied under two conditions. `CLAUDE_CODE_SUBAGENT_MODEL` is unset or empty in the guard's environment. No `agents/*.md` file in the pointer checkout names the role with a `model:` pin in its frontmatter. A spawn with no role counts as general-purpose. The remedy is "name the role's model", with the row's model beside it unless the row is haiku.
 - With no pointer checkout the rule stands down and logs nothing. A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one `agent-role-model-unread` line, which `lint/guard_log_report.py` counts as a note for that rule.
 - No override lifts it (`owner-override`, the model guards).
