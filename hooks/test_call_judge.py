@@ -658,10 +658,10 @@ def case_page_task_item_judged():
 
 
 def case_page_task_exempt_from_decision_items():
-    # Review round 1, finding 1: a task item has no Goal, Problem or pick, so the decision items 1, 2 and 7 do not
-    # apply to it. The prompt for a lone task write must say so. Matched loosely: only the sentences that name a
-    # task are read, and together they must exempt the Goal, the Problem and the recommended option, carry a
-    # negation or an only-rule, and state what a task is judged on.
+    # A task item has no Goal, Problem or pick, so decision items 1, 2 and 7 do not apply to it. The prompt for a
+    # lone task write must say so, or the judge holds the task to items it cannot meet. Matched loosely: only the
+    # sentences that name a task are read, and together they must exempt the Goal, the Problem and the recommended
+    # option, carry a negation or an only-rule, and state what a task is judged on.
     r = run_hook(page_input("set", good_task_item()), answer=ALLOW)
     check("task exempt: a lone good task write makes one model call, claude-opus-5-5, no effort",
           r.code == 0 and len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL
