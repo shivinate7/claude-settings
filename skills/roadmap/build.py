@@ -30,7 +30,7 @@ entered the top TOP open places in the last day without a "Placed ahead of" line
 
 The upkeep list also names each step marked doing or active that has no live lane session and no open
 pull request, so triage can set it back (step roadmap-matches-lanes). A step is live when a session in
-the live file's "sessions" list is running or idle (any other status does not count) and carries both
+the live file's "sessions" list is not archived (any other status counts) and carries both
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
 branch equals the step id. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
@@ -64,7 +64,6 @@ STALE_LIVE_MINUTES = 60
 STEP_TAG = "cs-step:"
 REPO_TAG = "cs-repo:"
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
-# Real list_sessions rows read ARCHIVED, IDLE, PENDING, REQUIRES_ACTION or RUNNING.
 # An unseen status reads live: a false "set to todo" resets a working lane's step; a missed flag only delays cleanup.
 ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
