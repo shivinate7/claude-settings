@@ -7,6 +7,7 @@ so its start-up never loads the guard. guard_core.py imports it by name, and a t
 that patches one of these names patches it here, on the one object every reader calls. Standard
 library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
 """
+import calendar
 import json
 import os
 import subprocess
@@ -378,9 +379,8 @@ def _process_start_ms_windows(pid: int):
     process exists but this read cannot see into it. Any other code is also unreadable: this
     function never guesses a code it has not measured into a definite dead or alive answer.
 
-    A valid handle's `GetProcessTimes` creation FILETIME is UTC-anchored by definition. `ps
-    -o lstart=` below prints local time with no zone marker at all. FILETIME carries no such
-    trap: no zone is assumed, because none is ever ambiguous.
+    A valid handle's `GetProcessTimes` creation FILETIME is UTC-anchored by definition, so no
+    zone is assumed and `_process_start_ms` needs no `ps` zone override on Windows.
 
     Cost on the reference machine: 0.137 ms per call.
     """
@@ -418,15 +418,12 @@ def _process_start_ms(pid: int):
     tell either way. A caller must never fold the third state into the second: an unreadable
     read is not proof of death.
 
-    POSIX: `ps -o lstart=` prints the start time in THIS machine's own local clock, with no
-    timezone marker at all. Read it with `time.mktime`. That call turns a naive `struct_time`
-    into an epoch by treating it as LOCAL time on THIS SAME machine. The number it returns then
-    lines up with the epoch millisecond a session record already carries, written by
-    `Date.now()` on the same local machine.
-    The trap: parsing the identical string as UTC
-    introduced a five-hour offset and made a live session look expired. `calendar.timegm` and
-    `datetime.fromisoformat(...).timestamp()` after tagging the string UTC both carry that trap.
-    `mktime` does not, because it never assumes a zone the string never named.
+    POSIX: `ps -o lstart=` prints a wall-clock time with no zone marker. `mktime` would have to
+    guess the zone's offset, and it guesses wrong in the repeated hour of a fall-back night: both
+    01:30s print the same text. So `ps` is run with `TZ=UTC0`, which makes it print UTC. UTC has
+    no repeated hour, so the text names one instant, and `calendar.timegm` reads it with no
+    guess. `mktime` on that text is the trap now: it would read UTC as local time. `LC_ALL=C`
+    keeps the day and month names English, so `strptime` can parse them.
 
     Windows has no such trap: see `_process_start_ms_windows`, called below when `sys.platform`
     says Windows.
@@ -438,6 +435,7 @@ def _process_start_ms(pid: int):
     try:
         answer = _nowindow.run(
             ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
+            env=dict(os.environ, TZ="UTC0", LC_ALL="C"),
         )
     except Exception:
         return PROCESS_START_UNREADABLE  # exec failed or timed out, not a dead-pid answer
@@ -452,7 +450,7 @@ def _process_start_ms(pid: int):
         return None
     try:
         parsed = time.strptime(text, "%a %b %d %H:%M:%S %Y")
-        return int(time.mktime(parsed) * 1000)
+        return calendar.timegm(parsed) * 1000
     except Exception:
         return PROCESS_START_UNREADABLE  # output that does not parse is not a death either
 
