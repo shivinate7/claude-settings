@@ -448,14 +448,23 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
   own_not_source=0
   if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
     # A clean branch checkout at the tip of origin/$REF already holds $REF's files: it stays the source, untouched.
-    # A failed fetch (or no origin remote) compares with the origin/$REF ref the checkout already has.
-    own_tip=
-    if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
-      cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null
-      own_tip=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
+    # The fetch runs only when HEAD already equals the origin/$REF ref the checkout has, so a branch off it pays no fetch
+    # before the mirror. A failed fetch keeps the checkout against that older ref, with a WARN; no origin remote, no WARN.
+    own_how=
+    if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ] \
+       && [ "$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)" = "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ] \
+       && git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null 2>&1; then
+      if [ -z "$(git -C "$SRC" config --get remote.origin.url 2>/dev/null)" ]; then
+        own_how="the last fetched $REF"
+      elif cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
+        [ "$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)" != "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ] || own_how="the $REF tip"
+      else
+        log "WARN: could not fetch $REF into $SRC; the checkout is kept against the last fetched $REF, which may be older"
+        own_how="the last fetched $REF"
+      fi
     fi
-    if [ -n "$own_tip" ] && [ "$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)" = "$own_tip" ]; then
-      log "the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD) at the $REF tip; it stays the source"
+    if [ -n "$own_how" ]; then
+      log "the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD) at $own_how; it stays the source"
     else
       log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
       own_not_source=1
