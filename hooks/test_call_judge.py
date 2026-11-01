@@ -657,9 +657,38 @@ def case_page_task_item_judged():
           ITEM_99_STEP in prompt and PAGE_MARK in prompt, prompt[:200])
 
 
+def case_page_task_exempt_from_decision_items():
+    # Review round 1, finding 1: a task item has no Goal, Problem or pick, so the decision items 1, 2 and 7 do not
+    # apply to it. The prompt for a lone task write must say so. Matched loosely: only the sentences that name a
+    # task are read, and together they must exempt the Goal, the Problem and the recommended option, carry a
+    # negation or an only-rule, and state what a task is judged on.
+    r = run_hook(page_input("set", good_task_item()), answer=ALLOW)
+    check("task exempt: a lone good task write makes one model call, claude-opus-5-5, no effort",
+          r.code == 0 and len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL
+          and "--effort" not in r.calls[0]["argv"], detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    # The item's own strings are cut out first, so only the prompt's words can satisfy the checks.
+    rest = prompt.replace(GOOD_TASK_STEP, "").replace(TASK_WHY, "").lower()
+    task = [s for s in re.split(r"[.;\n]", rest) if "task" in s]
+    exempt = " ".join(s for s in task if re.search(r"\b(goal|problem|pick|recommend\w*)\b", s))
+    check("task exempt: a sentence that names a task exempts the Goal", re.search(r"\bgoal\b", exempt) is not None,
+          rest[:400])
+    check("task exempt: a sentence that names a task exempts the Problem",
+          re.search(r"\bproblem\b", exempt) is not None, rest[:400])
+    check("task exempt: a sentence that names a task exempts the recommended option (pick)",
+          re.search(r"\b(pick|recommend\w*)\b", exempt) is not None, rest[:400])
+    check("task exempt: the exempting sentence carries a negation or an only-rule",
+          re.search(r"\b(not|no|never|only|without|exempt)\b|n't", exempt) is not None, exempt[:300])
+    judged = " ".join(task)
+    check("task exempt: the sentences that name a task state the judged set (plain words, unexplained ids, "
+          "pointers outside the item, the whole-unit rule)",
+          all(w in judged for w in ("plain", "unexplain", "outside", "whole")), judged[:400])
+
+
 def case_page_steps_judged():
     # Coordinator follow-up after the Nov 1 11:51 CST ruling: steps are task-only, so a write that carries `steps` is
-    # judged as a task, even with no kind. A str_replace on `steps` or `steps.N` is judged on its new_str alone.
+    # judged as a task, even with no kind. No str_replace case: the tool's `field` is one top-level key, never `steps`
+    # or `steps.N` (ArtifactData schema), so that write cannot occur.
     import question_form  # the one form check (hooks/question_form.py)
     upd = {"steps": [ITEM_99_STEP]}
     got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "t99", "data": upd})
@@ -672,21 +701,6 @@ def case_page_steps_judged():
           and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1, detail(r))
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("task steps: the one prompt holds item 99's step text", ITEM_99_STEP in prompt, prompt[:200])
-    for field in ("steps", "steps.0"):
-        entry = {"collection": PAGE_ITEMS, "doc_id": "t99", "field": field, "old_str": PAGE_OLD, "new_str": ITEM_99_STEP}
-        got = question_form.item_hit("str_replace", entry)
-        check("task steps fixture: a %s str_replace to item 99's step passes question_form.item_hit" % field,
-              got == ("", ""), got)
-        r = run_hook(page_input("str_replace", None, field=field, old_str=PAGE_OLD, new_str=ITEM_99_STEP),
-                     answer=TASK_FLAG)
-        d = r.deny() or {}
-        check("task steps: a %s str_replace to item 99's step is denied by the judge, rule question-judge, one call"
-              % field, r.code == 0 and d.get("permissionDecision") == "deny"
-              and r.reason().startswith("question-judge: ") and r.log.count("\tdeny\tquestion-judge\t") == 1
-              and len(r.calls) == 1, detail(r))
-        prompt = r.calls[0]["prompt"] if r.calls else ""
-        check("task steps: a %s str_replace's prompt holds new_str and not old_str" % field,
-              ITEM_99_STEP in prompt and PAGE_OLD not in prompt, prompt[:200])
 
 
 def case_page_reads_and_other_collections_skip_question_form():
@@ -754,7 +768,7 @@ def main():
                  case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
                  case_page_no_model_call, case_page_batch_one_call, case_page_override,
                  case_page_model_failure_fails_open, case_page_str_replace_judged,
-                 case_page_task_item_judged, case_page_steps_judged,
+                 case_page_task_item_judged, case_page_task_exempt_from_decision_items, case_page_steps_judged,
                  case_page_reads_and_other_collections_skip_question_form,
                  case_fail_open, case_settings_row):
         try:
