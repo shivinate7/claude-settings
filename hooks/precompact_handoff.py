@@ -32,10 +32,12 @@ the desktop app has none.
   cache_read tokens) as the context size. Overhead = the first such entry's size. Messages
   = size - overhead, at least 0 (a proxy: record hook-inputs-carry-token-counts). Bucket =
   index of the highest checkpoint that messages reached, -1 below the first, and -1 when
-  messages is 0 (checkpoints(limit - overhead): 200k, +150k while below the top, then the
-  top = room - 50k; limit = window_limit(model of the last such entry): env
+  messages is 0 (checkpoints(compact_threshold(limit) - overhead): 200k, +150k while below
+  the top, then the top = room - 50k; limit = window_limit(model of the last such entry): env
   CLAUDE_CODE_AUTO_COMPACT_WINDOW, then modelSettings.<model>.autoCompactWindow, then
-  autoCompactWindow in <config dir>/settings.json, default 500,000). The last checkpoint is at size = limit - 50k. The bucket lives in
+  autoCompactWindow in <config dir>/settings.json, default 500,000; compact_threshold is
+  where Claude Code compacts: (limit - 20k) * 0.8, so 384k on 500k). The last checkpoint is at
+  size = threshold - 50k (500k: 334k). The bucket lives in
   ~/.claude/state/handoff/<session_id>.nudge.json as {"bucket": N}. A higher bucket
   than stored prints {"decision": "block", "reason": ...}: rewrite the handoff per the
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
@@ -69,6 +71,12 @@ STALE_AGE = 30 * 86400
 NUDGE_FLOOR = 200_000
 NUDGE_STEP = 150_000
 NUDGE_MARGIN = 50_000
+# Claude Code's effective window is window minus min(max output, 20,000), and compaction fires at
+# effective window times (1 - summary fraction). 0.2 is the CLI's default fraction, the lowest
+# threshold seen (384,000 on 500k). A server flag may raise it (441,600 seen); the hook cannot
+# read the flag, so it uses the low default.
+OUTPUT_RESERVE = 20_000
+SUMMARY_FRACTION = 0.2
 DEFAULT_WINDOW = 500_000
 # The source kinds of a handoff premise, strongest first. docs/decisions/premise-format.md says what
 # each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
@@ -482,11 +490,12 @@ def _run_reorient(payload):
     return 0
 
 
-def checkpoints(limit):
-    """Nudge sizes: 200k, then +150k while below limit-50k, then limit-50k itself
-    (500k: 200, 350, 450k). When limit-50k <= 200k, only limit-50k. A step within
-    NUDGE_STEP // 2 of limit-50k is dropped: two rewrites that close are one too many."""
-    top = limit - NUDGE_MARGIN
+def checkpoints(room):
+    """Nudge message sizes for `room` tokens of messages before compaction: 200k, then +150k
+    while below room-50k, then room-50k itself (room 384k: 200, 334k). When room-50k <= 200k,
+    only room-50k. A step within NUDGE_STEP // 2 of room-50k is dropped: two rewrites that
+    close are one too many."""
+    top = room - NUDGE_MARGIN
     if top <= NUDGE_FLOOR:
         return [top]
     cps = [NUDGE_FLOOR]
@@ -500,6 +509,11 @@ def checkpoints(limit):
 def _model_key(name):
     """A model or modelSettings key without a trailing `[...]` tag or `-YYYYMMDD` date."""
     return re.sub(r"-\d{8}$", "", re.sub(r"\[[^\]]*\]$", "", name))
+
+
+def compact_threshold(limit):
+    """The context size at which Claude Code compacts a window of `limit` tokens."""
+    return int((limit - OUTPUT_RESERVE) * (1 - SUMMARY_FRACTION))
 
 
 def window_limit(model=None):
@@ -571,7 +585,7 @@ def run_nudge(payload):
         if messages == 0:
             bucket = -1  # nothing to hand off, even when the room left is zero or negative
         else:
-            bucket = sum(1 for c in checkpoints(window_limit(model) - overhead)
+            bucket = sum(1 for c in checkpoints(compact_threshold(window_limit(model)) - overhead)
                          if messages >= c) - 1
         path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
         try:
