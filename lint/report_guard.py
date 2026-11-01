@@ -28,6 +28,8 @@ unless the same main-session turn opened the question box (AskUserQuestion), or 
 waiting page and either the reply links it or the Input Needed item names the 5-minute wait and the
 waiting page, whatever ArtifactData calls the turn made (`decisions-reach-a-clickable-pick`). This
 check does not wait for a git write: the reply's labels are what it reads. Cost: one layout read per turn whose Input Needed offers a pick with no box.
+The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
+hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 """
 import json
 import os
@@ -72,7 +74,8 @@ LANDING_TOOLS = {
     "mcp__github__create_or_update_file",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
-LABEL_RE = re.compile(r"^\*\*(.+?)\*\*")
+# A bold "**Departs from:**" starts a line of the item (rule `question-departs`), never a report label.
+LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from))(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
@@ -488,6 +491,22 @@ def repo_root(cwd):
         here = parent
 
 
+def departs_problem(text):
+    """The refusal text when the Input Needed item offers a pick and its Departs from line is missing or
+    restates main (rule `question-departs`), else ''. The predicate is question_form.departs_hit."""
+    if not offers_a_pick(text):
+        return ""
+    # hooks/question_form.py is the one home of the predicate: the chat box, the waiting page and this
+    # report all call it. lint/ and hooks/ sit side by side, in the repo and under ~/.claude. It loads only
+    # for a turn that offers a pick, and an import error fails this one check open (the callers catch it).
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    miss = question_form.departs_hit(input_needed_section(text))
+    if not miss:
+        return ""
+    return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
+
+
 def pick_has_a_control(records, text, cwd):
     """True when the main session's turn opened the question box, or this repo has a waiting page
     and the reply links it or its Input Needed item names the 5-minute wait and the page. An
@@ -615,10 +634,22 @@ def main():
     after = records[last_human_idx + 1:]
     text = last_reply(hook)
     if not turn_landed(after):
-        # An unlanded turn is judged on the pick check alone. An error in it fails open.
+        # An unlanded turn is judged on the pick check and the Departs from check alone. An error in
+        # either fails open on its own: the Departs from check never drops the pick refusal.
+        pick = []
         try:
             if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
-                reason = PICK_REFUSAL + (CORRECTION_TAIL if report_shape_ok(text) else "")
+                pick.append(PICK_REFUSAL)
+        except Exception:
+            pass
+        try:
+            pick.append(departs_problem(text))
+        except Exception:
+            pass
+        try:
+            pick = [r for r in pick if r]
+            if pick:
+                reason = " ".join(pick) + (CORRECTION_TAIL if report_shape_ok(text) else "")
                 print(json.dumps({"decision": "block", "reason": reason}))
         except Exception:
             pass
@@ -640,6 +671,12 @@ def main():
     try:
         if offers_a_pick(text) and not pick_has_a_control(after, text, hook.get("cwd")):
             reasons.append(PICK_REFUSAL)
+    except Exception:
+        pass
+    try:
+        departs = departs_problem(text)
+        if departs:
+            reasons.append(departs)
     except Exception:
         pass
     cite = bare_cite(text)
