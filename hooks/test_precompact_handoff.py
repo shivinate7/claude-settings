@@ -380,7 +380,7 @@ def case_settings_json():
 
 
 # --------------------------------------------------------------------------- Stop --nudge
-# On Stop, `--nudge` blocks once per 150k bucket from 200k up.
+# On Stop, `--nudge` blocks once per checkpoint: 200k, then the top, compact_threshold - 50k.
 
 
 def usage_line(inp, cc=0, cr=0, model=None):
@@ -446,18 +446,19 @@ def case_nudge():
               p.returncode == 0 and is_block(c, p), "rc=%r out=%r" % (p.returncode, p.stdout))
         check("nudge: 210k stores bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
-        p = nudge(c, 340000)
-        check("nudge: 340k after 210k is silent", p.returncode == 0 and not p.stdout.strip(),
-              "out=%r" % p.stdout)
-        check("nudge: 340k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
+        p = nudge(c, 330000)
+        check("nudge: 330k after 210k is silent (below the top checkpoint)",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: 330k keeps bucket 0", stored_bucket(c) == 0, "got %r" % stored_bucket(c))
 
         p = nudge(c, 360000)
-        check("nudge: 360k blocks", is_block(c, p), "out=%r" % p.stdout)
+        check("nudge: 360k blocks at the top checkpoint", is_block(c, p), "out=%r" % p.stdout)
         check("nudge: 360k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 455000)
-        check("nudge: 455k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("nudge: 455k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
+        check("nudge: 455k after the top is silent (no checkpoint above it)",
+              p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
+        check("nudge: 455k keeps bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
 
         p = nudge(c, 120000)
         check("nudge: 120k after 455k (compaction) is silent",
@@ -532,24 +533,24 @@ def set_limit(c, limit):
 def case_nudge_limit_checkpoints():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # default limit 500k (no settings.json): checkpoints 200,350,450
+    # default limit 500k (no settings.json): checkpoints 200k, then the top at 334k total
     c = Case("nlim5")
     try:
-        nudge(c, 410000)
-        p = nudge(c, 455000)
-        check("limit: 455k blocks after 410k fired (limit-50k checkpoint, 500k limit)",
+        nudge(c, 210000)
+        p = nudge(c, 340000)
+        check("limit: 340k blocks at the top checkpoint after 210k fired (500k limit)",
               is_block(c, p), "out=%r" % p.stdout)
-        check("limit: 455k stores bucket 2", stored_bucket(c) == 2, "got %r" % stored_bucket(c))
+        check("limit: 340k stores bucket 1", stored_bucket(c) == 1, "got %r" % stored_bucket(c))
         p = nudge(c, 460000)
-        check("limit: 460k after 455k is silent", p.returncode == 0 and not p.stdout.strip(),
+        check("limit: 460k after the top is silent", p.returncode == 0 and not p.stdout.strip(),
               "out=%r" % p.stdout)
     finally:
         c.cleanup()
     c = Case("nlimexp")
     try:
         set_limit(c, 500000)
-        nudge(c, 410000)
-        p = nudge(c, 455000)
+        nudge(c, 210000)
+        p = nudge(c, 340000)
         check("limit: explicit 500k setting behaves like the default", is_block(c, p),
               "out=%r" % p.stdout)
     finally:
@@ -558,26 +559,27 @@ def case_nudge_limit_checkpoints():
     c = Case("nlimbad")
     try:
         put(os.path.join(c.cfg, "settings.json"), "{not json")
-        nudge(c, 410000)
-        p = nudge(c, 455000)
+        nudge(c, 210000)
+        p = nudge(c, 340000)
         check("limit: unreadable settings falls back to 500k", is_block(c, p),
               "out=%r" % p.stdout)
     finally:
         c.cleanup()
-    # limit 800k: 200, 350, 500, 650, then 750
+    # limit 800k: threshold 624k, so checkpoints 200k, 350k, then the top at 574k total
     c = Case("nlim8")
     try:
         set_limit(c, 800000)
         nudge(c, 410000)
         p = nudge(c, 455000)
-        check("limit 800k: 455k silent after 410k fired (next is 500k)",
+        check("limit 800k: 455k silent after 410k fired (next is the top, 574k)",
               p.returncode == 0 and not p.stdout.strip(), "out=%r" % p.stdout)
         p = nudge(c, 755000)
         check("limit 800k: 755k blocks", is_block(c, p), "out=%r" % p.stdout)
-        check("limit 800k: 755k stores bucket 4", stored_bucket(c) == 4, "got %r" % stored_bucket(c))
+        check("limit 800k: 755k stores bucket 2", stored_bucket(c) == 2,
+              "got %r" % stored_bucket(c))
     finally:
         c.cleanup()
-    # limit 200k: limit-50k = 150k <= 200k, only checkpoint is 150k
+    # limit 200k: threshold 144k, top 94k total, the only checkpoint
     c = Case("nlim2")
     try:
         set_limit(c, 200000)
@@ -591,7 +593,8 @@ def case_nudge_limit_checkpoints():
 def case_nudge_reads_messages_not_total():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # limit 200k, overhead 160k: room 40k, checkpoints(40000) = [-10000] (degenerate)
+    # limit 200k: threshold 144k is under the 160k overhead, so room is -16k: checkpoints(-16000)
+    # = [-66000] (degenerate)
     c = Case("nmsg1")
     try:
         set_limit(c, 200000)
@@ -617,12 +620,12 @@ def case_nudge_reads_messages_not_total():
         p = nudge(c, 0, overhead=None, lines=[first, usage_line(285000)])
         check("messages: total 285,000 (messages 200,000) blocks at 85k overhead",
               is_block(c, p), "out=%r" % p.stdout)
-        # checkpoints(415000) = 200k, 365k (350k is within 75k of the top, dropped): total 450k
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(449999)])
-        check("messages: total 449,999 stays at bucket 0 (last checkpoint is total 450k)",
+        # threshold 384k: checkpoints(299000) = 200k, 249k (no 350k step fits): total 334k
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
+        check("messages: total 333,999 stays at bucket 0 (last checkpoint is total 334k)",
               stored_bucket(c) == 0, "got %r" % stored_bucket(c))
-        p = nudge(c, 0, overhead=None, lines=[first, usage_line(450000)])
-        check("messages: total 450,000 blocks at the last checkpoint (bucket 1)",
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
+        check("messages: total 334,000 blocks at the last checkpoint (bucket 1)",
               is_block(c, p) and stored_bucket(c) == 1,
               "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
         try:
@@ -630,7 +633,7 @@ def case_nudge_reads_messages_not_total():
         except Exception:
             reason = ""
         check("messages: the text names the total and the messages",
-              "Context is about 450k tokens, messages about 365k." in reason,
+              "Context is about 334k tokens, messages about 249k." in reason,
               "reason: %r" % reason)
     finally:
         c.cleanup()
@@ -639,16 +642,18 @@ def case_nudge_reads_messages_not_total():
 def case_nudge_close_checkpoint_dropped_and_bogus_first_entry():
     Case.nudge_path = lambda self: os.path.join(
         self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
-    # 500k, overhead 90k: room 410k, top 360k. A 350k checkpoint would sit 10k below it.
+    # 700k, overhead 90k: threshold 544k, room 454k, top 404k. A 350k checkpoint would sit 54k
+    # below it, so it is dropped. At 500k no 350k step fits under the top, so the drop needs 700k.
     c = Case("nmsg3")
     try:
+        set_limit(c, 700000)
         first = usage_line(90000)
         blocks = []
-        for total in (290000, 430000, 440000, 450000):
+        for total in (290000, 430000, 440000, 494000):
             p = nudge(c, 0, overhead=None, lines=[first, usage_line(total)])
             blocks.append((total, is_block(c, p)))
-        check("close checkpoint: one nudge between total 430k and 450k, none at 440k",
-              blocks == [(290000, True), (430000, False), (440000, False), (450000, True)],
+        check("close checkpoint: one nudge between total 430k and 494k, none at 440k",
+              blocks == [(290000, True), (430000, False), (440000, False), (494000, True)],
               "got %r" % blocks)
     finally:
         c.cleanup()
@@ -702,6 +707,66 @@ def case_nudge_settings():
     cmds = [h.get("command", "") for g in stop for h in g.get("hooks", [])]
     check("settings: a Stop hook runs precompact_handoff.py with --nudge",
           any("precompact_handoff.py" in x and "--nudge" in x for x in cmds), "Stop: %r" % cmds)
+
+
+# --------------------------------------------------------------------------- compact threshold
+# Claude Code compacts at compact_threshold(window) = (window - 20k) * (1 - 0.2). The nudge's top
+# checkpoint sits 50k below it, so the nudge comes before compaction. Under test: the module's
+# compact_threshold. Loaded by path, so a missing name fails its checks instead of the whole run.
+
+
+def under_test():
+    spec = importlib.util.spec_from_file_location("precompact_handoff_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def case_compact_threshold():
+    for limit, want in ((500000, 384000), (200000, 144000)):
+        try:
+            got = under_test().compact_threshold(limit)
+        except Exception as e:
+            got = "%s: %s" % (type(e).__name__, e)
+        check("threshold: compact_threshold(%d) is %d" % (limit, want), got == want,
+              "got %r" % (got,))
+
+
+def case_nudge_top_checkpoint_at_threshold():
+    """500k window: the top checkpoint is threshold - 50k = 334k total. With a 30k overhead
+    that is 304k messages, so the 340k case below blocks at the top bucket and nothing above
+    it fires."""
+    Case.nudge_path = lambda self: os.path.join(
+        self.cfg, "state", "handoff", "%s.nudge.json" % self.session_id)
+    first = usage_line(30000)
+    c = Case("ntop1")
+    try:
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(340000)])
+        check("top: a 340k transcript (30k overhead) blocks at the top bucket",
+              is_block(c, p) and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(445000)])
+        check("top: 445k after 340k is not a new block (top bucket already reached)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
+    c = Case("ntop2")
+    try:
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(240000)])
+        check("top: 240k blocks at bucket 0 before the top",
+              is_block(c, p) and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(333999)])
+        check("top: 333,999 is below the top checkpoint (silent, bucket 0)",
+              p.returncode == 0 and not p.stdout.strip() and stored_bucket(c) == 0,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+        p = nudge(c, 0, overhead=None, lines=[first, usage_line(334000)])
+        check("top: 334,000 (threshold - 50k) reaches the top bucket",
+              is_block(c, p) and stored_bucket(c) == 1,
+              "out=%r bucket=%r" % (p.stdout, stored_bucket(c)))
+    finally:
+        c.cleanup()
 
 
 # --------------------------------------------------------------------------- window tiers
@@ -1285,6 +1350,8 @@ def main() -> int:
     case_nudge_close_checkpoint_dropped_and_bogus_first_entry()
     case_nudge_ignores_bogus_last_entries()
     case_nudge_settings()
+    case_compact_threshold()
+    case_nudge_top_checkpoint_at_threshold()
     case_window_tiers_table()
     case_window_tier_follows_transcript_model()
     case_handoff_path_not_frozen()
