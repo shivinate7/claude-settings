@@ -20,14 +20,15 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
 CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
-ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
-           GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
+                           GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
 
 
@@ -64,8 +65,8 @@ class Job(unittest.TestCase):
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
-        env = dict(ENV, VERDICT_LOG=self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
-                   **(env or {}))
+        env = {**ENV, "VERDICT_LOG": self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
+               **(env or {})}
         return [sys.executable, script, "lane", "--workflow", path, *args], env
 
     def run_job(self, *steps, args=(), env=None, script=CI_JOB):
