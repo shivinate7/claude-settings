@@ -61,10 +61,13 @@ PAGE_HOME = re.compile(r"page:(\d+)")
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
-HEADING_PREFIX = "### "  # local_time.py writes it before each message's stamp; the block text quotes it
-HEADER = re.compile(re.escape(HEADING_PREFIX) + r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
-STAMP_HHMM = re.compile(r"\d{4}-\d{2}-\d{2} (\d{2}):(\d{2}) ")
-EXAMPLE_KIND, EXAMPLE_HOME = "note", "noted"  # a kind in KINDS, and the home the decision gives it
+HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer emits
+HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
+STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
+# The home each kind without a file home takes, as the decision gives it.
+KIND_WORDS = {"question": "answered", "note": "noted", "standing": "handoff", "page": "page:<n>"}
+EXAMPLE_KIND = "note"  # a key of KIND_WORDS
+EXAMPLE_HOME = KIND_WORDS[EXAMPLE_KIND]
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
@@ -150,13 +153,14 @@ def example_item(stamp):
     return "- fb-%s%s-1 [%s] -> %s" % (m.group(1), m.group(2), EXAMPLE_KIND, EXAMPLE_HOME) if m else None
 
 
-def no_items_problem(block, inbox):
-    """The reason for a burst message with no items: where the items go, and what one looks like."""
+def no_items_problem(block, inbox, homes_line=""):
+    """The reason for a burst message with no items: where the items go, what one looks like, and each kind's home."""
     first = (block["text"] or "").split("\n")[0][:40]
     where = "add items under the line `%s%s` (line %d of %s)" % (HEADING_PREFIX, block["stamp"], block["line"], inbox)
     example = example_item(block["stamp"])
-    return "the message at %s (%s) has no items: %s%s" % (
-        block["stamp"], first, where, ", one per line, for example `%s`" % example if example else "")
+    return "the message at %s (%s) has no items: %s%s%s" % (
+        block["stamp"], first, where, ", one per line, for example `%s`" % example if example else "",
+        ". Kind homes: %s" % homes_line if homes_line else "")
 
 
 def kind_homes(layout, root, kind):
@@ -230,6 +234,25 @@ class Homes:
             return None
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
+
+    def homes_line(self):
+        """`ruling -> <homes>; task -> <homes>; question -> answered; ...` for every kind in KINDS. The file homes
+        come from kind_homes; when the layout or the repo cannot be read, such a kind names "a tracked file"."""
+        found = {}
+        try:
+            import layout
+        except ImportError:
+            layout = None
+        if layout is not None:
+            try:
+                start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+                root = self._root(start) if start else None
+                if root is not None:
+                    found = {k: kind_homes(layout, root, k) for k in HOME_KINDS}
+            except (layout.LayoutError, ruling_home._GitFailure):
+                found = {}
+        return "; ".join("%s -> %s" % (k, KIND_WORDS[k] if k in KIND_WORDS
+                                       else ", ".join(found.get(k) or ()) or "a tracked file") for k in KINDS)
 
     def _stand_down(self, e):
         self.skip = self.skip or " ".join(str(e).split()) or type(e).__name__
@@ -342,7 +365,7 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
         text = norm(b["text"])
         seen[text] = seen.get(text, 0) + 1
         if not b["items"] and n in burst:
-            out.append(no_items_problem(b, inbox))
+            out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
         for ln in b["items"]:
             it = item(ln)
             if it is None:
@@ -370,6 +393,7 @@ def main():
         if paths is None:
             return 0
         inbox, turns = paths
+        inbox = os.path.abspath(inbox)  # CLAUDE_CONFIG_DIR may be relative; the reason promises an absolute path
         out = {}
         try:
             with open(inbox, encoding="utf-8") as f:

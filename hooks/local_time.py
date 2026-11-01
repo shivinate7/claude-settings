@@ -48,6 +48,13 @@ from datetime import datetime, timedelta, timezone
 
 
 CST = timedelta(hours=-6)
+# The inbox heading and stamp, written here and read by feedback_guard.py.
+HEADING_PREFIX = "### "
+STAMP_FORMAT = "%Y-%m-%d %H:%M"
+STAMP_ZONES = {"CDT": "UTC-05:00", "CST": "UTC-06:00"}  # zone name -> offset text
+# Matches a stamp; groups 1 and 2 are its hour and minute. It mirrors STAMP_FORMAT.
+STAMP_PATTERN = r"\d{4}-\d{2}-\d{2} (\d{2}):(\d{2}) (?:%s) \((?:%s)\)" % (
+    "|".join(STAMP_ZONES), "|".join(re.escape(o) for o in STAMP_ZONES.values()))
 
 
 def nth_sunday(year, month, n):
@@ -73,8 +80,8 @@ def line(clock=clock):
     end = nth_sunday(now.year, 11, 1).replace(hour=7)
     dst = start <= now < end
     local = now + CST + (timedelta(hours=1) if dst else timedelta())
-    name, off = ("CDT", "UTC-05:00") if dst else ("CST", "UTC-06:00")
-    return "Local time: %s %s (%s)" % (local.strftime("%Y-%m-%d %H:%M"), name, off)
+    name = "CDT" if dst else "CST"
+    return "Local time: %s %s (%s)" % (local.strftime(STAMP_FORMAT), name, STAMP_ZONES[name])
 
 
 def central_hhmm(at):
@@ -133,7 +140,7 @@ def save_message(inbox, stamp, text):
         fence = "`" * max([3] + [len(r) + 1 for r in re.findall(r"`+", text)])
         os.makedirs(os.path.dirname(inbox), exist_ok=True)
         with open(inbox, "ab") as f:  # bytes: "\n" stays "\n" on Windows, and the text stays verbatim
-            f.write(("### %s\n%s\n%s\n%s\n" % (stamp, fence, text, fence)).encode("utf-8"))
+            f.write(("%s%s\n%s\n%s\n%s\n" % (HEADING_PREFIX, stamp, fence, text, fence)).encode("utf-8"))
     except (OSError, ValueError) as e:
         return str(e)
     return None
