@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.33767,
   "why": "Renovate PRs #917 (claude-code v2.1.302) and #918 (impeccable skill-v4.6.0) wait on rule verification-newest-that-passes: read the changelog first, then take the newest version that passes.",
-  "note": "Lane session_013NEJKzNV4Bjg5u8KncVxyQ, started Nov 1 06:26 CST (coordinator). Done check: each changelog read, each PR green; a version that breaks a check is pinned to the newest that passes, with the reason.",
-  "updatedAt": "2026-11-01T12:30:00Z"
+  "note": "Lane session_013NEJKzNV4Bjg5u8KncVxyQ, started Nov 1 06:26 CST (coordinator). Done check: each changelog read, each PR green; a version that breaks a check is pinned to the newest that passes, with the reason. Part landed on main in batch 47, #943 (lane cc-pin-2.1.311, commit afe66b7e: the claude-code-plugins marketplace is pinned at v2.1.311; #917 closed as replaced), main 7276aa2c, Nov 1 07:31 CST. Open: #918 (impeccable 4.8.0, lane/impeccable-4.8.0 62126f23) waits on page item 119; lane/fd-official-pin (6ea3b529) is parked on page item 120.",
+  "updatedAt": "2026-11-01T13:35:00Z"
 }
