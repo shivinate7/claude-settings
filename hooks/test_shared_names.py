@@ -50,7 +50,7 @@ MACHINE_TAGS = (  # pinned; shared_names.py holds the one copy
     "Another Claude session sent a message while you were working:\n<agent-message\n",
     "Another Claude session sent a message while you were working:\n<agent-message\r",
 )
-GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN = "shivinate7", "ssemwal-cdc"  # pinned; the owner's ruling, Oct 31 14:55 CDT
+GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN = "shivinate7", "ssemwal-cdc"  # the default and fallback gh logins (decision `act-in-place`)
 CLOCK = "2026-07-04T10:30:00-05:00"
 TIME_LINE = "Local time: 2026-07-04 10:30 CDT (UTC-05:00)\n"
 # What local_time may load beyond the standard library: itself, shared_names, and the light
@@ -105,8 +105,8 @@ def case_values_pinned():
 
 
 def case_gh_logins_pinned():
-    """Owner ruling, Oct 31 14:55 CDT: shivinate7 is the default gh login; ssemwal-cdc is the fallback, for a
-    repo shivinate7 cannot reach. Both names live here, once, for the guard and the reply judge."""
+    """shivinate7 is the default gh login; ssemwal-cdc is the fallback, for a
+    repo shivinate7 cannot reach (decision `act-in-place`). Both names live here, once, for the guard and the reply judge."""
     shared = _shared()
     default = getattr(shared, "GH_DEFAULT_LOGIN", None)
     fallback = getattr(shared, "GH_FALLBACK_LOGIN", None)

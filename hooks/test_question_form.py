@@ -540,8 +540,8 @@ def case_page_reasons_are_one_table():
 
 # ------------------------------------------------------------------ the gh login switch
 
-# Owner ruling, Oct 31 14:55 CDT: shivinate7 is the default login, ssemwal-cdc only for a repo shivinate7
-# cannot reach. The value pins live in test_shared_names.py; the literals here are the inputs.
+# The default gh login is shivinate7; ssemwal-cdc is only for a repo shivinate7 cannot reach
+# (decision `act-in-place`). The value pins live in test_shared_names.py; the literals here are the inputs.
 GH_PATCH = ("gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/"
             "required_status_checks -f strict=true")
 GH_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
@@ -646,7 +646,7 @@ def case_gh_login_hit_direct():
     gh_hit("gh login switch: ssemwal-cdc on a shivinate7/ repo in powershell only is denied",
            gh_task("gh auth switch -u shivinate7 && " + GH_PATCH, "gh auth switch -u ssemwal-cdc; " + GH_PATCH), True)
 
-    # Round 2 (review findings): PowerShell paths, gh text in a quoted body, a lone quote, sudo and env.
+    # Cases for PowerShell paths, gh text in a quoted body, a lone quote, sudo and env.
     # The mac twin of a PowerShell path uses forward slashes: bash reads `"C:\repo\"` as an open quote.
     gh_hit("gh login switch: a PowerShell Set-Location with a trailing backslash, then the switch, then gh, is allowed",
            gh_task('cd "/repo/"\ngh auth switch -u shivinate7\ngh pr view 5',
@@ -684,7 +684,7 @@ def case_gh_login_switch_on_the_page():
          entry_of(gh_task(GH_PATCH, GH_PATCH, steps=["Open plans/gh.md", "Run its command"])), ("command-in-item", None))
     page("gh login switch: a switch first is allowed on the page", "set",
          entry_of(gh_task("gh auth switch -u shivinate7 && " + GH_PATCH, "gh auth switch -u shivinate7; " + GH_PATCH)), None)
-    # Round 2: a str_replace on the task's command is judged on the text that replaces old_str.
+    # A str_replace on the task's command is judged on the text that replaces old_str.
     page("gh login switch: a str_replace that adds a gh command with no switch to command is refused", "str_replace",
          {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
           "new_str": "step one\ngh pr merge 5"}, ("gh-login-switch", None))

@@ -12341,11 +12341,11 @@ for step in BACKTICK_PROSE:
 # --------------------------------------------------------------------------- a gh command handed to the owner switches login first
 FAMILY = "gh-login-switch"
 #
-# Owner ruling, Oct 31 14:55 CDT: shivinate7 is the default login; ssemwal-cdc only for a repo shivinate7
-# cannot reach. A task's `command` runs on the owner's computer, so a gh command in it runs as whichever
+# The default gh login is shivinate7; ssemwal-cdc is only for a repo shivinate7 cannot reach (decision
+# `act-in-place`). A task's `command` runs on the owner's computer, so a gh command in it runs as whichever
 # login is active there. The command switches first: `gh auth switch -u <login>` before the first non-auth
-# gh command. Built against a named incident: a branch-protection PATCH on shivinate7/claude-settings was
-# handed to the owner with no switch, Oct 31 14:52 CDT. A decision is not judged by this rule.
+# gh command. Why: a handed PATCH needs admin, and the owner could not tell which login would run it.
+# A decision is not judged by this rule.
 
 GL_PATCH = ("gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/"
             "required_status_checks -f strict=true")
@@ -12423,8 +12423,8 @@ gl("a continued gh api after the switch is allowed", "allow",
 gl("a multi-line quoted argument after the switch is allowed", "allow",
    GL_SWITCH + '\ngh pr comment 5 --body "first\nsecond"', GL_SWITCH + '\ngh pr comment 5 --body "first\nsecond"')
 
-# Round 2 (review findings): PowerShell paths, gh text in a quoted body, a lone quote, sudo and env
-# wrappers, and a bare fallback switch. The PowerShell lines are raw strings, so each backslash is literal.
+# Cases for PowerShell paths, gh text in a quoted body, a lone quote, sudo and env wrappers, and a
+# bare fallback switch. The PowerShell lines are raw strings, so each backslash is literal.
 # The mac twin of a PowerShell path uses forward slashes: bash would read `"C:\repo\"` as an open quote.
 gl("a PowerShell Set-Location to a path with a trailing backslash in quotes, then the switch, then gh, is allowed",
    "allow", 'cd "/repo/"\n' + GL_SWITCH + "\ngh pr view 5", r'Set-Location "C:\repo\"' + "\n" + GL_SWITCH + "\ngh pr view 5")
@@ -12465,7 +12465,7 @@ wp_write("gh login switch: a decision that holds a gh command with no switch is 
                       {"key": "b", "label": "Keep it", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]},
          doc_id=GL_DOC)
 
-# Round 2: a str_replace on the task's `command` is judged on the text that replaces old_str.
+# A str_replace on the task's `command` is judged on the text that replaces old_str.
 wp_write("gh login switch: a str_replace that adds a gh command with no switch to command is denied", "deny",
          "gh-login-switch", None, action="str_replace", doc_id=GL_DOC, field="command",
          old_str="step one", new_str="step one\ngh pr merge 5")
