@@ -803,6 +803,22 @@ def page_item_hit(tool_input, cwd=""):
     return PASS, writes
 
 
+def design_writes(writes):
+    """The (doc_id, data) of each set or update in `writes` whose data carries a picture: a non-empty `designs`
+    list, or an option with a `design`. Rule page-item-design reads only these, so a write with no picture
+    never starts the checker. An update is judged on the fields it carries."""
+    found = []
+    for op, entry in writes:
+        data = _write_data(entry) if op in ("set", "update") else None
+        if not isinstance(data, dict) or data.get("status") == "closed":  # a closed item is not drawn
+            continue
+        options = data.get("options")
+        has_option = isinstance(options, list) and any(isinstance(o, dict) and o.get("design") for o in options)
+        if data.get("designs") or has_option:
+            found.append((entry.get("doc_id"), data))
+    return found
+
+
 def _judged_fragment(field):
     """True for a str_replace field the model review reads: `context`, `options`, or a subfield of `options`.
     The ArtifactData str_replace `field` is one top-level string key, so `steps` (a list) never reaches it."""

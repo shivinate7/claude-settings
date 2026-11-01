@@ -251,15 +251,41 @@ def read_stamp(root):
         return None
 
 
-def write_stamp(root, blob):
-    """Write `blob` to the repo's stamp. True when it wrote; a failure is False and never raises."""
+def write_record(root, name, text):
+    """Write `text` to the file `name` in the repo's common git dir, the one home of these records. True when
+    it wrote; a failure is False and never raises."""
     common = common_git_dir(root)
     try:
-        with open(os.path.join(common, STAMP), "w", encoding="utf-8") as f:
-            f.write(blob + "\n")
+        with open(os.path.join(common, name), "w", encoding="utf-8") as f:
+            f.write(text + "\n")
         return True
     except (OSError, TypeError):
         return False
+
+
+def write_stamp(root, blob):
+    """Write `blob` to the repo's stamp. True when it wrote; a failure is False and never raises."""
+    return write_record(root, STAMP, blob)
+
+
+# The published record: an allowed publish of the waiting page writes the absolute path of the file it
+# published, so a later item write can load that exact page (rule page-item-design).
+PUBLISHED = "waiting-page-published"
+
+
+def write_published(root, path):
+    """Record `path` as the file last published. True when it wrote; never raises."""
+    return write_record(root, PUBLISHED, path)
+
+
+def read_published(root):
+    """The path the last allowed publish recorded for the repo at `root`, or None."""
+    common = common_git_dir(root)
+    try:
+        with open(os.path.join(common, PUBLISHED), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except (OSError, TypeError):
+        return None
 
 
 def session_line(root, main_checkout=None):

@@ -518,8 +518,18 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The deny cases of rule page-item-design render a page through hooks/guard.py's checker, which needs
+      # Playwright and Chromium. The same pinned copy checks-shoot installs; NODE_PATH below lets the guard's node find it.
+      - name: Install the pinned Playwright and Chromium, no apt step
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
+        uses: $/actions/playwright-setup
+        with:
+          package-dir: .github/shoot
+
       - name: Guard fixture suite
         if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          NODE_PATH: ${{ github.workspace }}/.github/shoot/node_modules
         run: python3 hooks/test_guard.py
 
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
@@ -559,7 +569,7 @@ jobs:
         shell: bash
         run: |
           python3 --version && git --version
-          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
