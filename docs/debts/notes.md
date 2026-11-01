@@ -291,6 +291,8 @@
 - stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-other-forms: a name or path cited as `` `name` in `file.py` ``, `file.py:name`, `[x](/path)`, `@path` or `_path_` is not checked (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-def-to-assign: a `def f` replaced by `f = h` in the same file reads as removed, so a line that cites `f` is flagged (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)

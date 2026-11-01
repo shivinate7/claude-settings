@@ -17,11 +17,14 @@ Each Markdown file is read as committed at head, never from the working tree.
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
-checks out shallow is not red at its pin move.
+checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
+the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
-Cost, per ste-lint changed-scope run: one python3 start, one `git cat-file --batch` start (base blobs, head
-blobs and head existence), and a few one-shot git reads (rev-parse, merge-base, diff, ls-tree). Each tracked
-.md is read once. It writes no file and leaves no process running.
+Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
+Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py.
+A touched .py adds one `git cat-file --batch`. A removed path or def adds `ls-tree` and that `cat-file
+--batch`, so 5 at most. Each tracked .md is read once, only when something was removed. It writes no file
+(no .pyc either) and leaves no process running.
 """
 import argparse
 import ast
@@ -30,6 +33,7 @@ import re
 import subprocess
 import sys
 
+sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the import below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
@@ -89,7 +93,12 @@ class BlobReader:
 
 
 def glob_regex(pattern):
-    """A .ste-lint-exclude pathspec as a regex: `**/` spans zero or more folders, `*` stays in one."""
+    """A .ste-lint-exclude pathspec as a regex, read as git reads `:(exclude,glob)<pattern>`: `**/` spans
+    zero or more folders, `*` stays in one. A pattern with no wildcard also matches each file under it as a
+    folder, so `vendor` and `vendor/` leave out `vendor/a.md`. A wildcard pattern matches the whole path only."""
+    literal = not any(c in pattern for c in "*?[")
+    if literal:
+        pattern = pattern.rstrip("/")
     out, i = "", 0
     while i < len(pattern):
         if pattern.startswith("**/", i):
@@ -102,7 +111,7 @@ def glob_regex(pattern):
             out, i = out + "[^/]", i + 1
         else:
             out, i = out + re.escape(pattern[i]), i + 1
-    return re.compile(out + r"\Z")
+    return re.compile(out + (r"(?:/.*)?\Z" if literal else r"\Z"))
 
 
 def exclude_patterns(root):
@@ -198,8 +207,14 @@ def path_cites(line, gone, exotic):
 
 
 def scan(range_text):
+    """(found, unknowns): {(path, line, code): [messages]}, and one text per touched .py that does not parse."""
     diff_args, base, head = parse_range(range_text)
     removed, renamed, modified = changed_paths(diff_args)
+    found, unknowns = {}, []
+    py_files = {p: p for p in modified if p.endswith(".py")}
+    py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
+    if not removed and not renamed and not py_files:
+        return found, unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
     batch = BlobReader()
     try:
         gone = {}  # path -> new home or None
@@ -208,27 +223,26 @@ def scan(range_text):
                 gone[path] = renamed.get(path)
         simple = {p for p in gone if SIMPLE_PATH.match(p)}
         exotic = [p for p in gone if p not in simple]
-        py_files = {p: p for p in modified if p.endswith(".py")}
-        py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
+
+        removed_names = {}  # file at base -> names the range removed
+        for path in sorted(py_files):
+            old_src = batch.get("%s:%s" % (base, path))
+            new_src = batch.get("%s:%s" % (head, py_files[path]))
+            before = defs_in(old_src) if old_src is not None else None
+            after = defs_in(new_src) if new_src is not None else None
+            bad = [side for side, names in (("base", before), ("head", after)) if names is None]
+            if bad:
+                unknowns.append("%s does not parse at %s; the defs it removed were not checked"
+                                % (path, " and ".join(bad)))
+            elif before - after:
+                removed_names[path] = before - after
+        if not gone and not removed_names:
+            return found, unknowns
 
         excludes = exclude_patterns(".")
         tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
         tracked = [e.split("\t", 1)[1] for e in tree if "\t" in e and e.split(" ", 1)[0] in ("100644", "100755")]
         tracked = [t for t in tracked if t.endswith(".md")]
-        found = {}  # (path, line, code) -> [messages]
-        removed_names = {}  # file -> names the range removed, read once per file
-
-        def removed_in(path):
-            if path not in removed_names:
-                names = set()
-                old_src = batch.get("%s:%s" % (base, path))
-                new_src = batch.get("%s:%s" % (head, py_files[path]))
-                before = defs_in(old_src) if old_src is not None else None
-                after = defs_in(new_src) if new_src is not None else None
-                if before is not None and after is not None:
-                    names = before - after
-                removed_names[path] = names
-            return removed_names[path]
 
         for md in tracked:
             if not md or md == RECORDS_PAGE or any(rx.match(md) for rx in excludes):
@@ -245,16 +259,16 @@ def scan(range_text):
                     text = ("%s was renamed to %s in this range; name the new home" % (path, home) if home
                             else "%s was deleted in this range" % path)
                     found.setdefault((md, number, "STALE001"), []).append(text)
-                if py_files and ".py" in line and "STALE002" not in off:
+                if removed_names and ".py" in line and "STALE002" not in off:
                     for pair in PAIR_RES:
                         for match in pair.finditer(line):
                             path, name = match.group(1), match.group(2)
-                            if path in py_files and path not in cited and name in removed_in(path):
+                            if path not in cited and name in removed_names.get(path, ()):
                                 found.setdefault((md, number, "STALE002"), []).append(
                                     "%s no longer defines %s at head; find its new home" % (path, name))
     finally:
         batch.close()
-    return found
+    return found, unknowns
 
 
 def main(argv):
@@ -264,7 +278,7 @@ def main(argv):
     try:
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
-        found = scan(args.range)
+        found, unknowns = scan(args.range)
     except BaseUnknown as exc:
         print("stale-cites: unknown, the base of %s does not resolve (%s). Check out with fetch-depth 0 "
               "(actions/checkout) so the range has history. Nothing was checked." % (args.range, exc))
@@ -274,6 +288,8 @@ def main(argv):
         return 2
     for (path, number, code), texts in sorted(found.items()):
         print("%s:%d: %s %s" % (path, number, code, "; ".join(texts)))
+    for text in unknowns:
+        print("stale-cites: unknown, %s" % text)
     print("stale-cites: %s" % ("FAIL, %d finding(s)" % len(found) if found else "PASS"))
     return 1 if found else 0
 

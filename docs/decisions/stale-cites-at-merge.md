@@ -14,7 +14,8 @@ Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that s
 - A base that does not resolve (a shallow clone with no history) is unknown, not a finding. The check prints `stale-cites: unknown, ...`, names fetch-depth 0, and exits 0, so a repo that pins the action and checks out shallow is not red at its pin move (owner-lane call, 2026-11-01).
 - `FAIL=false` is honored: the findings print and the step exits 0.
 - Findings have their own exit path. The STE split step makes a finding on an untouched line report-only, and every stale line is untouched by design.
-- Cost: one `python3` start and one `git cat-file --batch` start per ste-lint changed-scope run (each PR CI run and each `bin/ste-changed` call). It reads each tracked Markdown file once. It writes no file and starts no lasting process.
+- A touched `.py` file that does not parse at base or head is unknown the same way: `stale-cites: unknown, <file> ...`, and it alone keeps the exit 0.
+- Cost, per ste-lint changed-scope run (each PR CI run and each `bin/ste-changed` call): one `python3` start. Git starts 3 (`rev-parse`, `merge-base`, `diff`) when the range removes or renames no path and touches no `.py` file. A touched `.py` file adds one `git cat-file --batch`. A removed path or def adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked Markdown file is read once, and only when something was removed. It writes no file, no `.pyc` either, and starts no lasting process. `CostTests` in `lint/test_stale_cites.py` proves it.
 
 ## Kind of staleness
 
