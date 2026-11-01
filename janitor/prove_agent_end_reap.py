@@ -26,6 +26,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 sys.path.insert(0, HERE)
 import sweep  # noqa: E402
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
+import _test_git  # noqa: E402,F401  fixture commits skip signing (lint/_test_git.py)
 
 VCS = "g" + "it"
 IDENT = ["-c", "user.email=reap-proof@example.invalid", "-c", "user.name=reap-proof"]

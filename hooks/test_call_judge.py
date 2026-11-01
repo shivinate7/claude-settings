@@ -168,6 +168,8 @@ def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=
 GOAL_LINE = "Goal: ship the change today"
 PROBLEM_LINE = "Problem (risk): the change touches the guard, so it needs your word"
 BASED_LINES = ("Based on (read): the diff changes one rule",)
+# The line a question to the owner carries (rule question-departs): what is on main, and what changes.
+DEPARTS_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
 
 
 def good_options():
@@ -177,10 +179,10 @@ def good_options():
              "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}]
 
 
-def good_box(goal=GOAL_LINE, problem=PROBLEM_LINE, based=BASED_LINES, options=None):
-    """An AskUserQuestion input that meets the form. A form line passed as None or empty is left out,
-    so a case drops one line and keeps the rest."""
-    text = "\n".join(line for line in (goal, problem, *based) if line)
+def good_box(goal=GOAL_LINE, problem=PROBLEM_LINE, based=BASED_LINES, options=None, departs=DEPARTS_LINE):
+    """An AskUserQuestion input that meets the form and the Departs from line. A line passed as None or
+    empty is left out, so a case drops one line and keeps the rest."""
+    text = "\n".join(line for line in (goal, problem, *based, departs) if line)
     return {"questions": [{"question": text, "header": "Ship", "multiSelect": False,
                            "options": options or good_options()}]}
 
@@ -321,6 +323,40 @@ def case_question():
     check("question: an ok answer is empty stdout", r.code == 0 and r.out == "" and len(r.calls) == 1, detail(r))
 
 
+def case_question_departs():
+    # Rule question-departs (hooks/question_form.py, chat_hit): a box with no Departs from line, or one that
+    # restates main, is refused in code before any model call, and the refusal names the line.
+    restates = "Departs from: agent-model-cap — Opus above the row stays the existing ask"
+    for label, departs in (("no Departs from line", None), ("a line that restates main", restates)):
+        r = run_hook(question_input(box=good_box(departs=departs)), answer=ALLOW)
+        d = r.deny() or {}
+        check("question departs: %s is refused by code, though the model would answer ok" % label,
+              r.code == 0 and d.get("permissionDecision") == "deny" and "Departs from" in r.reason(), detail(r))
+        check("question departs: the code refusal makes no model call (%s)" % label, r.calls == [], detail(r))
+        check("question departs: one question-departs deny line (%s)" % label,
+              r.log.count("\tdeny\tquestion-departs\t") == 1, detail(r))
+    r = run_hook(question_input(box=good_box(departs=None)), answer=ALLOW)
+    check("question departs: the code refusal ends with the override line",
+          override is not None and hasattr(override, "offer")
+          and r.reason().rstrip().endswith(override.offer("question-departs").strip()), r.reason()[-160:])
+    r = run_hook(question_input(box=good_box(departs=None)), answer=ALLOW, pass_=(SID_A, TIMED))
+    check("question departs: a timed override lifts the code refusal",
+          r.code == 0 and r.out == "" and lifted_log(r, "question-departs"), detail(r))
+    r = run_hook(question_input(), answer=ALLOW)
+    check("question departs: a box with the line reaches the model once and is not refused",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+    one = good_box(departs=None)
+    one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
+    r = run_hook(question_input(box=one), answer=ALLOW)
+    check("question departs: a one-option question with no line is not refused",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    options = good_options()
+    options[1] = {"label": "Hold it", "description": "Lose: the change lands a day later."}
+    r = run_hook(question_input(box=good_box(options=options, departs=None)), answer=ALLOW)
+    check("question departs: a box with no line and an option with no gain is refused as question-form first",
+          r.code == 0 and "\tdeny\tquestion-form\t" in r.log and "\tdeny\tquestion-departs\t" not in r.log, detail(r))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -365,7 +401,7 @@ def case_settings_row():
 
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed, case_question,
-                 case_fail_open, case_settings_row):
+                 case_question_departs, case_fail_open, case_settings_row):
         try:
             case()
         except Exception as exc:

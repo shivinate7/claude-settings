@@ -46,6 +46,7 @@ Only some mutants (label fragments, comma-separated; every anchor is still check
     MUTATE_ONLY="deadline,oldest first" python3 janitor/mutate_sweep.py
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -1480,6 +1481,9 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     janitor_dir = os.path.join(scaffold, "janitor")
     os.makedirs(hooks_dir, exist_ok=True)
     os.makedirs(janitor_dir, exist_ok=True)
+    lint_dir = os.path.join(scaffold, "lint")
+    os.makedirs(lint_dir, exist_ok=True)
+    shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "_nowindow.py"), hooks_dir)  # sweep.py imports it; never mutated
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "shared_names.py"), hooks_dir)  # guard_core.py imports it; never mutated
     # sweep.py and guard_core.py import it. The loop below replaces this copy when `sources` holds
@@ -1519,8 +1523,14 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
         h.write(sources["settings_json"])
 
 
+# unittest's verbosity=2 line for one started test: `test_x (module.Class.test_x)`, then ` ... ok`
+# on the same line, or on the next line after a docstring. The failure heading `FAIL: test_x (...)`
+# does not match, so each case counts once.
+CASE_LINE = re.compile(r"^\w+ \([\w.]+\)")
+
+
 def run_suite(suite_path: str, config_dir: str, only=None):
-    """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr).
+    """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr, case lines).
 
     janitor/test_sweep.py is a plain `unittest.main(verbosity=2)`, which writes its per-case
     progress and its failure headings to STDERR by default -- unlike hooks/test_guard.py's own
@@ -1528,15 +1538,21 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     line is never missed because of which stream unittest chose. `CLAUDE_CONFIG_DIR` is set only
     as a floor: setUpModule immediately overwrites it with its own fresh tempfile.mkdtemp()
     directory, so this value is never actually read once the suite is under way, and is set here
-    only so nothing accidentally falls back to a real `~/.claude` before that line runs."""
+    only so nothing accidentally falls back to a real `~/.claude` before that line runs.
+
+    The case lines are one per test started, read from unittest's `test_x (module.Class.test_x)`
+    line. That line holds the method name even when a docstring pushes the `... ok` result to the
+    next line. `mutate_shared.staged_suite` reads them to know whether stage 1 ran the required case."""
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = config_dir
     result = _nowindow.run(
         # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
         [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=1200,
     )
-    red = [line for line in (result.stdout + result.stderr).splitlines() if "FAIL" in line]
-    return result.returncode, red
+    lines = (result.stdout + result.stderr).splitlines()
+    red = [line for line in lines if "FAIL" in line]
+    ran = [line for line in lines if CASE_LINE.match(line)]
+    return result.returncode, red, ran
 
 
 def run_mutant(sources, work: str, index: int, entry):
