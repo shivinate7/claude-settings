@@ -1,0 +1,9 @@
+{
+  "title": "A widening option's card says the uniform ruling in plain words, not a bare id",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33773,
+  "why": "Incident (shiv, Nov 1 11:43 CST, page item 114): \"what was my uniform ruling (t18)? ... it should never just quote a variable to me like that and expect me to understand\". The card text 'Goes against your uniform ruling (t18)' cites a bare topic id, against rule speak-cite-id-plus-gloss.",
+  "note": "Triage judged it a debt with an incident (roles-findings-are-debts-or-notes): every widening option shows the bare id. Fix the cause in one home: the card text says what the ruling is, for example 'Goes against your ruling that a repo matches a shared tool, never the tool bending for one repo'. The text lives in skills/waiting-page/page.html; hooks/question_form.py WIDENS_MARK, the output style rule style-question-form, skills/waiting-page/SKILL.md and hooks/test_question_form.py read the same words, so they move together. Done check: the question-form tests pass with the new words and no card or rule text carries a bare 't18'. Needs no answer.",
+  "updatedAt": "2026-11-01T17:50:00Z"
+}
