@@ -50,7 +50,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (lanes-start-in-tool-worktrees)
   impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
                        (design-skills)
-  cite-by-id           deny. A commit message or PR body that cites a record by its path.
+  debug-port-ask       ask. A launch with `--remote-debugging-port`, or a WebView2 env value that
+                       holds it. Text that only names the flag passes. (design-skills)
+  cite-by-id          deny. A commit message or PR body that cites a record by its path.
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
   machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
@@ -2511,6 +2513,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
 
+    # 1e2. A launch that opens a remote-debugging port (design-skills record, rule debug-port-ask).
+    matched = debug_port_hit(stripped)
+    if matched:
+        ask_command("debug-port-ask", DEBUG_PORT_REASON, matched, "debug port")
+
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
     # each segment takes its own bodies: heredoc_offsets counts the headers ahead of it (1c's split)
@@ -2840,6 +2847,65 @@ def impeccable_command_hit(raw: str) -> str:
             if matched:
                 return matched
     return ""
+
+
+# ------------------------------------------------------------------ a debug port asks
+#
+# docs/decisions/design-skills.md, rule `debug-port-ask` (a likely risk, 2026-11-01): impeccable 4.8.0
+# tells an agent to open a DevTools port on a desktop app. The port lets any local process drive the
+# app, so the owner answers first. A launch ASKS when a token of its own arguments is the flag, or
+# when a WebView2 environment value holds it. Text that only names the flag is no launch: a token
+# that holds the flag inside longer text never matches, and a text command's arguments are skipped.
+# The limits: a flag inside a longer `-ArgumentList` string, a `docker exec` and an interpreter
+# body (Python, Node) are not read.
+DEBUG_PORT_REASON = ("this command opens a remote-debugging port on an app. Any local process can "
+                     "then drive that app. Answer yes only if you want the port open.")
+DEBUG_PORT_FLAG = "--remote-debugging-port"
+DEBUG_PORT_ENV = re.compile(r"^(?:\$env:)?WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=(.*)$", re.I | re.S)
+DEBUG_PORT_TEXT_COMMANDS = {
+    "echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "ag", "ack", "git", "gh", "sed", "awk",
+    "head", "tail", "less", "more", "wc", "diff", "ls", "find", "write-host", "write-output",
+    "select-string", "findstr", "type", "get-content"}
+
+
+def debug_port_name(token: str) -> str:
+    """The command word without a path or a `.exe`, in lower case."""
+    name = basename(token).lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def debug_port_segment_hit(segment: str) -> str:
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    script = nested_script(tokens)
+    if script:
+        return next((hit for part in split_segments(script)
+                     if (hit := debug_port_segment_hit(part))), "")
+    index = resolve_command(tokens)
+    # A value set ahead of the command (`NAME=v cmd`, `env NAME=v cmd`), alone (`$env:NAME=v`) or by `export`.
+    words = list(tokens if index is None else tokens[:index + 1])   # PowerShell's `$env:NAME=v` is the command word itself
+    if index is not None and debug_port_name(tokens[index]) in ("export", "declare", "typeset"):
+        words += tokens[index + 1:]
+    for word in words:
+        found = DEBUG_PORT_ENV.match(word)
+        if found and "remote-debugging-port" in found.group(1).lower():
+            return segment.strip()[:100]
+    if index is None or debug_port_name(tokens[index]) in DEBUG_PORT_TEXT_COMMANDS:
+        return ""
+    for word in tokens[index + 1:]:
+        if word == DEBUG_PORT_FLAG or word.startswith(DEBUG_PORT_FLAG + "="):
+            return segment.strip()[:100]
+    return ""
+
+
+def debug_port_hit(stripped: str) -> str:
+    """The first segment of a shell command that opens a debug port, else ''. The early return only
+    spares the tokenizer on a command that cannot match."""
+    if "remote-debugging-port" not in stripped.lower():
+        return ""
+    return next((hit for segment in split_segments(stripped) if segment.strip()
+                 and (hit := debug_port_segment_hit(segment))), "")
 
 
 # ------------------------------------------------------------------ simulator boots
