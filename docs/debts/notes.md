@@ -821,3 +821,5 @@
 - stale-stamped-tree-called-live-pin: session_start.sh calls an old `<clone>-live-<hex>` tree "the live pin" after the link has moved on, though hooks/guard_frozen.py leaves it writable; the cd advice still holds (hooks/session_start.sh)
 - pin-line-silent-on-failed-listing: when the worktree listing fails inside a pin, no pin line prints and the unknown line names only the agent count (hooks/session_start.sh)
 - pin-name-fifth-copy: install.ps1 also builds `<clone>-live`, which the copy list in install.sh's comment omits (install.sh, install.ps1)
+- process-start-lc-all-unpinned: no test covers `LC_ALL=C` on the `ps -o lstart=` call; the fake ps ignores locale, so a mutant that drops it survives; no mutate_guard mutant covers the `env=` line or `calendar.timegm` (hooks/git_reads.py _process_start_ms)
+- ps-lstart-tz-macos-unmeasured: unmeasured: does real macOS BSD `ps` honour `TZ=UTC0` for lstart? macOS CI runners run in UTC, so they cannot show a non-UTC read; procps was measured and it does (hooks/git_reads.py _process_start_ms)
