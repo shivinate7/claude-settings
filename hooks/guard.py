@@ -330,7 +330,11 @@ while True:
             os.makedirs(folder, exist_ok=True)
             text = " ".join(("%s: %s: %s" % (_loading, type(exc).__name__, exc)).split())[:120]
             with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
-                handle.write("\t".join([time.strftime("%Y-%m-%dT%H:%M:%S"), "", "crash", "guard-crash",
+                # Same form as record(): ISO 8601 with a colon UTC offset. datetime is imported here, not
+                # taken from guard_core, so the writer survives the failure it reports.
+                from datetime import datetime
+                stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+                handle.write("\t".join([stamp, "", "crash", "guard-crash",
                                         text, "-"]) + "\n")  # the one literal "-": guard_core failed to load
         except Exception:
             pass
