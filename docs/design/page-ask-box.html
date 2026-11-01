@@ -48,19 +48,20 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-s="c">C. In the answer bar</button>
   </div>
   <div class="row" id="rowH"><span>Hide</span>
+    <button class="hide" data-hide="a">Hide A</button>
     <button class="hide" data-hide="b">Hide B</button>
     <button class="hide" data-hide="c">Hide C</button>
     <button class="hide" data-hide="rail">Hide the rail link (item 7)</button>
     <button class="hide" data-hide="older">Hide "older asks" (item 9)</button>
   </div>
   <div class="row" id="rowW"><span>Size</span>
-    <button data-w="all">Both</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button>
+    <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
   </div>
   <div class="row" id="rowT"><span>Theme</span>
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button data-lab="1" id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=a|empty|loading|sent|failed|offline|b|c</code>, <code>&amp;w=all|390|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=b,c,rail,older</code>. Notes: <code>page-ask-box-notes.md</code>. The question cards are drawn short: this step does not change them.</p>
+  <p>Deep links: <code>#s=a|empty|loading|sent|failed|offline|b|c</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=b,c,rail,older</code>. Notes: <code>page-ask-box-notes.md</code>. The question cards are drawn short: this step does not change them.</p>
 </header>
 <main id="stage">
   <section class="st" data-state="a" id="askA"><h2>A. One Ask section after both tab panels (pick)</h2><p>Box on top, asks newest first. Two wait for an answer, one new answer shows open, older answers fold to one line.</p><div class="frames"></div></section>
@@ -543,10 +544,10 @@ function askItem(a, i, lab, open) {
 function askForm(mode, lab) {
   const val = mode === "failed" || mode === "offline" ? "Please batch the two hook lanes into one PR." : "";
   const hint = {
-    idle: `<p class="askhint" id="askHint">Send ask turns on once you type. It goes to ${WRITER}, which answers here or passes it on.<span class="kbd"> Ctrl+Enter sends.</span></p>`,
+    idle: `<p class="askhint" id="askHint"><span>Send ask turns on once you type. It goes to ${WRITER}, which answers here or passes it on.<span class="kbd"> Ctrl+Enter sends.</span></span></p>`,
     sent: `<p class="askhint ok" id="askHint" role="status"${lab ? ' data-new="Undo at the box"' : ""}><span class="g done" aria-hidden="true"></span><span><b>Sent 17:41.</b> Claude was told.</span></p>`,
-    failed: `<p class="askhint bad" id="askHint" role="alert">Not saved (permission-denied). Your ask is still in the box: copy it and paste it in chat.</p>`,
-    offline: `<p class="askhint bad" id="askHint">This view cannot reach the page's store, so an ask cannot be saved here. Copy it and paste it in chat.</p>`,
+    failed: `<p class="askhint bad" id="askHint" role="alert"><span>Not saved (permission-denied). Your ask is still in the box: copy it and paste it in chat.</span></p>`,
+    offline: `<p class="askhint bad" id="askHint"><span>This view cannot reach the page's store, so an ask cannot be saved here. Copy it and paste it in chat.</span></p>`,
   }[mode];
   const slot = mode === "sent" ? '<button class="btn alt" type="button" id="askUndo">Undo send (6)</button>' : mode === "failed" || mode === "offline" ? '<button class="btn alt" type="button" id="askCopy">Copy ask</button>' : "";
   const off = mode === "offline" || !val;
@@ -615,12 +616,15 @@ ${bar(s, lab)}</body></html>`;
 /* ---------- Harness ---------- */
 const STATES = ["a", "empty", "loading", "sent", "failed", "offline", "b", "c"];
 const P = { s: "a", w: "all", t: "", lab: "on", hide: [] };
+// Hide A hides its five sub-states too: each one draws option A.
+const A_STATES = ["a", "empty", "loading", "sent", "failed", "offline"];
+const gone = (s) => P.hide.includes(s) || (P.hide.includes("a") && A_STATES.includes(s));
 function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; }); if (!STATES.includes(P.s)) P.s = "a"; }
 function writeHash() { const q = new URLSearchParams({ s: P.s, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(",")); history.replaceState(null, "", "#" + q); }
 const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 function frame(host, w) {
   const box = document.createElement("div"); box.className = "fr";
-  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : "Wide") + " " + w + ", " + theme();
+  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : w === 800 ? "Mid" : "Wide") + " " + w + ", " + theme();
   const wrap = document.createElement("div"); wrap.className = "fw";
   const f = document.createElement("iframe"); f.title = "Waiting page at " + w + " wide, state " + P.s; f.style.width = w + "px";
   wrap.append(f); box.append(cap, wrap); host.append(box);
@@ -657,17 +661,17 @@ function wire(doc, fit) {
   if (t && send && !doc.querySelector(".askhint.bad:not([role])")) t.addEventListener("input", () => { send.disabled = !t.value.trim(); });
 }
 function render() {
-  if (P.hide.includes(P.s)) P.s = STATES.find((s) => !P.hide.includes(s));
+  if (gone(P.s)) P.s = STATES.find((s) => !gone(s)) || "a";
   writeHash();
   document.documentElement.dataset.theme = theme();
-  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = gone(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
   document.querySelectorAll("[data-hide]").forEach((b) => { const on = P.hide.includes(b.dataset.hide); b.textContent = b.textContent.replace(/^(Hide|Show)/, on ? "Show" : "Hide"); b.setAttribute("aria-pressed", String(on)); });
   document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
   document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
   const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
   document.querySelectorAll(".st[data-state]").forEach((sec) => { const on = sec.dataset.state === P.s; sec.classList.toggle("on", on); sec.querySelector(".frames").replaceChildren(); });
   const host = document.querySelector(`.st[data-state="${P.s}"] .frames`);
-  (P.w === "all" ? [390, 1280] : [Number(P.w) === 1280 ? 1280 : 390]).forEach((w) => frame(host, w));
+  (P.w === "all" ? [390, 800, 1280] : [[800, 1280].includes(Number(P.w)) ? Number(P.w) : 390]).forEach((w) => frame(host, w));
 }
 document.querySelector(".tool").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
