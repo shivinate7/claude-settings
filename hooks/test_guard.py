@@ -19576,20 +19576,31 @@ def cs_override_call(config, session, seconds):
 CS_OPENS_DIR = os.path.join(ROOT, "cs-opens")
 
 
-def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None):
-    """(decision, reason, the absolute path of each open) of one guard call, made as `cs` makes one."""
+def cs_probe_report(config, tool, tool_input, cwd, env=None, agent_id=None):
+    """(decision, reason, the probe's report) of one guard call, made as `cs` makes one. The report holds `opens` (each
+    path the call opens), `open_modes` (each open as [path, mode]), `children` (each subprocess the call starts) and
+    `log_children` (per guard.log write, the subprocesses that write starts). The report is {} when the probe wrote none."""
     os.makedirs(CS_OPENS_DIR, exist_ok=True)
     handle, side = tempfile.mkstemp(dir=CS_OPENS_DIR, suffix=".json")
     os.close(handle)
     got, reason = decide({"raw": None, "tool": tool, "cwd": cwd, "session": CS_PAYLOAD_SID, "env_path": None,
                           "config": config, "agent_id": agent_id, "agent_type": "builder" if agent_id else None,
                           "env": dict(CS_REMOTE if env is None else env), "tool_input": tool_input,
-                          "probe_side": side, "probe_spec": {"mode": "judge", "opens": True}})
+                          "probe_side": side,
+                          "probe_spec": {"mode": "judge", "opens": True, "log_children": True}})
     try:
         with open(side, encoding="utf-8") as done:
-            return got, reason, json.load(done)["opens"]
-    except (OSError, ValueError, KeyError):
+            return got, reason, json.load(done)
+    except (OSError, ValueError):
+        return got, reason, {}
+
+
+def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None):
+    """(decision, reason, the absolute path of each open) of one guard call, made as `cs` makes one."""
+    got, reason, report = cs_probe_report(config, tool, tool_input, cwd, env, agent_id)
+    if "opens" not in report:
         return "error", "the probe wrote no opens: %s" % reason[:90], []
+    return got, reason, report["opens"]
 
 
 def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None):
@@ -19667,6 +19678,146 @@ for _what, _tool, _input, _cwd in (   # a coordinator's call that names no repo 
                       cs_cost_check("coordinator", _tool, _input, _cwd)))
 CS_CHECKS.append(("coordinator-scope cost: the control, a coordinator's refused Write of product code shows the layout open",
                   cs_cost_control_check))
+
+
+# 7. guard.log (owner ruling, waiting-page item 112 a, 2026-11-01 16:45 CST): each coordinator-scope refusal appends
+# exactly one guard.log line, and each override that lifts one appends exactly one line. The reader is shiv (rule
+# outcomes-mechanize-rules). A log line costs one append in the guard process already running: no process starts for it.
+CS_LOG_EDIT = {"file_path": CS_CODE, "new_string": "x"}
+
+
+def cs_log_rows(config):
+    """The guard.log lines of `config`, each split into its tab fields."""
+    return [line.split("\t") for line in gs_log_lines(config)]
+
+
+def cs_log_refusal_check():
+    """One denied coordinator write appends one guard.log line: six fields, decision deny, rule coordinator-scope, the
+    refused path in the matched field, and the payload's session last. The remedy is printed, not logged, so the line
+    holds none of its words."""
+    config = cs_config("cs-log-refusal", "coordinator")
+    got, reason = ov_call("Edit", dict(CS_LOG_EDIT), GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE)
+    problem = ov_want(got, reason, "deny", CS_RULE)
+    if problem:
+        return False, problem
+    rows = cs_log_rows(config)
+    if len(rows) != 1:
+        return False, "the refusal wrote %d guard.log lines, want one: %r" % (len(rows), rows)
+    fields = rows[0]
+    if len(fields) != 6 or fields[2:4] != ["deny", CS_RULE]:
+        return False, "the line is %r, want six fields with decision deny and rule coordinator-scope" % (fields,)
+    if os.path.basename(CS_CODE) not in fields[4]:
+        return False, "the matched field is %r, want the refused path" % fields[4]
+    if fields[5] != CS_PAYLOAD_SID:
+        return False, "the session field is %r, want the payload's session" % fields[5]
+    text = "\t".join(fields).lower()
+    for remedy in ("brief a lane session", "to allow this act"):
+        if remedy in text:
+            return False, "the log line holds remedy text %r: %r" % (remedy, fields)
+    return True, "one deny line names coordinator-scope and the refused path, and no remedy text"
+
+
+def cs_log_override_check():
+    """An override that lifts a coordinator write appends one guard.log line that marks it an override of
+    coordinator-scope. The grant writes no line: a bare `override` carries no reason."""
+    config = cs_config("cs-log-lift", "coordinator")
+    note = ov_type(config, CS_PAYLOAD_SID, "override")
+    if gs_log_lines(config):
+        return False, "the grant wrote %r, want no line for a bare override" % gs_log_lines(config)
+    got, reason = ov_call("Edit", dict(CS_LOG_EDIT), GITMAIN, config, CS_PAYLOAD_SID, 60, env=CS_REMOTE)
+    problem = ov_want(got, reason, "allow", CS_RULE)
+    if problem:
+        return False, "%s (%s)" % (problem, note or "typed")
+    rows = cs_log_rows(config)
+    if len(rows) != 1:
+        return False, "the lifted write appended %d guard.log lines, want one: %r" % (len(rows), rows)
+    fields = rows[0]
+    if len(fields) != 6 or fields[2:4] != ["override", CS_RULE]:
+        return False, "the line is %r, want decision override and rule coordinator-scope" % (fields,)
+    return True, "a typed override lets one write through and appends one override line naming coordinator-scope"
+
+
+def cs_log_unreadable_check():
+    """A refused coordinator write, with an override file that cannot be read, appends one guard.log line. The refusal
+    stands, so its line is the one the reader counts: decision deny, or override-unread, under rule coordinator-scope."""
+    config = cs_config("cs-log-unreadable", "coordinator")
+    write(ov_pass_path(config, CS_PAYLOAD_SID), "not an override")
+    got, reason = ov_call("Edit", dict(CS_LOG_EDIT), GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE)
+    problem = ov_want(got, reason, "deny", CS_RULE)
+    if problem:
+        return False, problem
+    rows = cs_log_rows(config)
+    if len(rows) != 1:
+        return False, "the refusal wrote %d guard.log lines, want one: %r" % (len(rows), rows)
+    if rows[0][2:4] not in (["deny", CS_RULE], ["override-unread", CS_RULE]):
+        return False, "the line is %r, want rule coordinator-scope with decision deny or override-unread" % (rows[0],)
+    return True, "one line for the refusal with an unreadable override file"
+
+
+def cs_log_allowed_check():
+    """A record write, and writes no coordinator-scope refusal covers (a lane's product write, an agent's product
+    write), append no guard.log line."""
+    calls = (("a record write by a coordinator", "coordinator", {"file_path": cs_kind_path("todo"), "new_string": "x"}, None),
+             ("a product write by a lane session", "lane", dict(CS_LOG_EDIT), None),
+             ("a product write by an agent", "coordinator", dict(CS_LOG_EDIT), "bld1"))
+    for index, (what, role, tool_input, agent_id) in enumerate(calls):
+        config = cs_config("cs-log-allowed-%d" % index, role)
+        got, reason = ov_call("Edit", tool_input, GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE, agent_id=agent_id,
+                              agent_type="builder" if agent_id else None)
+        problem = ov_want(got, reason, "allow", CS_RULE)
+        if problem:
+            return False, "%s: %s" % (what, problem)
+        if gs_log_lines(config):
+            return False, "%s wrote guard.log lines %r, want none" % (what, gs_log_lines(config))
+    return True, "a record write and two writes no coordinator scope covers append no guard.log line"
+
+
+def cs_log_cost_check():
+    """A refusal and a lift each make one guard.log write, which opens the file for append once and starts no process
+    (the probe counts the children each write starts). An allowed write makes no write. The refusal is the control: its
+    one append shows the spy sees the open. The call's own reads of the repository are not the log's, so they are not
+    counted here."""
+    def appends(config, report):
+        log = os.path.abspath(os.path.join(config, "guard.log"))
+        return [path for path, mode in report.get("open_modes", []) if path == log and "a" in mode]
+
+    refuse_config = cs_config("cs-log-cost-refusal", "coordinator")
+    lift_config = cs_config("cs-log-cost-lift", "coordinator")
+    ov_type(lift_config, CS_PAYLOAD_SID, "override")
+    allow_config = cs_config("cs-log-cost-allowed", "coordinator")
+    events = (
+        ("a refusal", "deny", refuse_config, dict(CS_REMOTE), dict(CS_LOG_EDIT), 1),
+        ("a lifted refusal", "allow", lift_config, dict(CS_REMOTE, LOCAL_TIME_NOW=ov_clock(60)), dict(CS_LOG_EDIT), 1),
+        ("an allowed record write", "allow", allow_config, dict(CS_REMOTE),
+         {"file_path": cs_kind_path("todo"), "new_string": "x"}, 0),
+    )
+    problems = []
+    for what, want, config, env, tool_input, want_appends in events:
+        got, reason, report = cs_probe_report(config, "Edit", tool_input, GITMAIN, env=env)
+        if got != want:
+            problems.append("%s: got %s, want %s (%s)" % (what, got, want, reason[:70]))
+            continue
+        writes = report.get("log_children", None)
+        if writes != [0] * want_appends:
+            problems.append("%s: its guard.log writes started %s processes, want %d write(s) with none"
+                            % (what, writes, want_appends))
+        found = appends(config, report)
+        if len(found) != want_appends:
+            problems.append("%s opened guard.log for append %d times, want %d" % (what, len(found), want_appends))
+    return not problems, "; ".join(problems) or (
+        "a refusal and a lifted refusal each open guard.log for append once and start no process; an allowed write never opens it")
+
+
+CS_CHECKS.append(("coordinator-scope refusal_logs_one_line: one denied coordinator write appends one guard.log line that "
+                  "names the rule and holds no remedy text", cs_log_refusal_check))
+CS_CHECKS.append(("coordinator-scope override_logs_one_line: a typed override that lifts a coordinator write appends one "
+                  "line that marks it an override of coordinator-scope", cs_log_override_check))
+CS_CHECKS.append(("coordinator-scope unreadable_override_logs_one_line: a refusal with an unreadable override file appends "
+                  "one guard.log line, not two", cs_log_unreadable_check))
+CS_CHECKS.append(("coordinator-scope allowed_write_logs_nothing: a record write and two writes no coordinator scope covers "
+                  "append no guard.log line", cs_log_allowed_check))
+CS_CHECKS.append(("coordinator-scope log_cost: a refusal and a lift each open guard.log for append once and start no "
+                  "process; an allowed write never opens it", cs_log_cost_check))
 for _label, _check in CS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
@@ -19721,8 +19872,9 @@ FAMILY = "load-brake"
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
 # With spec "opens" the probe also records, around main() only, each path the call opens through
-# builtins.open or io.open (pathlib reads through io.open), as an absolute path in `opens`: the one seam
-# for a cost case that counts file opens (rule coordinator-scope, cs_opens_of). A failed open counts too.
+# builtins.open or io.open (pathlib reads through io.open), as an absolute path in `opens`, and its mode
+# as [path, mode] in `open_modes`: the one seam for a cost case that counts file opens (rule coordinator-scope,
+# cs_probe_report). A failed open counts too.
 LB_PROBE = r"""
 import builtins, importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
 from unittest import mock
@@ -19879,13 +20031,28 @@ try:
             g.floor_hit = lambda tool, tool_input: g.read_load() and ""
         if spec.get("opens"):
             out["opens"] = opened = []
+            out["open_modes"] = modes = []
             real_open = io.open
 
             def spy_open(file, *args, **kwargs):
                 if isinstance(file, (str, bytes, os.PathLike)):
                     opened.append(os.path.abspath(os.fsdecode(file)))
+                    modes.append([opened[-1], str(args[0] if args else kwargs.get("mode", "r"))])
                 return real_open(file, *args, **kwargs)
             builtins.open = io.open = spy_open
+        if spec.get("log_children"):
+            # Each guard.log write (guard_core.record) counts the child processes it starts: one entry per write.
+            core = sys.modules["guard_core"]
+            out["log_children"] = log_children = []
+            real_record = core.record
+
+            def counted_record(*args, **kwargs):
+                before_count = len(children)
+                try:
+                    return real_record(*args, **kwargs)
+                finally:
+                    log_children.append(len(children) - before_count)
+            core.record = counted_record
         try:
             g.main()
         except SystemExit:
