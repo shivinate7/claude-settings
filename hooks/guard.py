@@ -2012,7 +2012,8 @@ def role_agent_keys(pointer_root):
     """Yield the frontmatter keys of each agents/*.md file in the pointer checkout, one dict per file with
     frontmatter, in file order, one file read at a time. Raises OSError when the folder or a file cannot be read, so
     a caller that stops early never reads the files after its match. The reader of agent frontmatter for the role
-    rules; lint/check_agent_models.py frontmatter() reads the same files for its own model check."""
+    rules. In lint/check_agent_models.py, main() reads the same files and frontmatter() parses their text for its
+    own model check."""
     folder = os.path.join(pointer_root, "agents")
     for name in sorted(name for name in os.listdir(folder) if name.endswith(".md")):
         try:
@@ -2051,8 +2052,9 @@ ROLE_BUILTINS = (ROLE_DEFAULT, "claude", "Plan", EXPLORE_ROLE)
 def role_list_drift(pointer_root):
     """One line per disagreement between the role table and the three role lists, [] when all agree or when the
     table or the agents folder cannot be read (the lint check reports that as unknown). Lint-time only. Cost per
-    call: one table read and one agents/ read; lint/check_agent_models.py also reads each agent file once for its
-    own check, and calls this once per run. floor_hit, opus_spawn_hit and hooks/override.py keep their constants.
+    lint run: each agent file is read 3 times and the table twice. main() in lint/check_agent_models.py reads each
+    file once (frontmatter() parses that text), role_list_problems reads the table and the files once to test
+    readability, and this function reads both again. floor_hit, opus_spawn_hit and hooks/override.py keep their constants.
     A real role has an agents/ file `name` or is built in, which drops the table's non-role keys."""
     table = role_model_table(pointer_root)
     if table is None:
@@ -2064,7 +2066,7 @@ def role_list_drift(pointer_root):
     import override
     real = {keys["name"] for keys in agents if keys.get("name")} | set(ROLE_BUILTINS)
     on = {word: {role for role, model in table.items() if model == word and role in real} for word in ROLE_MODEL_RANK}
-    # Bandaid: Explore stays in the Opus standing list until the owner rules items 127 and 137. Remove it then.
+    # Bandaid: Explore stays in the Opus standing list until the owner rules items 127 and 137 (which model a search agent may run). Remove it then.
     standing_want = on["opus"] | {EXPLORE_ROLE}
     override_want = {role for role in table if role in real} - on["opus"] - {EXPLORE_ROLE}
     lists = (("HAIKU_ROLES", "hooks/guard.py", set(HAIKU_ROLES), on["haiku"], "a haiku row"),
