@@ -11,6 +11,7 @@ if [ "${RUNNER_OS:-}" = Linux ]; then
   if [ -r "$release" ]; then
     # A subshell, so os-release variables never leak out. ID and VERSION_ID are unset first, so a value
     # exported in the environment never fills a gap in the file.
+    # shellcheck source=/dev/null
     fields=$(unset ID VERSION_ID; . "$release" 2>/dev/null; printf '%s\n%s\n' "${ID:-}" "${VERSION_ID:-}")
     # The command substitution strips the trailing newline, so `read` of an empty last field hits EOF.
     { read -r id || true; read -r ver || true; } <<< "$fields"
