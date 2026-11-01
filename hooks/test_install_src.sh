@@ -3955,14 +3955,37 @@ caseM7() {
   ok "$name"
 }
 
-# caseM8: a second cloud install in the same HOME, after origin/main gains a commit. The checkout stays on its branch, so both
-# installs take the mirror. The mirror the first install made refreshes in place to the new main, and the installed files
-# match it. CLAUDE.md is the file the new commit changes, so a mirror left at the first commit fails the check.
+# m8_check LABEL: after the install named LABEL, the mirror is at main ($want), refreshed in place (the sentinel survives),
+# the install's source is the mirror, the installed files match main, and the checkout keeps its branch and head. Prints the
+# first failure and returns 1. Reads mirror, want, co_head and co_branch from caseM8.
+m8_check() {
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
+    printf '%s: the mirror is at %s, want main %s' "$1" "$(git -C "$mirror" rev-parse HEAD)" "$want"; return 1
+  fi
+  if [ ! -e "$mirror/.git/caseM8-sentinel" ]; then printf '%s: the mirror was cloned again, not refreshed in place' "$1"; return 1; fi
+  if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$mirror")" ]; then
+    printf '%s: the install source is [%s], want the mirror [%s]' "$1" "$(installed_src "$h/.claude-cfg" "$h")" "$mirror"; return 1
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then printf '%s: %s' "$1" "$mm"; return 1; fi
+  if [ "$(git -C "$co" symbolic-ref -q HEAD)" != "$co_branch" ] || [ "$(git -C "$co" rev-parse HEAD)" != "$co_head" ]; then
+    printf '%s: the checkout branch or head was moved' "$1"; return 1
+  fi
+  return 0
+}
+
+# caseM8: later cloud installs in the same HOME, after origin/main gains a commit, take the mirror by two routes, and the mirror
+# refreshes in place each time. The second install finds the mirror through the pointer the first one wrote, so its refresh
+# runs from the pointer candidate (install.sh, the top mirror_refresh "$SRC"). The third install is pointed back at the
+# checkout, so it reaches the mirror through the checkout fallback in use_main_mirror, the refresh the second install never
+# runs. The checkout stays on its branch throughout. CLAUDE.md is the file each new commit changes, so a mirror left at an
+# old commit fails m8_check.
 caseM8() {
-  name="caseM8: a second cloud install in the same HOME, after origin/main gains a commit: the mirror refreshes in place, and the installed files match it"
+  name="caseM8: later cloud installs in the same HOME, after origin/main gains commits: the mirror refreshes in place by the pointer route and by the checkout fallback, and the installed files match it"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   move_fixture m8
   git -C "$co" checkout -q -b lane
+  co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
   move_install
   first=$want; mirror="$h/claude-settings-main"
   if [ "$rc" -ne 0 ]; then bad "$name" "FIXTURE the first install exited $rc: $(install_problems)"; return; fi
@@ -3972,23 +3995,21 @@ caseM8() {
   fi
   # A file inside the mirror's .git that only an in-place refresh keeps: a mirror that is cloned again loses it.
   : > "$mirror/.git/caseM8-sentinel"
+
+  # The second install: main gains a commit, and the pointer the first install wrote names the mirror.
   advance_github_fixture "$fx" second claudemd; want=$(fixture_sha "$fx")
   if [ "$want" = "$first" ]; then bad "$name" "FIXTURE main did not move, so the second install has nothing new to take"; return; fi
-  co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
   move_install
   if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
-  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
-    bad "$name" "after the second install the mirror is at $(git -C "$mirror" rev-parse HEAD), want the new main $want (the first was $first)"; return
-  fi
-  if [ ! -e "$mirror/.git/caseM8-sentinel" ]; then bad "$name" "the mirror was cloned again, not refreshed in place"; return; fi
-  if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$mirror")" ]; then
-    bad "$name" "the second install's source is [$(installed_src "$h/.claude-cfg" "$h")], want the mirror [$mirror]"; return
-  fi
-  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
-  if [ -n "$mm" ]; then bad "$name" "$mm"; return; fi
-  if [ "$(git -C "$co" symbolic-ref -q HEAD)" != "$co_branch" ] || [ "$(git -C "$co" rev-parse HEAD)" != "$co_head" ]; then
-    bad "$name" "the checkout's branch or head was moved"; return
-  fi
+  if ! msg=$(m8_check "the second install (pointer route)"); then bad "$name" "$msg"; return; fi
+
+  # The third install: main gains another commit, and the pointer is set back to the checkout, so the install
+  # takes the checkout as its candidate, leaves it on its branch, and refreshes the mirror through use_main_mirror.
+  advance_github_fixture "$fx" third claudemd; want=$(fixture_sha "$fx")
+  seed_pointer "$h/.claude-cfg" "$co"
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the third install: $(install_problems)"; return; fi
+  if ! msg=$(m8_check "the third install (checkout fallback route)"); then bad "$name" "$msg"; return; fi
   ok "$name"
 }
 
