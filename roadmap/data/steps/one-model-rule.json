@@ -1,0 +1,9 @@
+{
+  "title": "One model rule for every agent: each role runs its table row, or one marked step up",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33773,
+  "why": "Owner asked, Nov 1 16:45 CST (page item 127, note): the model rules looked picked at random. A blind Opus review (his grant) found five layered rulings giving opposite verdicts at two edges: a plain search agent passes on Opus but is refused on Sonnet, and a bigger model jump gets a softer check.",
+  "note": "Lane session_013NEJL1W9hdjvYuy1gvkVEz (explore-audit-marker), started Nov 1 16:51 CST (coordinator). Plan from the blind review, read at main 4b8037d4. No pick needed: (2) derive HAIKU_ROLES, OPUS_STANDING_ROLES and override.py OPUS_ROLES from the table in decision agent-model-cap; (3) one marker scanner, step-up rows read from the table; (4) Workflow agent() through the same check, which retires debt workflow-agent-model-unchecked; (5) make the record's lines 8, 11 and 80 agree, and a lint that each agents/*.md pin equals its row. Waits on shiv: (1) the role-row check judges Opus like any model, per page items 127 (verdict above the row) and 137 (plain search agent on Opus). Placed after explore-audit-marker (triage 5): same files, same lane.",
+  "updatedAt": "2026-11-01T22:53:00Z"
+}
