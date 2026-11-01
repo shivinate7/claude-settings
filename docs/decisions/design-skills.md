@@ -6,16 +6,15 @@ Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each
 `skills/design-review/SKILL.md`, the builder line in `agents/builder.md`, the designer steps in `agents/designer.md`, the reviewer clause in `agents/reviewer.md`.
 
 - `frontend-design`: a builder loads it by name before it writes styling for a new screen, or in a repo with no design yet. A designer loads it
-  by name before it draws (owner, 2026-10-30, waiting-page item 82 b, designer skills). It is a plugin, `frontend-design@frontend-design-pin`.
-  The `frontend-design-pin` marketplace in `settings.json` is an inline `settings` source. It pins the `plugins/frontend-design` folder of
-  `anthropics/claude-plugins-official` to a full commit sha. A marketplace `ref` takes only a branch or tag, and that repo has no tags.
+  by name before it draws (owner, 2026-10-30, waiting-page item 82 b, designer skills). It is a plugin, `frontend-design@claude-plugins-official`. The
+  `claude-plugins-official` marketplace in `settings.json` is a `github` source pinned to a full commit sha of `anthropics/claude-plugins-official`.
 - Vercel `web-design-guidelines`: no plugin. A blind reviewer checks the changed pages against the rules at a pinned URL, after the build.
 - `impeccable`: a pinned copy of its skill folder in `skills/impeccable`. No plugin. A second blind reviewer runs `/impeccable audit` and
   `/impeccable critique` only. A designer also runs `critique <mockup path>` on its own mockup before hand-off, and fixes each finding
   inside its write scope (owner, 2026-10-30, waiting-page item 82 b, designer skills). That pass is not the design review.
 - Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month and waits 14 days after a release
   (`minimumReleaseAge`). The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt`, the
-  commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `sha` of the `frontend-design-pin` marketplace in `settings.json`.
+  commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `sha` of the `claude-plugins-official` marketplace in `settings.json`.
 - Narrowing of `verification-newest-that-passes`: these three sources take the newest release only after it has waited 14 days. The owner
   wants their improvements.
 - No Vercel plugin: the upstream skill fetches from `main` on every run, so a plugin update would move the rules without a decision. No
