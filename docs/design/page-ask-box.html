@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page Ask box</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+#stage { padding: 16px; }
+/* Each state is a static element with data-state, so the waiting page's state check finds it without running this script. */
+.st[data-state] { display: none; gap: 16px; justify-items: center; }
+.st[data-state].on { display: grid; }
+.st > h2 { margin: 0; font-size: 16px; justify-self: start; }
+.st > p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; justify-self: start; }
+.frames { display: grid; gap: 24px; width: 100%; justify-items: center; }
+.fr { display: grid; gap: 8px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No ask, answer, session name, number or time on this page is real.</div>
+<header class="tool">
+  <h1>Waiting page: the Ask box (step page-ask-box)</h1>
+  <div class="row" id="rowS"><span>State</span>
+    <button data-s="a">A. After both tabs (pick)</button>
+    <button data-s="empty">A: nothing asked</button>
+    <button data-s="loading">A: loading</button>
+    <button data-s="sent">A: just sent, Undo</button>
+    <button data-s="failed">A: send failed</button>
+    <button data-s="offline">A: store not reachable</button>
+    <button data-s="b">B. Own tab</button>
+    <button data-s="c">C. In the answer bar</button>
+  </div>
+  <div class="row" id="rowH"><span>Hide</span>
+    <button class="hide" data-hide="b">Hide B</button>
+    <button class="hide" data-hide="c">Hide C</button>
+    <button class="hide" data-hide="rail">Hide the rail link (item 7)</button>
+    <button class="hide" data-hide="older">Hide "older asks" (item 9)</button>
+  </div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">Both</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button data-lab="1" id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=a|empty|loading|sent|failed|offline|b|c</code>, <code>&amp;w=all|390|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=b,c,rail,older</code>. Notes: <code>page-ask-box-notes.md</code>. The question cards are drawn short: this step does not change them.</p>
+</header>
+<main id="stage">
+  <section class="st" data-state="a" id="askA"><h2>A. One Ask section after both tab panels (pick)</h2><p>Box on top, asks newest first. Two wait for an answer, one new answer shows open, older answers fold to one line.</p><div class="frames"></div></section>
+  <section class="st" data-state="empty" id="askEmpty"><h2>A: nothing asked yet</h2><p>One sentence, and the box above it is the one control.</p><div class="frames"></div></section>
+  <section class="st" data-state="loading" id="askLoading"><h2>A: asks not read yet</h2><p>Loading is not empty. The box works before the list loads.</p><div class="frames"></div></section>
+  <section class="st" data-state="sent" id="askSent"><h2>A: just sent, 8-second Undo at the box</h2><p>The answer bar does not change: an ask is not an answer.</p><div class="frames"></div></section>
+  <section class="st" data-state="failed" id="askFailed"><h2>A: the write failed</h2><p>The ask stays in the box, with Copy ask to paste it in chat.</p><div class="frames"></div></section>
+  <section class="st" data-state="offline" id="askOffline"><h2>A: this view cannot reach the store</h2><p>Send ask is off and says why. The list says it cannot be read; it never says "nothing asked".</p><div class="frames"></div></section>
+  <section class="st" data-state="b" id="askB"><h2>B. A third tab, Ask</h2><p>The same box and list, on their own tab.</p><div class="frames"></div></section>
+  <section class="st" data-state="c" id="askC"><h2>C. The box in the fixed answer bar</h2><p>One line to type in the bar, always in view. The list still sits at the end of the page.</p><div class="frames"></div></section>
+</main>
+
+<script type="text/plain" id="pagecss">
+:root {
+  /* Neutrals and state colours. The script replaces the --r-* values when meta/page names a brand. */
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+/* The fixed send bar covers the bottom of the viewport, so a focused or scrolled-to element stops above it. */
+html { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+/* Repo bar: the repo's colour at full strength, one slim sticky band. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+/* The repo's own icon sits on a tile chosen so most of its drawn pixels stand out (applyIcon). */
+.mark.icon { background: var(--tile, var(--on-hdr)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-hdr) 28%, transparent); }
+.mark img { width: 22px; height: 22px; object-fit: contain; display: block; }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+
+/* State shapes: a tier shows by shape and word, never by colour alone. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.holds { background: var(--holds); border-radius: 2px; }
+.g.due { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 12px solid var(--due); }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.stands { border-radius: 50%; background: var(--gold-ink); }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Main grid: the overview beside the list on wide screens, above it on a phone. */
+.main { padding-block: 18px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); display: grid; gap: 16px; align-content: start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ov-prog { display: grid; gap: 8px; }
+.ov-prog .big { font: 700 15px/1.3 var(--body); }
+.ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
+.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
+.ov-prog .sub.none { visibility: hidden; }
+.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
+.ov-prog .track i { display: block; height: 100%; }
+.ov-prog .track .s { background: var(--good); }
+.ov-prog .track .r { background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
+.ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+.chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
+.nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.nchip:hover { border-color: var(--acc); }
+.nchip.ready { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.nchip.sent { background: var(--good-soft); border-color: transparent; color: var(--good); }
+.nchip.sent::before { content: "\2713"; margin-right: 3px; }
+.nchip.sent:not(.filed)::before { content: "\25CB"; }
+.pairchips { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; padding: 4px; border: 1.5px dashed color-mix(in srgb, var(--acc) 60%, var(--line)); border-radius: 12px; }
+.pairchips .nchip { height: 32px; width: 48px; }
+.nchip .nt { display: none; }
+.ov-tier, .chips-n, .pairchips { min-width: 0; }
+.nchip { min-width: 0; overflow: hidden; }
+@media (min-width: 961px) {
+  .chips-n, .pairchips { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .chips-n { gap: 4px; }
+  .pairchips { display: flex; }
+  .nchip.sent::before { flex: none; margin-right: 0; }
+  .nchip, .pairchips .nchip { width: 100%; height: 32px; justify-content: flex-start; gap: 8px; padding-inline: 8px; }
+  .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
+  .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
+}
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
+
+.list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
+@media (max-width: 960px) { .list { grid-column: 1; } }
+.tier { display: grid; gap: 12px; scroll-margin-top: 64px; }
+.tier > header { display: flex; align-items: center; }
+.tier > header h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 10px; }
+.tier > header .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.empty { color: var(--muted); padding: 20px; border: 1px dashed var(--line); border-radius: 12px; background: var(--surface); }
+
+/* Item card */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; scroll-margin-top: 64px; min-width: 0; }
+.card.holds { border-left: 6px solid var(--holds); }
+.card.due { border-left: 6px solid var(--due); }
+.card.answered { background: color-mix(in srgb, var(--good-soft) 45%, var(--surface)); }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; }
+.stake { margin: 0; display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 8px; font-size: 15px; }
+/* The Blocking line is a solid fill, so it reads at full strength next to any repo colour. */
+.stake.holds { background: var(--holds); color: var(--on-holds); font-weight: 600; }
+.stake.holds .g.holds { background: var(--on-holds); }
+.stake.due { background: var(--due-soft); box-shadow: inset 0 0 0 1.5px var(--due); }
+.stake.due b { color: var(--due); }
+.ctx { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; }
+.ctx.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morebtn { justify-self: start; background: none; border: 0; padding: 0; min-height: 32px; color: var(--acc); font-weight: 600; cursor: pointer; font-size: 14.5px; }
+.about { margin: 0; font-size: 14px; color: var(--muted); }
+/* Related items sit together in one frame, with one sentence on how they connect. */
+.bundle { display: grid; gap: 10px; padding: 12px; border: 1.5px solid color-mix(in srgb, var(--acc) 55%, var(--line)); border-radius: 16px; background: var(--acc-soft); scroll-margin-top: 64px; }
+.bundle > header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; padding: 4px 6px 2px; align-items: start; }
+.bundle > header svg { grid-row: span 2; margin-top: 2px; color: var(--acc); }
+.bundle > header b { font-size: 16px; }
+.bundle > header p { margin: 0; font-size: 15px; max-width: 72ch; }
+.inbundle { font-weight: 600; color: var(--acc); }
+/* The lane the item waits on: the weight and colour of "goes with No. 4". It never holds the owner's answer, so it is no stake line. */
+.onlane { font-weight: 600; color: var(--acc); min-width: 0; overflow-wrap: anywhere; }
+
+/* Options side by side; each card's rows line up so lose sits beside lose. */
+.opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
+@supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
+.opt:hover { border-color: var(--faint); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.opt.sel { border-color: var(--acc); background: var(--acc-soft); box-shadow: inset 0 0 0 1px var(--acc); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: 0 1 auto; min-width: 26px; max-width: 45%; height: 26px; padding-inline: 6px; box-sizing: border-box; border-radius: 7px; border: 1.5px solid var(--line); display: block; text-align: center; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; }
+.opt .opic { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; position: relative; cursor: zoom-in; min-height: 44px; }
+.opt .opic .dfitwrap { justify-self: center; }
+.opt .opic .view { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; background: var(--hdr); color: var(--on-hdr); font: 600 14px var(--body); }
+.opts.pics { grid-auto-rows: auto; }
+.opts.pics .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opt .dwarn { margin: 0; font-size: 13.5px; }
+.opt.sel .dfitwrap { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc); }
+.opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
+.opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
+.opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
+.opt .tr .s { font: 600 15px/1.4 var(--mono); }
+.opt .tr .gain .s { color: var(--good); }
+.opt .tr .lose .s { color: var(--holds); }
+/* What sets an option apart: a bar on the row, a not-equal sign and hidden words. Shape, sign and words carry it; the accent colour only adds. */
+.opt .dif { position: relative; border-left: 3px solid var(--acc); margin-left: -11px; padding-left: 8px; padding-right: 20px; }
+.opt .tr .dif { grid-template-columns: 18px minmax(0, 1fr); }
+.opt .dif > .ne { position: absolute; right: 0; top: 0; }
+.ne { font: 700 15px/1.4 var(--mono); color: var(--acc); }
+.opt .opic.dif { border-left: 0; margin-left: 0; padding: 0; }
+.opt .opic.dif .view { position: relative; }
+.opt .opic.dif .dfitwrap { border-left: 3px solid var(--acc); }
+.opt .opic.dif .view .ne { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--on-hdr); }
+.difkey { margin: 0; display: flex; gap: 8px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .nopick { align-self: end; }
+/* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
+.multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
+.tick { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--faint); background: var(--surface); display: grid; place-items: center; font: 700 14px/1 var(--mono); color: var(--on-acc); }
+.opt.sel .tick { background: var(--acc); border-color: var(--acc); }
+.opt.sel .tick.mark::before { content: ""; width: 6px; height: 12px; border: solid var(--on-acc); border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
+/* Ranked: the card is a div, and its label stretches over it so a press anywhere ticks it. The rank number sits in the tick box. Up, Down, View and the marked rows sit above the label. */
+.opt.ranked { cursor: default; }
+.opt.ranked > label.head { cursor: pointer; }
+.opt.ranked > label.head::after { content: ""; position: absolute; inset: 0; border-radius: var(--r); z-index: 1; }
+.opt.ranked .rank, .opt.ranked .opic { position: relative; z-index: 2; }
+.opts.ranked .opt { grid-template-rows: auto auto 1fr auto auto; }
+.opts.ranked.pics .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked .opt { grid-row: span 5; grid-template-rows: subgrid; } .opts.ranked.pics .opt { grid-row: span 6; } }
+.opt .rank { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.opt .rank.gone { visibility: hidden; }
+.btn.mv { position: relative; min-height: 44px; min-width: 44px; padding: 8px 12px; background: var(--surface); color: var(--acc); }
+.btn.mv svg { flex: none; }
+/* At an end of the order the button stays in place and focusable. It is marked off by a dashed border, and the reason shows on hover and focus. */
+.btn.mv[aria-disabled="true"] { border-style: dashed; border-color: var(--faint); color: var(--muted); cursor: default; }
+.btn.mv[aria-disabled="true"] svg { opacity: .5; }
+.btn.mv[aria-disabled="true"]:is(:hover, :focus-visible)::after { content: attr(data-why); position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 2; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 13px/1.5 var(--body); pointer-events: none; }
+/* Links on an option card: optCard puts <div class="links"> after .how and before .tr. A card with no links gets <span class="nolinks">,
+   as .nopick does, so the subgrid rows still line up. buildCard adds "olinks" to .opts only when some option has links. */
+.opts.olinks .opt { grid-template-rows: auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.olinks .opt { grid-row: span 5; grid-template-rows: subgrid; } }
+.opts.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto; }
+@supports (grid-template-rows: subgrid) { .opts.pics.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } }
+/* A miss on a small link lands on the <label> and picks the option, so each link gets a 44px tap box. A flex item
+   is a block, and a screen reader puts a space between blocks, so the one span inside the link holds all its text:
+   the arrow's gap sits in CSS and the link's name is the label plus the hidden phrase. */
+.links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a [aria-hidden] { margin-inline-start: 4px; }
+/* A block-level .sr (position: absolute is one) gets a space before it in the link's name, so in a link it stays inline and takes no room. */
+.links a .sr { position: static; display: inline; font-size: 0; }
+/* Links on a ranked card: one more row than the ranked rows above. The label's ::after overlay covers the card, so the links row sits above it as .rank and .opic do. */
+.opt.ranked .links { position: relative; z-index: 2; }
+/* A press anywhere on a ranked card ticks it, so only the link itself is raised above the overlay. */
+.opt.ranked .links { pointer-events: none; }
+.opt.ranked .links a { pointer-events: auto; }
+.opts.ranked.olinks .opt { grid-template-rows: auto auto auto 1fr auto auto; }
+.opts.ranked.pics.olinks .opt { grid-template-rows: auto auto auto auto 1fr auto auto; }
+@supports (grid-template-rows: subgrid) { .opts.ranked.olinks .opt { grid-row: span 6; grid-template-rows: subgrid; } .opts.ranked.pics.olinks .opt { grid-row: span 7; grid-template-rows: subgrid; } }
+
+.ready { min-height: 1.55em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14.5px; color: var(--muted); }
+.ready.on { color: var(--good); font-weight: 600; }
+/* A multi item names its picks, so its line may wrap. Hidden copies of its longest possible lines share the live line's grid cell,
+   so the cell is always as tall as the longest line at the current width: the tail is never cut and the cards never move. */
+.readybox { display: grid; }
+.readybox > * { grid-area: 1 / 1; min-width: 0; }
+.ready.multi, .readyfit { white-space: normal; overflow: visible; }
+.readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
+.ready.on::before, .readyfit::before { content: "\2713  "; }
+/* The row under the body: None of these on a decision, Mark done on a task. */
+.alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
+.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.note { display: grid; gap: 6px; }
+.note label { font-size: 14px; color: var(--muted); }
+.note.need label { color: var(--due); font-weight: 600; }
+.note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.note.need textarea { border-color: var(--due); }
+/* A blocked card's note box dims like its other disabled controls; the label stays readable. */
+.note textarea:disabled { opacity: .45; cursor: default; }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
+/* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
+.cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd + .cmd { border-top: 1px solid var(--line); padding-top: 14px; }
+.cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.shell .cmd-say { color: var(--ink); font-weight: 600; }
+.cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
+/* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
+.btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
+.cmd-copy > span { grid-area: 1 / 1; }
+.cmd-copy .ok, .cmd.copied .cmd-copy .go { visibility: hidden; }
+.cmd.copied .cmd-copy .ok { visibility: visible; }
+.cmd-more > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--acc); font-weight: 600; font-size: 14.5px; }
+.cmd-more[open] > summary { margin-bottom: 8px; }
+.status .cmd-more { font-weight: 400; color: var(--ink); }
+/* Each written line is one block. A long line wraps in the block, and its wrapped part hangs 2ch in. */
+.cmd-text { margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); font: 14px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.cmd-text code { font: inherit; }
+.cmd-text .ln { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+.cmd-text .ln:empty::after { content: " "; }
+.dest { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.status.broken { padding: 9px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1.5px var(--due); background: var(--due-soft); }
+.status { font-size: 14px; color: var(--due); font-weight: 600; margin: 0; }
+
+/* Receipt: the card stays where it was and shows what happened to the answer. */
+.receipt { display: grid; gap: 8px; }
+.receipt .line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-height: 44px; font-size: 15.5px; }
+.receipt .line > .g { grid-column: 1; grid-row: 1; }
+.receipt .line b { grid-column: 2; grid-row: 1; }
+.receipt .line .read { grid-column: 2; grid-row: 2; }
+.receipt .line .changebtn { grid-column: 3; grid-row: 1; }
+.receipt .line:has(.read) .changebtn { grid-row: 1 / span 2; }
+.receipt .line b { overflow-wrap: anywhere; color: var(--good); }
+.receipt .rnote { margin: 0; color: var(--muted); font-size: 14.5px; }
+/* A multi answer lists each pick with its letter and title, in order. */
+.receipt .picks { margin: 0; padding: 0 0 0 20px; list-style: none; display: grid; gap: 6px; counter-reset: pk; }
+.receipt .picks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; min-height: 32px; font-size: 15.5px; }
+.receipt ol.picks li { grid-template-columns: 2ch auto minmax(0, 1fr); }
+.receipt ol.picks li::before { counter-increment: pk; content: counter(pk) "."; font: 600 14px var(--mono); color: var(--muted); text-align: end; }
+.receipt .picks .key { color: var(--ink); }
+/* The thread: the owner's last answer, then the writer's reply, in one calm panel with the shape of .stake. */
+.thread { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--chip); min-width: 0; }
+.thread > .last:has(+ .reply) { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+/* The last answer extends the receipt: muted head, ink answer, no done mark, no Change button. */
+.receipt.last { gap: 4px; }
+.receipt.last .lhead { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.receipt.last .line { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.receipt.last .line b { grid-column: 1; color: var(--ink); font-weight: 600; }
+.thread .reply { font-size: 15px; }
+.card.answered { border-left: 6px solid var(--good); }
+.ans { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; line-height: 20px; }
+.ans::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; }
+.ans.filed { background: var(--good); color: var(--surface); }
+.ans.filed::before { content: "\2713"; width: auto; height: auto; border: 0; }
+.ans .t { white-space: nowrap; }
+.receipt .read { color: var(--muted); font-size: 14.5px; }
+.nchip.sent.filed { background: var(--good); color: var(--surface); }
+
+.checked { font: 13px var(--mono); color: var(--faint); margin: 0; }
+.parked { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 14px 18px; font-size: 15px; color: var(--muted); }
+.parked ul { margin: 6px 0 0; padding-left: 20px; }
+
+/* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
+.bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.btn.send { min-height: 48px; padding-inline: 18px; white-space: nowrap; }
+.sent { background: var(--surface); border-bottom: 1px solid var(--line); }
+.sent .in { padding-block: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; font-size: 15px; }
+.sent-head { flex: 1 1 320px; min-width: 0; display: flex; gap: 16px; align-items: center; }
+.sent-what { min-width: 0; display: grid; gap: 8px; }
+.sent-line { margin: 0; }
+.stamp { flex: none; transform: rotate(-4deg); border: 2px solid var(--good); color: var(--good); border-radius: 8px; padding: 4px 8px; font: 700 18px/20px var(--body); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+.stamp small { display: block; font: 500 12px/16px var(--mono); letter-spacing: 0; text-transform: none; }
+@media (prefers-reduced-motion: no-preference) { .sent:not([hidden]) .stamp { animation: stamp-settle 200ms cubic-bezier(0.2, 0, 0, 1) both; } }
+@keyframes stamp-settle { from { transform: rotate(-4deg) scale(1.06); opacity: 0; } to { transform: rotate(-4deg) scale(1); opacity: 1; } }
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 22vh; overflow: auto; }
+.sent-list li { display: inline-flex; gap: 8px; align-items: center; min-height: 28px; padding: 0 4px 0 12px; border-radius: 999px; background: var(--chip); font-size: 13.5px; }
+.sent-list .no { color: var(--acc); font: 600 12px var(--mono); }
+.sent-list li:not(:has(.dstate)) { padding-inline-end: 12px; }
+.dstate { padding: 0 8px; line-height: 20px; border-radius: 999px; background: var(--surface); color: var(--faint); font-size: 12.5px; }
+.dstate.on { background: var(--good-soft); color: var(--good); font-weight: 600; }
+.sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
+#undoBtn { font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+
+/* Status tab: the roadmap's layout in this page's tokens, under .sv. The names page.html also uses
+   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) are renamed here, so no rule above reaches status. */
+.tabs .tl { display: flex; gap: 4px; }
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+.tabs #qCount:empty { display: inline-block; }
+</script>
+
+<script type="text/plain" id="newcss">
+/* ---- New for page-ask-box ---- */
+/* The Ask section: after both tab panels, so it ends the Questions tab and the Status tab. On a wide screen it
+   keeps the list's two columns: the heading sits in the rail's column, the box and the asks in the list's column. */
+.asks { border-top: 1px solid var(--line); padding-block: 24px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; scroll-margin-top: 64px; }
+@media (max-width: 960px) { .asks { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+.asks.tabbed { border-top: 0; padding-top: 16px; }
+.asks-head { display: grid; gap: 4px; align-content: start; }
+.asks-head h2 { font: 700 19px/1.25 var(--body); display: flex; align-items: center; gap: 12px; }
+.asks-head h2 .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
+.asks-head p { margin: 0; font-size: 14.5px; color: var(--muted); max-width: 44ch; }
+.asks-body { display: grid; gap: 16px; min-width: 0; }
+
+/* Pending: a half-filled disc, its own shape. The hollow ring already means Whenever, and the check means answered. */
+.g.wait { border: 2px solid var(--acc); border-radius: 50%; background: linear-gradient(90deg, var(--acc) 50%, transparent 50%); }
+
+.askform { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 8px; }
+.askform > label { font-weight: 600; }
+.askform textarea { width: 100%; min-height: 88px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.askform textarea:focus-visible { border-color: var(--acc); }
+/* The hint and the buttons keep one grid: Send ask never moves when Undo or Copy ask shows beside it. */
+.askrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; }
+.askrow .slot { min-width: 0; }
+.askrow .slot:empty { display: none; }
+.askhint { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.askhint.ok b { color: var(--good); }
+.askhint.bad { color: var(--due); font-weight: 600; }
+.btn.askgo { min-height: 48px; white-space: nowrap; }
+/* Off, it keeps its box and label, marked by a dashed edge as .btn.mv is at an end of the order; the hint beside it says why. */
+.btn.askgo:disabled { opacity: 1; background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+html.coarse .kbd { display: none; } /* Mockup stand-in for @media (pointer: coarse). */
+@media (max-width: 520px) {
+  .askrow { grid-template-columns: minmax(0, 1fr) auto; }
+  .askrow .askhint { grid-column: 1 / -1; }
+  .askrow .slot { grid-column: 1; justify-self: end; }
+  .askrow .btn.askgo { grid-column: 2; }
+}
+
+.asklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ask { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; min-width: 0; }
+.ahead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 44px; font-size: 14px; color: var(--muted); }
+.ahead .who { min-width: 0; }
+.ahead .unfold { margin-inline-start: auto; }
+.atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; }
+.atext.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.astate { margin: 0; font-size: 14.5px; color: var(--ink); font-weight: 600; }
+.astate .t { color: var(--muted); font-weight: 400; }
+.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; }
+.ask .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
+.ask .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.ask .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+/* A fold control has the shape of .morebtn and a 44px box. Fold and Show answer sit at the same spot, the right end of the first line. */
+.unfold { background: none; border: 0; padding: 0 4px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 14.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+/* A folded answer is one button: the whole row unfolds it. */
+.ask.folded { padding: 0; }
+.frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
+.frow:hover { background: var(--acc-soft); }
+.frow .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .fwhen { font-size: 14px; color: var(--muted); white-space: nowrap; }
+.frow .fgo { color: var(--acc); font-weight: 600; font-size: 14.5px; white-space: nowrap; }
+@media (max-width: 520px) {
+  .frow { grid-template-columns: auto minmax(0, 1fr) auto; padding-block: 8px; }
+  .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .frow .fwhen { grid-column: 2; grid-row: 2; }
+  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; }
+}
+.older { justify-self: start; }
+.asks .empty { padding: 16px; }
+.asks .empty.unk { color: var(--due); border-color: var(--due); }
+/* The rail row for asks: the head of an overview tier, no chips. */
+.ov-tier.zero .ov-head { color: var(--muted); }
+
+/* Option C: the ask line in the fixed bar, above the answer row. */
+.bar .askbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); flex: 1 1 100%; }
+.bar .askbar label { font-weight: 600; font-size: 14.5px; }
+.bar .askbar textarea { flex: none; font: 15px/1.4 var(--body); min-height: 44px; resize: none; border-radius: var(--r); border: 1.5px solid var(--line); padding: 8px 12px; }
+.bar .askbar .btn { min-height: 44px; }
+
+/* Sample labels: dashed "Today:" for what exists, "New:" for what this step adds. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+
+<script>
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const WRITER = "triage";
+// Sample asks, newest first by the ask's own time. A reply never re-orders them.
+const ASKS = [
+  { id: "ask-mh2k1q", at: "Nov 1, 17:40 CST", text: "Is the iOS build still red, or did the pin bump fix it?", state: "unread", waited: "under an hour" },
+  { id: "ask-mh1z8c", at: "Nov 1, 13:12 CST", waited: "5 hours", text: "Why did lane tier-fold need three review rounds? From here it looks slow.", state: "read", owner: "lane tier-fold", read: "13:13 CST" },
+  { id: "ask-mgx40d", at: "Nov 1, 15:02 CST", text: "The rail chips feel small on my phone.\nI miss them with my thumb.", state: "answered", fresh: true, owner: "triage", answered: "Nov 1, 15:20 CST",
+    reply: "Thanks. Each chip is 48 by 32 px: under the 44 px touch floor in height. I filed it for the next page-review lane.", home: "step page-review", filed: "Nov 1, 15:21 CST" },
+  { id: "ask-mfq2ce", at: "Oct 31, 11:04 CDT", text: "What does “Pick stands” mean on the page?", state: "answered", owner: "triage", answered: "Oct 31, 11:09 CDT",
+    reply: "It is the last section. It holds each question where you let my pick stand, until its session files that pick." },
+  { id: "ask-mf0aa1", at: "Oct 30, 09:30 CDT", text: "Can triage stop telling me about each archive push?", state: "answered", owner: "triage", answered: "Oct 30, 09:41 CDT",
+    reply: "Yes. An archive push now shows only in the Status tab's log." },
+];
+const SENT = { id: "ask-mh2l0z", at: "Nov 1, 17:41 CST", text: "Please batch the two hook lanes into one PR.", state: "unread", waited: "under an hour" };
+const FIRST = (i, s) => i === 0 && s;
+
+// An answered ask shows open while its answer is new to this viewer (`fresh`), or once the owner unfolds it (`open`).
+function askItem(a, i, lab, open) {
+  if (a.state === "answered" && !a.fresh && !open) {
+    return `<li class="ask folded"${FIRST(i === 3, lab) ? ' data-new="folded answer: the row unfolds it"' : ""}><button class="frow unfold" type="button" aria-expanded="false" aria-controls="${a.id}-b">
+      <span class="g done" aria-hidden="true"></span><span class="ftext">${esc(a.text)}</span><span class="fwhen">Answered ${esc(a.answered)}</span><span class="fgo">Show answer</span></button>
+      <div id="${a.id}-b" hidden></div></li>`;
+  }
+  // A waiting ask shows its age, as an item shows "waited", so a stuck ask is seen.
+  const head = (glyph, extra) => `<div class="ahead"><span class="g ${glyph}" aria-hidden="true"></span><span class="who">You asked, ${esc(a.at)}</span>${a.waited ? `<span>waited ${esc(a.waited)}</span>` : ""}${extra || ""}</div>`;
+  const text = `<p class="atext">${esc(a.text)}</p>`;
+  if (a.state === "unread") return `<li class="ask"${lab && i === 0 ? ` data-new="${a === SENT ? "the new ask, top of the list" : "waiting: who has it"}"` : ""}>${head("wait")}${text}<p class="astate">Waiting for ${WRITER} to read it.</p></li>`;
+  if (a.state === "read") return `<li class="ask">${head("wait")}${text}<p class="astate">Read by ${esc(a.owner)} <span class="t">${esc(a.read)}</span>. Waiting for its answer.</p></li>`;
+  return `<li class="ask"${lab ? ' data-new="answer under the ask"' : ""}>${head("done", `${a.fresh ? '<span class="newmark">New answer</span>' : ""}<button class="unfold" type="button" aria-expanded="true" aria-controls="${a.id}-b">Fold</button>`)}${text}
+    <div class="thread" id="${a.id}-b"><p class="lhead">Answer from ${esc(a.owner)}, ${esc(a.answered)}</p><p class="reply">${esc(a.reply)}</p>${a.home ? `<p class="filed">Filed in ${esc(a.home)}, ${esc(a.filed)}</p>` : ""}</div></li>`;
+}
+
+// The box. `mode` picks the hint row: idle, sent, failed or offline.
+function askForm(mode, lab) {
+  const val = mode === "failed" || mode === "offline" ? "Please batch the two hook lanes into one PR." : "";
+  const hint = {
+    idle: `<p class="askhint" id="askHint">Send ask turns on once you type. It goes to ${WRITER}, which answers here or passes it on.<span class="kbd"> Ctrl+Enter sends.</span></p>`,
+    sent: `<p class="askhint ok" id="askHint" role="status"${lab ? ' data-new="Undo at the box"' : ""}><span class="g done" aria-hidden="true"></span><span><b>Sent 17:41.</b> Claude was told.</span></p>`,
+    failed: `<p class="askhint bad" id="askHint" role="alert">Not saved (permission-denied). Your ask is still in the box: copy it and paste it in chat.</p>`,
+    offline: `<p class="askhint bad" id="askHint">This view cannot reach the page's store, so an ask cannot be saved here. Copy it and paste it in chat.</p>`,
+  }[mode];
+  const slot = mode === "sent" ? '<button class="btn alt" type="button" id="askUndo">Undo send (6)</button>' : mode === "failed" || mode === "offline" ? '<button class="btn alt" type="button" id="askCopy">Copy ask</button>' : "";
+  const off = mode === "offline" || !val;
+  return `<form class="askform" onsubmit="return false"${lab ? ' data-new="ask box"' : ""}>
+    <label for="askText">Your ask</label>
+    <textarea id="askText" rows="3" aria-describedby="askHint">${esc(val)}</textarea>
+    <div class="askrow">${hint}<span class="slot">${slot}</span><button class="btn askgo" type="button" id="askSend"${off ? " disabled" : ""}>Send ask</button></div>
+  </form>`;
+}
+
+function askList(s, lab, hide) {
+  if (s === "empty") return `<p class="empty">Nothing asked yet. Type above, and a session answers here.</p>`;
+  if (s === "loading") return `<p class="empty">Loading your asks…</p>`;
+  if (s === "offline") return `<p class="empty unk">Your asks cannot be read in this view.</p>`;
+  const list = s === "sent" || s === "failed" ? (s === "sent" ? [SENT, ...ASKS] : ASKS) : ASKS;
+  return `<ol class="asklist" aria-label="Your asks, newest first">${list.map((a, i) => askItem(a, i, lab)).join("")}</ol>
+    ${hide.includes("older") ? "" : `<button class="unfold older" type="button"${lab ? ' data-new="older asks"' : ""}>Show 6 older asks</button>`}`;
+}
+const waitingOf = (s) => (s === "empty" || s === "loading" || s === "offline" ? null : s === "sent" ? 3 : 2);
+
+function asksSection(s, lab, hide, opts = {}) {
+  const n = waitingOf(s), form = opts.noForm ? "" : askForm(s === "sent" ? "sent" : s === "failed" ? "failed" : s === "offline" ? "offline" : "idle", lab);
+  return `<section class="in asks${opts.tabbed ? " tabbed" : ""}" id="asks" aria-labelledby="asksH"${lab && !opts.tabbed ? ' data-new="Ask section, after both tabs"' : ""}>
+    <div class="asks-head"><h2 id="asksH"><span class="g wait" aria-hidden="true"></span>Ask${n ? `<span class="ct" aria-label="${n} waiting for an answer">${n}</span>` : ""}</h2>
+      <p>${opts.noForm ? "Your asks from the bar, newest first. A session answers under each one." : "A question, feedback, anything. A session answers under your ask, so you need not watch the chat."}</p></div>
+    <div class="asks-body">${form}${askList(s, lab, hide)}</div></section>`;
+}
+
+function rail(s, lab, hide) {
+  const n = waitingOf(s), askRow = hide.includes("rail") || s === "b" ? "" : `<div class="ov-tier${n ? "" : " zero"}"${lab ? ' data-new="rail link to Ask"' : ""}><a class="ov-head" href="#asks" aria-label="${n == null ? "Asks not read" : n + " asks waiting for an answer"}, Ask"><span class="g wait" aria-hidden="true"></span>Ask<span class="ct">${n == null ? "—" : n}</span></a></div>`;
+  return `<nav class="rail" aria-label="Overview"><div class="ov-prog"><div class="big"><b>0</b>of 2 sent</div><div class="sub none"></div><div class="track"></div></div>
+    <div class="ov-tier"><a class="ov-head" href="#tier-holds"><span class="g holds" aria-hidden="true"></span>Blocking<span class="ct">1</span></a><div class="chips-n"><button class="nchip" type="button"><span class="no">4</span><span class="nt">Test runner</span></button></div></div>
+    <div class="ov-tier"><a class="ov-head" href="#tier-calm"><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">1</span></a><div class="chips-n"><button class="nchip" type="button"><span class="no">7</span><span class="nt">Archive stale lanes</span></button></div></div>
+    ${askRow}</nav>`;
+}
+function list(lab) {
+  return `<div class="list" id="list">
+    <section class="tier" id="tier-holds"><header><h2><span class="g holds" aria-hidden="true"></span>Blocking<span class="ct">1</span></h2></header>
+      <article class="card holds"${lab ? ' data-today="question card"' : ""}><div class="top"><span class="num">No. 4</span><span>waited 2 hours</span></div><h3 class="title">Which test runner should the janitor sweep use?</h3><p class="stake holds"><span class="g holds" aria-hidden="true"></span>Lane janitor-sweep waits for this answer.</p></article></section>
+    <section class="tier" id="tier-calm"><header><h2><span class="g calm" aria-hidden="true"></span>Whenever<span class="ct">1</span></h2></header>
+      <article class="card"><div class="top"><span class="num">No. 7</span><span>waited 1 day</span></div><h3 class="title">Archive the three stale lanes?</h3></article></section>
+    <p class="checked">Checked against main at ea92b0cc</p></div>`;
+}
+function tabs(s, lab) {
+  const b = s === "b";
+  return `<nav class="in tabs" aria-label="Page"${lab ? ' data-today="tabs"' : ""}><div class="tl" role="tablist" aria-label="Page parts">
+    <a href="#" role="tab" aria-selected="${!b}">Questions <span class="cnt">2</span></a><a href="#" role="tab" aria-selected="false" tabindex="-1">Status</a>
+    ${b ? `<a href="#" role="tab" aria-selected="true"${lab ? ' data-new="Ask tab"' : ""}>Ask <span class="cnt">2</span></a>` : ""}</div></nav>`;
+}
+function bar(s, lab) {
+  const askLine = s === "c" ? `<div class="askbar"${lab ? ' data-new="ask line in the bar"' : ""}><label for="askBar">Ask</label><textarea id="askBar" rows="1" aria-label="Your ask"></textarea><button class="btn askgo alt" type="button" disabled>Send ask</button></div>` : "";
+  return `<div class="bar"${lab ? ' data-today="answer bar: counts answers only"' : ""}><div class="in">${askLine}<span class="st"><b>1</b> ready. <b>1</b> stays open.</span><button class="btn send" type="button">Send 1 answer</button></div></div>`;
+}
+
+function screen(s, theme, lab, w, hide) {
+  const bodyMain = s === "b"
+    ? asksSection("a", lab, hide, { tabbed: true })
+    : `<div class="in main">${rail(s, lab, hide)}${list(lab)}</div>${asksSection(s === "c" ? "a" : s, lab, hide, { noForm: s === "c" })}`;
+  return `<!doctype html><html lang="en" data-theme="${theme}" class="${lab ? "" : "nolab"}${w <= 520 ? " coarse" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body${s === "c" ? ' style="padding-bottom:168px"' : ""}>
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1></div></div></header>
+${tabs(s, lab)}
+${bodyMain}
+${bar(s, lab)}</body></html>`;
+}
+
+/* ---------- Harness ---------- */
+const STATES = ["a", "empty", "loading", "sent", "failed", "offline", "b", "c"];
+const P = { s: "a", w: "all", t: "", lab: "on", hide: [] };
+function readHash() { new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; }); if (!STATES.includes(P.s)) P.s = "a"; }
+function writeHash() { const q = new URLSearchParams({ s: P.s, w: P.w }); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(",")); history.replaceState(null, "", "#" + q); }
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function frame(host, w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = (w === 390 ? "Phone" : "Wide") + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "Waiting page at " + w + " wide, state " + P.s; f.style.width = w + "px";
+  wrap.append(f); box.append(cap, wrap); host.append(box);
+  const fit = () => {
+    const avail = Math.min(host.clientWidth - 2, w), sc = avail / w;
+    let hgt = 900;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { wire(f.contentDocument, fit); fit(); setTimeout(fit, 200); });
+  f.srcdoc = screen(P.s, theme(), P.lab !== "off", w, P.hide);
+  addEventListener("resize", fit);
+}
+// Fold and unfold work in the drawn page; typing turns Send ask on.
+function wire(doc, fit) {
+  doc.addEventListener("click", (e) => {
+    const b = e.target.closest(".frow");
+    if (b) {
+      const a = ASKS.find((x) => b.getAttribute("aria-controls") === x.id + "-b");
+      b.closest("li").outerHTML = askItem({ ...a, fresh: false }, 1, false, true);
+      const btn = doc.querySelector(`.ahead [aria-controls="${a.id}-b"]`); if (btn) btn.focus();
+      fit(); return;
+    }
+    const u = e.target.closest(".ahead .unfold");
+    if (u) {
+      const a = [...ASKS, SENT].find((x) => u.getAttribute("aria-controls") === x.id + "-b");
+      u.closest("li").outerHTML = askItem({ ...a, fresh: false }, 1, false);
+      const btn = doc.querySelector(`[aria-controls="${a.id}-b"]`); if (btn) btn.focus();
+      fit();
+    }
+  });
+  const t = doc.getElementById("askText"), send = doc.getElementById("askSend");
+  if (t && send && !doc.querySelector(".askhint.bad:not([role])")) t.addEventListener("input", () => { send.disabled = !t.value.trim(); });
+}
+function render() {
+  if (P.hide.includes(P.s)) P.s = STATES.find((s) => !P.hide.includes(s));
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { const on = P.hide.includes(b.dataset.hide); b.textContent = b.textContent.replace(/^(Hide|Show)/, on ? "Show" : "Hide"); b.setAttribute("aria-pressed", String(on)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.querySelectorAll(".st[data-state]").forEach((sec) => { const on = sec.dataset.state === P.s; sec.classList.toggle("on", on); sec.querySelector(".frames").replaceChildren(); });
+  const host = document.querySelector(`.st[data-state="${P.s}"] .frames`);
+  (P.w === "all" ? [390, 1280] : [Number(P.w) === 1280 ? 1280 : 390]).forEach((w) => frame(host, w));
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.dataset.lab) P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const k = b.dataset.hide; P.hide = P.hide.includes(k) ? P.hide.filter((x) => x !== k) : [...P.hide, k]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+readHash(); render();
+</script>
+</body>
+</html>
