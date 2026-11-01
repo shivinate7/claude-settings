@@ -5,7 +5,9 @@ description: >
   on a slow apt mirror. WebKit and Firefox lack libraries there, so a caller may opt in with
   `system-deps`. That apt step runs on Linux only, under a 5 min cap.
   A missing library fails the suite when it cannot launch a browser, never skips it.
-  The browser download is cached by the runner OS and release, the pinned Playwright version and the browsers.
+  The browser download is cached by the pinned Playwright version, the browsers and the OS. On GitHub-hosted
+  Linux the key holds the OS release. A self-hosted macOS or Windows runner with no ImageOS keys on the OS
+  name only, so a runner upgrade there can still restore stale browsers.
   It needs playwright-core reachable from package-dir, so a pnpm strict layout is not supported.
 inputs:
   package-dir:
