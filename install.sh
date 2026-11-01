@@ -448,19 +448,21 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
   own_not_source=0
   if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
     # A clean branch checkout at the tip of origin/$REF already holds $REF's files: it stays the source, untouched.
-    # The fetch runs only when HEAD already equals the origin/$REF ref the checkout has, so a branch off it pays no fetch
-    # before the mirror. A failed fetch keeps the checkout against that older ref, with a WARN; no origin remote, no WARN.
+    # The fetch runs only when the origin/$REF ref the checkout has is HEAD or an ancestor of it (a stale record still
+    # allows a checkout at the tip), so a branch that does not hold that ref pays no fetch before the mirror. A failed
+    # fetch keeps the checkout only when HEAD equals the older ref, with a WARN; no origin remote, no WARN.
     own_how=
-    if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ] \
-       && [ "$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)" = "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ] \
-       && git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null 2>&1; then
+    own_head=$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)
+    own_ref=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
+    if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ] && [ -n "$own_ref" ] \
+       && git -C "$SRC" merge-base --is-ancestor "$own_ref" "$own_head" 2>/dev/null; then
       if [ -z "$(git -C "$SRC" config --get remote.origin.url 2>/dev/null)" ]; then
-        own_how="the last fetched $REF"
+        [ "$own_head" != "$own_ref" ] || own_how="the last fetched $REF"
       elif cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
-        [ "$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)" != "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ] || own_how="the $REF tip"
+        [ "$own_head" != "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ] || own_how="the $REF tip"
       else
-        log "WARN: could not fetch $REF into $SRC; the checkout is kept against the last fetched $REF, which may be older"
-        own_how="the last fetched $REF"
+        log "WARN: could not fetch $REF into $SRC; the checkout is kept only against the last fetched $REF, which may be older"
+        [ "$own_head" != "$own_ref" ] || own_how="the last fetched $REF"
       fi
     fi
     if [ -n "$own_how" ]; then
