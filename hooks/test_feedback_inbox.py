@@ -20,7 +20,7 @@ Capture: hooks/local_time.py (env LOCAL_TIME_UNDER_TEST overrides the path). A U
     `fb:` and `fb done` are plain text.
   - A notice is never captured: a prompt that starts with `<task-notification>` or
     `<system-reminder>` (shared_names.MACHINE_TAGS). A tag quoted mid-message is owner text.
-  - A subagent hand-back is never captured. It starts with `<agent-message` followed by whitespace
+  - An agent hand-back is never captured. It starts with `<agent-message` followed by whitespace
     or `>`, or with the line `Another Claude session sent a message:` (or `... message while you
     were working:`, the CLI's mid-turn frame), then a newline and that tag.
   - A lone surrogate in the text (JSON escape `\\ud800`) is either saved with U+FFFD (the
@@ -1019,11 +1019,11 @@ def case_damaged_turn_state_counts_every_message():
 
 # --------------------------------------------------------------------------- agent hand-back cases
 
-# The harness's text for a subagent's hand-back (a CLI 2.1.316 constant), ids faked. An agent wrote
+# The harness's text for an agent's hand-back (a CLI 2.1.316 constant), ids faked. An agent wrote
 # it, not the owner, so capture never saves it.
 FRAME = "Another Claude session sent a message:\n"
 MID_TURN_FRAME = "Another Claude session sent a message while you were working:\n"
-HAND_BACK_LINES = ("[Subagent hand-back] The text below is the final report of a subagent ...\n"
+HAND_BACK_LINES = ("[Agent hand-back] The text below is the final report of an agent ...\n"
                    "Lint: 0 findings in 12 files.\n")
 TAGGED = '<agent-message from="a0000000000000001">\n' + HAND_BACK_LINES + "</agent-message>"
 HAND_BACK_SHAPES = (
