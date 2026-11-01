@@ -14,11 +14,14 @@ TASK_NOTIFICATION_TAG = "<task-notification>"
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the
 # mid-turn one. The tag name ends at `>` or whitespace.
 _HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")
+# Bandaid (debt inbox-saves-other-notices): a peer's send_message frame, bare at the start of the
+# prompt. The tag name ends at `>` or whitespace.
+_PEER_FRAME_TAGS = tuple("<cross-session-message" + end for end in "> \t\n\r")
 MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + tuple(
     frame + "\n" + tag
     for frame in ("Another Claude session sent a message:",
                   "Another Claude session sent a message while you were working:")
-    for tag in _HAND_BACK_TAGS)
+    for tag in _HAND_BACK_TAGS) + _PEER_FRAME_TAGS
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
