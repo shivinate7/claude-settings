@@ -587,7 +587,8 @@ class StaleInProgress(Fixture):
     def test_doing_step_with_a_live_session_is_not_listed(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # no session, so it is listed and an empty row cannot pass
-        for status in ("SESSION_STATUS_RUNNING", "SESSION_STATUS_IDLE"):
+        for status in ("SESSION_STATUS_RUNNING", "SESSION_STATUS_IDLE",
+                       "SESSION_STATUS_REQUIRES_ACTION", "SESSION_STATUS_PENDING"):
             with self.subTest(status=status):
                 self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
                 count, entries = self.stale(self.out_with_live())
@@ -705,14 +706,12 @@ class StaleInProgress(Fixture):
             self.publish(sessions=[], read_at=iso_ago(-2))
             self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
 
-    def test_session_outside_running_and_idle_is_not_live(self):
+    def test_session_in_an_unseen_status_keeps_its_step_live(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
-        for status in ("SESSION_STATUS_STOPPED", "SESSION_STATUS_COMPLETED"):
-            with self.subTest(status=status):
-                self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
-                count, entries = self.stale(self.out_with_live())
-                self.assertEqual((count, sorted(self.listed_ids(entries))), (2, ["c1", "c2"]))
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_SOMETHING_NEW", "cs-step:c1")])
+        count, entries = self.stale(self.out_with_live())
+        self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
     def test_session_counts_only_with_this_repos_cs_repo_tag(self):
         self.commit_step("c1", status="doing")
