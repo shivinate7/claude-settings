@@ -1233,11 +1233,6 @@ async function receive(h, text, kind = 'task-notification') {
   if (!hook) throw new Error('no session.receive hook')
   return hook.fn(h.$, { origin: { kind }, text }, async e => e)
 }
-async function stopWith(h, tasks, agentId) {
-  const hook = h.hooks.find(x => x.event === 'classic.Stop')
-  if (!hook) throw new Error('no classic.Stop hook')
-  return hook.fn(h.$, { hook_event_name: 'Stop', session_id: ID, background_tasks: tasks, ...(agentId ? { agent_id: agentId } : {}) }, async () => ({}))
-}
 const PYOK = () => ({ exitCode: 0, stdout: '', stderr: '' })
 const guardLines = h => h.pythonCalls.filter(a => a.some(x => String(x).includes('guard_core')))
 
@@ -1268,19 +1263,64 @@ await test('question box: a live background command refuses it, until its notice
   same((await askBox(h)).decision, 'allow', 'verdict after its notice')
 })
 
-await test('question box: the turn-end list of background work replaces what the check tracked', async () => {
+// The built-in sec-default mod passes every classic.* event on, so a user mod's classic.* hook never runs.
+await test('register: adds no classic.* hook', async () => {
+  const h = await start()
+  same(h.hooks.filter(x => x.event.startsWith('classic.')).map(x => x.event), [], 'classic hooks')
+})
+
+await test('question box: a TaskStop that answers without error clears its background task', async () => {
   const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
   await fire(h, 'session.start', {})
   await bashBackground(h, 'b1', 'task1')
-  await stopWith(h, [])
-  same((await askBox(h)).decision, 'allow', 'an empty list clears a missed notice')
-  await stopWith(h, [{ id: 'task9', type: 'shell', status: 'running', description: 'x' }])
-  same((await askBox(h)).decision, 'deny', 'a listed shell task refuses')
-  await stopWith(h, [], 'sub1')
-  same((await askBox(h)).decision, 'deny', "an agent's turn end leaves the session's list alone")
+  same((await askBox(h)).decision, 'deny', 'verdict before the stop')
+  await callTool(h, 'TaskStop', { result: { message: 'stopped', task_id: 'task1', task_type: 'local_bash' } }, { task_id: 'task1' })
+  same((await askBox(h)).decision, 'allow', 'verdict after the stop')
 })
 
-await test('question box: a background workflow refuses it, from its start and from the turn-end list', async () => {
+await test('question box: a TaskStop by its deprecated shell_id input clears its background task', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await bashBackground(h, 'b1', 'task1')
+  same((await askBox(h)).decision, 'deny', 'verdict before the stop')
+  await callTool(h, 'TaskStop', { result: { message: 'stopped', task_id: 'task1', task_type: 'local_bash' } }, { shell_id: 'task1' })
+  same((await askBox(h)).decision, 'allow', 'verdict after the stop')
+})
+
+await test('question box: a TaskStop that throws, errors or is refused leaves its background task tracked', async () => {
+  const failed = [
+    new Error('host failed'),
+    { result: { message: 'not running', task_id: 'task1' }, isError: true },
+    { deny: 'refused' },
+  ]
+  for (const answer of failed) {
+    const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+    await fire(h, 'session.start', {})
+    await bashBackground(h, 'b1', 'task1')
+    await callTool(h, 'TaskStop', answer, { task_id: 'task1' })
+    const r = await askBox(h)
+    same(r.decision, 'deny', `verdict after a failed stop (${answer instanceof Error ? 'throw' : JSON.stringify(answer)})`)
+    assert.match(r.reason, /1 background task\b/, 'the task still counts')
+    await callTool(h, 'TaskStop', { result: { message: 'stopped', task_id: 'task1', task_type: 'local_bash' } }, { task_id: 'task1' })
+    same((await askBox(h)).decision, 'allow', 'verdict after a stop that succeeds')
+  }
+})
+
+await test('question box: a TaskStop naming an unknown id leaves the other tracked tasks tracked', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await bashBackground(h, 'b1', 'task1')
+  await bashBackground(h, 'b2', 'task2')
+  await callTool(h, 'TaskStop', { result: { message: 'stopped', task_id: 'nope', task_type: 'local_bash' } }, { task_id: 'nope' })
+  const r = await askBox(h)
+  same(r.decision, 'deny', 'verdict after a stop of an unknown id')
+  assert.match(r.reason, /2 background tasks/, 'both tracked tasks still count')
+  await callTool(h, 'TaskStop', { result: { message: 'stopped', task_id: 'task1', task_type: 'local_bash' } }, { task_id: 'task1' })
+  const left = await askBox(h)
+  assert.match(left.reason, /1 background task\b/, 'only the stopped task left the count')
+})
+
+await test('question box: a background workflow refuses it from its start, until its notice arrives', async () => {
   const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
   await fire(h, 'session.start', {})
   const hook = h.hooks.find(x => x.event === 'tool.call')
@@ -1288,10 +1328,6 @@ await test('question box: a background workflow refuses it, from its start and f
   same((await askBox(h)).decision, 'deny', 'verdict after its start')
   await receive(h, notice('wf1'))
   same((await askBox(h)).decision, 'allow', 'verdict after its notice')
-  await stopWith(h, [{ id: 'wf2', type: 'workflow', status: 'running', description: 'x' }, { id: 'm1', type: 'monitor', status: 'running', description: 'x' }])
-  const r = await askBox(h)
-  same(r.decision, 'deny', 'a listed workflow refuses')
-  assert.match(r.reason, /1 background task\b/, 'a monitor does not count')
 })
 
 await test('question box: nothing running lets it through', async () => {
@@ -1334,9 +1370,9 @@ await test('question box: an earlier deny stands and costs no read', async () =>
 })
 
 // One tool call through the tool.call hook; `answer` is what the rest of the chain returns, or throws.
-async function callTool(h, tool, answer) {
+async function callTool(h, tool, answer, input = {}) {
   const hook = h.hooks.find(x => x.event === 'tool.call')
-  try { await hook.fn(h.$, { tool, input: {}, tool_use_id: 'u-' + tool }, async () => { if (answer instanceof Error) throw answer; return answer }) } catch { /* the call failed */ }
+  try { await hook.fn(h.$, { tool, input, tool_use_id: 'u-' + tool }, async () => { if (answer instanceof Error) throw answer; return answer }) } catch { /* the call failed */ }
 }
 const STARTED = { result: { content: [{ type: 'text', text: 'session_x started' }] } }
 
