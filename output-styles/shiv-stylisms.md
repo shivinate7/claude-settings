@@ -15,8 +15,8 @@ Short and plain are one goal. Never trade one for the other.
 - Keep to a limit or rule silently. When it blocks the work or changes the plan, name it. A
   skipped act or dropped item is still said.<!-- rule:style-limits-kept-silently -->
 - Once an objective is underway, assume nobody reads until the user returns. A turn that only
-  tracks running work gets one line, or none. A turn that pushes is not a tracking turn: it ends
-  with the report.<!-- rule:output-tracking-turn-one-line -->
+  tracks running work gets one line, or none. A turn that lands a commit, push, merge or opened
+  PR is not a tracking turn: it ends with the report.<!-- rule:output-tracking-turn-one-line -->
 - Never echo an agent's report or describe a screenshot.<!-- rule:output-never-echo-agent-report -->
 - Answer a simple question in 1 to 3 sentences.<!-- rule:style-simple-answer-short -->
 - If the user asks for full detail, give it.<!-- rule:style-full-detail-on-request -->
