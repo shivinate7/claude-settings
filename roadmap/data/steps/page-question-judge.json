@@ -1,9 +1,9 @@
 {
   "title": "A waiting-page question gets the same model review as a chat question",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33774,
   "why": "shiv, Nov 1 11:51 CST, in chat to triage (page item 121): \"yes please add it that's incredibly important\". Today a chat question box gets the form check (hooks/question_form.py chat_hit) and then a model verdict (hooks/call_judge.py, rule question-judge). A waiting-page item write gets only the form check (question_form.item_hit). Since questions moved to the page, none gets a model review, and weak items (circular options, bare ids) reached the owner.",
-  "note": "Fix in one home: extend call_judge's question-judge to an ArtifactData write of a waiting-page item that carries options or context, after item_hit passes, through decision_watch.invoke_model as today. Same refuse path, override and guard.log line; fail open on a model error, as call_judge does. Decision question-form records that both places get the model review. Done check: a test feeds a page item write that passes the form check but the judge rejects, and one it accepts; red on main (no model call on page writes) and green on the fix; a chat box still judges as before. Needs no answer. Files: hooks/call_judge.py, hooks/question_form.py, settings.json (hook matcher), hooks test, docs/decisions/question-form.md.",
-  "updatedAt": "2026-11-01T17:58:00Z"
+  "note": "Fix in one home: extend call_judge's question-judge to an ArtifactData write of a waiting-page item that carries options or context, after item_hit passes, through decision_watch.invoke_model as today. Same refuse path, override and guard.log line; fail open on a model error, as call_judge does. Decision question-form records that both places get the model review. Done check: a test feeds a page item write that passes the form check but the judge rejects, and one it accepts; red on main (no model call on page writes) and green on the fix; a chat box still judges as before. Needs no answer. Files: hooks/call_judge.py, hooks/question_form.py, settings.json (hook matcher), hooks test, docs/decisions/question-form.md. Lane session_013NEJL1xwWmwcbBtBrN6EmE, started Nov 1 11:52 CST (coordinator).",
+  "updatedAt": "2026-11-01T18:00:00Z"
 }
