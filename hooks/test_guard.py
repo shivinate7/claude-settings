@@ -103,7 +103,6 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
-    "debug-port-ask": "a launch that opens a remote-debugging port, or a WebView2 env value that holds one, asks; text that only names the flag is allowed",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
@@ -3332,15 +3331,16 @@ def tag_orphan(env_entries=(), argv_extra=(), holder=None):
     return None
 
 
-def stranded_job(job_env_words):
+def stranded_job(job_env_words, wrappers=0):
     """The `holder` of a stranded stub: a shell that runs one `sleep` as its child and waits. The
     child's environment is set by `job_env_words`: `env NAME=value` gives it a tag, `env -u NAME`
-    takes the stub's away. The stub's own environment is `env_entries` of tag_orphan."""
-    return ["sh", "-c", '"$@" & wait', "sh"] + list(job_env_words) + ["sleep", "300"]
+    takes the stub's away. `wrappers` adds that many shell wrappers between the stub and the job.
+    The stub's own environment is `env_entries` of tag_orphan."""
+    return ["sh", "-c", '"$@" & wait', "sh"] * (1 + wrappers) + list(job_env_words) + ["sleep", "300"]
 
 
-def stub_job(stub):
-    """The pid of the one child of `stub`, once the stub has forked it, or None."""
+def child_of(parent):
+    """The pid of the one child of `parent`, once it has forked one, or None."""
     for _ in range(100):
         try:
             rows = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
@@ -3349,21 +3349,41 @@ def stub_job(stub):
             return None
         for row in rows:
             fields = row.split()
-            if len(fields) == 2 and fields[1] == str(stub) and fields[0].isdigit():
+            if len(fields) == 2 and fields[1] == str(parent) and fields[0].isdigit():
                 ORPHAN_PIDS.append(int(fields[0]))
                 return int(fields[0])
         time.sleep(0.05)
     return None
 
 
+def stub_job(stub, depth=1):
+    """The pid `depth` levels under `stub`, once that pid has exec'd `sleep`, or None. Until its
+    exec, a forked pid holds its parent's environment, so the tag is read only after it."""
+    pid = stub
+    for _ in range(depth):
+        pid = child_of(pid)
+        if pid is None:
+            return None
+    for _ in range(100):
+        try:
+            comm = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True,
+                                  text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if comm == "sleep":
+            return pid
+        time.sleep(0.05)
+    return None
+
+
 def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
-             holder=None, job=False, **who):
-    """One kill of a PPID-1 holder, or with `job` of the child under a stranded stub (`holder` from
-    stranded_job). Returns the killed pid, or None when it was skipped. `who` is agent_id and
-    agent_type, the payload fields that mark an agent call."""
+             holder=None, job=False, depth=1, **who):
+    """One kill of a PPID-1 holder, or with `job` of the pid `depth` levels under a stranded stub
+    (`holder` from stranded_job). Returns the killed pid, or None when it was skipped. `who` is
+    agent_id and agent_type, the payload fields that mark an agent call."""
     pid = tag_orphan(env_entries, argv_extra, holder) if ORPHAN_CASES else None
     if pid is not None and job:
-        pid = stub_job(pid)
+        pid = stub_job(pid, depth)
     if pid is None:
         skip_case(name, NO_ORPHAN)
     else:
@@ -3377,10 +3397,12 @@ TAG_LEADER = tag_case("kill: a PPID-1 pid whose environment holds this session's
                       env_entries=[TAG + "=" + SUB_SESSION])
 # Every agent shares the main session's id, so the tag owns a pid for the main session only
 # (decision a-kill-by-pid-needs-an-owned-pid). A truthy agent_id or agent_type
-# marks an agent call, which keeps the agent-worktree rule alone.
-for _who, _kw in (("agent_id and agent_type", dict(agent_id="tag-sub1", agent_type="general-purpose")),
-                  ("agent_id only", dict(agent_id="tag-sub1")),
-                  ("agent_type only", dict(agent_type="general-purpose"))):
+# marks an agent call, which keeps the agent-worktree rule alone. AGENT_CALLS is the one list of
+# those call shapes; the stranded-job cases below loop over it too.
+AGENT_CALLS = (("agent_id and agent_type", dict(agent_id="tag-sub1", agent_type="general-purpose")),
+               ("agent_id only", dict(agent_id="tag-sub1")),
+               ("agent_type only", dict(agent_type="general-purpose")))
+for _who, _kw in AGENT_CALLS:
     tag_case("kill: a PPID-1 pid with this session's id, called by an agent (%s)" % _who, "deny",
              env_entries=[TAG + "=" + SUB_SESSION], carries="did not start", **_kw)
 tag_case("kill: a PPID-1 pid whose environment holds another session's id", "deny",
@@ -3404,13 +3426,28 @@ else:
     sh("kill: the group led by a PPID-1 pid whose environment holds this session's id",
        "kill -- -%d" % TAG_LEADER, "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
        transcript=SUB_TRANSCRIPT)
-# A STRANDED JOB (roadmap step wait-for-pid-form). After a stall the stub shell is under init, and
-# the job is its child. On Linux the forked stub holds no tag, and the exec'd job holds it.
-# `kill` keeps the predicate the owner ruled on (decision a-kill-by-pid-needs-an-owned-pid: the
-# PPID-1 pid itself). A wider kill needs the owner, so each job below stays refused. The wait form,
+# A STRANDED JOB. After a stall the stub shell is under init, and the job is its child. In a real
+# stall the stub holds no tag and the job holds the session tag. The guard owns a pid that holds this
+# session's id when its parent or grandparent is init (decision a-kill-by-pid-needs-an-owned-pid),
+# so a tagged job under a stub is owned whether the stub is tagged or not. The cases below check that
+# in the main session, and that these stay refused: an agent call, which passes no session id and so
+# owns no pid by tag; a job with no id or another session's id; an untagged job under a tagged stub;
+# a tagged job two levels under the stub, where init is the great-grandparent. The wait form,
 # bin/wait-pid, owns these shapes by its own test (lint/test_wait_pid.py).
-tag_case("kill: a job under an untagged PPID-1 stub, the job holding this session's id, stays refused",
-         "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
+tag_case("kill: a job under an untagged PPID-1 stub, holding this session's id, from the main session",
+         "allow", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True)
+tag_case("kill: a job under a tagged PPID-1 stub, holding this session's id, from the main session",
+         "allow", env_entries=[TAG + "=" + SUB_SESSION],
+         holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True)
+for _who, _kw in AGENT_CALLS:
+    tag_case("kill: a job under an untagged PPID-1 stub, holding this session's id, called by an agent (%s)"
+             % _who, "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
+             carries="did not start", **_kw)
+tag_case("kill: a job under an untagged PPID-1 stub, holding another session's id, stays refused",
+         "deny", holder=stranded_job(["env", TAG + "=" + OTHER_SESSION]), job=True,
+         carries="did not start")
+tag_case("kill: a tagged job two levels under an untagged PPID-1 stub, from the main session, stays refused",
+         "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION], wrappers=1), job=True, depth=2,
          carries="did not start")
 tag_case("kill: a job under a PPID-1 stub that holds this session's id, the job untagged, stays refused",
          "deny", env_entries=[TAG + "=" + SUB_SESSION], holder=stranded_job(["env", "-u", TAG]),
@@ -4312,6 +4349,10 @@ sh("detached: Start-Process with neither -Wait nor -PassThru",
 sh("detached: Start-Process -WindowStyle Hidden still denies without -Wait or -PassThru",
    "Start-Process notepad.exe -WindowStyle Hidden", "deny", "detached-launch",
    tool="PowerShell", cwd=NOGIT)
+# The array form of a launch with a debug port is a detached launch, so detached-launch owns the deny.
+sh("detached: a Start-Process array argument list with a remote-debugging port is denied",
+   "Start-Process app.exe -ArgumentList '--disable-gpu','--remote-debugging-port=9222'", "deny",
+   "detached-launch", tool="PowerShell", cwd=NOGIT)
 sh("detached: a PowerShell assignment ahead of Start-Process is still read, MEASURED wrongly "
    "missed before _skip_assignments_and_keywords learned $name =",
    '$bad = Start-Process npx -ArgumentList "server.js"', "deny", "detached-launch",
@@ -11806,130 +11847,6 @@ LOG_CHECKS_EXTRA.append(("temp: the sweep removes an old sibling run folder and 
                          run_folder_sweep_case))
 
 
-# --------------------------------------------------------------------------- a debug port asks
-FAMILY = "debug-port-ask"
-#
-# Rule debug-port-ask: a launch that opens a remote-debugging port (either flag form, any value), or a
-# WebView2 environment value that holds one, ASKS. Impeccable 4.8.0's reference steps tell an agent to
-# start such a port, and main opens none without the owner (rule building-port-keeps-behaviour). Text
-# that only names the flag is no launch, so it stays an allow.
-
-sh("debug-port: electron with an equals-form port asks", "electron . --remote-debugging-port=9222",
-   "ask", "debug-port-ask", cwd=NOGIT)
-sh("debug-port: an app bundle with a space-form port asks",
-   "/Applications/Foo.app/Contents/MacOS/Foo --remote-debugging-port 9222", "ask",
-   "debug-port-ask", cwd=NOGIT)
-sh("debug-port: chromium headless on port zero asks",
-   "chromium --headless --remote-debugging-port=0 about:blank", "ask", "debug-port-ask", cwd=NOGIT)
-sh("debug-port: a WebView2 value on the launch line asks",
-   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 ./app.exe", "ask",
-   "debug-port-ask", cwd=NOGIT)
-sh("debug-port: a WebView2 value with other arguments asks",
-   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--disable-gpu --remote-debugging-port=9222\" ./app.exe",
-   "ask", "debug-port-ask", cwd=NOGIT)
-sh("debug-port: an export of a WebView2 value that holds the port asks",
-   "export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"", "ask",
-   "debug-port-ask", cwd=NOGIT)
-sh("debug-port: a PowerShell set of a WebView2 value alone asks",
-   "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-# ask-alone (ask-commands-run-alone) denies this chained form. `$env:NAME=value;` is no harmless lead, and
-# widening it would turn a deny into an ask for every ask rule. The lone form above pins the ask itself.
-chained_ask("debug-port: a PowerShell set of a WebView2 value, then a launch, denies as a chained ask command",
-            "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"; .\\app.exe",
-            tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a launch inside bash -c asks",
-   "bash -c 'electron . --remote-debugging-port=9222'", "ask", "debug-port-ask", cwd=NOGIT)
-
-# A quoted argument is text, so a comment opener, a lone apostrophe or a line break in it does not
-# end the scan. Each case is one command, so ask-alone does not apply to it.
-sh("debug-port: a hash opener in a quoted argument does not hide the port",
-   "electron . --title \"# dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
-sh("debug-port: a double-slash opener in a quoted argument does not hide the port",
-   "electron . --title \"// dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
-sh("debug-port: a block opener in a quoted argument does not hide the port",
-   "electron . --title \"/* dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
-sh("debug-port: a lone apostrophe in a quoted argument does not hide the port",
-   "electron . --title \"it's dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
-sh("debug-port: a line break in a quoted argument does not hide the port",
-   "electron . --title \"dev\nbuild\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
-
-# Text that names the flag is no launch, and it stays an allow.
-sh("debug-port: a grep of the skills folder for the flag is allowed",
-   "grep -rn remote-debugging-port skills/", "allow", cwd=NOGIT)
-sh("debug-port: an echo that names the flag is allowed",
-   "echo \"use --remote-debugging-port to attach\"", "allow", cwd=NOGIT)
-sh("debug-port: a commit message that names the flag is allowed",
-   "git commit -m \"note --remote-debugging-port\"", "allow", cwd=NOGIT)
-sh("debug-port: a cat of the impeccable audit reference is allowed",
-   "cat skills/impeccable/reference/audit.md", "allow", cwd=NOGIT)
-sh("debug-port: an impeccable detect over CDP is allowed",
-   "npx impeccable detect --cdp 9222 src/pages", "allow", cwd=NOGIT)
-sh("debug-port: a hash opener in an echo that names the flag is allowed",
-   "echo \"# --remote-debugging-port=9222\"", "allow", cwd=NOGIT)
-sh("debug-port: a lone apostrophe in an echo that names the flag is allowed",
-   "echo \"it's --remote-debugging-port text\"", "allow", cwd=NOGIT)
-sh("debug-port: a multi-line echo that names the flag is allowed",
-   "echo \"start\nuse --remote-debugging-port to attach\nend\"", "allow", cwd=NOGIT)
-sh("debug-port: a WebView2 value without a port is allowed",
-   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu ./app.exe", "allow", cwd=NOGIT)
-
-# a PowerShell process start, an array argument list, and a container exec.
-sh("debug-port: a Start-Process argument string with the port asks",
-   "Start-Process -Wait app.exe -ArgumentList \"--disable-gpu --remote-debugging-port=9222\"", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-# detached-launch denies this form before debug-port-ask could ask. Asking would widen that deny.
-sh("debug-port: a Start-Process array argument list with the port is denied by detached-launch",
-   "Start-Process app.exe -ArgumentList '--disable-gpu','--remote-debugging-port=9222'", "deny",
-   "detached-launch", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a docker exec that launches with the port asks",
-   "docker exec app electron . --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
-chained_ask("debug-port: a PowerShell append to the WebView2 value, then a launch, denies as a chained ask command",
-            "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS += \" --remote-debugging-port=9222\"; .\\app.exe",
-            tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a process listing that matches the flag is allowed",
-   "Get-CimInstance Win32_Process | Where-Object CommandLine -match \"--remote-debugging-port\"", "allow",
-   tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a pgrep of the flag is allowed",
-   "pgrep -af \"--remote-debugging-port\"", "allow", cwd=NOGIT)
-
-# a launcher's argument array or parenthesised list, a call operator, and text-only matches.
-sh("debug-port: a Start-Process argument array with the port asks",
-   "Start-Process -Wait app.exe -ArgumentList @(\"--remote-debugging-port=9222\")", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a Start-Process parenthesised argument list with the port asks",
-   "Start-Process -Wait app.exe -ArgumentList (\"--remote-debugging-port=9222\")", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a call operator with an argument array holding the port asks",
-   "& electron.exe @(\"--remote-debugging-port=9222\")", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a call operator with a quoted argument list holding the port asks",
-   "& electron.exe '--disable-gpu','--remote-debugging-port=9222'", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a pgrep of the flag with a port value is allowed",
-   "pgrep -f \"--remote-debugging-port=9222\"", "allow", cwd=NOGIT)
-sh("debug-port: a process listing that matches the flag with a port value is allowed",
-   "Get-CimInstance Win32_Process | Where-Object CommandLine -match \"--remote-debugging-port=9222\"",
-   "allow", tool="PowerShell", cwd=NOGIT)
-
-# PowerShell's short aliases (`?`, `%`, `sls`, `gc`) and `ForEach-Object` only search. A search of a
-# process listing or a log is text, so it is an allow. A launch with the flag still asks.
-sh("debug-port: a ? alias search of a process listing for the flag is allowed",
-   "Get-Process | ? { $_.CommandLine -match \"--remote-debugging-port=9222\" }", "allow",
-   tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a % alias and sls search of a process listing for the flag is allowed",
-   "Get-CimInstance Win32_Process | % { $_.CommandLine } | sls \"--remote-debugging-port=9222\"", "allow",
-   tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a ForEach-Object search of a process listing for the flag is allowed",
-   "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine -match \"--remote-debugging-port=9222\" }",
-   "allow", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a gc and sls search of a log for the flag is allowed",
-   "gc launch.log | sls \"--remote-debugging-port=9222\"", "allow", tool="PowerShell", cwd=NOGIT)
-sh("debug-port: a Start-Process argument string with the port alone asks",
-   "Start-Process -Wait app.exe -ArgumentList \"--remote-debugging-port=9222\"", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-
-
 # --------------------------------------------------------------------------- a port question departs or is not asked
 FAMILY = "port-question"
 #
@@ -12140,7 +12057,7 @@ add("uniform pick: a batch with today's item among the sets is denied", "deny", 
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles", "data": up_item()}])
 add("uniform pick: the refusal names the ruling and what to pick", "deny", "uniform-pick",
-    carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
+    carries=("shared tool, never the tool to fit a repo", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="banchi-titles", data=up_item())
 
 # Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
@@ -12205,7 +12122,7 @@ add("uniform pick: a batch with a multi item whose list pick holds the widening 
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
              "data": up_item(multi=True, options=UP_THREE, pick=["a", "b"])}])
 add("uniform pick: the refusal of a widening list pick names the ruling and what to pick", "deny",
-    "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    "uniform-pick", carries=("shared tool, never the tool to fit a repo", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
     action="set", collection="items", doc_id="banchi-titles",
     data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
 

@@ -1,14 +1,28 @@
 #!/usr/bin/env python3
-"""PreToolUse judge for an Agent spawn and an AskUserQuestion call. One command hook replaces the
-settings.json `prompt` hook on Agent and the `agent` hook on AskUserQuestion: a hook of those types
-sees only the call's JSON and cannot read the override file, so no owner override reached it
-(decision owner-override).
+"""PreToolUse judge for an Agent spawn, an AskUserQuestion call and an ArtifactData write of a
+waiting-page item. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
+hook on AskUserQuestion: a hook of those types sees only the call's JSON and cannot read the override
+file, so no owner override reached it (decision owner-override).
 
 An AskUserQuestion box runs hooks/question_form.py chat_hit first. A hit refuses with the rule it
 names, through the same refuse(), and makes no model call; the model sees only a box that passes.
 Each call that passes gets one model verdict through decision_watch.invoke_model, the one model caller.
 A verdict {"ok": false, "reason": R} refuses through guard_core.refuse(), the one home of the override
 check, the override line and the guard.log line. The rules are `spawn-judge` and `question-judge`.
+
+An ArtifactData call exits first unless its action is set, update, str_replace or batch, before any heavy import.
+A call with no write on collection `items` exits before importing question_form.
+For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
+that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
+context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
+many writes a batch holds. The page and the chat box share the seven judge items, so both places get the
+same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
+options is judged too, on the same seven items and one task rule in PAGE_PROMPT: a step that replaces text
+quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
+that passes item_hit is judged on its new_str alone, as a fragment: the prompt tells the model to judge
+only plain words, unexplained ids and pointers outside the item, and never to flag a missing line or
+option. The ArtifactData str_replace field is one top-level string key, so only `context` occurs in
+practice (note page-judge-dead-fragment-fields).
 
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
@@ -27,6 +41,7 @@ if HERE not in sys.path:
 # building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
+from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -52,11 +67,8 @@ SPAWN_PROMPT = (
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
     "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
-QUESTION_PROMPT = (
-    "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
-    "or none. Otherwise judge the question box alone. Code has already checked the form lines and the "
-    "marks on each option, so judge only these. Block only on a clear miss; when unsure answer "
-    "{\"ok\": true}.\n"
+# The seven items a question to the owner is judged on: one text, for the chat box and the page.
+JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
     "2. The Problem is one plain sentence that says why it needs his word.\n"
     "3. Each premise is in plain words.\n"
@@ -67,6 +79,34 @@ QUESTION_PROMPT = (
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
     "one line>\"}."
 )
+QUESTION_PROMPT = (
+    "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
+    "or none. Otherwise judge the question box alone. Code has already checked the form lines and the "
+    "marks on each option, so judge only these. Block only on a clear miss; when unsure answer "
+    "{\"ok\": true}.\n" + JUDGE_ITEMS
+)
+# A page write carries only the fields it changes, so the prompt names the fields and judges only those.
+PAGE_PROMPT = (
+    "Review these writes of a waiting-page item, each as {op, doc_id, data}: %s\nThe item is a question to "
+    "the owner. Its `context` holds the Goal, Problem and Based on lines. Each entry of `options` has a "
+    "label, a `gain` and a `lose`. `pick` is the recommendation. Code has already checked the form lines "
+    "and the marks on each option, so judge only the items below, and only the fields a write carries: a "
+    "write with no `options` is not flagged for options, one with no `context` is not flagged for the "
+    "Goal, Problem or premises, and one with no `pick` is not flagged for item 7, because the stored item "
+    "is unseen. A write with op str_replace carries only `field` and `new_str`, a fragment of that field. "
+    "Judge a fragment only for plain words, unexplained ids, and pointers outside the item (items 3 to 6), "
+    "and never flag a missing line or option, because the rest of the item is unseen. A task item has "
+    "`context` (the Why yours line) and `steps` (the text the owner reads and follows), and may carry "
+    "options. Judge a task's `steps` and `context` on the items below, and on one more rule: a step that "
+    "tells the owner to replace text quotes the whole unit it replaces, the whole line or the whole value, "
+    "and shows the line after the change in full. A step that names only the changed part, such as "
+    "\"find X and change it to Y\", misses that rule, because the owner then drops the rest of the line. "
+    "That rule reaches a task's `steps` and `context` on a set or update; a str_replace reaches only the "
+    "top-level string field `context`, never `steps`. A task item is judged only on plain words, "
+    "unexplained ids, pointers outside the item, and that whole-unit rule, and never on the Goal, the "
+    "Problem or a recommended option, because a task has none of them. "
+    "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
+)
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
@@ -75,7 +115,19 @@ JUDGES = {
               + "` on the brief's first non-blank line)."),
     "AskUserQuestion": (QUESTION_PROMPT, QUESTION_MODEL, QUESTION_TIMEOUT, QUESTION_RULE,
                         "the question box misses an item of the question format."),
+    DATA_TOOL: (PAGE_PROMPT, QUESTION_MODEL, QUESTION_TIMEOUT, QUESTION_RULE,
+                "the waiting-page item misses an item of the question format."),
 }
+# The ArtifactData actions that write an item. Any other action exits before a heavy import.
+PAGE_WRITE_ACTIONS = ("set", "update", "str_replace", "batch")
+
+
+def writes_an_item(args):
+    """True when the call has a write on collection `items`. Plain dict reads, so no heavy import."""
+    if args.get("action") == "batch":
+        writes = args.get("writes")
+        return any(isinstance(w, dict) and w.get("collection") == "items" for w in writes or [])
+    return args.get("collection") == "items"
 
 
 def invoke_model(*args, **kwargs):
@@ -127,7 +179,18 @@ def main():
             if code_rule:
                 reason = "%s (%s)" % (question_form.CHAT_REASONS[code_rule], matched)
                 return refuse(payload, tool, args, code_rule, reason)
-        shown = json.dumps(args, ensure_ascii=False)
+            shown = json.dumps(args, ensure_ascii=False)
+        elif tool == DATA_TOOL:
+            if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
+                return 0
+            import question_form
+            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "")
+            judged = [] if hit[0] else question_form.judged_item_writes(writes)
+            if not judged:  # guard.py refuses a hit; no write carries options, context or steps
+                return 0
+            shown = json.dumps(judged, ensure_ascii=False)
+        else:
+            shown = json.dumps(args, ensure_ascii=False)
         verdict, error = invoke_model(prompt % shown, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),

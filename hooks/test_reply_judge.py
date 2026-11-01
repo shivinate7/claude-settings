@@ -1230,7 +1230,8 @@ def case_port_finding_is_a_note_with_its_rule():
 # --------------------------------------------------------------------------- c139
 # Uniform ruling (topic t18): a repo that differs from a shared format changes to match, and the
 # shared tool never grows a second form. An option that widens what a shared tool accepts carries
-# "Goes against your uniform ruling (t18)" and is never the recommended option. Rule
+# "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never
+# the recommended option. Rule
 # `style-question-form` holds that text (the one question form, hooks/question_form.py).
 
 WIDENS_RULE = "style-question-form"
@@ -1274,7 +1275,9 @@ def case_prompt_flags_a_recommended_option_that_widens():
     check("prompt: a sentence flags a recommended option that widens what a shared tool accepts",
           has_pin(sentences, ("flag",), ("recommend",), ("widen",), ("shared tool",)), sentences)
     check("prompt: a sentence flags such an option offered without its label",
-          has_pin(sentences, ("flag",), ("widen",), ("goes against your uniform ruling (t18)",)), sentences)
+          has_pin(sentences, ("flag",), ("widen",),
+                  ("goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo",)),
+          sentences)
     check("prompt: a sentence spares an option where the repo changes to match",
           has_pin(sentences, ("never flag",), ("repo",), ("match",)), sentences)
     check("prompt: a sentence judges only offered options and spares a reply that describes the rule",

@@ -1063,7 +1063,7 @@ const linkEl = (l) => h("a", { href: l.url, target: "_blank", rel: "noopener" },
 const isLink = (l) => !!l && typeof l === "object" && typeof l.url === "string" && typeof l.label === "string";
 const linksOf = (x) => (Array.isArray(x.links) ? x.links.filter(isLink) : []);
 const hasOptLinks = (it) => (it.options || []).some((o) => linksOf(o).length);
-// An option that widens what a shared tool accepts (`widens`) breaks the owner's uniform ruling, topic t18; its card says so.
+// An option that widens what a shared tool accepts (`widens`) breaks the owner's ruling (a repo changes to fit a shared tool, never the tool to fit a repo); its card says so.
 function optCard(it, o, chosen) {
   const id = "o-" + it.id + "-" + o.key, sfx = it.id + "-" + o.key, m = marks(it, o), on = (f) => m.includes(f);
   const mark = (f) => on(f) ? [sr()] : [], tail = (f) => on(f) ? [ne()] : [];
@@ -1081,7 +1081,7 @@ function optCard(it, o, chosen) {
   const body = [
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
     hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
-    h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your uniform ruling (t18)")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
+    h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
     pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" })];
   if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
   const n = list.length;

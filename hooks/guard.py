@@ -50,8 +50,6 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (lanes-start-in-tool-worktrees)
   impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
                        (design-skills)
-  debug-port-ask       ask. A launch with `--remote-debugging-port`, or a WebView2 env value that
-                       holds it. Text that only names the flag passes. (design-skills)
   cite-by-id          deny. A commit message or PR body that cites a record by its path.
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
@@ -2538,11 +2536,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
 
-    # 1e2. A launch that opens a remote-debugging port (design-skills record, rule debug-port-ask).
-    matched = debug_port_hit(stripped)
-    if matched:
-        ask_command("debug-port-ask", DEBUG_PORT_REASON, matched, "debug port")
-
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
     # each segment takes its own bodies: heredoc_offsets counts the headers ahead of it (1c's split)
@@ -2738,52 +2731,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-DATA_TOOL = "ArtifactData"
-WAITING_ITEMS = "items"
-
-
-def _is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
-    with no page reads as unknown, and its calls are not judged."""
-    lint = os.path.join(_HERE, "..", "lint")
-    if lint not in sys.path:
-        sys.path.append(lint)
-    import layout
-    root = _git_root_of(cwd)
-    page = layout.waiting_page(root) if root else "unknown"
-    url = str(tool_input.get("url") or "").rstrip("/")
-    return page != "unknown" and url == page.rstrip("/")
-
-
-def _git_root_of(cwd):
-    here = os.path.realpath(cwd or os.getcwd())
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
 def data_tool_hit(tool_input, cwd=""):
-    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
-    if not isinstance(tool_input, dict):
-        return "", ""
-    if tool_input.get("action") == "batch":
-        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
-    else:
-        entries = [(tool_input.get("action"), tool_input)]
-    writes = [(op, e) for op, e in entries
-              if op in ("set", "update", "str_replace") and e.get("collection") == WAITING_ITEMS]
-    if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
-        return "", ""
+    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
+    filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
     import question_form
-    for op, entry in writes:
-        hit = question_form.item_hit(op, entry)
-        if hit[0]:
-            return hit
-    return "", ""
+    return question_form.page_item_hit(tool_input, cwd)[0]
 
 
 # ------------------------------------------------------------------ impeccable is review-only
@@ -2872,87 +2827,6 @@ def impeccable_command_hit(raw: str) -> str:
             if matched:
                 return matched
     return ""
-
-
-# ------------------------------------------------------------------ a debug port asks
-#
-# docs/decisions/design-skills.md, rule `debug-port-ask`: impeccable 4.8.0
-# tells an agent to open a DevTools port on a desktop app. The port lets any local process drive the
-# app, so the owner answers first. A launch ASKS when a token of its own arguments is the flag, or
-# when a WebView2 environment value holds it. Text that only names the flag is no launch: the flag
-# must be a launched program's argument and carry a value, and a text command's arguments are skipped.
-# A `-ArgumentList` string is read word by word. An argument word also splits on `(`, `)`, `@` and
-# commas, so a PowerShell array (`@("…")`, `'a','b'`) shows its items. The limit: the guard reads no
-# variable it expands (`& app.exe @a`) and no script file, so `bash launch.sh` that holds the flag passes.
-DEBUG_PORT_REASON = ("this command opens a remote-debugging port on an app. Any local process can "
-                     "then drive that app. Answer yes only if you want the port open.")
-DEBUG_PORT_FLAG = "--remote-debugging-port"
-DEBUG_PORT_ENV = re.compile(r"^(?:\$env:)?WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS(?:\+?=(.*))?$", re.I | re.S)
-DEBUG_PORT_ARGUMENT_LISTS = ("-argumentlist", "-args")   # PowerShell's launcher takes its arguments as one string
-# Programs that only search, filter or print text. None launches an app, so their arguments are skipped.
-DEBUG_PORT_TEXT_COMMANDS = {
-    "echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "ag", "ack", "git", "gh", "sed", "awk",
-    "head", "tail", "less", "more", "wc", "diff", "ls", "find", "write-host", "write-output",
-    "select-string", "findstr", "type", "get-content", "pgrep", "where-object", "where",
-    "?", "%", "foreach-object", "sls", "gc"}
-
-
-def debug_port_name(token: str) -> str:
-    """The command word without a path or a `.exe`, in lower case."""
-    name = basename(token).lower()
-    return name[:-4] if name.endswith(".exe") else name
-
-
-def debug_port_segment_hit(segment: str) -> str:
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return ""
-    script = nested_script(tokens)
-    if script:
-        return next((hit for part in split_segments(script)
-                     if (hit := debug_port_segment_hit(part))), "")
-    index = resolve_command(tokens)
-    # A value set ahead of the command (`NAME=v cmd`, `env NAME=v cmd`), alone (`$env:NAME=v`) or by `export`.
-    scope = len(tokens) if index is None else index + 1   # PowerShell's `$env:NAME=v` is the command word itself
-    if index is not None and debug_port_name(tokens[index]) in ("export", "declare", "typeset"):
-        scope = len(tokens)
-    for at, word in enumerate(tokens[:scope]):
-        found = DEBUG_PORT_ENV.match(word)
-        if not found:
-            continue
-        # `NAME=v`, or PowerShell's `$env:NAME = v` and `$env:NAME += v` as three tokens
-        value = found.group(1)
-        if value is None and tokens[at + 1:at + 2] in (["="], ["+="]):
-            value = "".join(tokens[at + 2:at + 3])
-        if value is not None and "remote-debugging-port" in value.lower():
-            return segment.strip()[:100]
-    if index is None or debug_port_name(tokens[index]) in DEBUG_PORT_TEXT_COMMANDS:
-        return ""
-    # The launched program's own arguments, split at array marks; a launcher's argument string is
-    # also read word by word.
-    arguments = []
-    for at, word in enumerate(tokens[index + 1:], index + 1):
-        if tokens[at - 1].lower() in DEBUG_PORT_ARGUMENT_LISTS:
-            arguments += [part.strip("'\"") for part in re.split(r"[\s,()@]+", word) if part]
-        else:
-            arguments += [part for part in re.split(r"[,()@]+", word) if part]
-    # A launch gives the flag a value. A flag with none (`pgrep -f "--remote-debugging-port"`, a
-    # `-match` pattern) is a search for the text, never a launch.
-    for at, word in enumerate(arguments):
-        following = arguments[at + 1:at + 2]
-        if (word == DEBUG_PORT_FLAG and following and not following[0].startswith("-")) \
-                or (word.startswith(DEBUG_PORT_FLAG + "=") and len(word) > len(DEBUG_PORT_FLAG) + 1):
-            return segment.strip()[:100]
-    return ""
-
-
-def debug_port_hit(stripped: str) -> str:
-    """The first segment of a shell command that opens a debug port, else ''. The early return only
-    spares the tokenizer on a command that cannot match."""
-    if "remote-debugging-port" not in stripped.lower():
-        return ""
-    return next((hit for segment in split_segments(stripped) if segment.strip()
-                 and (hit := debug_port_segment_hit(segment))), "")
 
 
 # ------------------------------------------------------------------ simulator boots
