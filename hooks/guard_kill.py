@@ -317,7 +317,8 @@ def kills_group_pid(tokens) -> bool:
 
 
 def _under_init(pid: int) -> bool:
-    """True when the pid's parent is init, or its parent's parent is init (an orphan stub shell)."""
+    """True when the pid's parent is init, or its parent's parent is init (an orphan stub shell).
+    Each level is read once."""
     parent = _ps_ppid(pid)
     return parent == 1 or (bool(parent) and _ps_ppid(parent) == 1)
 
@@ -330,8 +331,9 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
     answer is "" (unknown, so allowed), never a guess. A pid is also owned when its exec
     environment holds `CLAUDE_CODE_SESSION_ID=<session_id>` exactly (`proc_env.holds_session_tag`)
     and its parent is init, or its parent's parent is init (a stranded job under an orphan stub
-    shell). The tag is read on the pid itself, only after the walk says foreign, so an allowed
-    kill costs nothing new. An agent call passes session_id "", so it owns no pid by tag.
+    shell). The tag is read on the pid itself, only after the walk says foreign. That adds at most
+    one `ps` read per level (the pid, then its parent) and one environment read; a pid the walk
+    owns pays nothing more. An agent call passes session_id "", so it owns no pid by tag.
     ponytail: a pid reused since launch reads as foreign; an untagged PPID-1 stub reads foreign;
     stop it through the harness.
     """
