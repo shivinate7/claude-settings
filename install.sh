@@ -118,6 +118,30 @@ is_linked_worktree() {
   [ "$gd" != "$gc" ]
 }
 
+# Canonical path, so C:/x and /c/x compare equal. Prints nothing when DIR is empty or missing.
+canon() { [ -n "$1" ] && ( cd "$1" 2>/dev/null && pwd -P ); }
+# Absolute common git dir of DIR: the same for a clone and every worktree of it.
+common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
+# The main working tree of the repo DIR belongs to: the first entry of the worktree list.
+clone_of() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'; }
+
+# Prints the clone when DIR is its live pin (decision merge-reinstalls-from-main): a linked worktree whose
+# resolved path is the resolved <clone>-live, or is <clone>-live-<12 hex>. Returns 1 for anything else.
+# The pin name has four copies; change all together: this file, hooks/session_start.sh (sh cannot source
+# this file), hooks/guard_frozen.py (LIVE_PIN_SUFFIX) and merge/install_from_main.sh (builds the name).
+live_pin_clone() {
+  is_linked_worktree "$1" || return 1
+  lp_clone=$(clone_of "$1")
+  [ -n "$lp_clone" ] || return 1
+  lp_dir=$(canon "$1")
+  [ -n "$lp_dir" ] || return 1
+  case "$lp_dir" in
+    "$(canon "$lp_clone")"-live-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+    *) [ "$lp_dir" = "$(canon "$lp_clone-live")" ] || return 1 ;;
+  esac
+  printf '%s' "$lp_clone"
+}
+
 # Locate the source files: the clone this script lives in, else fetch from GitHub.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
@@ -142,7 +166,12 @@ else
   PTR_DIR=$(pointer_dir) || PTR_DIR=""
   for cand in "$PTR_DIR" "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
     [ -n "$cand" ] || continue
-    t=$(checkout_at "$cand") && { SRC="$t"; break; }
+    t=$(checkout_at "$cand") || continue
+    # Cloud: the live pin is never the source and never moved; its clone is the source instead.
+    if [ "$CLOUD" = 1 ] && pin_clone=$(live_pin_clone "$t"); then
+      t=$(checkout_at "$pin_clone") || continue
+    fi
+    SRC="$t"; break
   done
 
   # cwd is not documented to be the checkout for every caller (setup script, SessionStart
@@ -167,13 +196,6 @@ else
 
   [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
 fi
-
-# Canonical path, so C:/x and /c/x compare equal. Prints nothing when DIR is empty or missing.
-canon() { [ -n "$1" ] && ( cd "$1" 2>/dev/null && pwd -P ); }
-# Absolute common git dir of DIR: the same for a clone and every worktree of it.
-common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
-# The main working tree of the repo DIR belongs to: the first entry of the worktree list.
-clone_of() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'; }
 
 # True when the pinned checkout $1 is not detached at the clone's local main commit.
 pin_off_main() {
