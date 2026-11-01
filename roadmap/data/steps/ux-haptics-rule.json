@@ -1,0 +1,9 @@
+{
+  "title": "The UX house rules ask apps to consider haptics on controls like sliders",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33778,
+  "why": "shiv, Nov 1 12:18 CST, in chat to triage (page item 124): \"apps should consider integrating haptics on things like sliders to make it feel substantial\".",
+  "note": "Home: docs/design/principles.md (record ux-house-rules), a new rule in its form: a heading id (for example ux-haptics-feel-substantial), one rule line, a Check line and a Source line citing this ruling. Scope as the owner put it: an app on a device with haptics considers them on controls such as sliders, steppers and toggles, so a change feels substantial; the design reviewer checks it. checklist.md gains its line. If the iOS skill's Mockups section should name the platform API (UIFeedbackGenerator, SwiftUI sensoryFeedback), the lane reads Apple's Playing haptics page first and cites it. A rule's text changes, so a record lane (record-writer, reviewer). Done check: the rule and its checklist line are on main and ste-lint passes. Needs no answer.",
+  "updatedAt": "2026-11-01T18:20:00Z"
+}
