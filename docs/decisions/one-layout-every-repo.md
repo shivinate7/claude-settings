@@ -22,6 +22,7 @@ The layout:
   Also `docs/todo.md`, the tasks a session catches.
 - Repos with screens add: `docs/design/` (`DESIGN.md`, `mockups/`, `reference/`); `tokens/tokens.json`;
   `shots/`, ignored by git.
+- Repos with a `map.config.json` add `docs/map/`, the plain-English map that skill plain-english-map writes.
 - A repo names its own extra kinds (home's `records/`) in its extras file, `.claude/layout-extras.json`.
   An extra kind never replaces a core or screen kind. The extras file marks the repo as rolled out only with
   its own key, `"rolled-out": true`. An extras file with no mark leaves the repo at its legacy folders. Its keys

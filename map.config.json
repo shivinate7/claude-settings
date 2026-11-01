@@ -1,0 +1,13 @@
+{
+  "formatVersion": 3,
+  "title": "claude-settings",
+  "codeExtensions": ["py", "mjs", "sh", "js", "ts"],
+  "mapPaths": [
+    "lint/find_copies.py",
+    "hooks/_nowindow.py",
+    "hooks/prose_judge.py",
+    "hooks/decision_watch.py",
+    "hooks/guard.py",
+    "skills/plain-english-map/scripts/lib/lazy-typescript.mjs"
+  ]
+}
