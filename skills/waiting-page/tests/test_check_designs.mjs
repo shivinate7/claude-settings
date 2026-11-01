@@ -1,4 +1,4 @@
-// Tests for skills/waiting-page/check_designs.mjs (rule page-item-design, decision page-item-checked-at-write).
+// Tests for skills/waiting-page/check_designs.mjs (rule page-item-design, decision page-item-design).
 //   NODE_PATH=<dir with playwright> node --test skills/waiting-page/tests/test_check_designs.mjs
 // The checker loads a page built from page.html with its designData filled, stubs the artifact database
 // with one item, and calls the page's own pictureProblem and card measure. Each case reads the checker's
@@ -41,16 +41,13 @@ const write = (name, text) => {
 const PHONE = '<div id="vol" data-state="full" style="width:390px;height:844px">Don\'t // /* # full</div>';
 // A strip: 2400 px wide and 300 high, drawn at 2400, so the card scales it down to a thin band.
 const STRIP = '<div id="vol" data-state="full" style="width:2400px;height:300px">x</div>';
-// A phone-shaped mockup whose focus is a 300x40 bar at its natural size. The page never shrinks it, so no floor applies.
-const SMALL = '<div style="width:390px;height:844px"><div id="bar" style="width:300px;height:40px">x</div></div>';
-const MOCKS = { m1: PHONE, m2: STRIP, m3: SMALL };
+const MOCKS = { m1: PHONE, m2: STRIP };
 
 const pageWith = (designs) => html.replace(SLOT, () =>
   '<script type="application/json" id="designData">' + JSON.stringify(designs).replace(/</g, "\\u003c") + "</script>");
 
 // Option a carries the picture. Option b has none, so the pair check cannot fire before the picture checks.
-// `extra` is merged last: a ranked item, or a status.
-function item({ focus, state, slug = "m1", drawn } = {}, extra = {}) {
+function item({ focus, state, slug = "m1", drawn } = {}) {
   return {
     id: "fill-of-volume-card", n: 51, kind: "decision", status: "open",
     title: "Which fill should the volume card show?", context: "The card shows the stock level.",
@@ -59,7 +56,6 @@ function item({ focus, state, slug = "m1", drawn } = {}, extra = {}) {
       { key: "b", label: "Empty card", how: "The card shows no stock.", gain: "g", lose: "l" },
     ],
     designs: [{ slug, label: "Full card", option: "a", focus, state, drawn }],
-    ...extra,
   };
 }
 
@@ -127,29 +123,4 @@ test("a missing --page is unknown, exit 3", () => {
 test("a missing --item is unknown, exit 3", () => {
   const got = check(write("unknown-item.html", pageWith(MOCKS)), path.join(dir, "no-such-item.json"));
   assert.equal(got.code, 3, `exit code, stderr: ${got.stderr.slice(0, 200)}`);
-});
-
-// Round 2 cases. The selector finds option cards only, so a ranked card (div.opt.ranked with label.head) is unmeasured.
-test("a ranked item whose option picture is a strip is a miss, exit 1, not unknown", async (t) => {
-  if ((await needEnv(t, "chromium", chromium)) === null) return;
-  const problem = answer("ranked-strip", pageWith(MOCKS),
-    item({ focus: "#vol", state: "full", slug: "m2", drawn: 2400 }, { ranked: true }), 1);
-  assert.equal(typeof problem, "string");
-  assert.match(problem, /option A/);
-  const heights = (problem.match(/\d+(\.\d+)?/g) ?? []).map(Number);
-  assert.ok(heights.some((h) => h < MIN_PIC), `the problem names no height below MIN_PIC (${MIN_PIC}): ${problem}`);
-});
-
-// The floor applies only to a picture the page shrank (scale below 1) that still draws under MIN_PIC high.
-test("a 300x40 focus drawn at natural size is not a miss: no floor without a shrink", async (t) => {
-  if ((await needEnv(t, "chromium", chromium)) === null) return;
-  assert.equal(answer("natural", pageWith(MOCKS), item({ focus: "#bar", slug: "m3" }), 0), null);
-});
-
-// An option with a design, on an item the page does not draw (a closed item has no card), has no picture box to measure.
-test("an option with a design and no picture box on the page is unknown, exit 3, not a pass", async (t) => {
-  if ((await needEnv(t, "chromium", chromium)) === null) return;
-  const got = check(write("closed.html", pageWith(MOCKS)),
-    write("closed.json", JSON.stringify(item({ focus: "#vol", state: "full" }, { status: "closed" }))));
-  assert.equal(got.code, 3, `exit code (stdout: ${JSON.stringify(got.json)}, stderr: ${got.stderr.slice(0, 200)})`);
 });

@@ -804,9 +804,9 @@ def page_item_hit(tool_input, cwd=""):
 
 
 def design_writes(writes):
-    """The (doc_id, data) of each set or update in `writes` whose data carries a picture: a non-empty `designs`
-    list, or an option with a `design`. Rule page-item-design reads only these, so a write with no picture
-    never starts the checker. An update is judged on the fields it carries."""
+    """The (op, doc_id, data) of each set or update in `writes` whose data carries a picture: a non-empty
+    `designs` list, or an option with a `design`. Rule page-item-design reads only these, so a write with no
+    picture never starts the checker."""
     found = []
     for op, entry in writes:
         data = _write_data(entry) if op in ("set", "update") else None
@@ -815,7 +815,7 @@ def design_writes(writes):
         options = data.get("options")
         has_option = isinstance(options, list) and any(isinstance(o, dict) and o.get("design") for o in options)
         if data.get("designs") or has_option:
-            found.append((entry.get("doc_id"), data))
+            found.append((op, entry.get("doc_id"), data))
     return found
 
 

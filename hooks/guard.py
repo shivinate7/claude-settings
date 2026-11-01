@@ -2830,13 +2830,16 @@ def page_stale_hit(tool_input, cwd):
 
 # ------------------------------------------------------------------ a design picture is checked at write
 #
-# Rule `page-item-design` (decision page-item-checked-at-write). An ArtifactData set or update of a waiting item
+# Rule `page-item-design` (decision page-item-design). An ArtifactData set or update of a waiting item
 # whose data carries `designs` or an option `design` runs skills/waiting-page/check_designs.mjs against the page
-# file the last allowed publish recorded (stale_pages.PUBLISHED). The checker runs the page's own code, so the
-# sentence a miss quotes is the page's. A miss denies. Unknown (no node, no record, the file gone, the checker
+# file the last allowed publish stamped (stale_pages.PUBLISHED). The checker runs the page's own code, so the
+# sentence a miss quotes is the page's. A miss denies. Unknown (no node, no stamp, the file gone, the checker
 # unable to render, a run past its cap) allows and logs one `noted` line. A write with no picture starts no node.
 CHECK_DESIGNS = "check_designs.mjs"
-CHECK_DESIGNS_CAP = 45  # seconds; the checker caps itself at 20, and the hook timeout is 60
+CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
+# One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
+PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
+_design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
 PAGE_ITEM_DESIGN_FIX = " Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
@@ -2850,15 +2853,18 @@ def _run_check_designs(page_file, item):
     folder = _waiting_page_folder(CHECK_DESIGNS)
     if node is None or folder is None:
         return 3, "node is not installed" if node is None else CHECK_DESIGNS + " not found"
+    cap = CHECK_DESIGNS_CAP
+    if _design_deadline[0] is not None:
+        cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
     with tempfile.TemporaryDirectory() as scratch:
         item_file = os.path.join(scratch, "item.json")
         with open(item_file, "w", encoding="utf-8") as handle:
             json.dump(item, handle)
         try:
             run = subprocess.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
-                                 capture_output=True, text=True, timeout=CHECK_DESIGNS_CAP)
+                                 capture_output=True, text=True, timeout=cap)
         except subprocess.TimeoutExpired:
-            return 3, "no answer in %d s" % CHECK_DESIGNS_CAP
+            return 3, "no answer in %d s" % cap
         except OSError as err:
             return 3, str(err.strerror or err)
     lines = run.stdout.strip().splitlines()
@@ -2875,9 +2881,19 @@ def _run_check_designs(page_file, item):
 
 def page_design_hit(writes, tool_input, cwd):
     """(reason, matched) for the first write in `writes` whose picture the page would refuse, else None. A write
-    with no picture leaves before the record is read. Fails open on any unread state."""
+    with no picture leaves before the record is read. A set is judged whole. An update is judged only when it
+    carries both `options` and `designs`: the checker needs the other half, which the write does not hold, so a
+    partial update is allowed with one noted line. The pictured items of one call share one deadline. Fails open
+    on any unread state."""
     import question_form
-    pictured = question_form.design_writes(writes)
+    pictured = []
+    for op, doc_id, data in question_form.design_writes(writes):
+        if op == "update" and not (data.get("options") and data.get("designs")):
+            record(DATA_TOOL, "noted", "page-item-design",
+                   "partial: an update of item %s carries only %s, so its picture is not checked"
+                   % (cap_safe(str(doc_id or data.get("id") or "?"), 40), "options" if data.get("options") else "designs"))
+            continue
+        pictured.append((doc_id, data))
     if not pictured:
         return None
     try:
@@ -2892,17 +2908,27 @@ def page_design_hit(writes, tool_input, cwd):
         return None
     if not page_file or not os.path.isfile(page_file):
         record(DATA_TOOL, "noted", "page-item-design",
-               "unknown: " + ("no published page recorded" if not page_file else "the recorded page file is gone"))
+               "unknown: " + ("no published page stamped" if not page_file else "the stamped page file is gone"))
         return None
-    for doc_id, data in pictured:
-        try:
-            code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
-        except Exception as err:
-            code, text = 3, type(err).__name__ + ": " + str(err)
-        if code == 1:
-            return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
-        if code != 0:
-            record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    deadline = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
+    _design_deadline[0] = deadline
+    try:
+        for done, (doc_id, data) in enumerate(pictured):
+            if time.monotonic() >= deadline:
+                record(DATA_TOOL, "noted", "page-item-design",
+                       "unknown: the %d s budget of this call is spent, %d item(s) not checked"
+                       % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
+                return None
+            try:
+                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+            except Exception as err:
+                code, text = 3, type(err).__name__ + ": " + str(err)
+            if code == 1:
+                return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
+            if code != 0:
+                record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    finally:
+        _design_deadline[0] = None
     return None
 
 
