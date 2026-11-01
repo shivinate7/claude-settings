@@ -218,6 +218,7 @@ $marker
 # changed installer or hook body still lands without a manual re-run.
 # Runs only when the checked-out branch is main, so a local merge of an unreviewed branch
 # (into any other branch) never pushes its settings.json into ~/.claude.
+# This hook lands files but removes none, and keeps no manifest: install.ps1 does that.
 repo="`$(git rev-parse --show-toplevel)"
 branch="`$(git rev-parse --abbrev-ref HEAD)"
 if [ "`$branch" != "main" ]; then
@@ -369,17 +370,11 @@ function Write-Pointer([string]$RepoDir, [string]$ClaudeDir) {
 Write-Pointer -RepoDir $RepoDir -ClaudeDir $ClaudeDir
 
 # ---- agents\ and lint\ : per-file symlinks, copy fallback -----------------------------------------
-# After landing every file the source defines now, prune a destination entry this same loop
-# symlinked on an earlier run, for a source file that has since gone away. Mirrors install.sh's
-# land_dir() prune: see the comment above land_dir() there for the reasoning and the three
-# tests. A prune candidate must be a symlink, its target must sit inside $srcDir (never a
-# hand-made link elsewhere), and that target must no longer exist. A regular file (including a
-# ".bak.*" file this loop writes above) fails the first test and is left alone.
-#
-# When symlinks are not permitted, this loop falls back to Copy-Item, same as install.sh's
-# cloud mode. That copy is pruned no more than install.sh prunes a cloud copy: a copied file
-# carries no mark of which source made it, so this loop does not remove it. It is left in
-# place as a documented gap, same reasoning as install.sh's cloud-mode comment.
+# Each file or skill folder git lists under the clone lands, as a link or, when symlinks are not
+# permitted, a copy (Copy-Item, same as install.sh's cloud mode), and goes into the install manifest
+# (see the comment above Test-Shipped). A later run removes a recorded entry main no longer ships, only
+# when it still matches its record, so a copy is removed as surely as a link, and a person's own file or
+# link is never touched. A link is no longer pruned because it dangles.
 # The set of directories landed here comes from landed-dirs.txt at the repo root, the single
 # source the embedded post-merge hook above reads too, and that install.sh reads on
 # Linux/macOS (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a deliberately
@@ -557,6 +552,126 @@ function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) 
     }
     return $how
 }
+# ---- install manifest: what a run landed, so a later run removes what main stopped shipping ----------
+# The same format and rules as install.sh (see the comment above its MANIFEST). $ClaudeDir\backups\
+# install-manifest.txt holds one line per landed entry, outside every landed folder: <sub>/<name>, a tab,
+# l (link), f (file) or d (folder), a tab, the link target, the file hash or the folder tree hash.
+# After landing, a recorded entry that main no longer ships is removed, only when it still matches its
+# record; a mismatch is the person's own, kept and logged. A folder whose landing failed, or a run that
+# failed, removes nothing. With no manifest yet (the first run of this version), only the names in
+# retired-files.txt are acted on. "Shipped": git lists the path under the clone (tracked, or untracked and
+# not ignored); a clone with no .git ships what exists; a git read that fails counts as shipped.
+$ManifestPath = Join-Path (Join-Path $ClaudeDir 'backups') 'install-manifest.txt'
+$RetiredDir   = Join-Path (Join-Path $ClaudeDir 'backups') 'retired'
+$LandedList   = [System.Collections.Generic.List[object]]::new()   # @{ Rel; Dest } for each entry the run landed or kept
+$FailedSubs   = @{}
+
+function Test-Shipped([string]$Rel) {
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) { return (Test-Path -LiteralPath (Join-Path $RepoDir $Rel)) }
+    $raw = Get-Git -C $RepoDir ls-files --cached --others --exclude-standard -- ":(literal)$Rel"
+    if ($LASTEXITCODE -ne 0) { return $true }
+    return (@($raw | Where-Object { "$_".Trim() }).Count -gt 0)
+}
+function Get-FileSha([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+# The tree hash install.sh computes: each file's "./path hash" line, sorted, one hash over all lines.
+function Get-TreeSha([string]$Dir) {
+    $root = (Get-Item -LiteralPath $Dir).FullName.TrimEnd('\', '/')
+    [string[]]$lines = @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force | ForEach-Object {
+        './' + ($_.FullName.Substring($root.Length + 1) -replace '\\', '/') + ' ' + (Get-FileSha $_.FullName)
+    })
+    [Array]::Sort($lines, [StringComparer]::Ordinal)
+    $text = if ($lines.Count) { ($lines -join "`n") + "`n" } else { '' }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    return ([BitConverter]::ToString($sha.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($text))) -replace '-', '').ToLowerInvariant()
+}
+# What sits at $Rel now, as "<kind>`t<value>", or $null when nothing does.
+function Get-LandedState([string]$Rel) {
+    $p = Join-Path $ClaudeDir $Rel
+    $i = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+    if (-not $i) { return $null }
+    if ($i.LinkType) { return "l`t$(@($i.Target)[0])" }
+    if ($i.PSIsContainer) { return "d`t$(Get-TreeSha $p)" }
+    return "f`t$(Get-FileSha $p)"
+}
+function Test-ProtectedName([string]$Rel) {
+    $n = ($Rel -replace '\\', '/').Split('/')[-1]
+    return ($n -eq 'guard.d' -or $n -like '*.bak.*' -or $n -like '*.cs-old' -or $n -like '*.cs-new')
+}
+function Move-ToRetired([string]$Rel) {
+    $p = Join-Path $ClaudeDir $Rel
+    New-Item -ItemType Directory -Force -Path $RetiredDir | Out-Null
+    $to = Join-Path $RetiredDir (($Rel -replace '[\\/]', '-') + '.' + (Get-Date -Format yyyyMMddHHmmss))
+    if (Test-Path -LiteralPath $to) { $to = "$to.$PID" }
+    Move-Item -LiteralPath $p -Destination $to
+    Log "moved $p to $to (main no longer ships $Rel)"
+}
+# True when nothing may be removed under $Sub this run: a failed run, a folder whose landing failed, or a
+# folder git lists nothing under.
+function Test-RetireBlocked([string]$Sub) {
+    if ($AgentFailed -or $GuardStageFailed -or $FailedSubs.ContainsKey($Sub)) { return $true }
+    return (-not (Test-Shipped $Sub))
+}
+
+# Runs once, after every folder landed and every failed file was retried. Writes the manifest atomically.
+function Complete-Retire {
+    $newLines = [System.Collections.Generic.List[string]]::new()
+    $landed = @{}
+    foreach ($e in $LandedList) {
+        if ($StillFailed.Contains($e.Dest)) { continue }
+        $state = Get-LandedState $e.Rel
+        if ($state) { $landed[$e.Rel] = $true; $newLines.Add("$($e.Rel)`t$state") }
+    }
+    $pending = $false
+    if (Test-Path -LiteralPath $ManifestPath) {
+        foreach ($line in @(Get-Content -LiteralPath $ManifestPath)) {
+            $f = $line -split "`t", 3
+            if ($f.Count -ne 3 -or -not $f[0] -or $landed.ContainsKey($f[0]) -or (Test-ProtectedName $f[0])) { continue }
+            $rel = $f[0]; $sub = $rel.Substring(0, [Math]::Max($rel.LastIndexOf('/'), 0))
+            if ((Test-Shipped $rel) -or (Test-RetireBlocked $sub)) { $newLines.Add($line); continue }
+            $cur = Get-LandedState $rel
+            if ($null -eq $cur) { continue }
+            $dest = Join-Path $ClaudeDir $rel
+            if ($cur -ceq "$($f[1])`t$($f[2])") {
+                try {
+                    Remove-Leftover $dest
+                    Log "removed $dest (main no longer ships $rel)"
+                    if ($rel -like 'skills/*') { Remove-Item -LiteralPath (Join-Path (Join-Path (Join-Path $ClaudeDir 'backups') 'skill-copies') $rel.Substring(7)) -Force -ErrorAction SilentlyContinue }
+                } catch { Log "could not remove $dest ($($_.Exception.Message)); left in place" }
+            } else {
+                Log "kept ${dest}: it is not what the last install put there, so it is yours; main no longer ships $rel"
+            }
+        }
+    } else {
+        $listPath = Join-Path $RepoDir 'retired-files.txt'
+        if (Test-Path -LiteralPath $listPath) {
+            foreach ($raw in @(Get-Content -LiteralPath $listPath)) {
+                $rel = ($raw -replace '#.*', '').Trim()
+                if (-not $rel -or $rel -notmatch '/' -or (Test-ProtectedName $rel) -or (Test-Shipped $rel)) { continue }
+                if (Test-RetireBlocked $rel.Substring(0, $rel.LastIndexOf('/'))) { $pending = $true; continue }
+                $dest = Join-Path $ClaudeDir $rel
+                $i = Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
+                if (-not $i) { continue }
+                try {
+                    if ($i.LinkType) {
+                        $tgt = [string]@($i.Target)[0]
+                        if ($tgt.StartsWith($RepoDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar) -or $tgt.StartsWith($RepoDir.TrimEnd('\', '/') + '/')) {
+                            Remove-Leftover $dest; Log "removed $dest (main no longer ships $rel)"
+                        }
+                    } else { Move-ToRetired $rel }
+                } catch { Log "could not retire $dest ($($_.Exception.Message)); left in place"; $pending = $true }
+            }
+        }
+    }
+    if ($pending) { return }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $ManifestPath) | Out-Null
+        [string[]]$sorted = $newLines.ToArray()
+        [Array]::Sort($sorted, [StringComparer]::Ordinal)
+        $tmp = "$ManifestPath.cs-new"
+        [IO.File]::WriteAllText($tmp, $(if ($sorted.Count) { ($sorted -join "`n") + "`n" } else { '' }), [Text.UTF8Encoding]::new($false))
+        Move-OverFile $tmp $ManifestPath
+    } catch { Log "WARN: could not write ${ManifestPath}: $($_.Exception.Message)" }
+}
 # Copy mode, the guard files (install-hooks-whole). A guard run sees the old set or the
 # new set, never a mix. Step 1 (here) writes every guard file, stamped with this run's id, into
 # hooks\guard.d\<id>\, where no guard reads it yet. Step 2 is the landing loop below, which lands
@@ -631,9 +746,11 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             catch { Log "could not move $($old.FullName) to $to ($($_.Exception.Message)); left in place" }
         }
         foreach ($src in @(Get-ChildItem -Path $srcDir -Directory -ErrorAction SilentlyContinue)) {
+            # A folder with no file git lists (retired, or only ignored files) is not landed.
+            if (-not (Test-Shipped "$sub/$($src.Name)")) { continue }
             $dest = Join-Path $destDir $src.Name
             $cur  = Get-Item $dest -ErrorAction SilentlyContinue
-            if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
+            if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { $LandedList.Add(@{ Rel = "$sub/$($src.Name)"; Dest = $dest }); continue }
             # A real directory (or a symlink pointing elsewhere) at $dest: on the first
             # local install ever, it is a person's own hand-made skill, backed up. After
             # that, it is this same installer's own earlier copy, from a no-symlink-rights
@@ -645,7 +762,8 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             if ($keep) { New-Item -ItemType Directory -Force -Path $skillBakDir | Out-Null }
             $old  = if ($keep) { $bak } else { "$dest.cs-old" }
             $how  = Install-Dir $src.FullName $dest $old $keep
-            if ($how -eq 'failed') { $AgentFailed = $true; continue }
+            if ($how -eq 'failed') { $AgentFailed = $true; $FailedSubs[$sub] = $true; continue }
+            $LandedList.Add(@{ Rel = "$sub/$($src.Name)"; Dest = $dest })
             if ($keep) { Log "existing $dest moved to $bak" }
             if ($how -eq 'linked') {
                 Log "linked $dest -> $($src.FullName)"
@@ -653,15 +771,6 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
                 $AgentCopied = $true
                 Log "copied $dest (symlink not permitted)"
             }
-        }
-        foreach ($entry in @(Get-ChildItem -Path $destDir -Directory -ErrorAction SilentlyContinue)) {
-            if ($entry.LinkType -ne 'SymbolicLink') { continue }
-            $tgt = @($entry.Target)[0]
-            if (-not $tgt) { continue }
-            if ((Split-Path $tgt -Parent) -ne $srcDir) { continue }
-            if (Test-Path $tgt) { continue }
-            Remove-Item $entry.FullName
-            Log "removed stale $($entry.FullName) (source $tgt no longer exists)"
         }
         continue
     }
@@ -673,9 +782,11 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
     if ($GuardSetMode -and $sub -eq 'hooks') { $srcFiles = @($srcFiles | Sort-Object @{ Expression = { $_.Name -cne 'guard.py' } }, Name) }
     foreach ($src in $srcFiles) {
         if ($GuardStageFailed -and $sub -eq 'hooks' -and (Test-StampTarget $src.Name)) { continue }
+        # A file git does not list (retired, or ignored) is not landed.
+        if (-not (Test-Shipped "$sub/$($src.Name)")) { continue }
         $dest = Join-Path $destDir $src.Name
         $cur  = Get-Item $dest -ErrorAction SilentlyContinue
-        if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { continue }
+        if ($cur -and $cur.LinkType -eq 'SymbolicLink' -and $cur.Target -eq $src.FullName) { $LandedList.Add(@{ Rel = "$sub/$($src.Name)"; Dest = $dest }); continue }
         # A real file (or a symlink pointing elsewhere) at $dest: on the first local
         # install ever, it is a person's own file, backed up. After that, it is this same
         # installer's own earlier copy, from a no-symlink-rights machine where the symlink
@@ -688,6 +799,9 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             Log "existing $dest backed up to $bak"
         }
         $how = Install-File $src.FullName $dest
+        # A file that failed is retried by Resolve-Failures; Complete-Retire records it only if it landed.
+        $LandedList.Add(@{ Rel = "$sub/$($src.Name)"; Dest = $dest })
+        if ($how -eq 'failed') { $FailedSubs[$sub] = $true }
         if ($how -eq 'linked') {
             Log "linked $dest -> $($src.FullName)"
         } elseif ($how -eq 'copied') {
@@ -696,17 +810,6 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
         }
         # A 'failed' file is in $FailedFiles; Resolve-Failures retries it and sets $AgentFailed only
         # for a file that still fails, so a recovered file does not read as failed.
-    }
-    foreach ($entry in @(Get-ChildItem -Path $destDir -File -ErrorAction SilentlyContinue)) {
-        if ($entry.LinkType -ne 'SymbolicLink') { continue }
-        # .Target can come back as a one-element array depending on PowerShell version;
-        # take the first (only) element either way.
-        $tgt = @($entry.Target)[0]
-        if (-not $tgt) { continue }
-        if ((Split-Path $tgt -Parent) -ne $srcDir) { continue }
-        if (Test-Path $tgt) { continue }
-        Remove-Item $entry.FullName
-        Log "removed stale $($entry.FullName) (source $tgt no longer exists)"
     }
 }
 # A folder an earlier install landed and the repo has since moved: ux, now docs\design (decision
@@ -796,6 +899,7 @@ function Resolve-Failures {
 Resolve-Failures
 if ($GuardSetMode) { Remove-StaleSets }
 if ($StillFailed.Count -gt 0) { $AgentFailed = $true }
+Complete-Retire
 
 # 'copy+failed': some files were copied and at least one replace failed (the run prints which).
 $AgentsMode = if ($AgentCopied -and $AgentFailed) { 'copy+failed' } elseif ($AgentCopied) { 'copy' } elseif ($AgentFailed) { 'kept' } else { 'symlink' }

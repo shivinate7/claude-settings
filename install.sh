@@ -518,6 +518,128 @@ fi
 
 mkdir -p "$CLAUDE_DIR"
 
+# ---- install manifest: what an install landed, so a later one removes what main stopped shipping ------
+# $CLAUDE_DIR/backups/install-manifest.txt holds one line per landed entry, outside every landed folder
+# so a copy cannot corrupt the record that proves it: <sub>/<name>, a tab, what it was (l for a link, f
+# for a file, d for a folder), a tab, its value (the link target, the file hash, the folder tree hash).
+# After landing, a recorded entry that main no longer ships is removed, only when it still matches its
+# record; a mismatch is the person's own, kept and logged. A folder whose landing failed, or a run that
+# failed, removes nothing. With no manifest yet (the first run of this version), only the names in
+# retired-files.txt are acted on. install.ps1 keeps the same format and rules.
+# "Shipped": git lists the path under $SRC (tracked, or untracked and not ignored). A $SRC that is not a
+# git checkout (a tarball) ships what exists. A git read that fails counts as shipped: never remove on doubt.
+MANIFEST="$CLAUDE_DIR/backups/install-manifest.txt"
+RETIRED_DIR="$CLAUDE_DIR/backups/retired"
+TAB=$(printf '\t')
+NL='
+'
+HAVE_MANIFEST=0; OLD_RECORD=""
+if [ -f "$MANIFEST" ]; then HAVE_MANIFEST=1; OLD_RECORD=$(cat "$MANIFEST"); fi
+NEW_RECORD=""
+FAILED_SUBS=""
+GIT_SRC=0; [ ! -e "$SRC/.git" ] || GIT_SRC=1
+
+shipped() {
+  [ "$GIT_SRC" = 1 ] || { [ -e "$SRC/$1" ]; return; }
+  ship_out=$(git -C "$SRC" ls-files --cached --others --exclude-standard -- ":(literal)$1" 2>/dev/null) || return 0
+  [ -n "$ship_out" ]
+}
+
+# A folder whose landing failed removes nothing this run.
+land_failed() { FAILED_SUBS="$FAILED_SUBS $1 "; }
+
+# note_landed SUB NAME: record what sits at the destination now.
+note_landed() {
+  nl_p="$1/$2"; nl_d="$CLAUDE_DIR/$nl_p"
+  if [ -L "$nl_d" ]; then nl_v="l$TAB$(readlink "$nl_d")"
+  elif [ -d "$nl_d" ]; then nl_v="d$TAB$(tree_hash "$nl_d")"
+  elif [ -f "$nl_d" ]; then nl_v="f$TAB$(sha256_of < "$nl_d")"
+  else return 0; fi
+  NEW_RECORD="$NEW_RECORD$nl_p$TAB$nl_v$NL"
+}
+
+# Names the retire pass never touches, whatever a list or a record says.
+protected_name() {
+  case "${1##*/}" in guard.d|*.bak.*|*.cs-old|*.cs-new) return 0 ;; esac
+  return 1
+}
+
+# remove_recorded PATH KIND VALUE: remove the destination only when it still is what the record says.
+remove_recorded() {
+  rr_d="$CLAUDE_DIR/$1"
+  [ -e "$rr_d" ] || [ -L "$rr_d" ] || return 0
+  rr_match=0
+  case "$2" in
+    l) [ -L "$rr_d" ] && [ "$(readlink "$rr_d")" = "$3" ] && rr_match=1 ;;
+    f) [ -f "$rr_d" ] && [ ! -L "$rr_d" ] && [ "$(sha256_of < "$rr_d")" = "$3" ] && rr_match=1 ;;
+    d) [ -d "$rr_d" ] && [ ! -L "$rr_d" ] && [ "$(tree_hash "$rr_d")" = "$3" ] && rr_match=1 ;;
+  esac
+  if [ "$rr_match" = 1 ]; then
+    rm -rf "$rr_d" && log "removed $rr_d (main no longer ships $1)"
+    case "$1" in skills/*) rm -f "$SKILL_COPY_DIR/${1#skills/}" ;; esac
+  else
+    log "kept $rr_d: it is not what the last install put there, so it is yours; main no longer ships $1"
+  fi
+}
+
+# retire_blocked SUB: true when nothing may be removed under SUB this run.
+retire_blocked() {
+  [ "$INSTALL_FAILED" != 0 ] && return 0
+  case "$FAILED_SUBS" in *" $1 "*) return 0 ;; esac
+  shipped "$1" || return 0
+  return 1
+}
+
+# retire_recorded: remove recorded entries main stopped shipping. Prints the old lines that stay recorded.
+retire_recorded() {
+  printf '%s\n' "$OLD_RECORD" | while IFS="$TAB" read -r rp rk rv; do
+    [ -n "$rp" ] || continue
+    case "$NEW_RECORD" in "$rp$TAB"*|*"$NL$rp$TAB"*) continue ;; esac
+    protected_name "$rp" && continue
+    if shipped "$rp"; then printf '%s\n' "$rp$TAB$rk$TAB$rv"; continue; fi
+    if retire_blocked "${rp%/*}"; then printf '%s\n' "$rp$TAB$rk$TAB$rv"; continue; fi
+    remove_recorded "$rp" "$rk" "$rv" >&2
+  done
+}
+
+# retire_listed: first run, no manifest. Act only on names in retired-files.txt (the format of
+# landed-dirs.txt) that main does not ship. A link into $SRC is removed; a real file or folder is moved to
+# backups/retired, never deleted. Prints PENDING when a name was held back, so the manifest is not written yet.
+retire_listed() {
+  [ -f "$SRC/retired-files.txt" ] || return 0
+  while IFS= read -r lp || [ -n "$lp" ]; do
+    lp=$(printf '%s' "$lp" | tr -d '\r' | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$lp" ] || continue
+    case "$lp" in */*) ;; *) continue ;; esac
+    protected_name "$lp" && continue
+    shipped "$lp" && continue
+    if retire_blocked "${lp%/*}"; then echo PENDING; continue; fi
+    ld="$CLAUDE_DIR/$lp"
+    if [ -L "$ld" ]; then
+      case "$(readlink "$ld")" in "$SRC"/*) rm -f "$ld" && log "removed $ld (main no longer ships $lp)" >&2 ;; esac
+    elif [ -e "$ld" ]; then
+      mkdir -p "$RETIRED_DIR" || { echo PENDING; continue; }
+      lto="$RETIRED_DIR/$(printf '%s' "$lp" | tr / -).$(date +%Y%m%d%H%M%S)"
+      [ ! -e "$lto" ] || lto="$lto.$$"
+      if mv "$ld" "$lto"; then log "moved $ld to $lto (main no longer ships $lp)" >&2; else echo PENDING; fi
+    fi
+  done < "$SRC/retired-files.txt"
+}
+
+# retire_and_record: after every folder landed. Writes the manifest atomically (temp file, then rename).
+retire_and_record() {
+  if [ "$HAVE_MANIFEST" = 1 ]; then
+    kept=$(retire_recorded)
+    [ -z "$kept" ] || NEW_RECORD="$NEW_RECORD$kept$NL"
+  else
+    pending=$(retire_listed)
+    [ -z "$pending" ] || return 0
+  fi
+  mkdir -p "$CLAUDE_DIR/backups" || return 0
+  printf '%s' "$NEW_RECORD" | LC_ALL=C sort > "$MANIFEST.cs-new" && mv -f "$MANIFEST.cs-new" "$MANIFEST" \
+    || { rm -f "$MANIFEST.cs-new"; log "WARN: could not write $MANIFEST"; }
+}
+
 # A real file where land_dir()/land_skills_dir() expect a symlink is
 # either a person's own pre-existing file (first local install ever: back it up) or this same
 # installer's own earlier copy, left by a no-symlink-rights `ln -sfn` fallback on a prior local
@@ -578,46 +700,41 @@ land_guard_set() {
 # agents/: one file per role (builder, reviewer). lint/: the STE linter and the report guard.
 # Local: per-file symlink. Cloud: copy.
 #
-# Local mode also prunes: after landing every file the source defines now, it removes a
-# destination entry that this same function linked on an earlier run, for a source file
-# that has since gone away. Without this, "$DEST_DIR" holds the UNION of every file that
-# has ever existed in "$SRC/$sub" across every install, not the set the current ref
-# defines. A prune candidate must pass all three tests: it is a symlink (never a regular
-# file, so a person's own file is never touched), its target sits inside "$SRC/$sub"
-# (never a symlink land_dir did not create, so a hand-made link elsewhere is left alone),
-# and that target no longer exists (so a live link is left alone too). A ".bak.*" file
-# this function writes below is a regular file, so it already fails the first test.
-#
-# Cloud mode does not prune. A cloud install copies bytes, not links, so a landed file
-# in "$DEST_DIR" carries no mark of which source file made it or whether that source
-# still exists. Proving a copy is stale needs a manifest recording what the last run
-# landed, kept outside "$DEST_DIR" so the copies cannot corrupt the record that would
-# prune them. That manifest is a real feature, not a line fix, and is left for a
-# separate change. Until then, cloud mode accumulates stale copies for any source file
-# removed after a cloud install has run: a real file with stale content, and it never
-# dangles, so no "[ -f ]" hook guard catches it either.
+# Both modes land only files git lists under "$SRC/$sub" (shipped, see above), and record each one in
+# the install manifest. A later run removes a recorded entry main no longer ships (retire_and_record,
+# after every folder landed), so "$DEST_DIR" does not keep the union of every file that has ever
+# existed. Nothing here prunes by looking at a dangling link: a link or copy is removed only when the
+# manifest recorded it and it still matches its record, so a person's own file or link is never touched.
+# A failed link or copy, or a failed guard set, marks the folder, and nothing under it is removed this run.
 land_dir() {
   sub="$1"
   DEST_DIR="$CLAUDE_DIR/$sub"
-  mkdir -p "$DEST_DIR"
+  mkdir -p "$DEST_DIR" || land_failed "$sub"
   LANDED=""
   GUARD_SET=0; GUARD_OK=0
   if [ "$CLOUD" = 1 ] && [ "$sub" = hooks ]; then
     GUARD_SET=1
-    land_guard_set "$SRC/hooks" "$DEST_DIR" && GUARD_OK=1
+    if land_guard_set "$SRC/hooks" "$DEST_DIR"; then GUARD_OK=1; else land_failed "$sub"; fi
   fi
   for f in "$SRC/$sub"/*; do
     [ -f "$f" ] || continue
+    # A file git does not list (retired, or ignored) is not landed.
+    shipped "$sub/$(basename "$f")" || continue
     # The guard files landed above, as one set.
     case "$(basename "$f")" in
       guard.py|guard_*.py)
-        if [ "$GUARD_SET" = 1 ]; then [ "$GUARD_OK" = 1 ] && LANDED="$LANDED $(basename "$f")"; continue; fi ;;
+        if [ "$GUARD_SET" = 1 ]; then
+          [ "$GUARD_OK" = 1 ] || continue
+          LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")"; continue
+        fi ;;
     esac
     DEST="$DEST_DIR/$(basename "$f")"
     if [ "$CLOUD" = 1 ]; then
-      put_file "$f" "$DEST" || continue
+      put_file "$f" "$DEST" || { land_failed "$sub"; continue; }
     else
-      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then LANDED="$LANDED $(basename "$f")"; continue; fi
+      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$f" ]; then
+        LANDED="$LANDED $(basename "$f")"; note_landed "$sub" "$(basename "$f")"; continue
+      fi
       # A real file at DEST (not a symlink): on the first local install ever, it is a
       # person's own file, backed up. After that, a real file here is this same
       # installer's own earlier copy (`ln -sfn` fell back to copying it on a
@@ -631,26 +748,12 @@ land_dir() {
           rm -f "$DEST"
         fi
       fi
-      ln -sfn "$f" "$DEST"
+      ln -sfn "$f" "$DEST" || { land_failed "$sub"; continue; }
     fi
     LANDED="$LANDED $(basename "$f")"
+    note_landed "$sub" "$(basename "$f")"
   done
   [ -n "$LANDED" ] && log "$sub in $DEST_DIR:$LANDED"
-  if [ "$CLOUD" != 1 ]; then
-    PRUNED=""
-    for d in "$DEST_DIR"/*; do
-      [ -L "$d" ] || continue
-      target=$(readlink "$d")
-      case "$target" in
-        "$SRC/$sub"/*) ;;
-        *) continue ;;
-      esac
-      [ -e "$target" ] && continue
-      rm -f "$d"
-      PRUNED="$PRUNED $(basename "$d")"
-    done
-    [ -n "$PRUNED" ] && log "$sub in $DEST_DIR: pruned (source removed):$PRUNED"
-  fi
 }
 
 # Skill backups never land inside skills/ or any folder Claude Code scans: a backup there loads as
@@ -706,12 +809,14 @@ move_old_skill_baks() {
 # candidate, never backed up, never pruned.
 land_skills_dir() {
   DEST_DIR="$CLAUDE_DIR/skills"
-  mkdir -p "$DEST_DIR"
+  mkdir -p "$DEST_DIR" || land_failed skills
   move_old_skill_baks
   LANDED=""
   for d in "$SRC/skills"/*; do
     [ -d "$d" ] || continue
     name=$(basename "$d")
+    # A folder with no file git lists (retired, or only ignored files) is not landed.
+    shipped "skills/$name" || continue
     DEST="$DEST_DIR/$name"
     if [ "$CLOUD" = 1 ]; then
       # Our own earlier copy is replaced with no backup. It is ours when its tree hash is the
@@ -725,11 +830,13 @@ land_skills_dir() {
           backup_skill "$DEST" "$name"
         fi
       fi
-      cp -r "$d" "$DEST"
+      cp -r "$d" "$DEST" || { land_failed skills; continue; }
       mkdir -p "$SKILL_COPY_DIR"
       tree_hash "$DEST" > "$SKILL_COPY_DIR/$name"
     else
-      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then LANDED="$LANDED $name"; continue; fi
+      if [ -L "$DEST" ] && [ "$(readlink "$DEST")" = "$d" ]; then
+        LANDED="$LANDED $name"; note_landed skills "$name"; continue
+      fi
       # A real directory at DEST (not a symlink): on the first local install ever, it is a
       # person's own hand-made skill, backed up. After that, a real directory here is this
       # same installer's own earlier copy, from a no-symlink-rights machine where `ln -sfn`
@@ -741,26 +848,12 @@ land_skills_dir() {
           rm -rf "$DEST"
         fi
       fi
-      ln -sfn "$d" "$DEST"
+      ln -sfn "$d" "$DEST" || { land_failed skills; continue; }
     fi
     LANDED="$LANDED $name"
+    note_landed skills "$name"
   done
   [ -n "$LANDED" ] && log "skills in $DEST_DIR:$LANDED"
-  if [ "$CLOUD" != 1 ]; then
-    PRUNED=""
-    for e in "$DEST_DIR"/*; do
-      [ -L "$e" ] || continue
-      target=$(readlink "$e")
-      case "$target" in
-        "$SRC/skills"/*) ;;
-        *) continue ;;
-      esac
-      [ -e "$target" ] && continue
-      rm -f "$e"
-      PRUNED="$PRUNED $(basename "$e")"
-    done
-    [ -n "$PRUNED" ] && log "skills in $DEST_DIR: pruned (source removed):$PRUNED"
-  fi
 }
 # The set of directories landed above comes from landed-dirs.txt at the repo root, the single
 # source install.ps1 reads too (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a
@@ -771,6 +864,7 @@ while IFS= read -r sub || [ -n "$sub" ]; do
   [ -n "$sub" ] || continue
   if [ "$sub" = "skills" ]; then land_skills_dir; else land_dir "$sub"; fi
 done < "$SRC/landed-dirs.txt"
+retire_and_record
 
 # A folder an earlier install landed and the repo has since moved: ux, now docs/design (decision
 # ux-house-rules). Local mode removes its dangling links into "$SRC/ux", the same test land_dir
@@ -819,18 +913,6 @@ if [ "$CLOUD" = 1 ] && ! command -v pipx >/dev/null 2>&1; then
     printf '%s\n' "$pipx_out" | tail -n 5 | while IFS= read -r l; do log "  $l"; done
   fi
 fi
-
-# Stale files from the old Banchi janitor. Nothing runs them, and bin/claude-janitor now runs
-# janitor/sweep.py. Only these exact names are removed, and only when they are not a link into
-# this repo's bin/. Nothing else under bin/ is ever touched.
-for stale in janitor.py reap.py session-teardown.sh; do
-  f="$CLAUDE_DIR/bin/$stale"
-  [ -e "$f" ] || [ -L "$f" ] || continue
-  if [ -L "$f" ]; then
-    case "$(readlink "$f")" in "$SRC/bin"/*) continue ;; esac
-  fi
-  rm -f "$f" && log "removed stale $f (old janitor, nothing runs it)"
-done
 
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"
