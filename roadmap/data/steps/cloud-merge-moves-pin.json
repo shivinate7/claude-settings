@@ -1,9 +1,9 @@
 {
   "title": "A cloud merge's install does not move the live pin by cloud mode",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.304996,
   "why": "Debt cloud-merge-moves-live-pin (coordinator, Oct 31 19:34 CDT): each cloud merge runs `bash <pin>/install.sh` with CLAUDE_CODE_REMOTE=true, so cloud mode moves the pin, not merge/install_from_main.sh. Ruling 4 of decision merge-reinstalls-from-main: only that script moves the pinned checkout.",
-  "note": "Likely in normal work: every cloud merge runs it. Fix the cause in one home: the merge's after-step runs the install so that only install_from_main.sh moves the pin, or install.sh's cloud mode leaves a pin it was not asked to move. Done check: a test runs the after-merge install with CLAUDE_CODE_REMOTE=true and the pin moves only through install_from_main.sh's one rename, red on main and green on the fix. Closes debt cloud-merge-moves-live-pin. Needs no answer. Files: merge/install_from_main.sh, install.sh, merge/test_merge.py or hooks/test_cloud_setup.sh. Linked: step setup-leaves-pin-cwd (#915) touches install.sh too, so it starts after #915 merges. Lane started Oct 31 after batch 41 (coordinator, 23:58 CDT). Built: draft PR #933 (head 62875ca0), closes both steps and both debts; with the batch runner for batch 43 (coordinator, Nov 1 01:59 CDT).",
-  "updatedAt": "2026-11-01T07:02:00Z"
+  "note": "Likely in normal work: every cloud merge runs it. Fix the cause in one home: the merge's after-step runs the install so that only install_from_main.sh moves the pin, or install.sh's cloud mode leaves a pin it was not asked to move. Done check: a test runs the after-merge install with CLAUDE_CODE_REMOTE=true and the pin moves only through install_from_main.sh's one rename, red on main and green on the fix. Closes debt cloud-merge-moves-live-pin. Needs no answer. Files: merge/install_from_main.sh, install.sh, merge/test_merge.py or hooks/test_cloud_setup.sh. Linked: step setup-leaves-pin-cwd (#915) touches install.sh too, so it starts after #915 merges. Lane started Oct 31 after batch 41 (coordinator, 23:58 CDT). Built: draft PR #933 (head 62875ca0), closes both steps and both debts; with the batch runner for batch 43 (coordinator, Nov 1 01:59 CDT). Landed on main in batch 46, #942 (lane PR #933, with cloud-install-from-main), main ca155b1b, Nov 1 06:26 CST.",
+  "updatedAt": "2026-11-01T12:30:00Z"
 }

@@ -1,0 +1,9 @@
+{
+  "title": "Renovate's claude-code and impeccable bumps pass their changelog read and checks",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33767,
+  "why": "Renovate PRs #917 (claude-code v2.1.302) and #918 (impeccable skill-v4.6.0) wait on rule verification-newest-that-passes: read the changelog first, then take the newest version that passes.",
+  "note": "Lane session_013NEJKzNV4Bjg5u8KncVxyQ, started Nov 1 06:26 CST (coordinator). Done check: each changelog read, each PR green; a version that breaks a check is pinned to the newest that passes, with the reason.",
+  "updatedAt": "2026-11-01T12:30:00Z"
+}

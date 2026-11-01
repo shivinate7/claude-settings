@@ -1,9 +1,9 @@
 {
   "title": "A live lock taken before the unlock keeps its tree on Windows every run",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33766,
   "why": "Incident (coordinator, Nov 1 05:22 CST): main's run 41295534105 went red on checks-windows-sweep in janitor/test_sweep.py test_a_live_lock_taken_before_the_unlock_keeps_the_tree_and_its_lock (\"agent-reltwin was not removed\"); the rerun passed. The flake held batch 45's merge.",
-  "note": "Triage judged it a debt with an incident (roles-findings-are-debts-or-notes): a flaky required check holds every batch that meets it. Fix the cause, never a retry or a skip: find the race in the sweep or the test on Windows, and make the result fixed. The lane writes debt record windows-live-lock-flake and closes it with the fix. Done check: a case pins the race, red before the fix and green after, and the test passes repeated runs on checks-windows-sweep. Needs no answer. Files: janitor/sweep.py, janitor/test_sweep.py. Lane session_013NEJL14fXqXSrXXk9NVnzM, started Nov 1 05:22 CST (coordinator). Built: draft PR #941, for batch 47 (coordinator, Nov 1 05:50 CST).",
-  "updatedAt": "2026-11-01T11:52:00Z"
+  "note": "Triage judged it a debt with an incident (roles-findings-are-debts-or-notes): a flaky required check holds every batch that meets it. Fix the cause, never a retry or a skip: find the race in the sweep or the test on Windows, and make the result fixed. The lane writes debt record windows-live-lock-flake and closes it with the fix. Done check: a case pins the race, red before the fix and green after, and the test passes repeated runs on checks-windows-sweep. Needs no answer. Files: janitor/sweep.py, janitor/test_sweep.py. Lane session_013NEJL14fXqXSrXXk9NVnzM, started Nov 1 05:22 CST (coordinator). Built: draft PR #941, for batch 47 (coordinator, Nov 1 05:50 CST). Landed on main in batch 46, #942 (lane PR #941, commit 08f990a4: the test no longer depends on pid reuse; two review findings in docs/debts/notes.md), main ca155b1b, Nov 1 06:26 CST. No debt record was opened, so none is left to close.",
+  "updatedAt": "2026-11-01T12:30:00Z"
 }
