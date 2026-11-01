@@ -8945,6 +8945,20 @@ sh("frozen: sed -i on a config hook, from a frozen folder", 'sed -i "s/a/b/" ' +
    cwd=os.path.join(CFG, "hooks"))
 sh("frozen: sed -i on a file outside the config folder, from a frozen folder, is allowed",
    'sed -i "s/a/b/" ' + slash(os.path.join(NOGIT, "f.txt")), "allow", cwd=os.path.join(CFG, "hooks"))
+# The FILE operands of an in-place sed are what it writes, however the options are spelled and whatever the
+# script holds. A text match on `-i` then the path misses a script with a `|`, a cluster that ends in `i` and the
+# long form. A script with a `w` command is judged as text, so the file it names counts.
+sh("frozen: sed -i with a pipe-delimited script on a config hook", "sed -i 's|a|b|' " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: sed -Ei on a config hook", "sed -Ei 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -ni on a config hook", "sed -ni 'p' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed --in-place with a backup suffix on a config hook",
+   "sed --in-place=.b 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i whose w command writes a config hook, the file operand a scratch file",
+   "sed -i 's/a/b/w " + CFG_HOOK + "' /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -n on a config hook, with no -i, is a read",
+   "sed -n 'p' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: sed -i on a scratch file is allowed", "sed -i 's/a/b/' /tmp/x", "allow", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
