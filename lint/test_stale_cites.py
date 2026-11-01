@@ -103,6 +103,27 @@ def direct_step_env(rng, fail):
                 DECISIONS_DIR="")
 
 
+def git_subcommands(trace_path):
+    """The git subcommands a run started, read from a GIT_TRACE file: one `built-in: git <sub>` line each."""
+    subs = []
+    with open(trace_path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            found = re.search(r"trace: built-in: git (\S+)", line)
+            if found:
+                subs.append(found.group(1))
+    return subs
+
+
+def paths_under(folder):
+    """Every file and folder under `folder`, relative to it, with .git left out."""
+    found = set()
+    for dirpath, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        for name in dirnames + filenames:
+            found.add(os.path.relpath(os.path.join(dirpath, name), folder))
+    return found
+
+
 def tuple_named(path, name):
     """The set of strings in the module-level tuple `name` of a Python file. Read with ast, never imported."""
     with open(path, encoding="utf-8") as f:
@@ -151,9 +172,9 @@ class StaleCase(unittest.TestCase):
         change(repo)
         return Range(case, repo, base_sha, git(repo, "rev-parse", "HEAD"))
 
-    def run_check(self, rng, base=None):
+    def run_check(self, rng, base=None, extra_env=None):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/stale_cites.py")
-        env = dict(os.environ, TMPDIR=rng.case)
+        env = dict(os.environ, TMPDIR=rng.case, **(extra_env or {}))
         spec = "%s...%s" % (rng.base if base is None else base, rng.head)
         done = subprocess.run([sys.executable, MODULE, "--range", spec],
                               cwd=rng.repo, env=env, capture_output=True, text=True,
@@ -542,6 +563,88 @@ class PinTests(unittest.TestCase):
         listed = tuple_named(os.path.join(ROOT, "bin", "ste-changed"), "LINT_FILES")
         needed = repo_modules_imported(MODULE) + ["lint/stale_cites.py"]
         self.assertEqual([f for f in needed if f not in listed], [], "bin/ste-changed LINT_FILES lacks these")
+
+
+class CostTests(StaleCase):
+    """The check's cost is a contract: a few git starts, no markdown read when nothing was removed, no file written."""
+
+    def run_traced(self, rng):
+        trace = os.path.join(rng.case, "git-trace.txt")
+        rc, out = self.run_check(rng, extra_env={"GIT_TRACE": trace})
+        return rc, out, git_subcommands(trace)
+
+    def test_a_range_that_removes_nothing_starts_three_git_reads_and_reads_no_markdown(self):
+        def change(repo):
+            write(repo, "hooks/new.py", "def fresh():\n    return 5\n")
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertLessEqual(len(subs), 3, subs)
+        self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff"}, subs)
+
+    def test_a_range_that_removes_a_path_starts_at_most_five_git_processes(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertLessEqual(len(subs), 5, subs)
+
+    def test_a_run_writes_no_file_in_the_repo_or_next_to_the_script(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        # Run a copy of the script's folders, so any file the run writes next to the script shows here.
+        scripts = os.path.join(rng.case, "scripts")
+        tracked_tree.copy_tracked(scripts, "lint", "hooks")
+        before = (paths_under(rng.repo), paths_under(scripts))
+        env = dict(os.environ, TMPDIR=rng.case)
+        env.pop("PYTHONDONTWRITEBYTECODE", None)  # a set variable would hide a .pyc the run writes
+        env.pop("PYTHONPYCACHEPREFIX", None)
+        done = subprocess.run([sys.executable, os.path.join(scripts, "lint", "stale_cites.py"),
+                               "--range", "%s...%s" % (rng.base, rng.head)],
+                              cwd=rng.repo, env=env, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        out = done.stdout + done.stderr
+        self.assertIn(done.returncode, (0, 1), out)
+        self.assertEqual((paths_under(rng.repo), paths_under(scripts)), before, out)
+
+
+class UnknownFileTests(StaleCase):
+    """A touched .py that does not parse cannot say which names it defines: unknown, named, never a silent pass."""
+
+    def test_a_touched_py_that_does_not_parse_is_unknown_and_exits_zero(self):
+        cases = (
+            ("head", GUARD, "def keep(:\n    return 1\n"),
+            ("base", "def keep(:\n    return 1\n", GUARD),
+        )
+        for side, base_src, head_src in cases:
+            with self.subTest(unparseable_at=side):
+                def change(repo, head_src=head_src):
+                    write(repo, "hooks/guard.py", head_src)
+                    commit(repo)
+                rng = self.make_range(base_files(extra={"hooks/guard.py": base_src}), change)
+                rc, out = self.run_check(rng)
+                unknown = [line for line in out.splitlines() if line.startswith("stale-cites: unknown")]
+                self.assertEqual(rc, 0, out)
+                self.assertTrue(unknown, out)
+                self.assertIn("hooks/guard.py", unknown[0], out)
+
+
+class ExcludeFolderTests(StaleCase):
+    """A bare folder line in .ste-lint-exclude leaves out the files under it, as `vendor/**` does."""
+
+    def test_a_bare_folder_line_leaves_out_the_files_under_it(self):
+        for line in ("vendor", "vendor/"):
+            with self.subTest(line=line):
+                def change(repo):
+                    move(repo, "hooks/lib.mjs", MOVED)
+                    commit(repo)
+                extra = {".ste-lint-exclude": line + "\n", "vendor/a.md": "- refusal list in `hooks/lib.mjs`\n"}
+                self.assert_passes(self.make_range(base_files(extra=extra), change))
 
 
 if __name__ == "__main__":
