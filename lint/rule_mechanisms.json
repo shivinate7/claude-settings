@@ -479,8 +479,10 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
-        "kind": "judgment",
-        "reason": "Whether a turn only tracked running work, and whether the reply held to one line, is a content judgment."
+        "kind": "check",
+        "ref": "lint/report_guard.py",
+        "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks",
+        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
       }
     },
     "output-never-echo-agent-report": {
