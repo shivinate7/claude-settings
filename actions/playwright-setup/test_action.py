@@ -2,7 +2,8 @@
 Asserts the opt-in `system-deps` input (default empty), that its step runs the Playwright install-deps
 command for exactly the listed browsers, on Linux only, under a time cap, and that chromium or an unknown
 name fails the job with one line. Every other step runs no apt. The browser cache key holds the OS id and
-version that pin.sh writes (`os=ubuntu-24.04`), never a runner env value or a literal version, and the
+version that pin.sh writes (`os=ubuntu-24.04`), never a runner env value or a literal version. pin.sh falls
+back to RUNNER_OS, with a warning, when os-release has no VERSION_ID or is missing, and the
 cache step has no restore-keys, because a prefix restore would bring back a browser built for another OS.
 It proves the step's shape and its shell scripts, not a real WebKit launch. Stdlib only."""
 import atexit, os, re, shutil, stat, subprocess, sys, tempfile
@@ -171,23 +172,38 @@ def fake_run(script, deps, runner_os="Linux", cap="30", node_sleep=0):
         return p.returncode, (p.stdout + p.stderr).strip(), calls
 
 
-def pin_run(os_release):
-    """Run pin.sh on Linux with a fake `node` and an os-release file. The runner's ImageOS is a decoy
-    (ubuntu99), so a script that reads it instead of the os-release file fails here too.
-    Returns (rc, output, GITHUB_OUTPUT lines)."""
+def pin_run(os_release, runner_os="Linux", image_os="ubuntu99", env_extra=None):
+    """Run pin.sh with a fake `node`. `os_release` is the os-release text, or None for no file at OS_RELEASE.
+    ImageOS is a decoy (ubuntu99) unless `image_os` says otherwise. ID and VERSION_ID are removed from the
+    environment, so a case that needs them sets them in `env_extra`. A script that reads a decoy, or an
+    exported ID that should not fill a gap, fails here. Returns (rc, output, GITHUB_OUTPUT lines)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         bindir = fake_node(d, 'case "$2" in\n  *require.resolve*) echo "%s/node_modules/playwright-core/package.json" ;;\n'
                               '  *) echo 1.55.0 ;;\nesac\n' % d)
         release, out_file = os.path.join(d, "os-release"), os.path.join(d, "github-output")
-        with open(release, "w") as f:
-            f.write(os_release)
+        if os_release is not None:
+            with open(release, "w") as f:
+                f.write(os_release)
         open(out_file, "w").close()
         env = dict(os.environ, PATH=bindir + os.pathsep + os.environ.get("PATH", ""), DIR=d,
-                   GITHUB_OUTPUT=out_file, RUNNER_OS="Linux", OS_RELEASE=release, ImageOS="ubuntu99")
+                   GITHUB_OUTPUT=out_file, RUNNER_OS=runner_os, OS_RELEASE=release)
+        for name in ("ImageOS", "ID", "VERSION_ID"):
+            env.pop(name, None)
+        if image_os:
+            env["ImageOS"] = image_os
+        env.update(env_extra or {})
         p = subprocess.run([BASH, PIN], env=env, capture_output=True, text=True, timeout=60)
         with open(out_file) as f:
             gh = f.read().splitlines()
         return p.returncode, (p.stdout + p.stderr).strip(), gh
+
+
+def os_line(gh):
+    return [l for l in gh if l.startswith("os=")]
+
+
+def warns(out):
+    return any(l.startswith("::warning::") for l in out.splitlines())
 
 
 check("input system-deps exists, default empty (off)",
@@ -246,6 +262,28 @@ for ver, (rc, out, gh) in pins.items():
           [l for l in gh if l.startswith("os=")] == ["os=ubuntu-" + ver], "%s %r %s" % (rc, out, gh))
 os_24, os_26 = ([l for l in pins[v][2] if l.startswith("os=")] for v in ("24.04", "26.04"))
 check("the os value differs between Ubuntu 24.04 and 26.04", bool(os_24) and os_24 != os_26, "%s %s" % (os_24, os_26))
+
+# Fallbacks. A rolling distro has no VERSION_ID; no file means RUNNER_OS; an exported ID or VERSION_ID
+# never fills a gap in os-release; non-Linux takes ImageOS, else RUNNER_OS. Each fallback warns on Linux.
+rolling = pin_run("ID=arch\n")
+check("pin.sh on Linux with ID but no VERSION_ID (rolling) exits 0 and writes os=arch",
+      rolling[0] == 0 and os_line(rolling[2]) == ["os=arch"], "%s %r %s" % rolling)
+check("pin.sh on Linux with ID but no VERSION_ID (rolling) prints a ::warning:: line",
+      rolling[0] == 0 and warns(rolling[1]), "%s %r" % rolling[:2])
+no_file = pin_run(None)
+check("pin.sh on Linux with no os-release file exits 0 and writes os=Linux (RUNNER_OS), not ImageOS",
+      no_file[0] == 0 and os_line(no_file[2]) == ["os=Linux"], "%s %r %s" % no_file)
+check("pin.sh on Linux with no os-release file prints a ::warning:: line",
+      no_file[0] == 0 and warns(no_file[1]), "%s %r" % no_file[:2])
+gaps = pin_run("ID=debian\n", env_extra={"ID": "arch", "VERSION_ID": "9.9"})
+check("exported ID and VERSION_ID do not fill gaps: os-release with only ID=debian writes os=debian",
+      gaps[0] == 0 and os_line(gaps[2]) == ["os=debian"], "%s %r %s" % gaps)
+mac = pin_run(None, runner_os="macOS", image_os="macos15")
+check("pin.sh on macOS with ImageOS=macos15 writes os=macos15",
+      mac[0] == 0 and os_line(mac[2]) == ["os=macos15"], "%s %r %s" % mac)
+win = pin_run(None, runner_os="Windows", image_os=None)
+check("pin.sh on Windows with no ImageOS writes os=Windows (RUNNER_OS)",
+      win[0] == 0 and os_line(win[2]) == ["os=Windows"], "%s %r %s" % win)
 
 # The cache step's key. Checks read the key line only, so a comment that mentions a name does not count.
 check("a step named '%s' exists" % CACHE_STEP, bool(all_steps.get(CACHE_STEP)))
