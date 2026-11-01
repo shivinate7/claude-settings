@@ -2,6 +2,7 @@ bin/** text eol=lf
 githooks/** text eol=lf
 *.sh text eol=lf
 skills/impeccable/scripts/impeccable text eol=lf
+skills/plain-english-map/tests/fixture*/** text eol=lf
 *.cmd text eol=crlf
 # Debt notes merge by union (decision notes-merge-union). Only this path: records.md and catalog.md are generated.
 docs/debts/notes.md merge=union
