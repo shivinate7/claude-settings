@@ -6,8 +6,8 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     chat_hit(tool_input) -> (rule, matched)   an AskUserQuestion input; judges each question with 2+ options
     item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
 
-("", "") is a pass. hooks/call_judge.py calls chat_hit; hooks/guard.py data_tool_hit calls item_hit after
-its url and collection guard. Nothing here writes a file or starts a process.
+("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
+page_item_hit, which filters the ArtifactData writes by url and collection and then calls item_hit. Nothing here writes a file or starts a process.
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
 
@@ -788,13 +788,24 @@ def page_item_hit(tool_input, cwd=""):
     return PASS, writes
 
 
+def _judged_fragment(field):
+    """True for a str_replace field the model review reads: `context`, `options` or an options subfield."""
+    return field == "context" or field == "options" or str(field).startswith("options.")
+
+
 def judged_item_writes(writes):
-    """The writes of a page item that the model review reads: [{"op", "doc_id", "data"}]. A write is read
-    when it sets or updates a decision (an update with no kind is read, as decision_form_hit cannot see the
-    stored kind), is not closed, and carries `options` or `context`. A str_replace is not read: it holds
-    only the replaced text, not the item."""
+    """The writes of a page item that the model review reads. A set or update is read as
+    {"op", "doc_id", "data"} when it writes a decision (an update with no kind is read, as decision_form_hit
+    cannot see the stored kind), is not closed, and carries `options` or `context`. A str_replace on
+    `context` or `options` (a subfield too) is read as {"op", "doc_id", "field", "new_str"}: its new_str
+    alone, never old_str, because the rest of the item is unseen."""
     judged = []
     for op, entry in writes:
+        if op == "str_replace":
+            if _judged_fragment(entry.get("field")) and isinstance(entry.get("new_str"), str):
+                judged.append({"op": op, "doc_id": entry.get("doc_id"), "field": entry.get("field"),
+                               "new_str": entry["new_str"]})
+            continue
         data = _write_data(entry)
         if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
             continue

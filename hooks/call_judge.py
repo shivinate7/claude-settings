@@ -10,12 +10,15 @@ Each call that passes gets one model verdict through decision_watch.invoke_model
 A verdict {"ok": false, "reason": R} refuses through guard_core.refuse(), the one home of the override
 check, the override line and the guard.log line. The rules are `spawn-judge` and `question-judge`.
 
-An ArtifactData call exits first unless its action is set, update or batch, before any heavy import.
+An ArtifactData call exits first unless its action is set, update, str_replace or batch, before any heavy import.
+A call with no write on collection `items` exits before importing question_form.
 For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options or
 context (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
 many writes a batch holds. The page and the chat box share the seven judge items, so both places get the
-same review. A str_replace is not model-judged: it holds only the replaced text, not the item.
+same review. A str_replace on `context` or `options` (a subfield too) that passes item_hit is judged on its
+new_str alone, as a fragment: the prompt tells the model to judge only plain words, unexplained ids and
+pointers outside the item, and never to flag a missing line or option.
 
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
@@ -80,7 +83,9 @@ PAGE_PROMPT = (
     "and the marks on each option, so judge only the items below, and only the fields a write carries: a "
     "write with no `options` is not flagged for options, one with no `context` is not flagged for the "
     "Goal, Problem or premises, and one with no `pick` is not flagged for item 7, because the stored item "
-    "is unseen. Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
+    "is unseen. A write with op str_replace carries only `field` and `new_str`, a fragment of that field. "
+    "Judge a fragment only for plain words, unexplained ids, and pointers outside the item (items 3 to 6), "
+    "and never flag a missing line or option, because the rest of the item is unseen. Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
@@ -92,7 +97,15 @@ JUDGES = {
                 "the waiting-page item misses an item of the question format."),
 }
 # The ArtifactData actions that write an item. Any other action exits before a heavy import.
-PAGE_WRITE_ACTIONS = ("set", "update", "batch")
+PAGE_WRITE_ACTIONS = ("set", "update", "str_replace", "batch")
+
+
+def writes_an_item(args):
+    """True when the call has a write on collection `items`. Plain dict reads, so no heavy import."""
+    if args.get("action") == "batch":
+        writes = args.get("writes")
+        return any(isinstance(w, dict) and w.get("collection") == "items" for w in writes or [])
+    return args.get("collection") == "items"
 
 
 def invoke_model(*args, **kwargs):
@@ -146,7 +159,7 @@ def main():
                 return refuse(payload, tool, args, code_rule, reason)
             shown = json.dumps(args, ensure_ascii=False)
         elif tool == DATA_TOOL:
-            if args.get("action") not in PAGE_WRITE_ACTIONS:
+            if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
             import question_form
             hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "")
