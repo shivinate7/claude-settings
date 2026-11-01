@@ -798,3 +798,6 @@
 - draft-step-stands-wording: the draft step prints "The green run stands." on a draft, where CI skipped the run. Wording only (review round 3 of PR #895). Decision: records-index-at-merge.
 - frozen-redirect-and-word: `echo x >&settings.json` from the config dir writes the file `settings.json` and the frozen-path rule allows it; same on main (hooks/guard_frozen.py).
 - frozen-copy-read-amp-redirect: `cp /tmp/x <frozen> &> /dev/null` is allowed because `_copy_reads` reads the bare `&` of `&>` as an operand, so the frozen DEST counts as a source; same on main (hooks/guard_frozen.py).
+- stale-stamped-tree-called-live-pin: session_start.sh calls an old `<clone>-live-<hex>` tree "the live pin" after the link has moved on, though hooks/guard_frozen.py leaves it writable; the cd advice still holds (hooks/session_start.sh)
+- pin-line-silent-on-failed-listing: when the worktree listing fails inside a pin, no pin line prints and the unknown line names only the agent count (hooks/session_start.sh)
+- pin-name-fifth-copy: install.ps1 also builds `<clone>-live`, which the copy list in install.sh's comment omits (install.sh, install.ps1)
