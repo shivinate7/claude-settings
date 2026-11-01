@@ -25,6 +25,7 @@ RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
 TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
+SCRIPT_T0=$(date +%s)
 CLOUD=0
 [ "${1:-}" = "--cloud" ] && CLOUD=1
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] && CLOUD=1
@@ -339,10 +340,16 @@ fi
 
 # Cloud only: git over the cloud proxy reaches repos that are out of the session's scope; the tarball
 # URL gets a 403 there, and a tarball copy has no .git. cloud_git bounds a stalled transfer at 10 s
-# and a slow one at 40 s, because the hook that runs this script is killed at 60 s.
+# and a slow one at 40 s, because the hook that runs this script is killed at 60 s. All calls of a run share
+# one budget of 50 s from the script's start: a call gets the time left, up to 40 s, and fails at once when under 5 s
+# are left, so two slow calls in series (a fetch, then a mirror clone) never pass the cap.
 cloud_git() {
+  cg_left=$((50 - ($(date +%s) - SCRIPT_T0)))
+  [ "$cg_left" -ge 5 ] || return 1
+  cg_cap=40
+  [ "$cg_left" -ge "$cg_cap" ] || cg_cap="$cg_left"
   if command -v timeout >/dev/null 2>&1; then
-    GIT_TERMINAL_PROMPT=0 timeout 40 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+    GIT_TERMINAL_PROMPT=0 timeout "$cg_cap" git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
   else
     GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
   fi
@@ -353,7 +360,8 @@ cloud_git() {
 # differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
 # unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
 # new tip only, never the history under it. A failed fetch keeps the clone as it was. The live pin skips it.
-# mirror_refresh DIR does the refresh; use_main_mirror below also calls it.
+# mirror_refresh DIR does the refresh; use_main_mirror below also calls it. A failed refresh keeps the clone at
+# its older main, with a WARN: older reviewed files are safer than a checkout's branch.
 mirror_refresh() {
   mr_dir="$1"
   mr_sha=$(git -C "$mr_dir" config --get claude-settings.mirrorSha 2>/dev/null)
@@ -407,15 +415,20 @@ clone_mirror() {
 # use_main_mirror: the session's own checkout $SRC must not be the source (see below). The files come from a mirror of
 # $REF at $HOME/claude-settings-main: made here, or refreshed when this script made it earlier. The checkout's branch,
 # head and changes are never touched. A mirror is a stable path the links can follow; a detached worktree inside the
-# person's checkout would add state to it. When the mirror cannot be had, the source stays the checkout, as before.
+# person's checkout would add state to it. When no mirror can be made, the source stays the checkout, as before. A mirror
+# that exists but cannot be refreshed stays the source at its older main (mirror_refresh logs the WARN).
+# The mirror name has two copies; change both together: this file and hooks/guard_frozen.py (MAIN_MIRROR_NAME), which
+# freezes the folder, because the CLAUDE.md pointer names it.
 MAIN_MIRROR="$HOME/claude-settings-main"
 use_main_mirror() {
   if [ "$(git -C "$MAIN_MIRROR" config --get claude-settings.cloudMirror 2>/dev/null)" = true ] && checkout_at "$MAIN_MIRROR" >/dev/null; then
     mirror_refresh "$MAIN_MIRROR"
-    log "the install takes its files from the mirror $MAIN_MIRROR, not the checkout $SRC"
+    log "the install takes its files from the mirror $MAIN_MIRROR, not the checkout $SRC; the mirror is at the $REF it last had, older than $REF now if a WARN above says the refresh failed"
+    OWN_CHECKOUT="$SRC"
     SRC="$MAIN_MIRROR"
   elif [ ! -e "$MAIN_MIRROR" ] && clone_mirror "$MAIN_MIRROR"; then
     log "cloned $REPO at $REF into $MAIN_MIRROR; the install takes its files from it, not the checkout $SRC"
+    OWN_CHECKOUT="$SRC"
     SRC="$MAIN_MIRROR"
   else
     log "WARN: no mirror of $REF at $MAIN_MIRROR (${CLONE_MIRROR_WHY:-the path is taken}); the install takes its files from the checkout $SRC as before, which may not be $REF"
@@ -507,7 +520,7 @@ TARGET_MD="$CLAUDE_DIR/CLAUDE.md"
 if [ -f "$TARGET_MD" ] && ! grep -qx -- "$POINTER" "$TARGET_MD"; then
   BAK="$TARGET_MD.bak.$(date +%Y%m%d%H%M%S)"
   cp "$TARGET_MD" "$BAK"
-  log "existing $TARGET_MD backed up to $BAK; fold anything you want to keep into $SRC/CLAUDE.md"
+  log "existing $TARGET_MD backed up to $BAK; fold anything you want to keep into ${OWN_CHECKOUT:-$SRC}/CLAUDE.md"
 fi
 printf '%s\n' "$POINTER" > "$TARGET_MD"
 log "wrote $TARGET_MD -> $POINTER"
