@@ -29,8 +29,14 @@ Interface the hook must match:
 - AskUserQuestion: a box that fails the code check (hooks/question_form.py chat_hit) is refused before
   any model call, with the rule chat_hit names. The model sees only a box that passes it, and judges only
   what code cannot (the cases are in hooks/test_question_form.py, which reuses run_hook below).
-- settings.json: one command hook on `Agent|AskUserQuestion` runs call_judge.py with a timeout above
-  the longest model call (60 s). No `prompt` or `agent` hook is left on either tool.
+- ArtifactData on the waiting page (ruled Nov 1 11:51 CST): a write of an item (set, update, or a
+  batch entry) on collection `items` that carries `options` or `context` and is not closed gets one model
+  call, claude-opus-5-5, rule `question-judge`, after question_form.item_hit passes it. A batch makes one call
+  for all its qualifying writes. An item_hit hit, a read, another collection or url, a delete, a str_replace and
+  an update with neither field make no call and no refusal from call_judge (guard.py refuses a hit). The page's
+  url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
+- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
+  above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
 """
 import atexit
 import json
@@ -60,6 +66,16 @@ TIMED = {"kind": "timed", "until": FUTURE}
 ONCE = {"kind": "once", "until": FUTURE, "id": "0" * 32}
 MARK = "BRIEFMARK-7d2e"
 AGENT_MODEL, QUESTION_MODEL = "claude-sonnet-5-5", "claude-opus-5-5"
+# The waiting page of a fixture repo. lint/layout.py reads it from .claude/layout-extras.json, key
+# "waiting-page", in the git root of the payload's cwd. The one home of this fixture: hooks/test_question_form.py
+# reuses PAGE_URL and PAGE_REPO. Its items sit in collection `items`.
+PAGE_URL = "https://claude.ai/artifact/waitpage"
+PAGE_REPO = os.path.join(ROOT, "page-repo")
+PAGE_ITEMS = "items"
+os.makedirs(os.path.join(PAGE_REPO, ".git"))
+os.makedirs(os.path.join(PAGE_REPO, ".claude"))
+with open(os.path.join(PAGE_REPO, ".claude", "layout-extras.json"), "w", encoding="utf-8") as _f:
+    json.dump({"kinds": {}, "waiting-page": PAGE_URL}, _f)
 
 try:
     import override
@@ -191,6 +207,54 @@ def question_input(session=SID_A, agent=None, box=None):
     payload = {"session_id": session, "tool_name": "AskUserQuestion", "tool_input": box or good_box()}
     if agent:
         payload["agent_id"] = agent
+    return json.dumps(payload)
+
+
+# ------------------------------------------------------------------ the waiting page (ArtifactData)
+#
+# Ruled Nov 1 11:51 CST: a waiting-page item write gets the same model review as a chat question.
+# good_page_item() passes question_form.item_hit: the chat box's form lines in `context`, and two options keyed
+# a and b, each with a plain gain and lose. A case that makes a model call answers PAGE_FLAG, so a call that
+# refuses shows as a deny.
+PAGE_FLAG = ('{"ok": false, "reason": "the gain is not a plain effect on the owner: say what he gets and what '
+             'he gives up."}')
+PAGE_MARK, PAGE_MARK_B = "PAGEMARK-3f9c", "PAGEMARK-8d21"
+
+
+def good_page_item(mark=PAGE_MARK, **over):
+    """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
+    in the prompt. `over` replaces fields, for a case that changes one."""
+    context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
+    item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
+            "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
+                         "lose": "Nobody reads it first."},
+                        {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
+                         "lose": "The change lands a day later."}]}
+    item.update(over)
+    return item
+
+
+def page_input(action="set", data=None, collection=PAGE_ITEMS, doc_id="p1", url=PAGE_URL, session=SID_A,
+               agent=None, **extra):
+    """One ArtifactData call, as the harness sends it, with the payload's cwd set to the fixture repo.
+    `doc_id` None leaves the key out (a list). `extra` holds the str_replace fields."""
+    tool_input = {"action": action, "url": url, "collection": collection}
+    if doc_id is not None:
+        tool_input["doc_id"] = doc_id
+    if data is not None:
+        tool_input["data"] = data
+    tool_input.update(extra)
+    payload = {"session_id": session, "tool_name": "ArtifactData", "tool_input": tool_input, "cwd": PAGE_REPO}
+    if agent:
+        payload["agent_id"] = agent
+    return json.dumps(payload)
+
+
+def page_batch_input(writes, session=SID_A):
+    """A batch ArtifactData call: `writes` are {op, collection, doc_id, data} entries, and the call has no
+    top-level collection or doc_id."""
+    payload = {"session_id": session, "tool_name": "ArtifactData", "cwd": PAGE_REPO,
+               "tool_input": {"action": "batch", "url": PAGE_URL, "writes": writes}}
     return json.dumps(payload)
 
 
@@ -357,6 +421,109 @@ def case_question_departs():
           r.code == 0 and "\tdeny\tquestion-form\t" in r.log and "\tdeny\tquestion-departs\t" not in r.log, detail(r))
 
 
+def case_page_fixture_passes_the_form():
+    # Precondition: the good item is a pass for the form check, so a refusal below is the judge's, not the form's.
+    import question_form  # the one form check (hooks/question_form.py)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item()})
+    check("page fixture: the good item passes question_form.item_hit", got == ("", ""), got)
+
+
+def case_page_reject_and_accept():
+    item = good_page_item()
+    r = run_hook(page_input("set", item), answer=PAGE_FLAG)
+    d = r.deny() or {}
+    check("page: a good item the judge rejects is denied with the judge's reason", r.code == 0
+          and d.get("permissionDecision") == "deny" and "plain effect" in r.reason(), detail(r))
+    check("page: the deny names rule question-judge and logs one deny line",
+          r.reason().startswith("question-judge: ") and r.log.count("\tdeny\tquestion-judge\t") == 1, detail(r))
+    check("page: one model call, claude-opus-5-5, no effort", len(r.calls) == 1
+          and model_of(r.calls[0]["argv"]) == QUESTION_MODEL and "--effort" not in r.calls[0]["argv"], detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("page: the model sees the item the write carries", PAGE_MARK in prompt, prompt[:160])
+    check("page: the refusal ends with the override line",
+          override is not None and hasattr(override, "offer")
+          and r.reason().rstrip().endswith(override.offer("question-judge").strip()), r.reason()[-160:])
+    ok = run_hook(page_input("set", item), answer=ALLOW)
+    check("page: the same item the judge accepts is not denied, after one model call",
+          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(ok.calls) == 1, detail(ok))
+
+
+def case_page_no_model_call():
+    # Cost proof: a model call only for an items write that carries options or context, is not closed, and
+    # passes item_hit. Each input below would be denied if the judge were called on it, so a call shows as a deny.
+    item, bad_form = good_page_item(), good_page_item(context=GOAL_LINE + "\n" + PROBLEM_LINE + "\n" + DEPARTS_LINE)
+    cases = (
+        ("a receipts collection write", page_input("set", item, collection="receipts", doc_id="r1")),
+        ("an answers delete", page_input("delete", None, collection="answers", doc_id="a1")),
+        ("an items get", page_input("get", None, doc_id="p1")),
+        ("an items list", page_input("list", None, doc_id=None)),
+        ("an items delete", page_input("delete", None, doc_id="p1")),
+        ("a write to another artifact", page_input("set", item, url="https://claude.ai/artifact/otherpage")),
+        ("an items write that fails the form", page_input("set", bad_form)),
+        ("a closed item", page_input("set", good_page_item(status="closed"))),
+        ("an items update that closes an item with no form line",
+         page_input("update", {"status": "closed", "context": "Answered: ship it."})),
+        ("an items str_replace", page_input("str_replace", None, field="context",
+                                            old_str="ship the change today", new_str="ship the change this week")),
+        ("an items update with neither options nor context", page_input("update", {"title": "Renamed"})),
+        ("a batch of a delete and a title-only update", page_batch_input([
+            {"op": "delete", "collection": PAGE_ITEMS, "doc_id": "p1"},
+            {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2", "data": {"title": "Renamed"}}])),
+        ("a batch with a good item and one that fails the form", page_batch_input([
+            {"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": item},
+            {"op": "set", "collection": PAGE_ITEMS, "doc_id": "p2", "data": bad_form}])),
+    )
+    for label, inp in cases:
+        r = run_hook(inp, answer=PAGE_FLAG)
+        check("page no model call: %s (no call, no refusal from call_judge)" % label,
+              r.code == 0 and r.out == "" and r.calls == [] and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_page_batch_one_call():
+    second = good_page_item(PAGE_MARK_B)
+    writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item()},
+              {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
+               "data": {"kind": "decision", "context": second["context"], "options": second["options"]}}]
+    r = run_hook(page_batch_input(writes), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("page batch: two qualifying item writes make exactly one model call, claude-opus-5-5",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL,
+          detail(r))
+    check("page batch: the one prompt carries both writes", PAGE_MARK in prompt and PAGE_MARK_B in prompt,
+          prompt[:160])
+    r = run_hook(page_batch_input(writes), answer=PAGE_FLAG)
+    check("page batch: a refusal of the batch is one deny line, from one call",
+          len(r.calls) == 1 and r.log.count("\tdeny\tquestion-judge\t") == 1 and (r.deny() or {}).get(
+              "permissionDecision") == "deny", detail(r))
+
+
+def case_page_override():
+    flagged, agent_call = page_input("set", good_page_item()), page_input("set", good_page_item(), agent="a1")
+    for label, inp, pass_, lifted in (
+        ("timed override", flagged, (SID_A, TIMED), True),
+        ("one-act override", flagged, (SID_A, ONCE), True),
+        ("one-act override, an agent's call", agent_call, (SID_A, ONCE), False),
+        ("no override", flagged, None, False),
+    ):
+        r = run_hook(inp, answer=PAGE_FLAG, pass_=pass_)
+        if lifted:
+            check("page: %s lifts the refusal (no output, one override log line)" % label,
+                  r.code == 0 and r.out == "" and lifted_log(r, "question-judge"), detail(r))
+        else:
+            check("page: %s leaves the deny" % label,
+                  r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny"
+                  and "\toverride\t" not in r.log, detail(r))
+
+
+def case_page_model_failure_fails_open():
+    r = run_hook(page_input("set", good_page_item()), answer=PAGE_FLAG, model_fail=True)
+    errs = [line for line in r.err.splitlines() if line.strip()]
+    check("page fail open: a model failure on an item write allows, after one model call",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+    check("page fail open: one stderr line from the hook", len(errs) == 1 and r.code == 0
+          and "can't open file" not in errs[0], detail(r))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -380,15 +547,16 @@ def case_settings_row():
         pre = json.load(f)["hooks"]["PreToolUse"]
     left = [(e.get("matcher"), h.get("type")) for e in pre for h in e["hooks"]
             if h.get("type") in ("prompt", "agent")
-            and re.search(r"\b(Agent|AskUserQuestion)\b", e.get("matcher") or "")]
-    check("settings: no prompt or agent hook is left on Agent or AskUserQuestion", left == [], left)
+            and re.search(r"\b(Agent|AskUserQuestion|ArtifactData)\b", e.get("matcher") or "")]
+    check("settings: no prompt or agent hook is left on Agent, AskUserQuestion or ArtifactData", left == [], left)
     rows = [(e, h) for e in pre for h in e["hooks"] if "call_judge.py" in h.get("command", "")]
     check("settings: one command hook runs call_judge.py", len(rows) == 1 and rows[0][1].get("type") == "command", rows)
     if len(rows) != 1:
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent and AskUserQuestion", matcher == {"Agent", "AskUserQuestion"}, entry.get("matcher"))
+    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
@@ -401,7 +569,9 @@ def case_settings_row():
 
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed, case_question,
-                 case_question_departs, case_fail_open, case_settings_row):
+                 case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
+                 case_page_no_model_call, case_page_batch_one_call, case_page_override,
+                 case_page_model_failure_fails_open, case_fail_open, case_settings_row):
         try:
             case()
         except Exception as exc:
