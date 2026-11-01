@@ -49,5 +49,3 @@ Seen in, bottom tab bar: sillage, degen spec, feed-build, home iOS.
 ## Not a default
 
 Motion durations and easing are per repo. They are not house defaults.
-
-Frame, byte and pixel-ratio budgets are per repo, as tokens in that repo.

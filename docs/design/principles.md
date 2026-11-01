@@ -165,16 +165,19 @@ impeccable `harden` and `overdrive` give it as advice with no check.
 When the GPU drops a 3D scene, the person sees words that say so, and the scene comes back when the GPU
 returns.
 Check: on the page, call `loseContext()` and then `restoreContext()` on the `WEBGL_lose_context`
-extension. Pass when the canvas is never blank without words, and the scene returns after restore.
+extension. For a WebGPU scene, call `device.destroy()` and check for the same words. Pass when the
+canvas is never blank without words, and the scene returns after restore.
 Source: [MDN, WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices)
 ("Budget VRAM conservatively": handle `webglcontextlost`).
 
 ## ux-still-scene-draws-nothing
 
 A 3D scene that does not move draws no frames, so it does not spend the person's battery.
-Check: before load, add an init script that wraps the WebGL draw calls (`drawArrays`, `drawElements`)
-with a counter. Let the scene rest for five seconds. Pass when the count stays 0, and a camera move or
-a resize draws again. A DevTools trace is the human view.
+Check: before load, add an init script that wraps every method whose name starts with `draw` or
+`multiDraw` on both `WebGLRenderingContext` and `WebGL2RenderingContext`, and counts each call. Let the
+scene draw its first frame, then reset the counter and let the scene rest for five seconds. Pass when
+the count stays 0 after the reset, and a camera move or a resize draws again. For a WebGPU scene, count
+`GPUQueue.submit` calls the same way. A DevTools trace is the human view.
 Source: [three.js manual, rendering on demand](https://threejs.org/manual/en/rendering-on-demand).
 
 ## ux-canvas-has-words
@@ -210,28 +213,29 @@ Source: [MDN, forced-colors](https://developer.mozilla.org/en-US/docs/Web/CSS/@m
 ## ux-full-height-fits
 
 A full-height region fits the visible phone screen, with the browser bars shown or hidden, so its bottom content and actions are never under the bars.
-Check: grep the changed CSS for a `vh` value (`[0-9]vh`). Pass when each hit has an `svh`, `dvh` or
-`lvh` declaration on the same selector, which overrides it.
+Check: grep the changed CSS for a `vh` value (`[0-9]vh`). Pass when each hit has an `svh` or `dvh`
+declaration on the same property, declared after the `vh` line, which overrides it.
 Source: [web.dev, the large, small and dynamic viewport units](https://web.dev/blog/viewport-units).
 
 ## ux-vitals-measured
 
-Each route's Core Web Vitals are measured on field data at the 75th percentile, against the "good"
-lines on web.dev. Only a route with too little traffic for field data may report "unmeasured"
-instead. The person gets a page that loads, answers a press and holds still on a real phone.
-Check: read the route's field data (CrUX through PageSpeed Insights, or the repo's own field log).
-With too little traffic for field data, record a lab trace on a mobile profile and report "field:
-unmeasured". Pass when each metric is good on field data. Pass also when the route has too little
-traffic for field data and the report names it unmeasured. Any other unmeasured metric fails.
-Source: [web.dev, Web Vitals](https://web.dev/articles/vitals) (a pass is field data at the 75th
-percentile); impeccable `optimize` gives the lines as advice with no check.
+Each changed route's Core Web Vitals meet the "good" lines on web.dev in a mobile lab trace and, where
+it exists, at the 75th percentile of field data. The person gets a page that loads, answers a press and
+holds still on a real phone.
+Check: record a lab trace of the changed route on a mobile profile. Pass when LCP, INP (or Total
+Blocking Time in the lab) and CLS meet web.dev's "good" lines. Where field data at the 75th percentile
+exists, it must also pass. Field data is in CrUX through PageSpeed Insights, or the repo's own field log.
+Source: [web.dev, Web Vitals](https://web.dev/articles/vitals) (the "good" lines, and the 75th
+percentile for field data); impeccable `optimize` gives the lines as advice with no check.
 
 ## ux-feature-baseline-or-fallback
 
-A web feature that is not Baseline Widely available runs only behind a feature test, with a fallback
-the person can use. So the page works in the browser the person has.
-Check: for each new CSS or JavaScript feature in the diff, read its status on webstatus.dev. Pass when
-it is Widely available, or it sits behind `@supports` or a feature test and the fallback was seen
-working. A browser-name check fails.
+A web feature outside the repo's browser target runs only behind a feature test, with a fallback the
+person can use. So the page works in the browser the person has.
+Check: the repo's browser target is in its browserslist or design record, and a repo with no target
+uses Baseline Widely available. For each new CSS or JavaScript feature in the diff that the target does
+not cover, read its status on webstatus.dev. Pass when the feature sits behind `@supports` or a feature
+test, and the fallback was seen working. To see the fallback, invert the `@supports` test or force the
+feature test false, then use the page. A browser-name check fails.
 Source: [web.dev, Baseline](https://web.dev/baseline); impeccable `overdrive` asks for a working
 fallback, with no check.
