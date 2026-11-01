@@ -872,3 +872,7 @@
 - vitals-tbt-source: rule ux-vitals-measured accepts lab Total Blocking Time, but its Source page gives only the LCP, INP and CLS lines. Cite web.dev's TBT page (docs/design/principles.md). Decision: ux-house-rules
 - full-height-lvh-grep: rule ux-full-height-fits greps `[0-9]vh`, which skips `lvh`, a unit that acts like `vh` (docs/design/principles.md, checklist.md). Decision: ux-house-rules
 - text-size-home-readme: the a11y.md Text size row cites MDN outside the record's "Browser and 3D" home, and README says principles.md "ends with" the browser rules, which breaks once a rule follows them (docs/design/a11y.md, README.md). Decision: ux-house-rules
+- pw-os-release-source-fail: pin.sh sources os-release under `set -eu` with stderr hidden, so a file with shell logic or an unset reference ends the step with no message. Real os-release files hold none (actions/playwright-setup/pin.sh). Decision: one-browser-setup-no-apt
+- pw-os-release-env-name: pin.sh's test hook `OS_RELEASE` is a generic env name. A job that sets it for another reason gets `os=Linux` and a warning (actions/playwright-setup/pin.sh). Decision: one-browser-setup-no-apt
+- pw-os-test-gaps: test_action.py has no case for an os-release with no ID, and no check that a normal Ubuntu run prints no warning (actions/playwright-setup/test_action.py). Decision: one-browser-setup-no-apt
+- pw-26-04-cause-unread: the decision cites `libicudata.so.74` on 26.04 from the joyous lane's report, not a log this lane read (docs/decisions/one-browser-setup-no-apt.md). Decision: one-browser-setup-no-apt
