@@ -836,3 +836,5 @@
 - bg-timeout-no-beat-file: A foreground Bash call that its timeout moves to the background skips `--hook`, so it gets no beat file. Only `--stop` lists it, and nothing strands it. Decision: stall-watch
 - merge-progress-stdout-only: merge/merge.py prints its progress line to stdout only, so `merge ... | grep` hides it from the stall watch; no incident (review round 1 of PR #932). Decision: stall-watch
 - bare-verdict-double-beat: in a bare `verdict x` background job each heartbeat shows twice in the output (stderr via LOG, and the beat relay); cost one extra line per heartbeat; kept because verdict keeps its stderr line on purpose. Decision: stall-watch
+- process-start-lc-all-unpinned: no test covers `LC_ALL=C` on the `ps -o lstart=` call; the fake ps ignores locale, so a mutant that drops it survives; no mutate_guard mutant covers the `env=` line or `calendar.timegm` (hooks/git_reads.py _process_start_ms)
+- ps-lstart-tz-macos-unmeasured: unmeasured: does real macOS BSD `ps` honour `TZ=UTC0` for lstart? macOS CI runners run in UTC, so they cannot show a non-UTC read; procps was measured and it does (hooks/git_reads.py _process_start_ms)

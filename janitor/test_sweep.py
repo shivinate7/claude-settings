@@ -34,6 +34,7 @@ import threading
 import time
 import types
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -127,6 +128,48 @@ def this_process_start_ms():
     started = guard._process_start_ms(os.getpid())
     require(started is not None, "could not read this test process's own start time from `ps`")
     return started
+
+
+# The repeated hour of a fall-back night in America/Chicago: the two 01:30s, as UTC epochs in ms.
+REPEATED_HOUR_CDT_MS = int(datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc).timestamp()) * 1000
+REPEATED_HOUR_CST_MS = int(datetime(2026, 11, 1, 7, 30, tzinfo=timezone.utc).timestamp()) * 1000
+
+# A fake `ps` for one epoch, rendered in the zone of its own environment as real ps does. The same
+# helper as hooks/test_guard.py, copied rather than imported: importing that file runs its whole
+# fixture build.
+FAKE_PS_BODY = '''import time
+EPOCH = @EPOCH@
+DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+t = time.localtime(EPOCH)  # in the zone of the TZ this process was started with
+# ps pads the day to two columns with a space, so the 1st prints as " 1", as real ps does.
+print("%s %s %2d %02d:%02d:%02d %d" % (DAYS[t.tm_wday], MONTHS[t.tm_mon - 1], t.tm_mday,
+                                       t.tm_hour, t.tm_min, t.tm_sec, t.tm_year))
+'''
+
+
+def in_chicago_with_fake_ps(epoch_ms, action):
+    """Run `action()` with TZ=America/Chicago in this process and its children, with a fake `ps`
+    first on PATH that answers any `-o lstart=` read with EPOCH_MS in the child's own zone. A real
+    child process, so a read that passes its own `env` to ps changes the answer it gets."""
+    folder = tempfile.mkdtemp(prefix="fake-ps-chicago-", dir=ROOT)
+    script = os.path.join(folder, "ps")
+    write(script, "#!%s\n" % sys.executable
+          + FAKE_PS_BODY.replace("@EPOCH@", str(epoch_ms // 1000)))
+    os.chmod(script, 0o755)
+    old_tz, old_path = os.environ.get("TZ"), os.environ.get("PATH", "")
+    os.environ["TZ"] = "America/Chicago"
+    os.environ["PATH"] = folder + os.pathsep + old_path
+    time.tzset()
+    try:
+        return action()
+    finally:
+        os.environ["PATH"] = old_path
+        if old_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old_tz
+        time.tzset()
 
 
 # --------------------------------------------------------------------------- listener fixtures
@@ -1198,6 +1241,23 @@ class StaleAgentLockTests(unittest.TestCase):
             else:
                 os.environ["TZ"] = old
             time.tzset()
+
+    def repeated_hour_verdict(self, epoch_ms):
+        """The verdict on a lock held by this live pid, dated EPOCH_MS in UTC, read in Chicago. A
+        start read an hour off looks like pid reuse, so the verdict flips to True (lock may go)."""
+        date = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(epoch_ms // 1000))
+        reason = "claude agent agent-x (pid %d start %s)" % (os.getpid(), date)
+        return in_chicago_with_fake_ps(epoch_ms, lambda: sweep.stale_agent_lock_verdict(reason))
+
+    @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset on this platform")
+    def test_repeated_hour_held_lock_at_0630_utc_is_not_stale(self):
+        got = self.repeated_hour_verdict(REPEATED_HOUR_CDT_MS)
+        self.assertIs(got, False, "lock dated 06:30 UTC (01:30 CDT): verdict %r, want False" % (got,))
+
+    @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset on this platform")
+    def test_repeated_hour_held_lock_at_0730_utc_is_not_stale(self):
+        got = self.repeated_hour_verdict(REPEATED_HOUR_CST_MS)
+        self.assertIs(got, False, "lock dated 07:30 UTC (01:30 CST): verdict %r, want False" % (got,))
 
     def test_unreadable_process_start_is_unknown_not_stale(self):
         real = sys.modules["git_reads"]._process_start_ms
