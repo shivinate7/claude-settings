@@ -46,15 +46,20 @@ export const importEntries = (src, { types = true, file } = {}) => {
 
 export const importSpecifiers = (src, opts) => importEntries(src, opts).map((e) => e.spec);
 
+// The tracked file that the specifier `spec` in the file `from` names, or null. A package specifier names none.
+export const resolveSpecifier = (from, spec, tracked) => {
+  if (!spec.startsWith('.')) return null;
+  const base = path.posix.join(path.posix.dirname(from), spec);
+  const ext = path.posix.extname(base);
+  return [base, ...(TS_FOR[ext] ? [base.slice(0, -ext.length) + TS_FOR[ext]] : []), ...EXTS.map((e) => base + e), ...EXTS.map((e) => `${base}/index${e}`)].find((c) => tracked.has(c)) ?? null;
+};
+
 // The tracked files that a source file imports. A package import and an untracked target are skipped.
 export const importTargets = (from, src, tracked, opts) => {
   const found = new Set();
   if (!/\.(ts|tsx|mjs|js|cjs)$/.test(from)) return []; // A .py, .sh or .sql file has no JS imports.
   for (const spec of importSpecifiers(src, { file: from, ...opts })) {
-    if (!spec.startsWith('.')) continue;
-    const base = path.posix.join(path.posix.dirname(from), spec);
-    const ext = path.posix.extname(base);
-    const hit = [base, ...(TS_FOR[ext] ? [base.slice(0, -ext.length) + TS_FOR[ext]] : []), ...EXTS.map((e) => base + e), ...EXTS.map((e) => `${base}/index${e}`)].find((c) => tracked.has(c));
+    const hit = resolveSpecifier(from, spec, tracked);
     if (hit) found.add(hit);
   }
   return [...found].sort();
