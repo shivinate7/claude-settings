@@ -44,6 +44,14 @@ class Matcher(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers))
 
+    def test_guard_matcher_covers_lane_effort_tool(self):
+        # Rule lane-effort-pin reads the create_session call that starts a lane, so the guard must see it.
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        tool = "mcp__claude-code-remote__create_session"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
     def test_guard_matcher_covers_exit_worktree(self):
         # Rule session-home deletes a session's record on ExitWorktree, so the guard must see that call.
         matchers = guard_matchers()

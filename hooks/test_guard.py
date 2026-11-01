@@ -14187,6 +14187,36 @@ add("floor: start_session naming the full haiku id is denied", "deny", "agent-mo
 add("floor: start_session naming sonnet is allowed", "allow",
     tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x", model="sonnet")
 
+# ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
+# prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
+# command. So a create_session that tags a lane must carry that prompt alone. Calls without the
+# lane tag are not judged by this rule.
+LANE_TOOL = "mcp__claude-code-remote__create_session"
+add("lane-effort-pin: lane tag with a brief after the effort command is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\nbrief")
+add("lane-effort-pin: lane tag with a prompt that is not the effort command is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="do the task")
+add("lane-effort-pin: lane tag with /effort high is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort high")
+add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-pin",
+    tool=LANE_TOOL, tags=["cs-build:lane"])
+add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium")
+add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
+    "deny", "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="  /effort medium\n")
+add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\n")
+add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane "], prompt="do the task")
+add("lane-effort-pin: upper-case lane tag with a wrong prompt is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags=["CS-BUILD:LANE"], prompt="do the task")
+add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, tags="cs-build:lane", prompt="do the task")
+add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
+add("lane-effort-pin: create_session with no tags is allowed", "allow",
+    tool=LANE_TOOL, prompt="do the task")
+
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
 add("floor: Workflow role spoofed in the prompt string is denied", "deny", "agent-model-floor",

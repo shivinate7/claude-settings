@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # verdict <cmd...>: run the command, keep the full output in a log, print only the verdict.
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
-# While it runs, print "verdict: still running, <elapsed>, log=<path>" every $VERDICT_HEARTBEAT s (default 120).
-# Why: a quiet background verdict over 300 s draws a false STALL (decision stall-watch, "Tools that are quiet by design").
+# While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120).
+# Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design").
 # Exit 0 is FAIL if the output holds a runner marker.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
@@ -57,7 +57,7 @@ def main(argv):
                     try: rc = proc.wait(timeout=beat); break
                     except subprocess.TimeoutExpired:
                         if say:
-                            try: print(f"verdict: still running, {time.time() - t:.0f}s, log={log}", flush=True)
+                            try: print(f"verdict: still running, {time.time() - t:.0f}s, log={log}", file=sys.stderr, flush=True)
                             except OSError: say = False  # reader gone: keep waiting, keep the child's rc
             except KeyboardInterrupt:
                 rc = 130

@@ -128,6 +128,11 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
+                       not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
+                       any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
+                       string. A call with no lane tag passes. An override lifts it.
+                       `session_home_keep` skips this tool. (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-cap, simulator-boot-twin
@@ -1714,6 +1719,15 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
+CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
+# The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
+LANE_EFFORT = "medium"
+LANE_TAG = "cs-build:lane"
+LANE_EFFORT_REASON = (
+    "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
+    "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
+    % LANE_EFFORT
+)
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
@@ -1838,6 +1852,22 @@ def floor_hit(tool: str, tool_input) -> str:
                 if below_the_floor(keys.get("model")) and keys.get("agentType") not in HAIKU_ROLES:
                     return keys["model"]
     return ""
+
+
+def lane_effort_hit(tool: str, tool_input) -> str:
+    """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
+    A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
+    tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
+    is not judged. A missing prompt is not the command."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL:
+        return ""
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return ""
+    prompt = tool_input.get("prompt")
+    return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
@@ -3038,7 +3068,8 @@ def session_home_record(payload, primary: str):
 def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither."""
-    if not isinstance(payload, dict) or payload.get("agent_id"):
+    if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
+        # create_session reaches the guard only for rule lane-effort-pin; it keeps no record
         return
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     primary, lane = session_home_place(where)
@@ -3222,7 +3253,13 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9b2. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
+    # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
+    # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
+    lane_prompt = lane_effort_hit(tool, tool_input)
+    if lane_prompt:
+        refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
+
+    # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
     # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
     role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
     if role_unread:

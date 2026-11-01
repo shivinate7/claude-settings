@@ -47,6 +47,10 @@
       "path": "docs/records.md",
       "set": "core"
     },
+    "map": {
+      "path": "docs/map",
+      "set": "map"
+    },
     "scorecard": {
       "path": "docs/health/compliance.md",
       "set": "health"
