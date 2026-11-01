@@ -25,7 +25,7 @@ Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each
   an impeccable call passes only for `detect ...` and `hooks status`. Every other subcommand is refused, also a later one. `detect` may
   download the engine, and it checks the engine against the committed checksum list `scripts/engine-checksums.txt` (owner, 2026-10-10).
 - Guard rule `debug-port-ask` (`hooks/guard.py`): a shell command that launches an app with `--remote-debugging-port` (equals or space form),
-  or sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to a value that holds it, asks. A chained form denies as `ask-alone`. Text that only names
+  or sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to a value that holds it, asks. A chained form is refused as `ask-alone`. Text that only names
   the flag (`grep`, `echo`, `git commit -m`, `cat`) and `impeccable detect --cdp` pass. Risk kind: likely risk (coordinator ruling,
   2026-11-01, `building-port-keeps-behaviour`). Impeccable 4.8.0 `reference/critique.md` step 1 and `reference/audit.md` "Desktop apps"
   tell an agent to open a debug port, and main opened none without the owner. Landed 2026-11-01.
