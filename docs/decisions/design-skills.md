@@ -33,11 +33,8 @@ reviewer clause in `agents/reviewer.md`.
 - Guard rule `impeccable-review-only` (`hooks/guard.py`): the Skill tool loads impeccable only for `audit` or `critique`. In the shell,
   an impeccable call passes only for `detect ...` and `hooks status`. Every other subcommand is refused, also a later one. `detect` may
   download the engine, and it checks the engine against the committed checksum list `scripts/engine-checksums.txt` (owner, 2026-10-10).
-- Guard rule `debug-port-ask` (`hooks/guard.py`): a shell command that launches an app with `--remote-debugging-port` (equals or space form),
-  or sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to a value that holds it, asks. A chained form is refused as `ask-alone`. Text that only names
-  the flag (`grep`, `echo`, `git commit -m`, `cat`) and `impeccable detect --cdp` pass. Risk kind: likely risk (coordinator ruling,
-  2026-11-01, `building-port-keeps-behaviour`). Impeccable 4.8.0 `reference/critique.md` step 1 and `reference/audit.md` "Desktop apps"
-  tell an agent to open a debug port, and main opened none without the owner. Landed 2026-11-01.
+- Owner ruling, waiting-page item 119 (impeccable debug port), pick b, 2026-11-01 11:43 CST: take impeccable 4.8.0 as is, with no guard. The guard does not ask on it. The owner asked how the port avoids a clash; the next line answers.
+  Launch headless Chrome with `--remote-debugging-port=0`. Measured (lane drop-debug-port-ask, 2026-11-01): the OS gave a free port (43677), written as the first line of `DevToolsActivePort` in its `--user-data-dir`; `impeccable detect --cdp 43677` ran. Electron, and WebView2 with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=0"`: unmeasured. The skill's reference/critique.md and reference/audit.md name 9222 as an example; `detect --cdp` takes any port.
 - Blind, then compare: each design reviewer judges the rendered screens before it reads the repo's design spec, tokens or design
   decisions. The orchestrator reads those only after both findings exist. Findings on the changed pages are not limited to the diff
   (`agents/reviewer.md`). A finding that agrees with the repo, or is a plain defect (accessibility, broken layout, overflow), is fixed
