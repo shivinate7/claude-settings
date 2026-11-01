@@ -13,6 +13,8 @@ import os, shutil, subprocess, sys, tempfile, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+sys.path.insert(0, os.path.join(ROOT, "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 URL = "https://github.com/shivinate7/claude-settings"
 
 def put(path, text):
@@ -59,7 +61,8 @@ class Launch(unittest.TestCase):
         # Windows path here drops every backslash (`C:\Users\x` -> `C:Usersx`) and every clone
         # in the suite fails to resolve. Forward slashes parse the same on both OSes and need no
         # escaping.
-        put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
+        # Signing is on, as in a real checkout, so the import above is what keeps these commits off the signer.
+        put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
 
     def release(self, tag):
         # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.

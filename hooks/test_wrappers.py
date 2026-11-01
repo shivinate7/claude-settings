@@ -54,6 +54,8 @@ import tempfile
 from mutate_shared import guard_tree  # run as a script, so hooks/ is on sys.path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 SETTINGS = os.environ.get("WRAPPERS_SETTINGS_UNDER_TEST") or os.path.join(HERE, "..", "settings.json")
 HELPER = os.environ.get("REFRESH_HELPER_UNDER_TEST") or os.path.join(HERE, "..", "merge", "install_from_main.sh")
 SH = shutil.which("sh")

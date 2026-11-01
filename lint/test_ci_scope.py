@@ -18,7 +18,10 @@ import subprocess
 import tempfile
 import unittest
 
+import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
@@ -133,6 +136,12 @@ class Scope(unittest.TestCase):
     def test_workflow_or_scope_script_change_runs_everything(self):
         for p in (".github/workflows/checks.yml", ".github/scripts/ci-scope.sh"):
             self.assertFlags(run([p]), want_true=ALL)
+
+    def test_a_test_run_signing_helper_change_runs_everything(self):
+        # Every suite loads the helper, so a change to any of its three twins runs every job.
+        for p in ("lint/_test_git.py", "lint/_test_git.sh", "lint/_test_git.mjs"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p]), want_true=ALL + DERIVED_FLAGS)
 
     def test_unmapped_path_runs_everything(self):
         self.assertFlags(run(["zz-unmapped/blob.bin"]), want_true=ALL)

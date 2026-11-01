@@ -4,6 +4,7 @@
 // throwaway directory under the OS temp dir and removes it when done, so tests never touch this
 // repository's own tree and never share state with each other.
 
+import "../../lint/_test_git.mjs";  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from "node:assert/strict";
 import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync, openSync, closeSync } from "node:fs";
 import { execFileSync, spawnSync, spawn } from "node:child_process";

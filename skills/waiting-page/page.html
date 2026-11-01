@@ -33,6 +33,8 @@
   --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
 
 * { box-sizing: border-box; }
+/* The fixed send bar covers the bottom of the viewport, so a focused or scrolled-to element stops above it. */
+html { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--hdr); }
@@ -143,7 +145,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 
 /* Options side by side; each card's rows line up so lose sits beside lose. */
 .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
-.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; scroll-margin-top: 64px; scroll-margin-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.opt { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; text-align: left; }
 @supports (grid-template-rows: subgrid) { .opts { grid-auto-rows: auto; } .opt { grid-row: span 4; grid-template-rows: subgrid; } }
 .opt:hover { border-color: var(--faint); }
 .opt input { position: absolute; opacity: 0; pointer-events: none; }
@@ -234,10 +236,8 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ready.multi, .readyfit { white-space: normal; overflow: visible; }
 .readyfit { visibility: hidden; margin: 0; font-size: 14.5px; font-weight: 600; }
 .ready.on::before, .readyfit::before { content: "\2713  "; }
-/* Every control keeps its place whether it applies or not, so a pick never reflows the row. */
+/* The row under the body: None of these on a decision, Mark done on a task. */
 .alts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.alts .sp { flex: 1 1 0; }
-.alts .gone { visibility: hidden; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
@@ -249,6 +249,8 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .note.need label { color: var(--due); font-weight: 600; }
 .note textarea { width: 100%; min-height: 60px; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
 .note.need textarea { border-color: var(--due); }
+/* A blocked card's note box dims like its other disabled controls; the label stays readable. */
+.note textarea:disabled { opacity: .45; cursor: default; }
 ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 /* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
@@ -703,7 +705,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, noteOpen: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, notice: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -724,7 +726,6 @@ const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : it.pick);
 // "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
 const namesOf = (it, l) => { const n = l.map((k) => pickName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
 const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]);
-const sameList = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((k, i) => k === b[i]);
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") n.className = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v === true) n.setAttribute(k, ""); else if (v !== false && v != null) n.setAttribute(k, v); }
@@ -1004,13 +1005,13 @@ function readyText(it) {
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
-  if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (d.auto ? ", my pick." : it.ranked === true ? ", your order." : ", your choice.") : "";
-  return "Ready to send: " + pickName(it, d.choice) + (d.auto ? ", my pick." : ", your choice.");
+  if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (it.ranked === true ? ", your order." : ", your choice.") : "";
+  return "Ready to send: " + pickName(it, d.choice) + ", your choice.";
 }
 // The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
 function readyFits(it) {
   const all = "Ready to send: " + namesOf(it, (it.options || []).map((o) => o.key));
-  return [all + (it.ranked === true ? ", your order." : ", your choice."), all + ", my pick.", "Ready to send: none of these, with your note.", "My pick goes with your next Send."];
+  return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note.", "My pick goes with your next Send."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
 function sparkle() {
@@ -1213,11 +1214,6 @@ function cmdBlocks(it) {
   const shells = onWindows() ? SHELLS : SHELLS.slice().reverse();
   return shells.filter((sh) => typeof c[sh.key] === "string" && c[sh.key].trim()).map((sh) => cmdBlock(it, c[sh.key], sh));
 }
-// Block "nearest" honours the scroll margins, so it would move an option already whole between the header and the bar.
-function showOpt(o) {
-  const r = o.getBoundingClientRect();
-  if (r.top < document.querySelector(".hdr").getBoundingClientRect().bottom || r.bottom > $("bar").getBoundingClientRect().top) o.scrollIntoView({ block: "nearest" });
-}
 // A ruling card: the title, the option the arbiter ruled, why, where it is recorded, and one Overturn toggle. A press changes only the draft, until Send.
 function buildRuling(it) {
   const saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it), armed = !saved && d.choice === OVERTURN, r = ruledOf(it);
@@ -1266,10 +1262,7 @@ function buildCard(it) {
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
-  const noteShown = !!(state.noteOpen[it.id] || d.choice === NONE || d.note);
-  const addNote = h("button", { class: "btn quiet notebtn" + (noteShown ? " gone" : ""), type: "button", id: "b-note-" + it.id, onclick: () => { state.noteOpen[it.id] = true; repaint(it); const t = $("n-" + it.id); if (t) t.focus(); } }, "Add a note");
-  // Take my pick hides whenever the ticks equal the pick, ranked or not: nothing is left for it to do. It is not shown at all when the pick is not valid.
-  const multi = isMulti(it), pk = pickKeys(it);
+  const multi = isMulti(it);
   const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
   if (it.kind === "decision") {
@@ -1279,33 +1272,27 @@ function buildCard(it) {
     if (multi) card.append(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
     card.append(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
-        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"),
-        addNote,
-        multi ? h("span", { class: "sp" }) : null,
-        pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); const r = $("o-" + it.id + "-" + pk[0]); if (r) { showOpt(r.closest(".opt")); r.focus({ preventScroll: true }); } } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
+        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these")));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     card.append(...cmdBlocks(it));
     if (linksOf(it).length) card.append(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     card.append(ready, h("div", { class: "alts" },
-      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),
-      addNote));
+      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done")));
   }
-  if (noteShown) {
-    const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
-    const ta = h("textarea", { id: "n-" + it.id, placeholder: need ? "Say what you want instead." : "Anything the session should know" });
-    ta.value = d.note || "";
-    ta.addEventListener("input", () => {
-      edited(); setDraft(it, { note: ta.value });
-      nb.classList.toggle("need", need && !ta.value.trim());
-      const dd = eff(it) || {}, rd = ta.closest(".card").querySelector(".ready");
-      rd.textContent = readyText(it); rd.classList.toggle("on", draftReady(it));
-      renderRail(); renderBar();
-    });
-    nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
-    card.append(nb);
-  }
-  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .takepick, .nonebtn, .donebtn").forEach((e) => { e.disabled = true; });
+  const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
+  const ta = h("textarea", { id: "n-" + it.id, placeholder: need ? "Say what you want instead." : "Anything the session should know" });
+  ta.value = d.note || "";
+  ta.addEventListener("input", () => {
+    edited(); setDraft(it, { note: ta.value });
+    nb.classList.toggle("need", need && !ta.value.trim());
+    const dd = eff(it) || {}, rd = ta.closest(".card").querySelector(".ready");
+    rd.textContent = readyText(it); rd.classList.toggle("on", draftReady(it));
+    renderRail(); renderBar();
+  });
+  nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
+  card.append(nb);
+  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .nonebtn, .donebtn, .note textarea").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
@@ -1321,7 +1308,7 @@ async function withdrawAll() {
       if (cur.exists && (cur.data() || {}).at !== prior.at) { state.notice[it.id] = "This answer changed since this page read it. Reload before you withdraw it."; continue; }
       await ref.delete();
     } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
-    delete state.answers[it.id]; delete state.changing[it.id]; delete state.noteOpen[it.id]; delete state.notice[it.id];
+    delete state.answers[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
     done.push({ it, prior, draft: null, changing: false, withdrawn: true });
   }
   saveDraft();
@@ -1362,7 +1349,7 @@ function releaseSent() {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.noteOpen[it.id], state.more[it.id], state.moreReply[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1513,11 +1500,11 @@ function renderRail() {
 /* ---------- Bar and Send ---------- */
 function renderBar() {
   const st = staged(), open = state.items.filter((i) => !isSaved(i)), sa = $("send");
-  const over = st.filter(isRuling).length, mine = st.filter((i) => (eff(i) || {}).auto && !(eff(i) || {}).stood).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over);
+  const over = st.filter(isRuling).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over);
   const parts = [];
   if (state.barNote) parts.push(state.barNote);
   else {
-    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [mine && mine + " by Take my pick", stood && stood + " where my pick stands", over && over + " overturn"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
+    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", over && over + " overturn"].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
     if (left) parts.push(h("b", {}, String(left)), " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
@@ -1588,7 +1575,7 @@ async function sendAll() {
       try { await state.db.collection("answers").doc(it.id).set(body); }
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from No. " + it.n : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id] });
-      state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id]; delete state.noteOpen[it.id];
+      state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push({ n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
     saveDraft();
