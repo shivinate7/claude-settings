@@ -1,0 +1,9 @@
+{
+ "title": "The waiting page has an ask box at the bottom, and sessions answer there",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.33764,
+ "why": "Your ask, Nov 1 17:31 CST: an area at the bottom of the waiting page where you ask anything (a question, feedback or otherwise) and the answer appears there, so you need not track the chat.",
+ "note": "Shape (defaults, from how the page already works): an Ask box at the bottom of every repo's waiting page. A send writes asks/<id> (your text and time) and wakes the page writer, as a page answer does today. The page writer answers in the same ask, or routes it to the owning session, which answers there; feedback is filed like a chat message (inbox, then its home). Each ask shows its answer under it, newest first; answered asks fold, and you can unfold them. Builds on the page code in skills/waiting-page/page.html and the answer flow in its SKILL.md; no comment threads (a rebuilt page drops them).\nLane: designer first (it is a screen), then builder, then design reviewer. Ready: no open question. Port: yes, every repo's page gets it from main.",
+ "updatedAt": "2026-11-01T23:33:00Z"
+}
