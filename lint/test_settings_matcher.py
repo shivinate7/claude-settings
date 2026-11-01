@@ -456,7 +456,8 @@ class SendMessageJudge(unittest.TestCase):
 # Every judge in hooks/call_judge.py must have a row in the model-per-role table
 # (docs/decisions/agent-model-cap.md), and that row's model must equal the module's model.
 RECORD = os.path.join(os.path.dirname(SETTINGS), "docs", "decisions", "agent-model-cap.md")
-ROW_NAMES = {"Agent": "Agent spawn judge", "AskUserQuestion": "question reviewer"}  # first-cell words of each row
+ROW_NAMES = {"Agent": "Agent spawn judge", "AskUserQuestion": "question reviewer",
+             "ArtifactData": "question reviewer"}  # first-cell words of each row; the question reviewer row covers both
 
 
 def table_rows(text):
