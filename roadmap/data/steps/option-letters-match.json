@@ -1,0 +1,9 @@
+{
+  "title": "A waiting-page option and its mockup carry one letter, not two",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33781,
+  "why": "Incident (shiv, Nov 1 16:12 CST, screenshot of a waiting page in another repo, in chat to triage): a design question showed page keys A, B, C, D on cards labelled 'B: a bottom strip', 'D: drag sideways', 'A: a rail', 'C: a grab line', and the mockups carry 'Option B', 'Option D' and so on. Two letter sets disagree, so an answer of 'a' is ambiguous.",
+  "note": "Triage judged it a debt with an incident (roles-findings-are-debts-or-notes): any design question built from explore mockups can show it. Fix the cause in one home: the option key the page shows is the only letter. Either the writer keys options by the mockup's letter, or the mockup and label carry no letter of their own and the page key is stamped on both. Candidate homes: hooks/question_form.py item_hit (refuse a label that opens with a different option letter than its key) and skills/waiting-page/SKILL.md plus skills/design-explore (mockup labels take the page key). Done check: a form test refuses an option keyed a whose label opens 'B:', red on main and green on the fix; the skill text says one letter per option. Needs no answer.",
+  "updatedAt": "2026-11-01T22:13:00Z"
+}
