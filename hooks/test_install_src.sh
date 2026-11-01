@@ -845,6 +845,398 @@ prune_case6() {
   rm -rf "$h"
 }
 
+# ---- retired files: a file main stopped shipping is removed; an owner's file is never touched ----
+# The manifest is $CLAUDE_DIR/backups/install-manifest.txt. A file is shipped when git tracks it under
+# $SRC. A retired local link needs `git rm --cached`: the file stays on disk, so the link does not
+# dangle (a dangling link is already pruned today). A retired cloud copy takes a plain `git rm`.
+retired_commit() { ( cd "$1" && git add -A && git commit -q -m "$2" ); }
+
+# A checkout with the files every retired case keeps: one hook and one skill, both shipped, so no
+# landed folder is ever empty. $1 is the checkout, $2 names the case in its commit message.
+retired_checkout() {
+  make_checkout "$1" "# $2 content"
+  cp "$INSTALL_SH" "$1/install.sh"
+  printf '#!/bin/sh\necho keep\n' > "$1/hooks/keep_hook.sh"
+  mkdir -p "$1/skills/keep-skill"
+  printf 'keep\n' > "$1/skills/keep-skill/SKILL.md"
+  retired_commit "$1" "$2 base"
+}
+
+# One install of checkout $1 into home $2, config dir $3. $4 is local or cloud. Prints its output.
+retired_run() {
+  if [ "$4" = cloud ]; then
+    ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" bash ./install.sh --cloud 2>&1 )
+  else
+    run_local_install "$1" "$2" "$3"
+  fi
+}
+
+# retired-files.txt at the checkout root, one argument per line, committed.
+retired_list() {
+  co="$1"; shift
+  printf '%s\n' "$@" > "$co/retired-files.txt"
+  retired_commit "$co" "retired list"
+}
+
+retired_case1() {
+  name="retired1: a link to a file main stopped tracking is removed on the next local run"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired1-checkout"
+  retired_checkout "$co" retired1
+  printf '#!/bin/sh\necho retired\n' > "$co/hooks/retired_hook.sh"
+  retired_commit "$co" "ship retired_hook"
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  recorded=$(grep -c '^hooks/retired_hook.sh' "$cfg/backups/install-manifest.txt" 2>/dev/null)
+  git -C "$co" rm -q --cached hooks/retired_hook.sh && git -C "$co" commit -q -m "retire retired_hook"
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ -e "$cfg/hooks/retired_hook.sh" ] || [ -L "$cfg/hooks/retired_hook.sh" ]; then
+    bad "$name" "the link to the retired file survived the second run"
+  elif [ "$recorded" != 1 ]; then
+    bad "$name" "run 1 did not record hooks/retired_hook.sh in $cfg/backups/install-manifest.txt"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case2() {
+  name="retired2: a cloud copy of a hook or skill main stopped tracking is removed on the next run"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired2-checkout"
+  retired_checkout "$co" retired2
+  printf '#!/bin/sh\necho copy\n' > "$co/hooks/retired_copy.sh"
+  mkdir -p "$co/skills/retired-skill"; printf 'old skill\n' > "$co/skills/retired-skill/SKILL.md"
+  retired_commit "$co" "ship retired copies"
+  out1=$(retired_run "$co" "$h" "$cfg" cloud); rc1=$?
+  git -C "$co" rm -q hooks/retired_copy.sh && git -C "$co" rm -q -r skills/retired-skill \
+    && git -C "$co" commit -q -m "retire the copies"
+  out2=$(retired_run "$co" "$h" "$cfg" cloud); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ -e "$cfg/hooks/retired_copy.sh" ]; then
+    bad "$name" "the retired hook copy survived the second cloud run"
+  elif [ -e "$cfg/skills/retired-skill" ]; then
+    bad "$name" "the retired skill copy survived the second cloud run"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case3() {
+  name="retired3: an owner's file the manifest does not list is kept on the next run"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired3-checkout"
+  retired_checkout "$co" retired3
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  printf 'mine\n' > "$cfg/hooks/owner_tool.py"
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+  got=$(cat "$cfg/hooks/owner_tool.py" 2>/dev/null)
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$got" != mine ]; then
+    bad "$name" "owner_tool.py holds [$got] after the second run, expected [mine]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case4() {
+  name="retired4: a recorded copy the owner hand-edited is kept, and the next run names it"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired4-checkout"
+  retired_checkout "$co" retired4
+  printf 'print("v1")\n' > "$co/hooks/edited_hook.py"
+  retired_commit "$co" "ship edited_hook"
+  out1=$(retired_run "$co" "$h" "$cfg" cloud); rc1=$?
+  printf 'print("mine")\n' > "$cfg/hooks/edited_hook.py"
+  git -C "$co" rm -q hooks/edited_hook.py && git -C "$co" commit -q -m "retire edited_hook"
+  out2=$(retired_run "$co" "$h" "$cfg" cloud); rc2=$?
+  got=$(cat "$cfg/hooks/edited_hook.py" 2>/dev/null)
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$got" != 'print("mine")' ]; then
+    bad "$name" "edited_hook.py holds [$got] after the second run; the owner's edit was lost"
+  elif ! printf '%s\n' "$out2" | grep -q 'edited_hook.py'; then
+    bad "$name" "the second run does not name edited_hook.py in its output"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case5() {
+  name="retired5: an owner's real folder under a listed skill name, with no manifest, is moved to backups/retired"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired5-checkout"
+  retired_checkout "$co" retired5
+  retired_list "$co" 'skills/tile-windows'
+  mkdir -p "$cfg/skills/tile-windows"; printf 'owner skill text\n' > "$cfg/skills/tile-windows/SKILL.md"
+  out=$(retired_run "$co" "$h" "$cfg" local); rc=$?
+  kept=$(grep -rl 'owner skill text' "$cfg/backups/retired" 2>/dev/null)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -e "$cfg/skills/tile-windows" ] || [ -L "$cfg/skills/tile-windows" ]; then
+    bad "$name" "the owner's folder is still under skills/"
+  elif [ -z "$kept" ]; then
+    bad "$name" "SKILL.md is not under $cfg/backups/retired (deleted, or moved elsewhere)"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case6() {
+  name="retired6: a clone folder holding only an ignored file is not landed, and an old link into it is removed"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired6-checkout"
+  retired_checkout "$co" retired6
+  printf '*.local\n' > "$co/.gitignore"
+  mkdir -p "$co/skills/tile-windows"; printf 'tile\n' > "$co/skills/tile-windows/SKILL.md"
+  retired_commit "$co" "ship tile-windows"
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  # main drops tile-windows. git stops tracking it, and the folder keeps only an ignored file.
+  # ghost-skill was never tracked, and holds only an ignored file too.
+  git -C "$co" rm -q -r skills/tile-windows && git -C "$co" commit -q -m "retire tile-windows"
+  mkdir -p "$co/skills/tile-windows" "$co/skills/ghost-skill"
+  printf 'cache\n' > "$co/skills/tile-windows/cache.local"
+  printf 'cache\n' > "$co/skills/ghost-skill/cache.local"
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ -e "$cfg/skills/tile-windows" ] || [ -L "$cfg/skills/tile-windows" ]; then
+    bad "$name" "the old link to the untracked tile-windows folder survived"
+  elif [ -e "$cfg/skills/ghost-skill" ] || [ -L "$cfg/skills/ghost-skill" ]; then
+    bad "$name" "ghost-skill was landed though git tracks nothing under it"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case7() {
+  name="retired7: a local run with a failed landing removes no retired link"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired7-checkout"
+  retired_checkout "$co" retired7
+  mkdir -p "$co/skills/gone-skill"; printf 'gone\n' > "$co/skills/gone-skill/SKILL.md"
+  retired_commit "$co" "ship gone-skill"
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  git -C "$co" rm -q -r skills/gone-skill && git -C "$co" commit -q -m "retire gone-skill"
+  # The next hooks landing fails: a plain file sits where the hooks folder must be.
+  rm -rf "$cfg/hooks"; printf 'a plain file, not a folder\n' > "$cfg/hooks"
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+
+  if [ $rc1 -ne 0 ]; then
+    bad "$name" "run 1 exited $rc1: $out1"
+  elif [ ! -L "$cfg/skills/gone-skill" ]; then
+    bad "$name" "the link to the retired skill was removed by a run whose hooks landing failed (run 2 exit $rc2)"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# Cloud twin of retired7. Today cloud never removes, so this passes today: it guards the new removal.
+retired_case7b() {
+  name="retired7b: a cloud run with a failed copy removes no retired copy"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired7b-checkout"
+  retired_checkout "$co" retired7b
+  printf '#!/bin/sh\necho gone\n' > "$co/hooks/gone_copy.sh"
+  retired_commit "$co" "ship gone_copy"
+  out1=$(retired_run "$co" "$h" "$cfg" cloud); rc1=$?
+  git -C "$co" rm -q hooks/gone_copy.sh && git -C "$co" commit -q -m "retire gone_copy"
+  # The next copy of keep_hook.sh fails: a folder named <dest>.cs-new makes its rename fail.
+  mkdir -p "$cfg/hooks/keep_hook.sh.cs-new"
+  out2=$(retired_run "$co" "$h" "$cfg" cloud); rc2=$?
+
+  if [ $rc1 -ne 0 ]; then
+    bad "$name" "run 1 exited $rc1: $out1"
+  elif [ $rc2 -eq 0 ]; then
+    bad "$name" "run 2 exited 0, so the injected landing failure did not happen: $out2"
+  elif [ ! -e "$cfg/hooks/gone_copy.sh" ]; then
+    bad "$name" "gone_copy.sh was removed by a run that failed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case8() {
+  name="retired8: a second local run after a removal removes nothing more and exits 0"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired8-checkout"
+  retired_checkout "$co" retired8
+  printf '#!/bin/sh\necho retired\n' > "$co/hooks/retired_hook.sh"
+  retired_commit "$co" "ship retired_hook"
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  git -C "$co" rm -q --cached hooks/retired_hook.sh && git -C "$co" commit -q -m "retire retired_hook"
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+  before=$(find "$cfg" | sort)
+  out3=$(retired_run "$co" "$h" "$cfg" local); rc3=$?
+  after=$(find "$cfg" | sort)
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ] || [ $rc3 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2 rc3=$rc3: $out1 / $out2 / $out3"
+  elif [ -e "$cfg/hooks/retired_hook.sh" ] || [ -L "$cfg/hooks/retired_hook.sh" ]; then
+    bad "$name" "the retired link survived run 2"
+  elif [ "$before" != "$after" ]; then
+    bad "$name" "run 3 changed the config tree: before [$(printf '%s' "$before" | tr '\n' ' ')] after [$(printf '%s' "$after" | tr '\n' ' ')]"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case9() {
+  name="retired9: with no manifest, a run acts only on the names retired-files.txt lists"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired9-checkout"
+  retired_checkout "$co" retired9
+  printf '#!/bin/sh\necho old\n' > "$co/hooks/listed_gone.sh"
+  retired_list "$co" 'hooks/listed_gone.sh' 'hooks/keep_hook.sh' "$(printf 'hooks/crlf_listed.py\r')" \
+    '# hooks/commented.py'
+  # Now main stops tracking listed_gone.sh. The file stays on disk, and an old link still points at it.
+  git -C "$co" rm -q --cached hooks/listed_gone.sh && git -C "$co" commit -q -m "retire listed_gone"
+  mkdir -p "$cfg/hooks"
+  ln -s "$co/hooks/listed_gone.sh" "$cfg/hooks/listed_gone.sh"
+  printf 'listed owner\n' > "$cfg/hooks/crlf_listed.py"
+  printf 'commented owner\n' > "$cfg/hooks/commented.py"
+  printf 'plain owner\n' > "$cfg/hooks/owner_plain.py"
+  out=$(retired_run "$co" "$h" "$cfg" local); rc=$?
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -L "$cfg/hooks/listed_gone.sh" ]; then
+    bad "$name" "the listed link to an untracked file survived"
+  elif [ -e "$cfg/hooks/crlf_listed.py" ] || [ -z "$(grep -rl 'listed owner' "$cfg/backups/retired" 2>/dev/null)" ]; then
+    bad "$name" "the listed file (CRLF line) is not moved to backups/retired"
+  elif [ "$(cat "$cfg/hooks/commented.py" 2>/dev/null)" != 'commented owner' ]; then
+    bad "$name" "commented.py was acted on; a # line in retired-files.txt must name nothing"
+  elif [ ! -L "$cfg/hooks/keep_hook.sh" ]; then
+    bad "$name" "keep_hook.sh is still tracked and listed, yet its link was removed"
+  elif [ "$(cat "$cfg/hooks/owner_plain.py" 2>/dev/null)" != 'plain owner' ]; then
+    bad "$name" "owner_plain.py, which the list does not name, was changed or removed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case10() {
+  name="retired10: a landed folder whose shipped set is empty removes no link into it"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired10-checkout"
+  retired_checkout "$co" retired10
+  printf '#!/bin/sh\necho retired\n' > "$co/hooks/retired_hook.sh"
+  retired_commit "$co" "ship retired_hook"
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  # main ships nothing under hooks now. git drops the folder and its files, so every link into it dangles.
+  git -C "$co" rm -q -r hooks && git -C "$co" commit -q -m "retire hooks"
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ ! -L "$cfg/hooks/keep_hook.sh" ] || [ ! -L "$cfg/hooks/retired_hook.sh" ]; then
+    bad "$name" "a link into the emptied hooks folder was removed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case11() {
+  name="retired11: guard.d, *.bak.* and *.cs-old are never removed, even when retired-files.txt lists them"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired11-checkout"
+  retired_checkout "$co" retired11
+  retired_list "$co" 'hooks/old.py.bak.1' 'hooks/old.py.cs-old' 'hooks/guard.d'
+  mkdir -p "$cfg/hooks/guard.d/abc"; printf 'guard set\n' > "$cfg/hooks/guard.d/abc/guard.py"
+  ln -s "$co/hooks/old.py.bak.1" "$cfg/hooks/old.py.bak.1"
+  ln -s "$co/hooks/old.py.cs-old" "$cfg/hooks/old.py.cs-old"
+  out=$(retired_run "$co" "$h" "$cfg" local); rc=$?
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ "$(cat "$cfg/hooks/guard.d/abc/guard.py" 2>/dev/null)" != 'guard set' ]; then
+    bad "$name" "guard.d/abc/guard.py was removed or changed"
+  elif [ ! -L "$cfg/hooks/old.py.bak.1" ] || [ ! -L "$cfg/hooks/old.py.cs-old" ]; then
+    bad "$name" "a *.bak.* or *.cs-old link was removed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case12() {
+  name="retired12: a cloud owner's plain file under a listed name, with no manifest, is moved to backups/retired"
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired12-checkout"
+  retired_checkout "$co" retired12
+  retired_list "$co" 'hooks/config_report.py'
+  mkdir -p "$cfg/hooks"; printf 'report v1\n' > "$cfg/hooks/config_report.py"
+  out=$(retired_run "$co" "$h" "$cfg" cloud); rc=$?
+  kept=$(grep -rl 'report v1' "$cfg/backups/retired" 2>/dev/null)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -e "$cfg/hooks/config_report.py" ] || [ -L "$cfg/hooks/config_report.py" ]; then
+    bad "$name" "config_report.py is still under hooks/"
+  elif [ -z "$kept" ]; then
+    bad "$name" "config_report.py is not under $cfg/backups/retired (deleted, or moved elsewhere)"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case13() {
+  name="retired13: with a manifest, a dangling link the manifest does not record is kept"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired13-checkout"
+  retired_checkout "$co" retired13
+  out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
+  mkdir -p "$cfg/hooks"; ln -s "$co/hooks/orphan.sh" "$cfg/hooks/orphan.sh"
+  out2=$(retired_run "$co" "$h" "$cfg" local); rc2=$?
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ ! -L "$cfg/hooks/orphan.sh" ]; then
+    bad "$name" "the unrecorded dangling link was removed"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- Case F1-F5: session_start.sh origin-freshness check ---------------------------------
 # These cases use a real local bare repo as "origin", so `git fetch` succeeds with no
 # network and the behind-count is exact. They also confirm the fetch never runs, and
@@ -4175,6 +4567,20 @@ run prune_case3
 run prune_case4
 run prune_case5
 run prune_case6
+run retired_case1
+run retired_case2
+run retired_case3
+run retired_case4
+run retired_case5
+run retired_case6
+run retired_case7
+run retired_case7b
+run retired_case8
+run retired_case9
+run retired_case10
+run retired_case11
+run retired_case12
+run retired_case13
 run skills_case1
 run skills_case2
 run cloud_settings1
