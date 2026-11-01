@@ -2,19 +2,24 @@
 
 ## The ruling
 
-Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each one is global and pinned. The procedure is in
-`skills/design-review/SKILL.md`, the builder line in `agents/builder.md`, the designer steps in `agents/designer.md`, the reviewer clause in `agents/reviewer.md`.
+Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each one is global. `frontend-design` floats on the newest
+`claude-plugins-official` main. Each other source is pinned (owner, 2026-11-01 11:43 CST, waiting-page item 120, pick c, frontend-design pin).
+The procedure is in `skills/design-review/SKILL.md`, the builder line in `agents/builder.md`, the designer steps in `agents/designer.md`, the
+reviewer clause in `agents/reviewer.md`.
 
 - `frontend-design`: a builder loads it by name before it writes styling for a new screen, or in a repo with no design yet. A designer loads it
-  by name before it draws (owner, 2026-10-30, waiting-page item 82 b, designer skills).
+  by name before it draws (owner, 2026-10-30, waiting-page item 82 b, designer skills). It comes from `anthropics/claude-plugins-official`
+  main, through the `claude-code-plugins` marketplace (`settings.json`), and moves with it. From claude-code v2.1.312 that marketplace lists
+  it at ref `main`. A github marketplace `sha` is ignored.
 - Vercel `web-design-guidelines`: no plugin. A blind reviewer checks the changed pages against the rules at a pinned URL, after the build.
 - `impeccable`: a pinned copy of its skill folder in `skills/impeccable`. No plugin. A second blind reviewer runs `/impeccable audit` and
   `/impeccable critique` only. A designer also runs `critique <mockup path>` on its own mockup before hand-off, and fixes each finding
   inside its write scope (owner, 2026-10-30, waiting-page item 82 b, designer skills). That pass is not the design review.
 - Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month and waits 14 days after a release
   (`minimumReleaseAge`). The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt`, the
-  commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `anthropics/claude-code` ref in `settings.json`.
-- Narrowing of `verification-newest-that-passes`: these three sources take the newest release only after it has waited 14 days. The owner
+  commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `anthropics/claude-code` ref in `settings.json`. Each pin moves to the
+  newest version that passes its checks (`verification-newest-that-passes`). The `claude-code` ref is the one that carries `frontend-design`.
+- Narrowing of `verification-newest-that-passes`: impeccable and Vercel take the newest release only after it has waited 14 days. The owner
   wants their improvements.
 - No Vercel plugin: the upstream skill fetches from `main` on every run, so a plugin update would move the rules without a decision. No
   impeccable plugin: it installs hooks that run `impeccable hook` on SessionStart, PostToolUse and Stop in every session, and an agent with
@@ -36,7 +41,7 @@ Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each
   list per repo, with what the skill wants, what the repo has, and a recommendation.
 
 Reason: the owner wants the skills to improve every repo. Conformity would make them worthless, so a repo does not silence a skill, and a
-skill does not restyle a repo on its own. Pinning keeps an update from changing a look by itself. Reopen when a clash repeats across repos, or a skill restyles a repo. Then follow `outcomes-stale-decision-protocol`.
+skill does not restyle a repo on its own. Pinning impeccable and Vercel keeps an update from changing a look by itself. `frontend-design` is guidance only and moves with its source. Reopen when a clash repeats across repos, or a skill restyles a repo. Then follow `outcomes-stale-decision-protocol`.
 
 Kind: process
 Home: skills/impeccable/SOURCE.txt
