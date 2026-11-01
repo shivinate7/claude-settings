@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.33777,
   "why": "Incident (coordinator, Nov 1 12:08 CST): since q_max PR #990, bin/ste-changed exits 2 on q_max main with \"kind map is in the layout already\", so the prose check cannot run there.",
-  "note": "Triage judged it a debt with an incident (roles-findings-are-debts-or-notes): a child repo's prose check is down until fixed. Fix the cause in the shared check, not in q_max: a layout extra that names a kind the base layout already has is either accepted as the same kind or refused with a remedy that names the extras file. Done check: a test with a repo whose layout extras repeat the map kind, red on main and green on the fix; q_max main passes ste-changed. Needs no answer. Lane session_013NEJKyqyWWRahbMMQFgBXg, started Nov 1 12:08 CST (coordinator).",
-  "updatedAt": "2026-11-01T18:10:00Z"
+  "note": "Triage judged it a debt with an incident (roles-findings-are-debts-or-notes): a child repo's prose check is down until fixed. Fix the cause in the shared check, not in q_max: a layout extra that names a kind the base layout already has is either accepted as the same kind or refused with a remedy that names the extras file. Done check: a test with a repo whose layout extras repeat the map kind, red on main and green on the fix; q_max main passes ste-changed. Needs no answer. Lane session_013NEJKyqyWWRahbMMQFgBXg, started Nov 1 12:08 CST (coordinator). q_max side (coordinator, Nov 1 13:09 CST): q_max #1000 (merge 14aaafbf) carried #999, which drops map from q_max layout extras, and the ste-lint pin move; that unblocks q_max but is not the shared fix this step builds.",
+  "updatedAt": "2026-11-01T19:11:30Z"
 }
