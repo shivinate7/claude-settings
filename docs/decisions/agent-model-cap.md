@@ -103,7 +103,7 @@ probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same lin
 set none). Guard rule `lane-effort-pin` (likely risk, landed 2026-10-30) refuses a `create_session`
 call tagged `cs-build:lane` with any other prompt. A lane started with no such tag is unseen; the
 tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards
-that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, in chat to lane lane-effort-medium, pick a: liftable). `LANE_EFFORT` in `hooks/guard.py` is the one
+that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, in chat to lane-effort-medium, pick a: liftable). `LANE_EFFORT` in `hooks/guard.py` is the one
 value; `lint/check_agent_models.py` fails when the lane row's effort cell does not start with it.
 Other tiers keep the model default. Ruled out: `effortLevel` in user settings does not count for Opus
 5.5, project settings and an environment's `CLAUDE_CODE_EFFORT_LEVEL` reach every tier, and a
