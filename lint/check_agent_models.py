@@ -9,7 +9,8 @@ the guard's HAIKU_ROLES.
     python3 lint/check_agent_models.py [file ...]
 
 With no argument it checks agents/*.md and skills/*/SKILL.md. Exits 0 and prints nothing when
-clean. Exits 1 and names each file that sets a Haiku model, and the model record
+clean. With no argument it also compares the guard's role lists with the role table (role_list_drift).
+Exits 1 and names each file that sets a Haiku model, and the model record
 docs/decisions/agent-model-cap.md when its `lane session` row's effort cell does not start
 with the guard's LANE_EFFORT.
 """
@@ -72,6 +73,14 @@ def lane_effort_problem(text: str) -> str:
     return ""
 
 
+def role_list_problems() -> list:
+    """The guard's role_list_drift lines for this repository, or one unknown line when the table or the agents
+    folder cannot be read (verification-report-unknown-reads: unread is neither clear nor broken)."""
+    if _guard.role_model_table(ROOT) is None or _guard.role_agent_keys(ROOT) is None:
+        return ["role lists: the role table or the agents folder could not be read, so drift is unknown."]
+    return list(_guard.role_list_drift(ROOT))
+
+
 def main(argv) -> int:
     files = argv or sorted(
         glob.glob(os.path.join(ROOT, "agents", "*.md"))
@@ -92,6 +101,10 @@ def main(argv) -> int:
             bad = 1
         elif haiku_model(text) and not is_haiku_role(path):
             print("%s: frontmatter sets a model below Sonnet. Sonnet is the floor." % path)
+            bad = 1
+    if not argv:  # the role lists belong to the whole repository, so a run on named files leaves them alone
+        for line in role_list_problems():
+            print(line)
             bad = 1
     return bad
 

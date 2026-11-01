@@ -2008,14 +2008,15 @@ def role_model_table(pointer_root):
     return table or None
 
 
-def role_has_model_pin(pointer_root, role):
-    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
-    frontmatter, False when none does, None when the folder cannot be read."""
+def role_agent_keys(pointer_root):
+    """The frontmatter keys of each agents/*.md file in the pointer checkout, one dict per file with frontmatter,
+    or None when the folder or a file cannot be read. The one reader of agent frontmatter."""
     folder = os.path.join(pointer_root, "agents")
     try:
         files = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
     except OSError:
         return None
+    found = []
     for name in files:
         try:
             with open(os.path.join(folder, name), encoding="utf-8") as handle:
@@ -2030,9 +2031,46 @@ def role_has_model_pin(pointer_root, role):
                 break
             key, _, value = line.partition(":")
             keys.setdefault(key.strip(), value.strip())
-        if keys.get("name", "").lower() == role.lower() and keys.get("model"):
-            return True
-    return False
+        found.append(keys)
+    return found
+
+
+def role_has_model_pin(pointer_root, role):
+    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
+    frontmatter, False when none does, None when the folder cannot be read."""
+    found = role_agent_keys(pointer_root)
+    if found is None:
+        return None
+    return any(keys.get("name", "").lower() == role.lower() and keys.get("model") for keys in found)
+
+
+ROLE_BUILTINS = ("general-purpose", "claude", "Plan", "Explore")  # roles with no agents/ file that spawns can name
+
+
+def role_list_drift(pointer_root):
+    """One line per disagreement between the role table and the three role lists, [] when all agree or when the
+    table or the agents folder cannot be read (the lint check reports that as unknown). Lint-time only: one
+    table read and one agents/ read per run; floor_hit, opus_spawn_hit and hooks/override.py keep their constants.
+    A real role has an agents/ file `name` or is built in, which drops the table's non-role keys."""
+    table, agents = role_model_table(pointer_root), role_agent_keys(pointer_root)
+    if table is None or agents is None:
+        return []
+    import override
+    real = {keys["name"] for keys in agents if keys.get("name")} | set(ROLE_BUILTINS)
+    on = {word: {role for role, model in table.items() if model == word and role in real} for word in ROLE_MODEL_RANK}
+    # Bandaid: Explore stays in the Opus standing list until the owner rules items 127 and 137. Remove it then.
+    standing_want = on["opus"] | {"Explore"}
+    override_want = {role for role in table if role in real} - on["opus"] - {"Explore"}
+    lists = (("HAIKU_ROLES", "hooks/guard.py", set(HAIKU_ROLES), on["haiku"], "a haiku row"),
+             ("OPUS_STANDING_ROLES", "hooks/guard.py", set(OPUS_STANDING_ROLES), standing_want, "an opus row"),
+             ("OPUS_ROLES", "hooks/override.py", set(override.OPUS_ROLES), override_want, "a row below opus"))
+    lines = []
+    for name, home, have, want, row in lists:
+        for role in sorted(have - want):
+            lines.append("%s lists %s, but the role table has no %s for it (%s)" % (name, role, row, home))
+        for role in sorted(want - have):
+            lines.append("%s lacks %s, which the role table puts on %s (%s)" % (name, role, row, home))
+    return lines
 
 
 def role_name(table, subagent_type) -> str:
