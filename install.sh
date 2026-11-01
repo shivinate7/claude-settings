@@ -353,45 +353,30 @@ cloud_git() {
 # differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
 # unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
 # new tip only, never the history under it. A failed fetch keeps the clone as it was. The live pin skips it.
+# mirror_refresh DIR does the refresh; use_main_mirror below also calls it.
+mirror_refresh() {
+  mr_dir="$1"
+  mr_sha=$(git -C "$mr_dir" config --get claude-settings.mirrorSha 2>/dev/null)
+  if [ -n "$mr_sha" ] && [ "$(git -C "$mr_dir" rev-parse -q --verify main 2>/dev/null)" != "$mr_sha" ]; then
+    log "WARN: the clone $mr_dir has local commits on main that $REF lacks; keeping it as it is"
+  elif ! cloud_git -C "$mr_dir" fetch -q --depth 1 origin "$REF"; then
+    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+  elif git -C "$mr_dir" checkout -q -B main FETCH_HEAD \
+       && git -C "$mr_dir" config claude-settings.mirrorSha "$(git -C "$mr_dir" rev-parse main)"; then
+    log "refreshed the clone $mr_dir to $REF"
+  else
+    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+  fi
+}
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
-  mirror_sha=$(git -C "$SRC" config --get claude-settings.mirrorSha 2>/dev/null)
-  if [ -n "$mirror_sha" ] && [ "$(git -C "$SRC" rev-parse -q --verify main 2>/dev/null)" != "$mirror_sha" ]; then
-    log "WARN: the clone $SRC has local commits on main that $REF lacks; keeping it as it is"
-  elif ! cloud_git -C "$SRC" fetch -q --depth 1 origin "$REF"; then
-    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
-  elif git -C "$SRC" checkout -q -B main FETCH_HEAD \
-       && git -C "$SRC" config claude-settings.mirrorSha "$(git -C "$SRC" rev-parse main)"; then
-    log "refreshed the clone $SRC to $REF"
-  else
-    log "WARN: could not refresh the clone $SRC to $REF; keeping it as it is"
-  fi
+  mirror_refresh "$SRC"
 fi
 
-# Cloud, a session's own checkout (no marker): a cloud session starts it detached at its creation commit, so its
-# hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
-# holds moves to origin/$REF, so nothing is lost. A branch, a dirty tree or a commit main lacks stays as it is.
-# The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
-# The live pin skips it.
-if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
-   && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
-  if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
-    log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
-  elif [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
-    log "WARN: the checkout $SRC has uncommitted changes; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
-  elif ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF"; then
-    log "WARN: could not fetch $REF into $SRC; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
-  elif ! git -C "$SRC" merge-base --is-ancestor HEAD "refs/remotes/origin/$REF"; then
-    log "WARN: the checkout $SRC is at $(git -C "$SRC" rev-parse --short HEAD), a commit $REF does not hold; left as is"
-  elif git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; then
-    log "moved the checkout $SRC to $REF at $(git -C "$SRC" rev-parse --short HEAD)"
-  else
-    log "WARN: could not move the checkout $SRC to $REF; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
-  fi
-fi
-
-# No checkout found: clone into a sibling folder, then swap it in, so a failed clone leaves the old
-# copy. A .git at the clone path that checkout_at refused is not ours: it is never removed.
-if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; then
+# clone_mirror DEST: clone $REF depth 1 into a sibling folder, then swap it in at DEST, so a failed clone leaves the old
+# copy. Marks DEST as a mirror this script made. Returns 1 and leaves DEST as it was on any failure, with the reason in
+# CLONE_MIRROR_WHY. The temp name is the same for every DEST, so one find sweeps a killed run's leftovers.
+clone_mirror() {
+  cm_dest="$1"
   clone_tmp="$HOME/claude-settings.clone.$$"
   # A killed run leaves its temp clone behind. Older than 5 minutes is past the hook's 60 s cap, so
   # no run still owns it; a newer one may belong to a run in parallel.
@@ -403,20 +388,80 @@ if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; t
      && clone_sha=$(git -C "$clone_tmp" rev-parse main) \
      && git -C "$clone_tmp" config claude-settings.mirrorSha "$clone_sha" \
      && [ -f "$clone_tmp/CLAUDE.md" ] && [ -f "$clone_tmp/settings.json" ]; then
-    old_copy="$HOME/claude-settings.old.$$"
+    old_copy="$cm_dest.old.$$"
     rm -rf "$old_copy"
-    if { [ ! -e "$HOME/claude-settings" ] || mv "$HOME/claude-settings" "$old_copy"; } && mv "$clone_tmp" "$HOME/claude-settings"; then
+    if { [ ! -e "$cm_dest" ] || mv "$cm_dest" "$old_copy"; } && mv "$clone_tmp" "$cm_dest"; then
       rm -rf "$old_copy"
-      SRC="$HOME/claude-settings"
-      log "cloned $REPO at $REF into $SRC"
-    else
-      [ ! -e "$old_copy" ] || [ -e "$HOME/claude-settings" ] || mv "$old_copy" "$HOME/claude-settings"
-      rm -rf "$clone_tmp"
-      log "WARN: could not swap in the clone; falling back to the tarball"
+      return 0
     fi
-  else
+    [ ! -e "$old_copy" ] || [ -e "$cm_dest" ] || mv "$old_copy" "$cm_dest"
     rm -rf "$clone_tmp"
-    log "WARN: could not clone $REPO at $REF; falling back to the tarball"
+    CLONE_MIRROR_WHY="could not swap in the clone"
+    return 1
+  fi
+  rm -rf "$clone_tmp"
+  CLONE_MIRROR_WHY="could not clone $REPO at $REF"
+  return 1
+}
+
+# use_main_mirror: the session's own checkout $SRC must not be the source (see below). The files come from a mirror of
+# $REF at $HOME/claude-settings-main: made here, or refreshed when this script made it earlier. The checkout's branch,
+# head and changes are never touched. A mirror is a stable path the links can follow; a detached worktree inside the
+# person's checkout would add state to it. When the mirror cannot be had, the source stays the checkout, as before.
+MAIN_MIRROR="$HOME/claude-settings-main"
+use_main_mirror() {
+  if [ "$(git -C "$MAIN_MIRROR" config --get claude-settings.cloudMirror 2>/dev/null)" = true ] && checkout_at "$MAIN_MIRROR" >/dev/null; then
+    mirror_refresh "$MAIN_MIRROR"
+    log "the install takes its files from the mirror $MAIN_MIRROR, not the checkout $SRC"
+    SRC="$MAIN_MIRROR"
+  elif [ ! -e "$MAIN_MIRROR" ] && clone_mirror "$MAIN_MIRROR"; then
+    log "cloned $REPO at $REF into $MAIN_MIRROR; the install takes its files from it, not the checkout $SRC"
+    SRC="$MAIN_MIRROR"
+  else
+    log "WARN: no mirror of $REF at $MAIN_MIRROR (${CLONE_MIRROR_WHY:-the path is taken}); the install takes its files from the checkout $SRC as before, which may not be $REF"
+  fi
+}
+
+# Cloud, a session's own checkout (no marker): a cloud session starts it detached at its creation commit, so its
+# hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
+# holds moves to origin/$REF, so nothing is lost. A branch, a dirty tree or a commit main lacks stays as it is and is
+# not the source: use_main_mirror takes the install's files from $REF, so no old branch's hooks go live.
+# When $REF cannot be fetched, the checkout stays the source as before, with a WARN.
+# The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
+# The live pin skips it.
+if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
+   && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+  own_not_source=0
+  if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
+    own_not_source=1
+  elif [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
+    log "WARN: the checkout $SRC has uncommitted changes; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
+    own_not_source=1
+  elif ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF"; then
+    log "WARN: could not fetch $REF into $SRC; left as is at $(git -C "$SRC" rev-parse --short HEAD); the install takes its files from it, which may not be $REF"
+  elif ! git -C "$SRC" merge-base --is-ancestor HEAD "refs/remotes/origin/$REF"; then
+    log "WARN: the checkout $SRC is at $(git -C "$SRC" rev-parse --short HEAD), a commit $REF does not hold; left as is"
+    own_not_source=1
+  elif git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; then
+    log "moved the checkout $SRC to $REF at $(git -C "$SRC" rev-parse --short HEAD)"
+  else
+    log "WARN: could not move the checkout $SRC to $REF; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
+    own_not_source=1
+  fi
+  if [ "$own_not_source" = 1 ]; then
+    use_main_mirror
+  fi
+fi
+
+# No checkout found: clone into a sibling folder, then swap it in, so a failed clone leaves the old
+# copy. A .git at the clone path that checkout_at refused is not ours: it is never removed.
+if [ "$CLOUD" = 1 ] && [ -z "$SRC" ] && [ ! -e "$HOME/claude-settings/.git" ]; then
+  if clone_mirror "$HOME/claude-settings"; then
+    SRC="$HOME/claude-settings"
+    log "cloned $REPO at $REF into $SRC"
+  else
+    log "WARN: $CLONE_MIRROR_WHY; falling back to the tarball"
   fi
 fi
 
