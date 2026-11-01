@@ -9239,6 +9239,38 @@ add("frozen: Write of X-live beside a clone that holds merge/install_from_main.s
     "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
 
+# THE MAIN MIRROR IS FROZEN. A cloud install takes its files from $HOME/claude-settings-main when the session
+# checkout is on a branch, dirty or at a commit main lacks (use_main_mirror in install.sh). Those files land in
+# the config directory as links into the mirror, so a write there changes what every session runs, as for the
+# live pin. A git command in it is allowed, as for the pin, because install.sh refreshes the mirror with git. The
+# clone and a sibling folder whose name only starts with the mirror's name are not frozen. Each case runs with
+# HOME set to MIRROR_HOME, because the mirror is read from the HOME the guard run sees.
+MIRROR_HOME = slash(os.path.join(ROOT, "mirrorhome"))
+MIRROR_ENV = {"HOME": MIRROR_HOME, "USERPROFILE": MIRROR_HOME}
+MIRROR = slash(os.path.join(MIRROR_HOME, "claude-settings-main"))
+MIRROR_CLAUDEMD = slash(os.path.join(MIRROR, "CLAUDE.md"))
+MIRROR_HOOK = slash(os.path.join(MIRROR, "hooks", "guard.py"))
+CLONE_IN_HOME = slash(os.path.join(MIRROR_HOME, "claude-settings", "CLAUDE.md"))
+MAINLINE_IN_HOME = slash(os.path.join(MIRROR_HOME, "claude-settings-mainline", "CLAUDE.md"))
+write(MIRROR_CLAUDEMD, "# mirror\n")
+write(MIRROR_HOOK, "# mirror\n")
+write(CLONE_IN_HOME, "# clone\n")
+write(MAINLINE_IN_HOME, "# sibling\n")
+add("frozen mirror: Write of the mirror's CLAUDE.md is refused", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=MIRROR_CLAUDEMD, content="rules\n", env=MIRROR_ENV)
+add("frozen mirror: Write of a hook in the mirror is refused", "deny", "frozen-path", tool="Write",
+    cwd=NOGIT, file_path=MIRROR_HOOK, content="# rewritten\n", env=MIRROR_ENV)
+sh("frozen mirror: sed -i on the mirror's CLAUDE.md is refused", "sed -i '' s/a/b/ " + MIRROR_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT, env=MIRROR_ENV)
+sh("frozen mirror: a redirect onto the mirror's CLAUDE.md is refused", "echo rules > " + MIRROR_CLAUDEMD,
+   "deny", "frozen-path", cwd=NOGIT, env=MIRROR_ENV)
+sh("frozen mirror: git fetch from the mirror is allowed", "git fetch origin main 2>&1 | tail -1",
+   "allow", cwd=MIRROR, env=MIRROR_ENV)
+add("frozen mirror: Write of the clone's CLAUDE.md beside the mirror is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=CLONE_IN_HOME, content="rules\n", env=MIRROR_ENV)
+add("frozen mirror: Write of a sibling folder named with the mirror's name as a prefix is allowed",
+    "allow", tool="Write", cwd=NOGIT, file_path=MAINLINE_IN_HOME, content="rules\n", env=MIRROR_ENV)
+
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
 # `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the

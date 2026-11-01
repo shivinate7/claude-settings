@@ -2767,8 +2767,9 @@ pinlive2() {
 # install.sh's candidate loop takes the pointer dir first, so a pointer at either form makes the pin the source.
 # The cloud own-checkout block never moves that pin, and the pointer is never written to it.
 # Each case points the pointer at one form (pin, link or the clone). pinmove1, pinmove2 and pinmove5 assert the candidate
-# pick, the clone. pinmove4 and pinmove5 assert what the install writes: the pointer never names the pin or its link, and
-# the pin keeps its HEAD. The final source may be the clone or a mirror of main: a clone on a branch takes the mirror.
+# pick, the clone. pinmove4 and pinmove5 assert what the install writes: the pointer is the clone or the mirror, never the
+# pin or its link, and the pin keeps its HEAD. The final source may be the clone or a mirror of main: a clone on a branch
+# takes the mirror.
 
 # live_pin_fixture TAG: pin_fixture's clone and bare origin, with origin/main 2 commits past the clone's main.
 # Its pin at main is renamed to <clone>-live-<12 hex>, locked, and <clone>-live is made a link to it. The clone's
@@ -2823,6 +2824,7 @@ pinmove_run() {
   pm_rc=$?
   pm_head_after=$(git -C "$pm_pin" rev-parse HEAD 2>/dev/null)
   pm_ptr=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  pm_home="$h"; pm_cfg="$cfg"
   rm -rf "$h"
   return 0
 }
@@ -2882,15 +2884,29 @@ pointer_names_pin() {
   return 1
 }
 
+# pointer_is_source CFG HOME CLONE: true when the pointer in CFG names exactly the clone CLONE, or exactly the mirror of main
+# at HOME/claude-settings-main. installed_src expands a "~/" pointer. The check compares text, never realpath, because
+# pinmove_run has removed HOME by the time it runs. It is a separate predicate on purpose: pointer_names_pin is a negative
+# test (true when the pointer names the pin), and a positive arm inside it would invert every use of it.
+pointer_is_source() {
+  pis_p=$(normalize_path "$(installed_src "$1" "$2")")
+  [ -n "$pis_p" ] || return 1
+  [ "$pis_p" = "$(normalize_path "$3")" ] || [ "$pis_p" = "$(normalize_path "$2/claude-settings-main")" ]
+}
+
 # pinmove4: for either pointer form, the pointer install.sh writes never names the live pin or its link, and the pin keeps
-# its HEAD. The pointer may name the clone or a mirror of main, so the case does not fix which source is picked.
+# its HEAD. The pointer may name the clone or a mirror of main, so the case does not fix which source is picked; it does
+# fix that the pointer is one of those two.
 pinmove4() {
-  name="pinmove4: pointer at the live pin or its link: the written pointer names neither the pin nor its link, and the pin keeps its HEAD"
+  name="pinmove4: pointer at the live pin or its link: the written pointer names neither the pin nor its link, is the clone or the mirror, and the pin keeps its HEAD"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   for form in pin link; do
     if ! pinmove_run "pinmove4-$form" "$form"; then bad "$name" "fixture ($form): $pm_msg"; return; fi
     if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc ($form): $pm_out"; return; fi
     if pointer_names_pin "$pm_ptr"; then bad "$name" "a $form run wrote the pointer [$pm_ptr], which names the live pin"; return; fi
+    if ! pointer_is_source "$pm_cfg" "$pm_home" "$pm_co"; then
+      bad "$name" "a $form run wrote the pointer [$pm_ptr], neither the clone [$pm_co] nor [$pm_home/claude-settings-main]"; return
+    fi
     if [ "$pm_head_after" != "$pm_head_before" ]; then
       bad "$name" "a $form run moved the pin from $pm_head_before to $pm_head_after"; return
     fi
@@ -2901,7 +2917,7 @@ pinmove4() {
 # pinmove5: the pointer at the clone itself. The candidate pick is still the clone. The written pointer never names the
 # live pin or its link, and the pin keeps its HEAD. The clone is on a branch here, so the source may be a mirror of main.
 pinmove5() {
-  name="pinmove5: pointer at the clone itself: the log names the clone, and the written pointer names neither the pin nor its link"
+  name="pinmove5: pointer at the clone itself: the log names the clone, the written pointer is the clone or the mirror and names neither the pin nor its link"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   if ! pinmove_run pinmove5 clone; then bad "$name" "fixture: $pm_msg"; return; fi
   src=$(pinmove_source "$pm_out")
@@ -2909,6 +2925,8 @@ pinmove5() {
   elif [ "$(normalize_path "$src")" != "$(normalize_path "$pm_co")" ]; then
     bad "$name" "log names [$src] as the source, want the clone [$pm_co]"
   elif pointer_names_pin "$pm_ptr"; then bad "$name" "pointer [$pm_ptr] names the live pin"
+  elif ! pointer_is_source "$pm_cfg" "$pm_home" "$pm_co"; then
+    bad "$name" "pointer [$pm_ptr] is neither the clone [$pm_co] nor [$pm_home/claude-settings-main]"
   elif [ "$pm_head_after" != "$pm_head_before" ]; then
     bad "$name" "the run moved the pin from $pm_head_before to $pm_head_after"
   else ok "$name"; fi
@@ -3210,7 +3228,8 @@ make_github_fixture() {
   git clone -q --bare "$1/src" "$1/bare.git"
 }
 # Commit one change, named $2, to the fixture's main and push it to the bare repo. With $3 = merge, the
-# change is a merge of a two-commit branch named $2, so the history under main is merge-based.
+# change is a merge of a two-commit branch named $2, so the history under main is merge-based. With $3 = claudemd,
+# the change appends a line to CLAUDE.md, the file a pointer reads back, so a copy left at the old main shows.
 advance_github_fixture() {
   if [ "${3:-}" = merge ]; then
     git -C "$1/src" checkout -q -b "side-$2"
@@ -3225,8 +3244,12 @@ advance_github_fixture() {
     git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
     return
   fi
-  printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"
-  git -C "$1/src" add RESUME.txt
+  if [ "${3:-}" = claudemd ]; then
+    printf 'advance %s\n' "$2" >> "$1/src/CLAUDE.md"; adv_file=CLAUDE.md
+  else
+    printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"; adv_file=RESUME.txt
+  fi
+  git -C "$1/src" add "$adv_file"
   git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "advance $2"
   git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
 }
@@ -3932,6 +3955,84 @@ caseM7() {
   ok "$name"
 }
 
+# caseM8: a second cloud install in the same HOME, after origin/main gains a commit. The checkout stays on its branch, so both
+# installs take the mirror. The mirror the first install made refreshes in place to the new main, and the installed files
+# match it. CLAUDE.md is the file the new commit changes, so a mirror left at the first commit fails the check.
+caseM8() {
+  name="caseM8: a second cloud install in the same HOME, after origin/main gains a commit: the mirror refreshes in place, and the installed files match it"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m8
+  git -C "$co" checkout -q -b lane
+  move_install
+  first=$want; mirror="$h/claude-settings-main"
+  if [ "$rc" -ne 0 ]; then bad "$name" "FIXTURE the first install exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD 2>/dev/null)" != "$first" ] \
+     || [ "$(git -C "$mirror" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "FIXTURE the first install did not leave a marked mirror at main [$first]"; return
+  fi
+  # A file inside the mirror's .git that only an in-place refresh keeps: a mirror that is cloned again loses it.
+  : > "$mirror/.git/caseM8-sentinel"
+  advance_github_fixture "$fx" second claudemd; want=$(fixture_sha "$fx")
+  if [ "$want" = "$first" ]; then bad "$name" "FIXTURE main did not move, so the second install has nothing new to take"; return; fi
+  co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc on the second install: $(install_problems)"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
+    bad "$name" "after the second install the mirror is at $(git -C "$mirror" rev-parse HEAD), want the new main $want (the first was $first)"; return
+  fi
+  if [ ! -e "$mirror/.git/caseM8-sentinel" ]; then bad "$name" "the mirror was cloned again, not refreshed in place"; return; fi
+  if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$mirror")" ]; then
+    bad "$name" "the second install's source is [$(installed_src "$h/.claude-cfg" "$h")], want the mirror [$mirror]"; return
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm"; return; fi
+  if [ "$(git -C "$co" symbolic-ref -q HEAD)" != "$co_branch" ] || [ "$(git -C "$co" rev-parse HEAD)" != "$co_head" ]; then
+    bad "$name" "the checkout's branch or head was moved"; return
+  fi
+  ok "$name"
+}
+
+# caseM9: no mirror can be made on a first start, because the origin redirect names a repo that is not there. The install
+# falls back to the checkout, with exactly one WARN that names the fallback, and the checkout is left as it was.
+caseM9() {
+  name="caseM9: no mirror on a first start: the install falls back to the checkout with one WARN naming it, and the checkout is untouched"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m9 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  git -C "$co" checkout -q -b lane
+  printf 'lane work\n' > "$co/lane.txt"
+  git -C "$co" add lane.txt
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -m "lane work"
+  printf 'local edit\n' >> "$co/README.md"
+  lane_head=$(git -C "$co" rev-parse HEAD)
+  lane_status=$(git -C "$co" status --porcelain)
+  lane_diff=$(git -C "$co" diff HEAD)
+  if [ "$(git -C "$co" symbolic-ref --short HEAD)" != lane ] || [ -z "$lane_status" ]; then
+    bad "$name" "FIXTURE the checkout is not a dirty branch"; return
+  fi
+  write_redirect "$h" "$work/m9-no-such-repo.git"
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  n_fallback=$(printf '%s\n' "$out" | grep -c 'WARN: no mirror of')
+  fallback=$(printf '%s\n' "$out" | grep 'WARN: no mirror of')
+  if [ "$n_fallback" -ne 1 ]; then bad "$name" "want one WARN naming the fallback, got $n_fallback: $(install_problems)"; return; fi
+  case "$fallback" in *"$co"*) ;; *) bad "$name" "the fallback WARN does not name the checkout [$co]: $fallback"; return ;; esac
+  if [ "$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")" != "$(normalize_path "$co")" ]; then
+    bad "$name" "the install's source is [$(installed_src "$h/.claude-cfg" "$h")], want the checkout [$co]"; return
+  fi
+  if [ -e "$h/claude-settings-main" ] || [ -n "$(find "$h" -maxdepth 1 -name 'claude-settings.clone.*' 2>/dev/null)" ]; then
+    bad "$name" "a mirror or a temp clone was left in the HOME after the failed clone"; return
+  fi
+  if [ "$(git hash-object "$h/.claude-cfg/hooks/session_start.sh" 2>/dev/null)" != "$(git -C "$co" rev-parse "$lane_head:hooks/session_start.sh")" ]; then
+    bad "$name" "the installed hooks/session_start.sh is not the checkout's committed copy"; return
+  fi
+  if [ "$(git -C "$co" symbolic-ref --short HEAD 2>/dev/null)" != lane ] || [ "$(git -C "$co" rev-parse HEAD)" != "$lane_head" ] \
+     || [ "$(git -C "$co" status --porcelain)" != "$lane_status" ] || [ "$(git -C "$co" diff HEAD)" != "$lane_diff" ]; then
+    bad "$name" "the checkout's branch, head or change was moved or lost"; return
+  fi
+  ok "$name"
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -4049,6 +4150,8 @@ run caseM4
 run caseM5
 run caseM6
 run caseM7
+run caseM8
+run caseM9
 run pinmove1
 run pinmove2
 run pinmove3
