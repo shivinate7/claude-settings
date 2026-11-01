@@ -517,9 +517,10 @@ def role_call_of(segment: str):
     return None
 
 
-def _own_get_session_tags(transcript: str, own_id: str):
-    """The tags of the newest get_session result whose ccr.id is own_id, else None."""
-    uses, newest = set(), None
+def _own_session_read(transcript: str, own_id: str):
+    """(tags, tagged_after): the tags of the newest get_session result whose ccr.id is own_id, else
+    None, and whether a set_session_tags call follows that result."""
+    uses, newest, tagged_after = set(), None, False
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -533,6 +534,8 @@ def _own_get_session_tags(transcript: str, own_id: str):
                     continue
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
+                elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
+                    tagged_after = True
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
                     body = block.get("content")
                     if isinstance(body, list):
@@ -540,10 +543,15 @@ def _own_get_session_tags(transcript: str, own_id: str):
                     try:
                         ccr = json.loads(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest = ccr["tags"]
+                            newest, tagged_after = ccr["tags"], False
                     except (ValueError, KeyError, TypeError):
                         continue
-    return newest
+    return newest, tagged_after
+
+
+def _own_get_session_tags(transcript: str, own_id: str):
+    """The tags of the newest get_session result whose ccr.id is own_id, else None."""
+    return _own_session_read(transcript, own_id)[0]
 
 
 def role_proof_hit(stripped: str, transcript: str) -> str:
@@ -565,6 +573,33 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             pass
         return "merge role " + tier
     return ""
+
+
+TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude-code-remote__request_computer_folder")
+TRUST_REASON = (
+    "trust-card-in-build: this call opens an owner card that blocks every message into the session, and "
+    "this session's own record does not prove it has no cs-build tag. A cs-build session hands the act to "
+    "the owner or to an untagged bridge session. A session with no record yet: run get_session (no "
+    "argument) alone in its own turn, then retry."
+)
+
+
+def trust_card_hit(tool: str, transcript: str) -> str:
+    """Return the tool name when it opens a trust card and the own record does not prove an untagged
+    session, else ''. Fails closed: any error in the reads is a refusal, because the guard-wide crash
+    path fails open."""
+    if tool not in TRUST_TOOLS:
+        return ""
+    try:  # cost: one transcript read, only on these two calls
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id and transcript:
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            if tags is not None and not tagged_after and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
+                return ""
+    except Exception:
+        pass
+    return tool
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

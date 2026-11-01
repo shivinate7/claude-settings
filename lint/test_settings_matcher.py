@@ -50,6 +50,15 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, "ExitWorktree") for m in matchers),
                         "no guard matcher covers ExitWorktree: %r" % matchers)
 
+    def test_guard_matcher_covers_trust_card_tools(self):
+        # Rule trust-card-in-build refuses these two calls in a cs-build session, so the first guard.py
+        # matcher must fire on both full tool names.
+        matcher = guard_matchers()[0]
+        for tool in ("mcp__claude-code-remote__confirm_repository_trust",
+                     "mcp__claude-code-remote__request_computer_folder"):
+            with self.subTest(tool=tool):
+                self.assertTrue(re.fullmatch(matcher, tool), "the first guard matcher does not cover %s: %r" % (tool, matcher))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a

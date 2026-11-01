@@ -31,7 +31,7 @@ Owner, 2026-10-02: at commit, push and stop, an offence writes one `noted` line 
 **False alarms pinned** (`guard-that-cries-wolf-is-spent`). A builder may still do these:
 
 - Rename or delete product files, and add a dependency or a script to a manifest.
-- Read tests, and keep test changes that the branch inherited or that main brought in a merge.
+- Read tests, and keep test changes that the branch inherited or that main brought in a merge. Keeping them needs no edit. A merge conflict in a test file is not the builder's: resolving it chooses what the test checks, so a test-author resolves it. The refusal says so.
 - Use a name that only looks like a test, such as `src/contest.py`.
 
 Kind: process
