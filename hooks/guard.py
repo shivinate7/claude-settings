@@ -2868,7 +2868,8 @@ DEBUG_PORT_ARGUMENT_LISTS = ("-argumentlist", "-args")   # PowerShell's launcher
 DEBUG_PORT_TEXT_COMMANDS = {
     "echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "ag", "ack", "git", "gh", "sed", "awk",
     "head", "tail", "less", "more", "wc", "diff", "ls", "find", "write-host", "write-output",
-    "select-string", "findstr", "type", "get-content", "pgrep", "where-object", "where"}
+    "select-string", "findstr", "type", "get-content", "pgrep", "where-object", "where",
+    "?", "%", "foreach-object", "sls", "gc"}
 
 
 def debug_port_name(token: str) -> str:
