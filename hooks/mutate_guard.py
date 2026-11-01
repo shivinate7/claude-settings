@@ -789,6 +789,38 @@ MUTATIONS = [
     ("floor: a non-string model is skipped, so a list naming haiku walks past",
      '    return "haiku" in str(model).lower()',
      '    return isinstance(model, str) and "haiku" in model.lower()', "guard", 'floor: Agent with a list model naming haiku is denied'),
+    ("role-model: the rank test is dropped, so a spawn above its role's row passes",
+     '        if named > ROLE_MODEL_RANK.index(row):',
+     '        if False:', "guard", 'role-model: test-author on sonnet is denied'),
+    ("role-model: Explore loses its exemption, so an audit Explore on sonnet is denied",
+     'or row is None or role in ROLE_ABOVE_ROW_ROLES:',
+     'or row is None:', "guard", 'role-model: Explore on sonnet is allowed'),
+    ("role-model: a reviewer round 2 or 3 loses its exemption, so it is denied on sonnet",
+     'for kind, n in brief_markers(tool_input.get("prompt"))):',
+     'for kind, n in brief_markers("")):', "guard", 'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
+    ("role-model: a reviewer round 1 is exempt too, so it walks past on sonnet",
+     'kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS',
+     'kind.lower() == "round" and n in ("1", "2", "3")', "guard",
+     'role-model: reviewer on sonnet with a Round 1 of 3 line is denied'),
+    ("role-model: Opus is no longer left to the ask, so a builder on opus is denied here",
+     'named == top or row is None or role in ROLE_ABOVE_ROW_ROLES:',
+     'row is None or role in ROLE_ABOVE_ROW_ROLES:', "guard",
+     'role-model: builder on opus with no round line asks'),
+    ("role-model: the default model is ignored, so a builder with no model is denied under a sonnet default",
+     '    if os.environ.get(ROLE_MODEL_ENV, "").strip():',
+     '    if False:', "guard", 'role-model: builder with no model is allowed when the default is sonnet'),
+    ("role-model: the agent file pin is ignored, so a reviewer with no model is denied",
+     '    if pinned:\n        return "", "", False',
+     '    if False:\n        return "", "", False', "guard",
+     'role-model: reviewer with no model is allowed when the default is unset'),
+    ("role-model: the no-model deny is dropped, so a builder with no model and no default passes",
+     '    return ROLE_NO_MODEL_REASON %',
+     '    return "", "", False; ROLE_NO_MODEL_REASON %', "guard",
+     'role-model: builder with no model is denied when the default is unset'),
+    ("role-model: an unread table is not logged, so the pass leaves no trace",
+     '    if role_unread:\n        record(',
+     '    if False:\n        record(', "guard",
+     'role-model: a missing decision file logs one unread line'),
     ("step-up: the marker regex loses its multiline flag, so a round line after the first line walks past",
      'STEP_UP_MARKER = re.compile(r"(?im)^',
      'STEP_UP_MARKER = re.compile(r"(?i)^', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
@@ -1963,6 +1995,11 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
+    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
+    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
+    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
 
     try:
         return mutate_shared.run_mutants(
