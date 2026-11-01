@@ -1,9 +1,9 @@
 {
   "title": "guard.log times carry their zone, so a machine on another clock reads true",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33769,
   "why": "Found Nov 1 (local vs cloud audit): shiv's Windows PC runs on Eastern time while the hooks speak Central, and hooks/guard_core.py record() writes datetime.now().isoformat() with no offset, so his guard.log lines read one hour ahead of Central. The batch pace numbers (rule reports-batch-pace-numbers) match guard.log load-brake lines against git times, so on his PC they pick the wrong window.",
-  "note": "Fix in one home: record() writes the time with its UTC offset (isoformat with tz), and every guard.log reader (lint/guard_log_report.py, the pace read) parses both forms, treating an old line with no offset as zone unknown, never as Central. Red first: a reader test with a +05:00 machine zone. Cloud lane; needs no answer. Done check: a new line carries an offset, and the pace read of an Eastern line lands in the right window. Source: shiv's local audit, bridge session \"Claude Code setup audit\" (session_013NEJKzvTAwDAZk1K19BoZB, Nov 1 16:40 CST), against this cloud session (triage 5). Placed after ponytail-local-still-on (triage 5).",
+  "note": "Lane session_013NEJL2oxnv1mWzdJ72qZUu, started Nov 1 16:55 CST (coordinator). Fix in one home: record() writes the time with its UTC offset (isoformat with tz), and every guard.log reader (lint/guard_log_report.py, the pace read) parses both forms, treating an old line with no offset as zone unknown, never as Central. Red first: a reader test with a +05:00 machine zone. Cloud lane; needs no answer. Done check: a new line carries an offset, and the pace read of an Eastern line lands in the right window. Source: shiv's local audit, bridge session \"Claude Code setup audit\" (session_013NEJKzvTAwDAZk1K19BoZB, Nov 1 16:40 CST), against this cloud session (triage 5). Placed after ponytail-local-still-on (triage 5).",
   "phase": "cleanup",
-  "updatedAt": "2026-11-01T23:02:00Z"
+  "updatedAt": "2026-11-01T23:06:00Z"
 }

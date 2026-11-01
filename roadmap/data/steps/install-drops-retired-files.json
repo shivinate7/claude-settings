@@ -1,9 +1,9 @@
 {
   "title": "An install removes ~/.claude files that main no longer ships",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33768,
   "why": "Found Nov 1 (local vs cloud audit): shiv's PC still holds a skills/tile-windows link and a plain hooks/config_report.py, neither on main. install.sh says so itself (line 593-597): proving a copy stale needs a manifest of what the last run installed, so cloud mode keeps stale copies of removed files.",
-  "note": "Fix in one home: the installers (install.sh and install.ps1) write a manifest of what they installed, and the next run removes each entry main no longer ships (a link whose target is gone, or a copy it wrote). Never remove a file the install did not write: org-synced skills (the Cu... folders), request-slide, synced, tidy-downloads and the this-machine-msix-appdata rule are shiv's own and stay. Cloud lane builds and tests both shells; the Windows proof is one install on his PC. Needs no answer. Source: shiv's local audit, bridge session \"Claude Code setup audit\" (session_013NEJKzvTAwDAZk1K19BoZB, Nov 1 16:40 CST), against this cloud session (triage 5). Placed after guard-log-time-offset (triage 5).",
+  "note": "Lane session_013NEJL2M4YSiHEXwk8wpnu4, started Nov 1 16:55 CST (coordinator). Fix in one home: the installers (install.sh and install.ps1) write a manifest of what they installed, and the next run removes each entry main no longer ships (a link whose target is gone, or a copy it wrote). Never remove a file the install did not write: org-synced skills (the Cu... folders), request-slide, synced, tidy-downloads and the this-machine-msix-appdata rule are shiv's own and stay. Cloud lane builds and tests both shells; the Windows proof is one install on his PC. Needs no answer. Source: shiv's local audit, bridge session \"Claude Code setup audit\" (session_013NEJKzvTAwDAZk1K19BoZB, Nov 1 16:40 CST), against this cloud session (triage 5). Placed after guard-log-time-offset (triage 5).",
   "phase": "cleanup",
-  "updatedAt": "2026-11-01T23:02:00Z"
+  "updatedAt": "2026-11-01T23:06:00Z"
 }

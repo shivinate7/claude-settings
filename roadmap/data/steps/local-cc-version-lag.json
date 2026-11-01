@@ -3,7 +3,7 @@
   "status": "todo",
   "order": 103.33767,
   "why": "Found Nov 1 (local vs cloud audit): his PC runs Claude Code 2.1.310 with autoUpdatesChannel=latest, while cloud sessions run 2.1.316 the same day, so local and cloud hooks can meet different Claude Code behaviour.",
-  "note": "Next: a session on his PC reads why auto-update has not moved (claude doctor, the updater log), and updates per rule verification-newest-that-passes. Needs a session on his computer; needs no answer. Source: shiv's local audit, bridge session \"Claude Code setup audit\" (session_013NEJKzvTAwDAZk1K19BoZB, Nov 1 16:40 CST), against this cloud session (triage 5). Placed after install-drops-retired-files (triage 5).",
+  "note": "Next: a session on his PC reads why auto-update has not moved (claude doctor, the updater log), and updates per rule verification-newest-that-passes. Needs a session on his computer; needs no answer. Source: shiv's local audit, bridge session \"Claude Code setup audit\" (session_013NEJKzvTAwDAZk1K19BoZB, Nov 1 16:40 CST), against this cloud session (triage 5). Placed after install-drops-retired-files (triage 5). On the page as task item 141 (Nov 1 16:57 CST): no folder of his is shared through Remote Control, so no session here can reach his computer.",
   "phase": "cleanup",
-  "updatedAt": "2026-11-01T23:02:00Z"
+  "updatedAt": "2026-11-01T23:06:00Z"
 }
