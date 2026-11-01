@@ -48,13 +48,13 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 
 ### Remote tool allow rules
 
-Both are permission allow rules, not `autoMode` entries, so the classifier does not judge them. The docs say: "Actions matching your allow, ask, or deny rules resolve immediately" (https://code.claude.com/docs/en/permission-modes#how-the-classifier-evaluates-actions). This is documented, not measured here.
+Both are permission allow rules, not `autoMode` entries, so the classifier does not judge them. The docs say: "Actions matching your allow, ask, or deny rules resolve immediately, with these exceptions:" (https://code.claude.com/docs/en/permission-modes#how-the-classifier-evaluates-actions). This is documented, not measured here.
 
-An MCP tool marked `requiresUserInteraction` still prompts. Unknown for these two tools.
+One exception: an MCP tool marked `requiresUserInteraction` prompts even when an allow rule matches. Unknown whether these two tools are marked so.
 
-- Incident: the classifier refused `archive_session` from 2026-10-31 to 2026-11-01. About 40 idle sessions stayed open. It also refused `add_repo`.
-- `add_repo` loses nothing. It only attaches a repo.
-- `archive_session` does not fully pass "can be undone". Unarchive gives a fresh container, so unpushed work in the old one is lost. The rule covers any session in the account. It lands on the owner's verbatim ask, 2026-11-01 17:37 CST: "add mcp__claude-code-remote__add_repo and mcp__claude-code-remote__archive_session to settings.json permissions.allow".
+- Incident, coordinator-reported, not measured here. The coordinator session (session_013NEJL2pASwRjgJDnsvnpNe) relayed on 2026-11-01: the auto-mode classifier refused `archive_session` from 2026-10-31 on, and about 40 idle sessions stayed open. It refused `add_repo` in repo `degen` at 16:46 CST and in repo `joyous` at 17:14 CST, with the reason "Access Added As A Means".
+- `add_repo` loses nothing. It attaches a repo to the session and mints credentials for it.
+- `archive_session` fails the test "can be undone, or loses nothing". Unarchive gives a fresh container, so unpushed work in the old one is lost. The owner waives that test. Their typed go, 2026-11-01 17:37 CST, is the verbatim grant: "add mcp__claude-code-remote__add_repo and mcp__claude-code-remote__archive_session to settings.json permissions.allow". The rule covers any session in the account.
 - Never covers `add_repo`: any other remote tool, or the server-level form.
 - Never covers `archive_session`: any other remote tool, or the server-level form.
 
@@ -71,7 +71,7 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 
 ### Notes
 
-- Not covered: the server's `elevated_session_untrusted_device` refusal is not the classifier. No entry can lift it. It also refused one of this lane's `send_message` calls to its coordinator.
+- Not covered: the server's `elevated_session_untrusted_device` refusal is not the classifier. No allow rule or `autoMode` entry lifts it. It also refused one of this lane's `send_message` calls to its coordinator.
 - Widens a shared tool (t18, the uniform ruling): yes. The owner chose this knowing it. `settings.json` installs into `~/.claude`, so the entries apply in every repo. The `shivinate7` and own-account bounds keep them to the owner's own things.
 - Home: the classifier reads `autoMode` only from `~/.claude/settings.json`, managed settings or `--settings`. `install.sh` links or copies this repo's `settings.json` there.
 - Check: `hooks/test_auto_mode_allow.py`, the one check for `autoMode`. It pins each named entry: the entry exists once, quotes its incident, and names its bounds in its Covers text and in a "Never covers" sentence. A new entry adds its own pins there. It also fails a list that drops `$defaults`.
