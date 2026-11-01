@@ -1250,6 +1250,73 @@ retired_case13() {
   rm -rf "$h"
 }
 
+# retired14 helper: an owner's real folder sits at a name main still ships. The name is shipped for two
+# runs, then main drops it and a third run follows. Prints why the owner's file was lost, or nothing.
+retired_owner_dir_flow() {
+  mode="$1"; h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired14-$mode-checkout"
+  retired_checkout "$co" "retired14-$mode"
+  # A second shipped file keeps bin/ from being an empty shipped set once shipped_tool.sh is dropped.
+  printf '#!/bin/sh\necho shipped\n' > "$co/bin/shipped_tool.sh"
+  printf '#!/bin/sh\necho keep\n' > "$co/bin/keep_tool.sh"
+  retired_commit "$co" "ship bin files"
+  out1=$(retired_run "$co" "$h" "$cfg" "$mode"); rc1=$?
+  rm -f "$cfg/bin/shipped_tool.sh"
+  mkdir -p "$cfg/bin/shipped_tool.sh"; printf 'owner keeps this\n' > "$cfg/bin/shipped_tool.sh/owner.txt"
+  out2=$(retired_run "$co" "$h" "$cfg" "$mode"); rc2=$?
+  kept2=$(grep -rl 'owner keeps this' "$cfg" 2>/dev/null)
+  git -C "$co" rm -q bin/shipped_tool.sh && git -C "$co" commit -q -m "retire shipped_tool"
+  out3=$(retired_run "$co" "$h" "$cfg" "$mode"); rc3=$?
+  kept3=$(grep -rl 'owner keeps this' "$cfg" 2>/dev/null)
+
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ] || [ $rc3 -ne 0 ]; then
+    echo "install.sh exited rc1=$rc1 rc2=$rc2 rc3=$rc3: $out1 / $out2 / $out3"
+  elif [ -z "$kept2" ]; then
+    echo "owner.txt was lost by the run that still ships the name"
+  elif [ -z "$kept3" ]; then
+    echo "owner.txt was lost when main dropped the name"
+  fi
+  rm -rf "$h"
+}
+
+retired_case14() {
+  name="retired14: an owner's real folder at a name main still ships keeps its file through that run and the run after main drops the name (local and cloud)"
+  loc=$(retired_owner_dir_flow local)
+  cld=$(retired_owner_dir_flow cloud)
+  if [ -n "$loc" ] || [ -n "$cld" ]; then
+    bad "$name" "local: ${loc:-ok}; cloud: ${cld:-ok}"
+  else
+    ok "$name"
+  fi
+}
+
+# retired15: no manifest, and the clone has a main branch, so install.sh lands from the pin <clone>-live.
+# A listed link into the clone itself (not the pin) must be deleted, not moved to backups/retired.
+retired_case15() {
+  name="retired15: with no manifest, a listed link into the clone is deleted, not moved, when the install lands from the pin"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then
+    skip "$name" "$NO_SYMLINK_REASON"
+    return
+  fi
+  h=$(new_home); cfg="$h/.claude-cfg"; co="$work/retired15-checkout"
+  retired_checkout "$co" retired15
+  force_main_branch "$co"
+  retired_list "$co" 'hooks/old_listed.sh'
+  mkdir -p "$cfg/hooks"; ln -s "$co/hooks/old_listed.sh" "$cfg/hooks/old_listed.sh"
+  out=$(retired_run "$co" "$h" "$cfg" local); rc=$?
+  moved=$(find "$cfg/backups/retired" -name '*old_listed*' 2>/dev/null)
+
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $out"
+  elif [ -e "$cfg/hooks/old_listed.sh" ] || [ -L "$cfg/hooks/old_listed.sh" ]; then
+    bad "$name" "the listed link into the clone survived"
+  elif [ -n "$moved" ]; then
+    bad "$name" "the listed link into the clone was moved to backups/retired, not deleted: $moved"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
 # ---- Case F1-F5: session_start.sh origin-freshness check ---------------------------------
 # These cases use a real local bare repo as "origin", so `git fetch` succeeds with no
 # network and the behind-count is exact. They also confirm the fetch never runs, and
@@ -4600,6 +4667,8 @@ run retired_case10
 run retired_case11
 run retired_case12
 run retired_case13
+run retired_case14
+run retired_case15
 run skills_case1
 run skills_case2
 run cloud_settings1
