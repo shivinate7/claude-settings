@@ -9165,9 +9165,23 @@ sh("frozen: sed --in-place with a backup suffix on a config hook",
    "sed --in-place=.b 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i whose w command writes a config hook, the file operand a scratch file",
    "sed -i 's/a/b/w " + CFG_HOOK + "' /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A `w` command is the file a script writes, however the script is spelled: `-e` glued to its script, `--expression=`,
+# or an `s` with a comma delimiter, whose flag `w` follows the last comma. The operand is a scratch file, so only the
+# script's `w` names the frozen path.
+sh("frozen: sed -i -e with a glued w command that writes the config settings file",
+   "sed -i -e'w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i --expression= with a w command that writes the config settings file",
+   "sed -i --expression='w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i with a comma-delimited s whose w flag writes the config settings file",
+   "sed -i 's,a,b,w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: sed -n on a config hook, with no -i, is a read",
    "sed -n 'p' " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen: sed -i on a scratch file is allowed", "sed -i 's/a/b/' /tmp/x", "allow", cwd=NOGIT)
+# A `w` or `e` letter in the text of a script is no command. These stay allowed: the script is text, not a write.
+sh("frozen: sed -i with w and e in the text of its script, on docs/todo.md, is allowed",
+   "sed -i 's/hello/world/' docs/todo.md", "allow", cwd=NOGIT)
+sh("frozen: sed -i -e with w and e in the text of its script, on docs/todo.md, is allowed",
+   "sed -i -e 's/we/us/' docs/todo.md", "allow", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -19231,7 +19245,8 @@ for _command in ('sed -i -e "s/a/b/" -e "s/c/d/" hooks/a.py',               # ea
                  "sed -i 's|a|b|' docs/todo.md hooks/a.py",
                  "sed -i.bak 's/a/b/' hooks/a.py",
                  'sed -i "/foo/d" hooks/a.py',                               # the script reads as an absolute word today
-                 'sed "s/a/b/" docs/todo.md > hooks/a.py'):                  # no -i: the redirect writes
+                 'sed "s/a/b/" docs/todo.md > hooks/a.py',                   # no -i: the redirect writes
+                 "sed -i -e'w hooks/a.py' docs/todo.md"):                    # a w command in a glued -e script writes it
     cs_shell("sed_product_file_denied", "deny", _command, "a.py")
 for _command in ('sed -i "s/a/b/" docs/decisions/a.md',
                  'sed -i -e "s/a/b/" docs/decisions/a.md',
@@ -19239,7 +19254,9 @@ for _command in ('sed -i "s/a/b/" docs/decisions/a.md',
                  'sed -i.bak "s/a/b/" docs/todo.md',                         # the backup lands beside the record
                  'sed -i "/foo/d" docs/todo.md',
                  'sed "s/a/b/" hooks/a.py',                                  # no -i: a read
-                 'sed -n "s/a/b/p" hooks/a.py'):
+                 'sed -n "s/a/b/p" hooks/a.py',
+                 "sed -i 's/hello/world/' docs/todo.md",                     # w and e in a script's text are no command
+                 "sed -i -e 's/we/us/' docs/todo.md"):
     cs_shell("sed_record_or_read_allowed", "allow", _command)
 # A script beside a path in no repo. Like a `cp` source, a script stood in by an empty word would resolve to the cwd, so
 # each runs at a repo root, in a folder of the repo, and at the root of a worktree nested in the repo.
@@ -19777,25 +19794,30 @@ def cs_log_allowed_check():
 
 def cs_log_cost_check():
     """A refusal and a lift each make one guard.log write, which opens the file for append once and starts no process
-    (the probe counts the children each write starts). An allowed write makes no write. The refusal is the control: its
-    one append shows the spy sees the open. The call's own reads of the repository are not the log's, so they are not
-    counted here."""
+    (the probe counts the children each write starts). Each refusal, lifted or not, opens the override folder once:
+    override.take() reads the session's override file, and nothing else opens it on that call. An allowed write makes
+    no write and opens neither. The refusal is the control: its one append shows the spy sees the open. The call's own
+    reads of the repository are not the log's, so they are not counted here."""
     def appends(config, report):
         log = os.path.abspath(os.path.join(config, "guard.log"))
         return [path for path, mode in report.get("open_modes", []) if path == log and "a" in mode]
+
+    def override_opens(config, report):
+        folder = os.path.abspath(os.path.join(config, "state", "override")) + os.sep
+        return [path for path, _mode in report.get("open_modes", []) if path.startswith(folder)]
 
     refuse_config = cs_config("cs-log-cost-refusal", "coordinator")
     lift_config = cs_config("cs-log-cost-lift", "coordinator")
     ov_type(lift_config, CS_PAYLOAD_SID, "override")
     allow_config = cs_config("cs-log-cost-allowed", "coordinator")
     events = (
-        ("a refusal", "deny", refuse_config, dict(CS_REMOTE), dict(CS_LOG_EDIT), 1),
-        ("a lifted refusal", "allow", lift_config, dict(CS_REMOTE, LOCAL_TIME_NOW=ov_clock(60)), dict(CS_LOG_EDIT), 1),
+        ("a refusal", "deny", refuse_config, dict(CS_REMOTE), dict(CS_LOG_EDIT), 1, 1),
+        ("a lifted refusal", "allow", lift_config, dict(CS_REMOTE, LOCAL_TIME_NOW=ov_clock(60)), dict(CS_LOG_EDIT), 1, 1),
         ("an allowed record write", "allow", allow_config, dict(CS_REMOTE),
-         {"file_path": cs_kind_path("todo"), "new_string": "x"}, 0),
+         {"file_path": cs_kind_path("todo"), "new_string": "x"}, 0, 0),
     )
     problems = []
-    for what, want, config, env, tool_input, want_appends in events:
+    for what, want, config, env, tool_input, want_appends, want_opens in events:
         got, reason, report = cs_probe_report(config, "Edit", tool_input, GITMAIN, env=env)
         if got != want:
             problems.append("%s: got %s, want %s (%s)" % (what, got, want, reason[:70]))
@@ -19807,8 +19829,12 @@ def cs_log_cost_check():
         found = appends(config, report)
         if len(found) != want_appends:
             problems.append("%s opened guard.log for append %d times, want %d" % (what, len(found), want_appends))
+        opened = override_opens(config, report)
+        if len(opened) != want_opens:
+            problems.append("%s opened the override folder %d times, want %d: %r" % (what, len(opened), want_opens, opened))
     return not problems, "; ".join(problems) or (
-        "a refusal and a lifted refusal each open guard.log for append once and start no process; an allowed write never opens it")
+        "a refusal and a lifted refusal each open guard.log for append once and the override folder once, and start no "
+        "process; an allowed write opens neither")
 
 
 CS_CHECKS.append(("coordinator-scope refusal_logs_one_line: one denied coordinator write appends one guard.log line that "
@@ -19819,8 +19845,8 @@ CS_CHECKS.append(("coordinator-scope unreadable_override_logs_diagnostic_then_re
                   "override-unread line and one deny line for the refusal, and no override line", cs_log_unreadable_diagnostic_check))
 CS_CHECKS.append(("coordinator-scope allowed_write_logs_nothing: a record write and two writes no coordinator scope covers "
                   "append no guard.log line", cs_log_allowed_check))
-CS_CHECKS.append(("coordinator-scope log_cost: a refusal and a lift each open guard.log for append once and start no "
-                  "process; an allowed write never opens it", cs_log_cost_check))
+CS_CHECKS.append(("coordinator-scope log_cost: a refusal and a lift each open guard.log for append once and the override "
+                  "folder once, and start no process; an allowed write opens neither", cs_log_cost_check))
 for _label, _check in CS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
