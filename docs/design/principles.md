@@ -143,3 +143,95 @@ On a phone layout, the main input and the main action sit in reach of the thumb.
 Check: phone layouts only. Pass when a reviewer who holds the phone in one hand reaches the main
 input and the main action with the thumb.
 Source: sillage `docs/design/system.md`.
+
+## Browser and 3D
+
+These rules cover any page that runs in a browser, from a static web app to a full 3D site. Each one
+cites a standard or platform source, not an owner repo (record ux-house-rules).
+
+## ux-works-when-script-fails
+
+When JavaScript, WebGL or WebGPU is off or fails, the person still reaches the content and the main
+action, or a page that says what is missing and leads on. A blocked script or a failed load never leaves
+the person on a blank page.
+Check: open each changed route in a Playwright context with `javaScriptEnabled: false`, then in
+Chromium launched with `--disable-3d-apis`. Pass when the content and the main action are reachable,
+or the page names what is missing and has a control that leads on.
+Source: [GOV.UK Service Manual, progressive enhancement](https://www.gov.uk/service-manual/technology/using-progressive-enhancement);
+impeccable `harden` and `overdrive` give it as advice with no check.
+
+## ux-lost-scene-recovers
+
+When the GPU drops a 3D scene, the person sees words that say so, and the scene comes back when the GPU
+returns.
+Check: on the page, call `loseContext()` and then `restoreContext()` on the `WEBGL_lose_context`
+extension. Pass when the canvas is never blank without words, and the scene returns after restore.
+Source: [MDN, WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices)
+("Budget VRAM conservatively": handle `webglcontextlost`).
+
+## ux-still-scene-draws-nothing
+
+A 3D scene that does not move draws no frames, so it does not spend the person's battery.
+Check: before load, add an init script that wraps the WebGL draw calls (`drawArrays`, `drawElements`)
+with a counter. Let the scene rest for five seconds. Pass when the count stays 0, and a camera move or
+a resize draws again. A DevTools trace is the human view.
+Source: [three.js manual, rendering on demand](https://threejs.org/manual/en/rendering-on-demand).
+
+## ux-canvas-has-words
+
+A canvas or 3D view that carries information has a name and a text equivalent, and each act in it
+works from the keyboard. So a person on a screen reader or a keyboard gets what the view shows. A
+canvas that carries no information is hidden from assistive technology.
+Check: axe cannot read inside a canvas, so this is a hand check. Tab to the view and through each act
+in it, with a screen reader on. Pass when the reader gives the name and the text, and each act works
+without a pointer. Read the DOM: each other canvas has aria-hidden="true".
+Source: [WCAG 2.2 Understanding 1.1.1, non-text content](https://www.w3.org/WAI/WCAG22/Understanding/non-text-content.html);
+WCAG 2.1.1 (keyboard).
+
+## ux-scroll-stays-native
+
+Scroll moves the page at the person's pace, so they can read and find their way. Motion linked to scroll follows the scroll, and never holds,
+slows or snaps the page.
+Check: scroll each changed route with the wheel, a trackpad, Space, Page Down and the arrow keys. Pass
+when each input moves the page by its usual step, and no section holds the scroll. A modal's own
+scroll area, kept inside it with `overscroll-behavior`, passes.
+Source: [Nielsen Norman Group, Scrolljacking 101](https://www.nngroup.com/articles/scrolljacking-101/)
+("scrolljacking leads to more user pain than benefits").
+
+## ux-forced-colors-hold
+
+In forced-colors mode, such as a Windows contrast theme, each control, its edge, its focus ring and its
+state stay visible. So a person who uses a contrast theme can see and use each control.
+Check: in Playwright, call `page.emulateMedia({ forcedColors: 'active' })` and capture each changed
+screen. Pass when each control, edge, focus ring and state shows. A cue made only of `box-shadow` or a
+gradient fails, because the browser removes it.
+Source: [MDN, forced-colors](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/forced-colors).
+
+## ux-full-height-fits
+
+A full-height region fits the visible phone screen, with the browser bars shown or hidden, so its bottom content and actions are never under the bars.
+Check: grep the changed CSS for a `vh` value (`[0-9]vh`). Pass when each hit has an `svh`, `dvh` or
+`lvh` declaration on the same selector, which overrides it.
+Source: [web.dev, the large, small and dynamic viewport units](https://web.dev/blog/viewport-units).
+
+## ux-vitals-measured
+
+Each route's Core Web Vitals are measured on field data at the 75th percentile, against the "good"
+lines on web.dev. Only a route with too little traffic for field data may report "unmeasured"
+instead. The person gets a page that loads, answers a press and holds still on a real phone.
+Check: read the route's field data (CrUX through PageSpeed Insights, or the repo's own field log).
+With too little traffic for field data, record a lab trace on a mobile profile and report "field:
+unmeasured". Pass when each metric is good on field data. Pass also when the route has too little
+traffic for field data and the report names it unmeasured. Any other unmeasured metric fails.
+Source: [web.dev, Web Vitals](https://web.dev/articles/vitals) (a pass is field data at the 75th
+percentile); impeccable `optimize` gives the lines as advice with no check.
+
+## ux-feature-baseline-or-fallback
+
+A web feature that is not Baseline Widely available runs only behind a feature test, with a fallback
+the person can use. So the page works in the browser the person has.
+Check: for each new CSS or JavaScript feature in the diff, read its status on webstatus.dev. Pass when
+it is Widely available, or it sits behind `@supports` or a feature test and the fallback was seen
+working. A browser-name check fails.
+Source: [web.dev, Baseline](https://web.dev/baseline); impeccable `overdrive` asks for a working
+fallback, with no check.

@@ -2,11 +2,19 @@
 
 ## The ruling
 
-The UX rules that every repo with screens shares, beyond the three third-party sets, live in `docs/design/`. They
-come from the owner's own repos. Each rule cites its repo and record. A rule that no repo shows is left out.
+The UX rules that every repo with screens shares, beyond the three third-party sets, live in `docs/design/`. Most come from the owner's own repos, and each such rule cites its repo and record. A browser or 3D rule
+that no repo shows may cite a standard or platform source instead (W3C, WHATWG, MDN, web.dev, GOV.UK,
+a browser's, engine's or library's own docs, or a usability study). It sits under "Browser and 3D" in
+`principles.md` (owner, 2026-11-01 12:21 CST, roadmap step web-design-guidelines: browser design dos
+and don'ts, from static web apps to full 3D sites). Any other rule that no repo shows is left out.
+A guideline becomes a house rule only when it makes the build better for the person who uses it, and
+its rule sentence names that outcome. A standard level that is not legally required, such as a higher
+WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
 
-- The house rules are `ux-answer-at-press`, `ux-long-run-stops`, `ux-all-is-well`, `ux-thumb-zone` and
-  `ux-label-once`.
+- The house rules are `ux-answer-at-press`, `ux-long-run-stops`, `ux-all-is-well`, `ux-thumb-zone`,
+  `ux-label-once`, `ux-works-when-script-fails`, `ux-lost-scene-recovers`, `ux-still-scene-draws-nothing`,
+  `ux-canvas-has-words`, `ux-scroll-stays-native`, `ux-forced-colors-hold`,
+  `ux-full-height-fits`, `ux-vitals-measured` and `ux-feature-baseline-or-fallback`.
   Touch size is the Target size row in `docs/design/a11y.md`: 44px on touch, 24px for mouse.
 - House design values are in `docs/design/tokens.md`, and a repo may override them. Motion durations and easing are
   per repo.

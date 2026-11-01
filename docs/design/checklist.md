@@ -24,6 +24,15 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-long-run-stops: For each run that takes more than a few seconds, is there a Stop control that ends it?
 - [ ] ux-all-is-well: Does a status summary name only what is not normal, or say "All is well." when nothing is?
 - [ ] ux-thumb-zone: On each phone layout, can a thumb reach the main input and the main action? (Phone layouts only.)
+- [ ] ux-works-when-script-fails: With JavaScript off, and with WebGL off, are the content and the main action reachable, or does the page say what is missing and lead on?
+- [ ] ux-lost-scene-recovers: After a forced context loss, does the canvas show words, and does the scene return on restore? (3D pages only.)
+- [ ] ux-still-scene-draws-nothing: While the scene rests, does the draw-call count stay 0? (3D pages only.)
+- [ ] ux-canvas-has-words: Does each canvas that carries information have a name, a text equivalent and keyboard acts? Is each other canvas hidden from assistive technology, with aria-hidden="true" in the DOM?
+- [ ] ux-scroll-stays-native: Do the wheel, trackpad, Space, Page Down and arrow keys each move the page by their usual step, with no section that holds the scroll?
+- [ ] ux-forced-colors-hold: In forced-colors mode, do each control, edge, focus ring and state show?
+- [ ] ux-full-height-fits: Does each `vh` value in the changed CSS have an `svh`, `dvh` or `lvh` declaration on the same selector?
+- [ ] ux-vitals-measured: Are LCP, INP and CLS good at the 75th percentile of field data? Is "unmeasured" named only where the route has too little traffic for field data?
+- [ ] ux-feature-baseline-or-fallback: Is each new feature Baseline Widely available, or behind a feature test with a fallback seen working?
 - [ ] ux-gap-on-parent: Does each flex or grid parent space its children with `gap`, with no child margin between siblings? A `margin-inline: auto` or other one-item offset passes. Prose and flow margins outside flex or grid pass.
 - [ ] ux-control-beside-area: Does each control sit next to the area it changes? Is each element between them the same in every state of the control?
 - [ ] ux-layout-primitives: Is each page region built from a named layout primitive (stack, cluster, sidebar, grid, center)?
