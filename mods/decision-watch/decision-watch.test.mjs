@@ -1100,9 +1100,9 @@ await test('log: holds the verdict line and timings, never the prompt text', asy
 
 const REPO_PY = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
 const SUBJECT = 'UNREAD-SUBJECT-ALPHA-3'
-const pad = n => String(n).padStart(2, '0')
-// A naive local stamp, the form guard_core writes into guard.log.
-const localStamp = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+// The form guard_core writes into guard.log: the time with its UTC offset, as ISO 8601 with a colon. The offset is a
+// literal +05:00, never this machine's zone, so the reader must convert it on any clock.
+const offsetStamp = d => new Date(d.getTime() + 5 * 3600000).toISOString().slice(0, 19) + '+05:00'
 
 // The first python on PATH that runs. The Store stub prints a message and exits non-zero. null when none runs.
 function pythonCmd() {
@@ -1140,7 +1140,7 @@ function unreadFixture() {
   ]
   writeFileSync(transcript, records.map(r => JSON.stringify(r)).join('\n') + '\n')
   // guard.log fields: when, tool, decision, rule, matched, session
-  writeFileSync(join(cfg, 'guard.log'), [localStamp(new Date()), 'Bash', 'noted', 'subject-unread', SUBJECT, SID].join('\t') + '\n')
+  writeFileSync(join(cfg, 'guard.log'), [offsetStamp(new Date()), 'Bash', 'noted', 'subject-unread', SUBJECT, SID].join('\t') + '\n')
   return { cfg, repo, transcript }
 }
 

@@ -13571,13 +13571,8 @@ def cap_reason_bound_case():
     return True, "%d characters, one line, cut marked" % len(reason)
 
 
-def crash_log_case():
-    """A guard defect still allows (fail open), and now logs one `crash` line naming the error."""
-    folder = os.path.join(ROOT, "crashlog")
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, "guard.log")
-    if os.path.exists(path):
-        os.remove(path)
+def _crash_judge_run(folder):
+    """Runs the guard with its judge raising, under CLAUDE_CONFIG_DIR = folder. Returns the run."""
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = folder
     code = ("import io, sys, importlib.util as u\n"
@@ -13586,8 +13581,18 @@ def crash_log_case():
             "g.judge = lambda payload: 1 / 0\n"
             "sys.stdin = io.StringIO('{\"tool_name\": \"Bash\", \"tool_input\": {}}')\n"
             "g.main()\n" % GUARD)
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                            env=env, timeout=60)
+    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          env=env, timeout=60)
+
+
+def crash_log_case():
+    """A guard defect still allows (fail open), and now logs one `crash` line naming the error."""
+    folder = os.path.join(ROOT, "crashlog")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    result = _crash_judge_run(folder)
     if result.returncode != 0 or result.stdout.strip():
         return False, "expected a silent exit 0, got %d %r" % (result.returncode, result.stdout[:80])
     if not os.path.exists(path):
@@ -17413,6 +17418,30 @@ RELOAD_CHECKS = (
 )
 for _label, _check in RELOAD_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+def reload_crash_stamp_case():
+    """reload-stamp: when guard_core stays broken, guard.py's fallback writer logs one guard-crash line, and
+    its time (field 0) carries the colon UTC offset. The run is reload_stuck_case's run, with no fix."""
+    name = "crash-stamp"
+    folder, good = _reload_copy(name, INSTALL_ID)
+    _damage_truncated(folder, good)
+    cfg = os.path.join(ROOT, "reload-cfg", name)
+    shutil.rmtree(cfg, ignore_errors=True)
+    run, _fixed = _reload_run(folder, name)
+    path = os.path.join(cfg, "guard.log")
+    if not os.path.exists(path):
+        return False, "the broken guard wrote no guard.log line (exit %d)" % run.returncode
+    with open(path, encoding="utf-8") as handle:
+        rows = [line.split("\t") for line in handle.read().splitlines() if line.strip()]
+    crash = [fields for fields in rows if len(fields) > 3 and fields[2:4] == ["crash", "guard-crash"]]
+    if len(crash) != 1:
+        return False, "want one crash guard-crash line, found %d in %r" % (len(crash), rows)
+    return _stamp_verdict(crash[0][0])
+
+
+LOG_CHECKS_EXTRA.append(("reload-stamp: the fallback writer's crash line carries the colon UTC offset",
+                         reload_crash_stamp_case))
 # guard.py stamped and guard_core.py with no INSTALL_ID line at all is a mixed set, not a match: the
 # guard must wait and reload it like any other mismatch, and refuse it when it never clears. The
 # repo's own set, every file on the commented placeholder, is a match, and is allowed at once.
@@ -17670,6 +17699,69 @@ LOG_CHECKS_EXTRA.append(("session-log: the writer with no session argument write
                          "line", session_log_writer_case))
 LOG_CHECKS_EXTRA.append(("session-log: an unwritable log never raises and never changes the "
                          "verdict", session_log_unwritable_case))
+
+
+# The time in field 0 of a written line: ISO 8601 with a colon UTC offset, as guard_core.record() writes it.
+STAMP_SHAPE = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d"
+
+
+def _stamp_verdict(stamp):
+    """(ok, message) for one written time: the colon shape, this machine's own offset, and the current instant."""
+    if not re.fullmatch(STAMP_SHAPE, stamp):
+        return False, "field 0 is %r, want ISO 8601 with a colon offset, like 2026-11-01T16:55:00-06:00" % stamp
+    parsed = datetime.fromisoformat(stamp)
+    local = datetime.now().astimezone().utcoffset()
+    if parsed.utcoffset() != local:
+        return False, "field 0 is %r with offset %s, want this machine's %s" % (stamp, parsed.utcoffset(), local)
+    if abs(datetime.now(timezone.utc) - parsed) > timedelta(minutes=5):
+        return False, "field 0 is %r, which is not the current time" % stamp
+    return True, "field 0 is %s, with this machine's offset and the current time" % stamp
+
+
+def session_log_stamp_offset_case():
+    """session-log: record() writes field 0 with its UTC offset, as ISO 8601 with a colon. The writer is
+    called in process as session_log_writer_case calls it, so the one line it writes is read back here.
+    """
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import guard_core  # noqa: F401  (imported for its sys.modules entry)
+    core = sys.modules["guard_core"]
+    folder = _session_log_fresh("sessionlog-stamp")
+    saved = core.config_dir
+    core.config_dir = lambda: folder
+    try:
+        core.record("Bash", "deny", "shared-tree", "git stash")
+    finally:
+        core.config_dir = saved
+    rows = _session_log_rows(folder)
+    if rows is None or len(rows) != 1:
+        return False, "expected one line, found %s" % ("none" if rows is None else len(rows))
+    return _stamp_verdict(rows[0].split("\t")[0])
+
+
+def crash_log_stamp_case():
+    """session-log: the crash line the judge's exception writes through record() carries the colon UTC
+    offset in field 0. The run is the one crash_log_case makes, through the shared step.
+    """
+    folder = os.path.join(ROOT, "crashstamp")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    _crash_judge_run(folder)
+    if not os.path.exists(path):
+        return False, "no crash line was logged"
+    with open(path, encoding="utf-8") as handle:
+        fields = handle.read().strip().split("\t")
+    if len(fields) < 4 or fields[2:4] != ["crash", "guard-crash"]:
+        return False, "unexpected crash line: %r" % fields
+    return _stamp_verdict(fields[0])
+
+
+LOG_CHECKS_EXTRA.append(("session-log: record() writes its time with a colon UTC offset",
+                         session_log_stamp_offset_case))
+LOG_CHECKS_EXTRA.append(("session-log: a guard crash line's time carries the colon UTC offset",
+                         crash_log_stamp_case))
 
 
 # A guard_core that lacks set_log_session is covered by the stale-core case below: that case drops

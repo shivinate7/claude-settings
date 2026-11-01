@@ -1653,8 +1653,9 @@ def case_split_output_carries_the_config_notice_apart_from_the_verdict():
 # reader then falls back to the state folder, where guard.log is not, so the real folder's unread subject is lost.
 # The fallback must print a line that names DW_REAL_CONFIG_DIR, on stdout or stderr, not stay silent.
 # Guessed contract point: only the name DW_REAL_CONFIG_DIR is pinned, not the wording.
-def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
-    name = "unread_fallback"
+def _unread_fallback_case(name, stamp, subject, label):
+    """The unread-subject notice from the real config folder, with DW_REAL_CONFIG_DIR unset and set. `stamp` is
+    the guard.log time of the one line, in the form under test."""
     repo = make_repo(name)
     write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
     commit_all(repo)
@@ -1667,8 +1668,7 @@ def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
     # The real config folder holds one unread-subject line from this turn. The mod's state folder holds none.
     real = os.path.join(ROOT, name + "-real")
     os.makedirs(real, exist_ok=True)
-    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    write(os.path.join(real, "guard.log"), "\t".join([stamp, "Bash", "noted", "subject-unread", "UNREAD-SUBJECT-BETA-4", "sess-" + name]) + "\n")
+    write(os.path.join(real, "guard.log"), "\t".join([stamp, "Bash", "noted", "subject-unread", subject, "sess-" + name]) + "\n")
     state = os.path.join(ROOT, name + "-state", "decision-watch-shadow")
     os.makedirs(state, exist_ok=True)
     env = dict(os.environ, CLAUDE_CONFIG_DIR=state)
@@ -1683,17 +1683,30 @@ def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
 
     result = emit(env)
     seen = result.stdout + result.stderr
-    check("unread fallback: exit 0", result.returncode == 0, result.stderr[:300])
-    check("unread fallback: a line names DW_REAL_CONFIG_DIR, so the fallback is not silent",
+    check(label + ": exit 0", result.returncode == 0, result.stderr[:300])
+    check(label + ": a line names DW_REAL_CONFIG_DIR, so the fallback is not silent",
           "DW_REAL_CONFIG_DIR" in seen, seen[:300])
     # Control: with the real folder named, the same fixture shows the subject. So a red above is
     # the fallback, not a fixture that never produces the notice.
     control = emit(dict(env, DW_REAL_CONFIG_DIR=real))
     got = _json_or_none(control.stdout.strip())
     notices = got.get("notices") if isinstance(got, dict) else None
-    shown = isinstance(notices, list) and any("UNREAD-SUBJECT-BETA-4" in n for n in notices if isinstance(n, str))
-    check("unread fallback control: with DW_REAL_CONFIG_DIR set, the unread subject shows",
+    shown = isinstance(notices, list) and any(subject in n for n in notices if isinstance(n, str))
+    check(label + " control: with DW_REAL_CONFIG_DIR set, the unread subject shows",
           shown, (control.stdout + control.stderr)[:300])
+
+
+def case_unread_fallback_is_named_when_dw_real_config_dir_is_unset():
+    # The offset-less shape of a line, which the reader must still parse.
+    _unread_fallback_case("unread_fallback", datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                          "UNREAD-SUBJECT-BETA-4", "unread fallback")
+
+
+def case_unread_offset_line_is_collected_when_dw_real_config_dir_is_unset():
+    # The shape guard_core.record() writes now: the time with its UTC offset. +05:00 is a literal, not this
+    # machine's zone, so a reader that drops the offset reads the wrong instant on any clock.
+    stamp = datetime.now(timezone(timedelta(hours=5))).isoformat(timespec="seconds")
+    _unread_fallback_case("unread_offset", stamp, "UNREAD-SUBJECT-GAMMA-5", "unread offset")
 
 
 def main():
@@ -1754,6 +1767,7 @@ def main():
         case_phase_two_with_the_same_key_stays_silent_on_allow,
         case_split_output_carries_the_config_notice_apart_from_the_verdict,
         case_unread_fallback_is_named_when_dw_real_config_dir_is_unset,
+        case_unread_offset_line_is_collected_when_dw_real_config_dir_is_unset,
     ):
         run_case(case)
 
