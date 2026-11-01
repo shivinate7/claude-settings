@@ -6,7 +6,7 @@ decide first. Facts were read on 2026-11-01 from the linked pages. "Unverified" 
 source confirmed. Nothing was installed. Browser 3D design rules are not here: roadmap step
 `web-design-guidelines` (browser design dos and don'ts) covers them.
 
-Each tool has a read-only vet note, per the decision on outside code: vet before any install.
+Each tool in the three tables has a read-only vet note, per the decision on outside code: vet before any install.
 
 ## What to decide first, ranked
 
@@ -42,7 +42,10 @@ Each item names the outcome it serves.
    `gltf_validator` (non-zero exit on error); three.js `renderer.info` in a Playwright page for
    draw calls, triangles and textures; Playwright `toHaveScreenshot` on a SwiftShader render. A
    SwiftShader baseline will not match a GPU baseline, so pin the browser and OS. This becomes a
-   lane once a target is picked, not a pick. Budgets: no published per-device budget was found (the Khronos table returned 404). Once a target is picked, set triangle, draw-call and texture-memory budgets for its devices and measure them with these tools.
+   lane once a target is picked, not a pick. Budgets: no published per-device budget was found
+   (the Khronos table returned 404). Any triangle, draw-call or texture-memory budget is the
+   owner's to set for a picked target; a reviewer measures it with these tools. It is not a
+   builder rule.
 7. **Hardware.** Outcome: no spend that buys nothing. No asset tool, validator or browser check
    needs a GPU. Editor work needs Shivam's desktop. A GPU matters only for heavy local renders.
 8. **Start with the official connectors.** Outcome: fewer unvetted installs. Anthropic's
@@ -104,7 +107,7 @@ All run in a Linux container with no GPU unless noted.
 | [KTX-Software](https://github.com/KhronosGroup/KTX-Software/releases) | KTX2 and Basis textures | Khronos, v4.4.2 2025-10-04; licence unverified | Licence unverified |
 | [OpenUSD usd-core](https://github.com/PixarAnimationStudios/OpenUSD/releases) | Read, write, check USD | Pixar, TOST-1.0, 26.11 2026-10-21 | Pixar's own licence; reaches local files only (unverified) |
 | [screenshot-glb](https://github.com/Shopify/screenshot-glb) | GLB to image via headless Chrome | Shopify, MIT, 4.2.1 2026-09-17 | Downloads Chrome |
-| [Playwright](https://playwright.dev/docs/api/class-snapshotassertions) + [pixelmatch](https://github.com/mapbox/pixelmatch) | WebGL page screenshots and diffs | Microsoft, Apache-2.0, 1.64.1; pixelmatch Mapbox, ISC, 8.0.0 | SwiftShader flag lowers browser sandbox security |
+| [Playwright](https://playwright.dev/docs/api/class-snapshotassertions) + [pixelmatch](https://github.com/mapbox/pixelmatch) | WebGL page screenshots and diffs | Microsoft, Apache-2.0, 1.64.1 (date unverified); pixelmatch Mapbox, ISC, 8.0.0 (date unverified) | SwiftShader flag lowers browser sandbox security |
 | [threejs-devtools-mcp](https://github.com/DmitriyGolub/threejs-devtools-mcp) | Inspect and change a live three.js scene | individual, MIT, 0.5.0 2026-10-14 | Opens Chrome remote control on port 9222; writes source files |
 | [bpy](https://docs.blender.org/manual/en/latest/advanced/command_line/arguments.html) (Blender as Python module) | Scripted import, export, Cycles CPU render | Blender Foundation, GPL-3.0, 5.2.3; date unverified | EEVEE needs OpenGL |
 
