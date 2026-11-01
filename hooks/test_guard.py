@@ -11893,6 +11893,25 @@ sh("debug-port: a process listing that matches the flag is allowed",
 sh("debug-port: a pgrep of the flag is allowed",
    "pgrep -af \"--remote-debugging-port\"", "allow", cwd=NOGIT)
 
+# Review round 3: a launcher's argument array or parenthesised list, a call operator, and text-only matches.
+sh("debug-port: a Start-Process argument array with the port asks",
+   "Start-Process -Wait app.exe -ArgumentList @(\"--remote-debugging-port=9222\")", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a Start-Process parenthesised argument list with the port asks",
+   "Start-Process -Wait app.exe -ArgumentList (\"--remote-debugging-port=9222\")", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a call operator with an argument array holding the port asks",
+   "& electron.exe @(\"--remote-debugging-port=9222\")", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a call operator with a quoted argument list holding the port asks",
+   "& electron.exe '--disable-gpu','--remote-debugging-port=9222'", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a pgrep of the flag with a port value is allowed",
+   "pgrep -f \"--remote-debugging-port=9222\"", "allow", cwd=NOGIT)
+sh("debug-port: a process listing that matches the flag with a port value is allowed",
+   "Get-CimInstance Win32_Process | Where-Object CommandLine -match \"--remote-debugging-port=9222\"",
+   "allow", tool="PowerShell", cwd=NOGIT)
+
 
 # --------------------------------------------------------------------------- a port question departs or is not asked
 FAMILY = "port-question"
