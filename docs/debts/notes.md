@@ -288,11 +288,15 @@
 - stamp-html-comment-hides-file: a fence inside an HTML comment hides the rest of the file from the scan (actions/stamp/stamp.mjs)
 - stamp-list-fence-not-seen: a blockquote fence in a list item at 4 or more columns is not seen as a fence (actions/stamp/stamp.mjs)
 - stale-cites-backslash: a Windows path with backslashes in prose is not matched (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-cost-untested-py: no case proves a PR that changes a .py and removes nothing starts 4 git processes and reads no .md; a mutant without that early return passes (lint/test_stale_cites.py CostTests). Decision: stale-cites-at-merge
+- stale-cites-def-to-assign: a `def f` replaced by `f = h` in the same file reads as removed, so a line that cites `f` is flagged (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
-- stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-ignores-paths-input: the check reads every tracked .md, not the action's `paths` or `changed_paths` scope (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stale-cites-other-forms: a name or path cited as `` `name` in `file.py` ``, `file.py:name`, `[x](/path)`, `@path` or `_path_` is not checked (lint/stale_cites.py). Decision: stale-cites-at-merge
-- stale-cites-def-to-assign: a `def f` replaced by `f = h` in the same file reads as removed, so a line that cites `f` is flagged (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-pass-after-unknown: with an unparseable touched .py and no findings, the last line reads `stale-cites: PASS` after the unknown line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-root-file-word: a removed extensionless root file, such as VERSION, matches the same bare word in prose; mark the line with ste-disable-line (lint/stale_cites.py). Decision: stale-cites-at-merge
 - stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
