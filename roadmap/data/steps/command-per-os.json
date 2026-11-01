@@ -1,9 +1,9 @@
 {
   "title": "A waiting-page command comes as PowerShell and Mac, each with Copy",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.3374,
   "why": "shiv, Oct 30 14:47 CDT (item 78 note): commands to run should be given as PowerShell and macOS, collapsed, copy to clipboard. Item 78 gave a bash-only line under 'any terminal works'; it failed in his Windows PowerShell 5.1 at 14:40 CDT (`&&` and `<<<`). Read on main: page.html shows one `command` string in a closed disclosure with Copy (cmdBlock); steps text carries no Copy.",
-  "note": "Fix: a task item's command becomes {powershell, mac} (the old single string still reads as both); the card shows one closed disclosure per shell, each with Copy, PowerShell first on Windows. The writer rule and guard rule command-in-item refuse a command in steps text and a command item missing either shell, matching output rule output-never-hand-off-doable-step (PowerShell 5.1-safe block, bash or zsh block). Done check: item with both renders two Copy blocks; a bash-only item write is refused. Needs no answer. Port: yes, every repo with a waiting page. Placed ahead of page-name-queue (Triage 12, Oct 30): the coordinator started its lane at 14:49 CDT.",
-  "updatedAt": "2026-10-30T19:52:00Z"
+  "note": "Fix: a task item's command becomes {powershell, mac} (the old single string still reads as both); the card shows one closed disclosure per shell, each with Copy, PowerShell first on Windows. The writer rule and guard rule command-in-item refuse a command in steps text and a command item missing either shell, matching output rule output-never-hand-off-doable-step (PowerShell 5.1-safe block, bash or zsh block). Done check: item with both renders two Copy blocks; a bash-only item write is refused. Needs no answer. Port: yes, every repo with a waiting page. Placed ahead of page-name-queue (Triage 12, Oct 30): the coordinator started its lane at 14:49 CDT. Done: #894 in batch 39 #916, main d657e1da (coordinator, Oct 31 20:01 CDT).",
+  "updatedAt": "2026-11-01T01:01:00Z"
 }

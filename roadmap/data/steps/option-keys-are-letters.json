@@ -1,9 +1,9 @@
 {
   "title": "A waiting-page option's key is the letter the page shows",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33743,
   "why": "shiv, Oct 30 15:09 CDT (item 77): 'what is e2 btw it's not shown on these questions'. The page shows options as A, B, C by position (letterOf in page.html) and never shows keys; item 77's text named keys e2, a, c, so key a was shown as B and his 'A is good' read as a mixed signal. A triage misread followed.",
-  "note": "Fix: the waiting-page skill's item check refuses an item whose option keys are not a, b, c in shown order, and item text that names an option by any other key. Writers name options by shown letter. Done check: an item keyed e2, a, c is refused; one keyed a, b, c passes. Needs no answer. Port: every repo with a waiting page. Lane started Oct 30 16:11 CDT; it also builds c188.",
-  "updatedAt": "2026-10-30T21:25:00Z"
+  "note": "Fix: the waiting-page skill's item check refuses an item whose option keys are not a, b, c in shown order, and item text that names an option by any other key. Writers name options by shown letter. Done check: an item keyed e2, a, c is refused; one keyed a, b, c passes. Needs no answer. Port: every repo with a waiting page. Lane started Oct 30 16:11 CDT; it also builds c188. Done: #898 in batch 39 #916, main d657e1da (coordinator, Oct 31 20:01 CDT).",
+  "updatedAt": "2026-11-01T01:01:00Z"
 }

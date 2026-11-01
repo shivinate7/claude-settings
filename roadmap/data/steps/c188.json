@@ -1,9 +1,9 @@
 {
   "title": "the waiting-page writer refuses a reserved or duplicate option key",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33835,
   "why": "Incident, Oct 28 12:47 CDT (orchestrator): triage 11 wrote waiting page item 44 with an option keyed \"none\", which the page reserves for its built-in \"None of these\" button. The page's problem() blocked the item on shiv's screen with a yellow warning and unselectable options. Fixed in the data by deleting that option (the built-in button covers it).",
-  "note": "The page already refuses a missing, duplicate or reserved key at render time (skills/waiting-page/page.html, problem(), NONE = \"none\"), so the defect reached shiv before anyone saw it. Next cloud lane: the skill's write path refuses the same three cases before the item is written, reading the page's own NONE constant (building-allow-list-is-the-constant), and SKILL.md names \"none\" as reserved next to the options field. Red first: writing item 44's old shape is refused. Checked Oct 28: every other open decision item has unique, non-reserved keys. Needs no answer. Port: yes, the skill installs everywhere. Due after c187, which merged Oct 28 16:22 CDT (batch 13): ready now. Placed ahead of c95 (triage 12, Oct 28; was after c187, triage 11): a real incident on shiv's page. Folded into lane option-keys-are-letters (coordinator, Oct 30 16:13 CDT).",
-  "updatedAt": "2026-10-30T21:25:00Z"
+  "note": "The page already refuses a missing, duplicate or reserved key at render time (skills/waiting-page/page.html, problem(), NONE = \"none\"), so the defect reached shiv before anyone saw it. Next cloud lane: the skill's write path refuses the same three cases before the item is written, reading the page's own NONE constant (building-allow-list-is-the-constant), and SKILL.md names \"none\" as reserved next to the options field. Red first: writing item 44's old shape is refused. Checked Oct 28: every other open decision item has unique, non-reserved keys. Needs no answer. Port: yes, the skill installs everywhere. Due after c187, which merged Oct 28 16:22 CDT (batch 13): ready now. Placed ahead of c95 (triage 12, Oct 28; was after c187, triage 11): a real incident on shiv's page. Folded into lane option-keys-are-letters (coordinator, Oct 30 16:13 CDT). Done: in lane option-keys-are-letters, #898 in batch 39 #916, main d657e1da (coordinator, Oct 31 20:01 CDT).",
+  "updatedAt": "2026-11-01T01:01:00Z"
 }
