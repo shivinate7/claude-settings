@@ -40,7 +40,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run
 
 RUN = _test_temp.run_folder()
 SESSION = "refusal-sid-1"
-REFUSALS_DIR = "refusals"  # the folder under the config dir's state/, as hooks/shared_names.py names it
+REFUSALS_DIR = "refusals"  # the folder under <config dir>/state/ that holds the refusal files
 ARCHIVE = "mcp__claude-code-remote__archive_session"
 ADD_REPO = "mcp__claude-code-remote__add_repo"
 CLAUDE_DENIAL = "Permission for archive_session was denied by the auto-mode classifier."
