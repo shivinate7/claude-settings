@@ -12057,7 +12057,7 @@ add("uniform pick: a batch with today's item among the sets is denied", "deny", 
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles", "data": up_item()}])
 add("uniform pick: the refusal names the ruling and what to pick", "deny", "uniform-pick",
-    carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
+    carries=("shared tool, never the tool to fit a repo", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
     collection="items", doc_id="banchi-titles", data=up_item())
 
 # Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
@@ -12122,7 +12122,7 @@ add("uniform pick: a batch with a multi item whose list pick holds the widening 
     writes=[{"op": "set", "collection": "items", "doc_id": "banchi-titles",
              "data": up_item(multi=True, options=UP_THREE, pick=["a", "b"])}])
 add("uniform pick: the refusal of a widening list pick names the ruling and what to pick", "deny",
-    "uniform-pick", carries=("t18", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
+    "uniform-pick", carries=("shared tool, never the tool to fit a repo", "pick"), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL,
     action="set", collection="items", doc_id="banchi-titles",
     data=up_item(multi=True, options=UP_THREE, pick=["a", "b"]))
 

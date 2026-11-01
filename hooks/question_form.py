@@ -244,13 +244,25 @@ def _write_data(entry):
 # option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`. In the
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
-WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: it goes against "
-                 "the owner's uniform ruling (t18). Make the pick an option where the repo changes to "
-                 "match the shared format, or leave pick out.")
-CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: it goes against the "
-                      "owner's uniform ruling (t18). Recommend an option where the repo changes to match "
-                      "the shared format, and give the widening option no (Recommended) label.")
-WIDENS_MARK = re.compile(r"Goes against your uniform ruling \(t18\)", re.I)
+WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
+WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
+                 "where the repo changes to match the shared format, or leave pick out.")
+CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
+                      "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
+                      "where the repo changes to match the shared format, and give the widening option no "
+                      "(Recommended) label.")
+# Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
+# reason carries them.
+LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
+
+
+def _words_pattern(text):
+    # Any run of whitespace between words, so a reflowed or wrapped sentence still matches.
+    return r"\s+".join(re.escape(w) for w in text.split())
+
+
+WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGACY_WIDENS_TEXT)), re.I)
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 

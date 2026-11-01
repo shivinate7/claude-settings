@@ -25,8 +25,9 @@ Interface the module must match (the lane's form contract):
   not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
   same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
   box judges it in `question`; a page decision in `context`.
-- A widening option: page `widens: true`, never in `pick`; chat `Goes against your uniform ruling (t18)`
-  in its label or description, and never `(Recommended)` in its label (rule uniform-pick).
+- A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
+  fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
+  its label (rule uniform-pick).
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
   The chat scan skips an option's Gain and Lose text, as the page scan reads only label and how.
 - A chat refusal reason names its remedy and no field of the waiting page (no `stands`). Each page reason
@@ -47,6 +48,7 @@ import copy
 import io
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +61,7 @@ os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
+import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 
 try:
@@ -83,6 +86,15 @@ STAKE_RULES = (FORM_RULE, "owner-judge")
 OWNER_STAKES = getattr(question_form, "OWNER_STAKES", None) or guard.OWNER_STAKES
 DOC = "batch-runner-merge"
 MISSING = ("MISSING", "hooks/question_form.py has no such function yet")
+# The widening words are one constant, question_form.WIDENS_TEXT. A build that lacks it gets this sentinel,
+# so each case that uses it goes red by its own name instead of raising. WIDENS_WORDS pins the owner's exact
+# words once; every other case takes WIDE from the module.
+WIDENS_WORDS = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
+WIDE = getattr(question_form, "WIDENS_TEXT", None) or "<WIDENS_TEXT missing from hooks/question_form.py>"
+# The reply judge's prompt is read from its module constant in case_widens_words_in_the_reply_judge_prompt.
+WIDENS_HOMES = ("skills/waiting-page/page.html", "skills/waiting-page/SKILL.md", "output-styles/shiv-stylisms.md",
+                "docs/decisions/uniform-over-variants.md", "docs/decisions/question-form.md")
+OLD_WIDENS_CARD = "uniform ruling (t18)"
 
 # Waiting item 92 as the writer sent it (Oct 30): a decision with a Goal line and no Problem line, no Based
 # on line, and a widening option 'b' not marked widens. It holds no personal data.
@@ -371,7 +383,7 @@ def case_chat_boxes():
     mixed["questions"].insert(0, one["questions"][0])
     chat("a one-option question beside a good question passes", mixed, None)
 
-    wide = "Goes against your uniform ruling (t18)."
+    wide = WIDE + "."
     options = tcj.good_options()
     options[0] = {"label": "Allow the second form (Recommended)",
                   "description": "Gain: it lands today. Lose: two forms stay. " + wide}
@@ -469,7 +481,7 @@ def case_chat_reasons_name_a_remedy_and_no_page_field():
         check("chat reasons: the %s reason names its remedy" % rule, not missing, missing)
     options = tcj.good_options()
     options[0] = {"label": "Allow the second form (Recommended)",
-                  "description": "Gain: it lands today. Lose: two forms stay. Goes against your uniform ruling (t18)."}
+                  "description": "Gain: it lands today. Lose: two forms stay. " + WIDE + "."}
     press = tcj.good_options()
     press[1] = {"label": "Press Merge in GitHub", "description": "Gain: it lands at once. Lose: nobody reads it first."}
     for name, box in (("a missing Problem line", tcj.good_box(problem=None)),
@@ -815,7 +827,7 @@ def case_departs_str_replace():
 def case_departs_ids_and_order():
     # The older rules and the form keep their ids: the question-departs check runs after them.
     wide = [dict(tcj.good_options()[0], label="Allow the second form (Recommended)",
-                 description="Gain: it lands today. Lose: two forms stay. Goes against your uniform ruling (t18)."),
+                 description="Gain: it lands today. Lose: two forms stay. " + WIDE + "."),
             tcj.good_options()[1]]
     chat("a widening recommended option with no Departs from line is refused as uniform-pick",
          chat_box(options=wide, departs=None), ("uniform-pick", None))
@@ -938,7 +950,7 @@ def case_call_judge():
           r.code == 0 and r.out == "" and tcj.lifted_log(r, FORM_RULE), tcj.detail(r))
     options = tcj.good_options()
     options[0] = {"label": "Allow the second form (Recommended)",
-                  "description": "Gain: it lands today. Lose: two forms stay. Goes against your uniform ruling (t18)."}
+                  "description": "Gain: it lands today. Lose: two forms stay. " + WIDE + "."}
     r = tcj.run_hook(tcj.question_input(box=tcj.good_box(options=options)), answer=tcj.ALLOW)
     check("call_judge: a Recommended option that goes against the uniform ruling is refused as uniform-pick",
           r.code == 0 and "uniform-pick" in r.reason() and r.log.count("\tdeny\tuniform-pick\t") == 1
@@ -953,6 +965,38 @@ def case_call_judge():
           r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, tcj.detail(r))
 
 
+def case_widens_text_is_the_set_words():
+    got = getattr(question_form, "WIDENS_TEXT", None)
+    check("widens: question_form.WIDENS_TEXT is the owner's exact words", got == WIDENS_WORDS, got)
+
+
+def case_widens_reasons_carry_no_topic_id():
+    # A refusal names the rule's words, never the owner's topic id: a bare id reads as a bare id on the card.
+    for name in ("WIDENS_REASON", "CHAT_WIDENS_REASON"):
+        text = getattr(question_form, name, None)
+        if text is None:
+            check("widens reasons: question_form.%s is there" % name, False, MISSING)
+            continue
+        check("widens reasons: question_form.%s carries no t18" % name, "t18" not in text, text)
+
+
+def case_widens_words_in_every_home():
+    # Each file holds the words, collapsed over line wraps, and no longer holds the old card text.
+    for rel in WIDENS_HOMES:
+        with open(os.path.join(REPO, rel), encoding="utf-8") as f:
+            text = re.sub(r"\s+", " ", f.read())
+        check("widens homes: %s carries question_form.WIDENS_TEXT" % rel, WIDE in text, WIDE)
+        check("widens homes: %s carries no %r" % (rel, OLD_WIDENS_CARD), OLD_WIDENS_CARD not in text,
+              OLD_WIDENS_CARD)
+
+
+def case_widens_words_in_the_reply_judge_prompt():
+    # The reply judge's prompt is built from reply_judge.INSTRUCTIONS: it holds the words and no topic id.
+    text = re.sub(r"\s+", " ", reply_judge.INSTRUCTIONS)
+    check("widens prompt: reply_judge.INSTRUCTIONS carries question_form.WIDENS_TEXT", WIDE in text, WIDE)
+    check("widens prompt: reply_judge.INSTRUCTIONS carries no 't18'", "t18" not in text, "t18")
+
+
 def main():
     for case in (case_item_92, case_form_lines, case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
@@ -964,7 +1008,8 @@ def main():
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
-                 case_call_judge):
+                 case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
+                 case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
         try:
             case()
         except Exception as exc:
