@@ -24,6 +24,8 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 MODULE = os.environ.get("MOD_VERSIONS_UNDER_TEST") or os.path.join(HERE, "check_mod_versions.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -96,7 +98,7 @@ class ModVersionTests(unittest.TestCase):
 
     def git(self, *args):
         subprocess.run(["git", "-C", self.tree, "-c", "user.name=test",
-                        "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", *args],
+                        "-c", "user.email=test@example.com", *args],
                        check=True, capture_output=True, text=True)
 
     def rev(self, ref):

@@ -13,6 +13,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../lint/_test_git.sh"  # test-run signing opt-out
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 INSTALL_SH="${INSTALL_SH_UNDER_TEST:-$REPO_ROOT/install.sh}"
 NAME="install.sh under the real Windows uname exits 0 at once, names install.ps1, and writes nothing"

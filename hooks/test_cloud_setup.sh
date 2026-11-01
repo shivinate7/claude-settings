@@ -44,6 +44,7 @@ trap 'rm -rf "$RUN"' EXIT
 # shellcheck source=../testing/tracked_tree.sh
 TRACKED_ROOT=$REPO_ROOT
 . "$TRACKED_ROOT/testing/tracked_tree.sh"  # copies what git lists, so no fixture lists files
+. "$REPO_ROOT/lint/_test_git.sh"  # test-run signing opt-out (lint/_test_git.sh)
 
 # The checkout every case copies: the repo's tracked files, with origin set to the GitHub URL.
 MASTER="$RUN/master"
