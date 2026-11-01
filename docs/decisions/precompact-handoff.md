@@ -21,13 +21,20 @@ Owner, 2026-10-13 11:20 CDT: the reorient and re-read hooks live in claude-setti
    - With nothing found, it says so. The session reads the named handoff and rewrites its own handoff from it.
    - At SessionStart reorient, stale pointers and `.dir` and `.reread` files are swept after 30 days (`STALE_AGE`, Claude Code's default `cleanupPeriodDays`). A malformed pointer is swept in every directory. A pointer with no handoff is swept only in the current directory. A failed pointer delete is logged.
    - After compaction, the reorient message ends with the owner feedback inbox note. After /clear or a fork, it has none.
-9. **Re-read check after compaction** (`hooks/reread_check.py`). A PostCompact hook sets a flag for the session. A PreToolUse hook on Read clears the flag when the path is the session's handoff. A Stop hook refuses once per turn while the flag is set and the handoff file exists, and names its path. It exits on `stop_hook_active`, so it cannot loop.
+9. **Re-read check after compaction** (`hooks/reread_check.py`).
+   - PostCompact sets the session's flag. A PreToolUse Read of the session's handoff clears it. A Read inside an agent (payload has `agent_id`) never clears it.
+   - While the flag is set and the handoff exists, the PreToolUse guard (`hooks/guard.py`, rule `handoff-unread`) denies each call it judges from the main session. Read, Grep and Glob are outside the guard's matcher, so they pass. A call whose payload has `agent_id` (made inside an agent) passes.
+   - The guard calls `unread_handoff` in `hooks/reread_check.py`. An owner override lifts the denial. If the import fails, the guard allows.
+   - The Stop refusal stays as the second net. While the flag is set and the handoff exists, it refuses once per turn and names the handoff path. It exits on `stop_hook_active`, so it cannot loop.
+   - Guard basis: named incident. 2026-11-01 17:23 CST: a triage session rewrote its handoff and worked a turn after compaction before it read the handoff. The Stop refusal caught it only at turn end. Owner, 2026-11-01 17:35 CST: the slip should not be possible. Landed 2026-11-01.
+   - Cost: one flag-file existence check per call in the guard's matcher, inside the guard hook already running. A second check runs only while the flag is set. No file is written. No process starts. `hooks/test_guard.py` proves this cost.
 10. **Premises.** The handoff holds a Goal line and a `## Working premises` section, right after the rulings with NO HOME YET (step 4 of the prompt file). The reorient message lists the premises to check: after compaction every one but a `ruling`, after /clear or a fork every one. A handoff with no premise line gets "no Working premises section" and a pointer to step 4. The prompt file's "Check premises" step says to check a weak or stale premise before acting, then rewrite its line. The line format and the source kinds: `premise-format`. The Stop nudge points at step 4 and copies no section list. A Read inside an agent (payload has `agent_id`) never clears the re-read flag.
 
-Reason for items 8 and 9: after /clear or a fork a session started blind. After compaction nothing checked that it read its handoff. Reason for item 10: a compaction summary and an old handoff hold beliefs with no source.
+Reason for items 8 and 9: after /clear or a fork a session started blind. After compaction a session could work a turn before it read its handoff. The guard denies that work at each call. The Stop refusal catches a turn that ends unread. Reason for item 10: a compaction summary and an old handoff hold beliefs with no source.
 
 A handoff is a short-term note. It is never a ruling's only home (`memory-is-never-a-rulings-only-home`).
 
 Kind: process
 Home: hooks/precompact_handoff.py
 Home: hooks/reread_check.py
+Home: hooks/guard.py
