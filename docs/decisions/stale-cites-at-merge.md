@@ -20,4 +20,5 @@ Measured risk, 2026-11-01. A sample on main at 84a56038: tracked Markdown held 1
 Not covered: a claim that is wrong in meaning, such as a "Departs from" line that describes main wrongly (the 2026-11-01 16:23 CST incident). No string match can judge meaning. `hooks/prose_judge.py` judges edits inside a decisions folder only.
 
 Kind: build
+Plan: docs/decisions/stale-cites-at-merge.md#the-ruling (all)
 Home: lint/stale_cites.py

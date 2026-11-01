@@ -25,6 +25,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+
 RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one run, or one suffix of a run
 RUN_RE = re.compile(RUN)
@@ -38,7 +41,7 @@ class Unknown(Exception):
 
 
 def git(*args, check=True):
-    done = subprocess.run(["git", *args], capture_output=True)
+    done = _nowindow.run(["git", *args], capture_output=True)
     if check and done.returncode != 0:
         raise Unknown("git %s failed: %s" % (" ".join(args[:2]), done.stderr.decode("utf-8", "replace").strip()))
     return done.stdout
@@ -53,7 +56,7 @@ class Batch:
     def get(self, spec):
         """Bytes of the blob, or None when the object does not exist."""
         if self.proc is None:
-            self.proc = subprocess.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE,
+            self.proc = _nowindow.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.proc.stdin.write(spec.encode("utf-8") + b"\n")
         self.proc.stdin.flush()
