@@ -1,10 +1,10 @@
 """Shared transcript readers for the hooks fired off a Stop event.
 
-`lint/report_guard.py` and `hooks/decision_watch.py` import this module, so the readers have one
+`lint/report_guard.py`, `hooks/decision_watch.py` and `hooks/feedback_guard.py` import this module, so the readers have one
 copy.
 
-read_transcript / is_last_human / tool_uses / records_after_last_human walk the JSONL transcript
-and its `content` blocks. last_reply returns the text of the last assistant reply.
+read_transcript / is_last_human / owner_text / tool_uses / records_after_last_human walk the JSONL
+transcript and its `content` blocks. last_reply returns the text of the last assistant reply.
 """
 import json
 import os
@@ -26,14 +26,17 @@ def read_transcript(path):
     return records
 
 
+def _is_peer(origin):
+    return isinstance(origin, dict) and origin.get("kind") == "peer"
+
+
 def is_last_human(rec):
     if rec.get("type") != "user":
         return False
     if rec.get("isSidechain"):
         return False
     # A cross-session reply is type user too, but it is a peer's words, never the owner's.
-    origin = rec.get("origin")
-    if isinstance(origin, dict) and origin.get("kind") == "peer":
+    if _is_peer(rec.get("origin")):
         return False
     msg = rec.get("message") or {}
     content = msg.get("content")
@@ -46,6 +49,32 @@ def is_last_human(rec):
         )
         return has_text and not has_tool_result
     return False
+
+
+def owner_text(rec, notice_tags=()):
+    """The text of an owner message record, or None for any other record.
+
+    An owner message is a user record that is_last_human accepts, or a queued_command attachment
+    (an owner message typed while the session runs; its text is attachment.prompt) with no peer
+    origin. Text that starts with one of `notice_tags` (shared_names.MACHINE_TAGS) is a machine
+    notice, never the owner's: the notice queued while a task runs is a queued_command too.
+    """
+    if rec.get("type") == "user":
+        text = (rec.get("message") or {}).get("content") if is_last_human(rec) else None
+    elif rec.get("type") == "attachment" and not rec.get("isSidechain"):
+        att = rec.get("attachment")
+        if (not isinstance(att, dict) or att.get("type") != "queued_command"
+                or _is_peer(rec.get("origin")) or _is_peer(att.get("origin"))):
+            return None
+        text = att.get("prompt")
+    else:
+        return None
+    if isinstance(text, list):
+        text = "\n".join(b["text"] for b in text if isinstance(b, dict) and b.get("type") == "text"
+                         and isinstance(b.get("text"), str))
+    if not isinstance(text, str) or (notice_tags and text.strip().startswith(tuple(notice_tags))):
+        return None
+    return text
 
 
 def tool_uses(rec):

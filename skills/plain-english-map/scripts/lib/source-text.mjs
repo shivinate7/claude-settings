@@ -46,6 +46,69 @@ export const blankCommentsAndStrings = (src, file) => scanSource(src, { keepLeng
  */
 export const stripCommentsAndStrings = (src, file) => scanSource(src, { keepLength: false, blankStrings: true }, file);
 
+// A heredoc operator in shell code: `<<WORD`, `<<-WORD`, `<<'WORD'`, `<<"WORD"` or `<<\WORD`, never the here-string `<<<`.
+const HEREDOC = /<<(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([\w.-]+))/y;
+
+/**
+ * Shell source with every comment, the text inside every string and every heredoc body blanked to spaces, at the same offsets as
+ * the file. Quotes and newlines stay. One pass. A single-quoted string takes no escape, and `$'...'` takes `\`. A double-quoted
+ * string takes `\` and may span lines. A `#` opens a comment at the start of a word: at the start of a line, after a space or
+ * after one of `;&|()<>`, so `$#` and `${#x}` open none. A heredoc body runs from the line after its operator to its end line,
+ * which `<<-` may indent with tabs, and no quote in it opens a string. An operator inside `((...))` is a shift, never a heredoc.
+ * Stated limit: a quote inside `$(...)` within a double-quoted string ends that string.
+ */
+export const blankShell = (src) => {
+  const blank = (ch) => (ch === "\n" ? "\n" : " ");
+  const n = src.length;
+  let out = "";
+  let state = "code"; // code | single | ansi | double | comment
+  let arith = 0; // open `((`
+  const heredocs = []; // the end lines of the heredocs whose operators the current line holds, in order: { word, tabs }
+  // At the newline that ends a line with heredoc operators: blank each body, keep each end line, and return the index after them.
+  const skipBodies = (i) => {
+    for (const { word, tabs } of heredocs) {
+      while (i < n) {
+        const at = src.indexOf("\n", i);
+        const eol = at === -1 ? n : at;
+        const line = src.slice(i, eol);
+        const ends = (tabs ? line.replace(/^\t+/, "") : line) === word;
+        out += (ends ? line : " ".repeat(line.length)) + (eol < n ? "\n" : "");
+        i = eol + 1;
+        if (ends) break;
+      }
+    }
+    heredocs.length = 0;
+    return i;
+  };
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    if (c === "\n" && (state === "code" || state === "comment")) { state = "code"; out += c; i = heredocs.length ? skipBodies(i + 1) : i + 1; continue; }
+    if (state === "comment") { out += " "; i++; continue; }
+    if (state !== "code") {
+      if (c === (state === "double" ? '"' : "'")) { state = "code"; out += c; }
+      else if (c === "\\" && state !== "single" && i + 1 < n) { out += " " + blank(src[i + 1]); i++; }
+      else out += blank(c);
+      i++; continue;
+    }
+    if (c === "\\" && i + 1 < n) { out += c + src[i + 1]; i += 2; continue; }
+    if (src.startsWith("<<<", i)) { out += "<<<"; i += 3; continue; }
+    if (c === "<" && arith === 0 && src[i + 1] === "<") {
+      HEREDOC.lastIndex = i;
+      const m = HEREDOC.exec(src);
+      if (m) { heredocs.push({ word: m[2] ?? m[3] ?? m[4], tabs: m[1] === "-" }); out += m[0]; i += m[0].length; continue; }
+    }
+    if (c === "(" && src[i + 1] === "(") { arith++; out += "(("; i += 2; continue; }
+    if (c === ")" && src[i + 1] === ")" && arith > 0) { arith--; out += "))"; i += 2; continue; }
+    if (c === "$" && src[i + 1] === "'") { state = "ansi"; out += "$'"; i += 2; continue; }
+    if (c === "'") state = "single";
+    else if (c === '"') state = "double";
+    else if (c === "#" && (i === 0 || /[\s;&|()<>]/.test(src[i - 1]))) { state = "comment"; out += " "; i++; continue; }
+    out += c; i++;
+  }
+  return out;
+};
+
 // Sticky: reads only the whitespace run after a brace, never the rest of the file.
 const SPREAD = /\s*\.\.\./y;
 // A `<` that opens a JSX tag: a tag name that ends at a space, a `/`, a `>` or the `<` of a type argument, or the `>` of a fragment.

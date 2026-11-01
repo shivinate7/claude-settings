@@ -288,6 +288,11 @@ jobs:
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
+      # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
+      # The script says why it runs `npm ci` first.
+      - name: Map check
+        run: bash .github/scripts/map-check.sh
+
       - name: Layout fixture suite
         run: python3 lint/test_layout.py
 
