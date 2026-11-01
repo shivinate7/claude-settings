@@ -27,6 +27,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 unset CLAUDE_CODE_REMOTE
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../lint/_test_git.sh"  # test-run signing opt-out
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 SCRIPT="${INSTALL_FROM_MAIN_UNDER_TEST:-$REPO_ROOT/merge/install_from_main.sh}"
 case "$SCRIPT" in /*) ;; *) SCRIPT="$PWD/$SCRIPT" ;; esac

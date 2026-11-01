@@ -58,6 +58,8 @@ REPO = os.path.dirname(HERE)
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
@@ -3293,16 +3295,18 @@ TAG_CWD = os.path.join(ROOT, "tagged")   # a scratch folder, not an agent worktr
 TAG_HOLDER = "import os, time; os.setsid(); time.sleep(300)"
 
 
-def tag_orphan(env_entries=(), argv_extra=()):
+def tag_orphan(env_entries=(), argv_extra=(), holder=None):
     """A holder whose shell exits first, so init adopts it (PPID 1). `env_entries` are NAME=value
     strings for its environment, with the inherited tag removed first. `argv_extra` is appended to
-    its argv. Returns its pid, or None when it is not an orphan leading its own process group."""
+    its argv. `holder` replaces the holder's argv (a shell stub, which leads no group of its own,
+    so only PPID 1 is waited for). Returns its pid, or None when it is not an orphan leading its
+    own process group (an orphan, for a `holder`)."""
     env = {key: value for key, value in os.environ.items() if key != TAG}
     env.update(entry.split("=", 1) for entry in env_entries)
     os.makedirs(TAG_CWD, exist_ok=True)
     script = '"$@" </dev/null >/dev/null 2>&1 & echo $!'
     try:
-        answer = subprocess.run(["sh", "-c", script, "sh", sys.executable, "-c", TAG_HOLDER]
+        answer = subprocess.run(["sh", "-c", script, "sh"] + (holder or [sys.executable, "-c", TAG_HOLDER])
                                 + list(argv_extra), cwd=TAG_CWD, env=env, capture_output=True,
                                 text=True, timeout=20)
         pid = int(answer.stdout.strip())
@@ -3312,7 +3316,7 @@ def tag_orphan(env_entries=(), argv_extra=()):
                                         capture_output=True, text=True, timeout=5).stdout.split()
             if ppid != "1":
                 return None
-            if pgid == str(pid):
+            if holder or pgid == str(pid):
                 return pid
             time.sleep(0.05)
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -3320,11 +3324,38 @@ def tag_orphan(env_entries=(), argv_extra=()):
     return None
 
 
+def stranded_job(job_env_words):
+    """The `holder` of a stranded stub: a shell that runs one `sleep` as its child and waits. The
+    child's environment is set by `job_env_words`: `env NAME=value` gives it a tag, `env -u NAME`
+    takes the stub's away. The stub's own environment is `env_entries` of tag_orphan."""
+    return ["sh", "-c", '"$@" & wait', "sh"] + list(job_env_words) + ["sleep", "300"]
+
+
+def stub_job(stub):
+    """The pid of the one child of `stub`, once the stub has forked it, or None."""
+    for _ in range(100):
+        try:
+            rows = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
+                                  timeout=10).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for row in rows:
+            fields = row.split()
+            if len(fields) == 2 and fields[1] == str(stub) and fields[0].isdigit():
+                ORPHAN_PIDS.append(int(fields[0]))
+                return int(fields[0])
+        time.sleep(0.05)
+    return None
+
+
 def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
-             **who):
-    """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped. `who`
-    is agent_id and agent_type, the payload fields that mark an agent call."""
-    pid = tag_orphan(env_entries, argv_extra) if ORPHAN_CASES else None
+             holder=None, job=False, **who):
+    """One kill of a PPID-1 holder, or with `job` of the child under a stranded stub (`holder` from
+    stranded_job). Returns the killed pid, or None when it was skipped. `who` is agent_id and
+    agent_type, the payload fields that mark an agent call."""
+    pid = tag_orphan(env_entries, argv_extra, holder) if ORPHAN_CASES else None
+    if pid is not None and job:
+        pid = stub_job(pid)
     if pid is None:
         skip_case(name, NO_ORPHAN)
     else:
@@ -3365,6 +3396,19 @@ else:
     sh("kill: the group led by a PPID-1 pid whose environment holds this session's id",
        "kill -- -%d" % TAG_LEADER, "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
        transcript=SUB_TRANSCRIPT)
+# A STRANDED JOB (roadmap step wait-for-pid-form). After a stall the stub shell is under init, and
+# the job is its child. On Linux the forked stub holds no tag, and the exec'd job holds it.
+# `kill` keeps the predicate the owner ruled on (decision a-kill-by-pid-needs-an-owned-pid: the
+# PPID-1 pid itself). A wider kill needs the owner, so each job below stays refused. The wait form,
+# bin/wait-pid, owns these shapes by its own test (lint/test_wait_pid.py).
+tag_case("kill: a job under an untagged PPID-1 stub, the job holding this session's id, stays refused",
+         "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
+         carries="did not start")
+tag_case("kill: a job under a PPID-1 stub that holds this session's id, the job untagged, stays refused",
+         "deny", env_entries=[TAG + "=" + SUB_SESSION], holder=stranded_job(["env", "-u", TAG]),
+         job=True, carries="did not start")
+tag_case("kill: a job under a PPID-1 stub, neither holding a session id, stays refused", "deny",
+         holder=stranded_job(["env", "-u", TAG]), job=True, carries="did not start")
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -4735,6 +4779,35 @@ for _label, _trigger in (
         cwd=NOGIT, lacks=NO_RUN_WATCH, command=_trigger)
     add("ci-wait: the remedy of %s names the CI-wake notice" % _label, "deny",
         "waiter", cwd=NOGIT, carries=(CI_WAIT_REMEDY,), command=_trigger)
+
+# ------------------------------------------------------------------ wait-pid: the one wait on a pid
+#
+# Roadmap step wait-for-pid-form: after the stall watch trips, the session holds a stranded job's
+# pid and the guard refuses every way to wait on it. `bin/wait-pid PID [--timeout SECS]` is the one
+# allowed form (its own cases: lint/test_wait_pid.py). The guard allows the helper and keeps
+# refusing the loops, so each refusal case pins that it did not move. The three remedies below
+# point at the helper.
+WAIT_PID = "wait-pid"
+for _label, _command in (("a pid", "wait-pid 12345"), ("a pid and a timeout", "wait-pid 12345 --timeout 500")):
+    sh("wait-pid: %s is allowed in the foreground" % _label, _command, "allow", cwd=NOGIT)
+    add("wait-pid: %s is allowed under run_in_background" % _label, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
+sh("wait-pid: a kill -0 loop stays refused, and its remedy names the helper",
+   "while kill -0 12345; do sleep 5; done", "deny", "waiter", cwd=NOGIT, carries=(WAIT_PID,))
+sh("wait-pid: tail --pid with a follow stays refused", "tail --pid=12345 -f /dev/null", "deny",
+   "live-stream", cwd=NOGIT)
+sh("wait-pid: a pgrep loop stays refused", "while pgrep x; do sleep 5; done", "deny", "waiter",
+   cwd=NOGIT)
+# Each remedy is reached by its own trigger. The pattern remedy must not advise `kill -0`: a bare
+# kill -0 loop is a refused form, so that advice sends the reader into a second refusal.
+for _label, _trigger, _rule, _lacks in (
+        ("a followed stream", "tail -f app.log", "live-stream", ()),
+        ("a pause", "sleep 30", "waiter", ()),
+        ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter",
+         ("kill -0",)),
+):
+    add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
+        carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
 
 # Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
 # `--watch` is allowed on main, and stays so.
@@ -9164,6 +9237,54 @@ add("frozen: Write of X-live beside a clone with both markers and no install scr
 add("frozen: Write of X-live beside a clone that holds merge/install_from_main.sh is frozen",
     "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
+
+# --------------------------------------------------------------------------- frozen dup: a descriptor dup
+#
+# `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
+# `&1`, `&2` or `&-` as a path. From a cwd inside a frozen place, that read makes a plain `git fetch
+# 2>&1 | tail -1` a frozen write, and the guard refuses it with rule frozen-path. The ALLOW cases
+# are the false alarm. The DENY cases after them stay refused: a quoted `&1` is a real file, a dup
+# beside a real write still writes that file, and `&>` onto a frozen file is a write.
+# Run only this block: MUTATE_ONLY="frozen dup:" python3 hooks/test_guard.py (the name filter).
+DUP_HOOKS_CWD = slash(os.path.join(CFG, "hooks"))   # the config directory's hooks folder, as a cwd
+# ALLOW: a descriptor dup, from the live pin and from the config directory's hooks folder.
+sh("frozen dup: the REST branch delete from the live pin, a 2>&1 tail, is allowed",
+   'cd /home/user && for b in batch-38 batch-37; do gh api -X DELETE "repos/shivinate7/claude-settings/git/refs/heads/$b" 2>&1 | tail -1; echo "$b exit $?"; done',
+   "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the live pin's clone is allowed",
+   "cd /home/user/claude-settings && git fetch origin main 2>&1 | tail -1", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls >&2 from the live pin is allowed", "ls >&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 1>&2 from the live pin is allowed", "ls 1>&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 2>&- from the live pin is allowed", "ls 2>&-", "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the config directory's hooks folder is allowed",
+   "git fetch 2>&1 | tail -1", "allow", cwd=DUP_HOOKS_CWD)
+# DENY: each one still writes a file, so each stays refused as frozen-path.
+sh("frozen dup: a quoted \"&1\" is a real file in the live pin and stays frozen",
+   'ls > "&1"', "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a dup beside a real write to a frozen file stays frozen",
+   "ls 2>&1 > " + CFG_SETTINGS, "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: &> onto a frozen file stays frozen", "ls &> " + CFG_SETTINGS, "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a relative redirect inside the live pin stays frozen", "echo x > f", "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a redirect onto a frozen file from a plain folder stays frozen",
+   "echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A DUP WRITTEN BEFORE A PATH. `2>&1 PATH` is one redirect and one argument: the `2>` is joined to
+# `&1`, so the path after them is an argument, not the target of a `2>`. Each ALLOW reads the path
+# or closes a descriptor. Each DENY still writes the path, through cp or tee.
+sh("frozen dup: cat 2>&1 before a frozen settings file is allowed", "cat 2>&1 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: grep 2>&1 before a frozen hook is allowed", "grep x 2>&1 " + CFG_HOOK,
+   "allow", cwd=NOGIT)
+sh("frozen dup: echo >&2 before a frozen settings file is allowed", "echo x >&2 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: ls >&- before a frozen settings file is allowed", "ls >&- " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
+   "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
+   "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,

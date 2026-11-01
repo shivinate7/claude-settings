@@ -17,6 +17,8 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 ACTION = os.path.join(HERE, "ruling-kind")
@@ -74,7 +76,7 @@ class RecordsDirInput(unittest.TestCase):
         self.assertRegex(read(CHECK_SH), r"%s=\"\$\(python3 \S*lint/layout\.py\" path " % re.escape(name))
 
 
-GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"]
+GIT = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com"]
 BASH = shutil.which("bash")
 
 
