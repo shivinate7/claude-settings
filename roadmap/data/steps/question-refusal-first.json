@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.33765,
   "why": "shiv, Nov 1 04:26 CST, page item 110 pick a: before routing around a refusal, the agent reads the guard's record; if the record seems to allow the act, its report flags a possible false alarm. Incident: Oct 31, three sessions routed around the builder-test refusal without asking (lane merge-role-allow's report).",
-  "note": "Home: rule verification-cry-wolf-guard-is-spent in CLAUDE.md gains this duty, in the fewest words. A rule's behaviour changes, so a lane writes it (record-writer, reviewer). Done check: the rule text names the check and the report flag; check_claude_md_size and ste-lint pass. Needs no answer. Lane started Nov 1 04:30 CST, session_013NEJL3k6Qf85CDJcxdeCun.",
-  "updatedAt": "2026-11-01T10:33:00Z"
+  "note": "Home: rule verification-cry-wolf-guard-is-spent in CLAUDE.md gains this duty, in the fewest words. A rule's behaviour changes, so a lane writes it (record-writer, reviewer). Done check: the rule text names the check and the report flag; check_claude_md_size and ste-lint pass. Needs no answer. Lane started Nov 1 04:30 CST, session_013NEJL3k6Qf85CDJcxdeCun. Built: draft PR #939 (head 211d0dbe), for batch 45 (coordinator, 04:38 CST).",
+  "updatedAt": "2026-11-01T10:41:00Z"
 }
