@@ -49,6 +49,11 @@ MACHINE_TAGS = (  # pinned; shared_names.py holds the one copy
     "Another Claude session sent a message while you were working:\n<agent-message\t",
     "Another Claude session sent a message while you were working:\n<agent-message\n",
     "Another Claude session sent a message while you were working:\n<agent-message\r",
+    "<cross-session-message>",
+    "<cross-session-message ",
+    "<cross-session-message\t",
+    "<cross-session-message\n",
+    "<cross-session-message\r",
 )
 GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN = "shivinate7", "ssemwal-cdc"  # the default and fallback gh logins (decision `act-in-place`)
 CLOCK = "2026-07-04T10:30:00-05:00"

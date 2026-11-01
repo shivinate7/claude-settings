@@ -20,8 +20,10 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
-  text. It is never captured, and it does not count toward a burst. Messages from other sessions are
-  not captured.
+  text. It is never captured, and it does not count toward a burst. Hand-backs and the
+  `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01
+  04:29 CST, covering this skip only; debt `inbox-saves-other-notices`, which tracks other notices
+  the inbox saves). Other peer messages are skipped only where a tag marks them.
 - **Burst.** A turn's messages are the ones captured since the last Stop. They are a burst when there
   are two or more, or when one message has three or more non-blank lines or two or more bullet lines.
   Only a burst's messages need items. A lone message of one or two plain lines never triggers the guard.
@@ -40,7 +42,11 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
 - **The guard.** A Stop check refuses to end a turn in four cases. A burst's message has no items. An
   item has no kind or home. A ruling or task, open or closed, names a home that is not a file under its
   kind's layout paths that some branch's tree holds. An open standing item id is missing from the
-  handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. It exits on
+  handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. A message
+  with no items is reported with the inbox file's path, its heading line and line number, and an
+  example item, then each kind's home (`ruling -> <homes>; task -> <homes>; question -> answered; note -> noted;
+  standing -> handoff; page -> page:<n>`). Items added in any later turn count, so the session needs no new heading. A home outside
+  its kind's paths is reported as not a tracked home of that kind, with the homes listed. It exits on
   `stop_hook_active`, so it cannot loop, but it still counts that turn's messages. When the session's
   folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
   in one line.
