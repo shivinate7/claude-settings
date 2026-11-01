@@ -18,8 +18,8 @@ context (question_form.judged_item_writes) go into one prompt, so the call makes
 many writes a batch holds. The page and the chat box share the seven judge items, so both places get the
 same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
 options is judged too, on the same seven items and one task rule in PAGE_PROMPT: a step that replaces text
-quotes the whole line or value and shows the line after the change in full. A str_replace on `context`,
-`options` or `steps` (a subfield too) that passes item_hit is judged on its
+quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
+or `options` (a subfield too) that passes item_hit is judged on its
 new_str alone, as a fragment: the prompt tells the model to judge only plain words, unexplained ids and
 pointers outside the item, and never to flag a missing line or option.
 
@@ -94,6 +94,10 @@ PAGE_PROMPT = (
     "tells the owner to replace text quotes the whole unit it replaces, the whole line or the whole value, "
     "and shows the line after the change in full. A step that names only the changed part, such as "
     "\"find X and change it to Y\", misses that rule, because the owner then drops the rest of the line. "
+    "That rule reaches a task's `steps` and `context` on a set or update; a str_replace reaches only the "
+    "top-level string field `context`, never `steps`. A task item is judged only on plain words, "
+    "unexplained ids, pointers outside the item, and that whole-unit rule, and never on the Goal, the "
+    "Problem or a recommended option, because a task has none of them. "
     "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
 # tool name -> (prompt, model, timeout, rule, fallback reason)

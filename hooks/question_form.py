@@ -789,9 +789,9 @@ def page_item_hit(tool_input, cwd=""):
 
 
 def _judged_fragment(field):
-    """True for a str_replace field the model review reads: `context`, `options` or `steps`, or a subfield of
-    `options` or `steps`."""
-    return field in ("context", "options", "steps") or str(field).startswith(("options.", "steps."))
+    """True for a str_replace field the model review reads: `context`, `options`, or a subfield of `options`.
+    The ArtifactData str_replace `field` is one top-level string key, so `steps` (a list) never reaches it."""
+    return field in ("context", "options") or str(field).startswith("options.")
 
 
 def judged_item_writes(writes):
@@ -799,7 +799,7 @@ def judged_item_writes(writes):
     {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
     read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
     task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
-    `steps`, since steps are task-only. A str_replace on `context`, `options` or `steps` (a subfield too) is
+    `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
     read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
     item is unseen."""
     judged = []
