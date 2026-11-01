@@ -749,6 +749,8 @@
 - set-waiting-page-usage-exit: `layout.py set-waiting-page` with the wrong number of arguments exits 1, the code that also means "already set". Decision: session-tiers.
 - set-waiting-page-new-root: a mistyped root makes `<root>/.claude/layout-extras.json` in a new folder and exits 0. Decision: session-tiers.
 - record-branch-null-stops: `record-branch: null` stops the roadmap build, while `waiting-page: null` counts as unset. Decision: session-tiers.
+- reap-log-done-by-margin: janitor/agent_end_reap.py LOG_DONE_BY 58 leaves 2 s, but the hook's 60 s timer starts before `started` (shell, interpreter start, stdin read); 55 was proposed. Decision: c95.
+- log-lock-retries-every-oserror: _log_lock retries on every OSError, so a non-contention error (ENOLCK, EOPNOTSUPP) waits to the deadline; a contention-only retry was proposed but its Windows errno pair (13, 36) for msvcrt.locking is unverified. Decision: c95.
 - page-title-scan-edges: `splice.title_span` takes the last markup `<title>` outside an svg, so a later markup title wins, and a self-closing or unclosed `<svg` before it gives no title (carry keeps the template's; stale reads behind). page.html has one markup title, so no real page reaches either (lane page-name-queue). Decision: none.
 - c204-clamp-untested: in `fitFrame` the scroll width clamp `pw = min(ceil(bw × sc), room)` has no test that goes red without it. Float error makes ceil pass the room by 1px only at rooms such as 202, 203, 214 and 215, which no tested width reaches (lane c204-scroll-width, review round 2). Decision: none.
 - standing-grant-local-unenforced: merge/merge.py validates `merge.standingGrant` on every run but enforces it only in a cloud session. A local session's `merge <pr> --confirm` merges with the switch false. There the tool cannot tell the owner from a session. The owner must stay able to merge the PR that turns the switch back on. Decision: standing-merge-grant (the merge grant and the merge tool)
@@ -764,6 +766,11 @@
 - heartbeat-starved-reads-stopped: a live holder starved 1 s or more reads as stopped, a false green only when the kill also failed. Decision: c95.
 - kill-holder-rekills-dead-pids: kill_holder and the atexit stop_holders kill each pid again, dead or not; a recycled pid inside that seconds-wide window could be killed. Decision: c95.
 - scratchpad-reap-reads-ps: ScratchpadReap reads liveness with ps, not the heartbeat; the reap is POSIX-only and needs ps to find orphans. Decision: c95.
+- reap-start-row-budget-unbound: janitor/agent_end_reap.py's start row give_up_at (HOOK_BUDGET, 45 s) never binds, because LOG_WAIT_SECONDS (30 s) ends the wait first; the hook-bound case tests a clamp production never reaches. The 60 s bound holds through the done row. Decision: c95.
+- hook-bound-case-1s-slack: janitor/test_sweep.py's hook-bound case allows 4.0 s on an expected 3.0 s; a stall over 1 s in main() on a loaded runner reads red. Decision: c95.
+- lock1sh-first-holder-unproven: hooks/test_install_src.sh lock1sh does not prove install A took the lock first; under load B can go first and the case passes uncontested. Decision: c95.
+- win-lk-lock-regression-uncovered: on Windows the holder holds 5 s, under LK_LOCK's own 10 s give-up, so only the POSIX stand-in can catch an LK_LOCK regression. Decision: c95.
+- sendmessage-state-skips-at-cap: hooks/test_sendmessage_state.py still skips (NOT-RUN) when a slow runner reaches its harness cap; the step's goal says never skipped. Decision: c95.
 - ci-job-no-pointer-unknown: a copied install with no pointer checkout reads a remote code-check step unknown, not FAIL; exit 2 still blocks a pass (bin/ci-job code_check).
 - ci-job-interrupt-leaves-verdict: Ctrl-C during a step leaves bin/verdict and the step's shell running; the step's children outlived it on main too (bin/ci-job heartbeat relay).
 - ci-job-relay-locale-decode: the heartbeat relay reads verdict's UTF-8 output in the locale's text mode, so a non-cp1252 byte on Windows can raise mid-step (bin/ci-job).
