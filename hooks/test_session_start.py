@@ -323,14 +323,21 @@ class SessionStartMergeRoleTests(unittest.TestCase):
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
     """A cwd inside a claude-settings live pin prints one line that names the pin, the words "live pin", and the
-    clone to cd to. The pin is the linked worktree <clone>-live-<12 hex>, or the <clone>-live link to it. Folders
-    that only look like one print no such line."""
+    clone to cd to. The pin is the linked worktree <clone>-live-<12 hex>, or the <clone>-live link to it. A pin
+    counts only when the clone beside it holds merge/install_from_main.sh, the install script that makes the pin
+    (the scope guard_frozen.py uses). Folders that only look like one print no such line."""
 
     # The 51-worktree case builds 51 worktrees; this class does not repeat it.
     test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
 
     def setUp(self):
         super().setUp()
+        # The clone holds the install script before the pin is made, so the pin carries it too.
+        os.makedirs(os.path.join(self.primary, "merge"))
+        with open(os.path.join(self.primary, "merge", "install_from_main.sh"), "w", encoding="utf-8") as handle:
+            handle.write("# stub: the install script that makes the live pin\n")
+        vcs(self.primary, "add", "-A")
+        vcs(self.primary, "commit", "-q", "-m", "install script")
         # The pin's name is <clone>-live-<12 hex>, the short sha install_from_main.sh makes it with.
         short = vcs(self.primary, "rev-parse", "--short=12", "HEAD").stdout.strip()
         self.pin = self.primary + "-live-" + short
@@ -346,12 +353,15 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
         """True when the line holds PATH as a whole path, not as the front of a longer one such as <clone>-live."""
         return re.search(re.escape(path) + r"(?![\w-]|\.\w)", line) is not None
 
-    def make_link(self):
+    def link_to(self, target, link):
         try:
-            os.symlink(self.pin, self.link)
+            os.symlink(target, link)
         except (OSError, NotImplementedError) as error:
             self.skipTest("this account cannot create a symlink: %s" % error)
-        return self.link
+        return link
+
+    def make_link(self):
+        return self.link_to(self.pin, self.link)
 
     @staticmethod
     def live_pin_lines(lines):
@@ -415,6 +425,31 @@ class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
         livex = self.primary + "-livex"
         vcs(self.primary, "worktree", "add", "-q", "--detach", livex, "HEAD")
         self.assert_no_live_pin_line(session_cwd=livex)
+
+    def pin_beside_a_clone_without_the_script(self):
+        """A clone that holds no merge/install_from_main.sh, and a pin made beside it the way install.sh makes one."""
+        unscripted = os.path.join(self.root, "unscripted")
+        os.makedirs(unscripted)
+        vcs(unscripted, "init", "-q", "-b", "main", ".")
+        with open(os.path.join(unscripted, "f.txt"), "w", encoding="utf-8") as handle:
+            handle.write("unscripted\n")
+        vcs(unscripted, "add", "-A")
+        vcs(unscripted, "commit", "-q", "-m", "unscripted")
+        short = vcs(unscripted, "rev-parse", "--short=12", "HEAD").stdout.strip()
+        pin = unscripted + "-live-" + short
+        vcs(unscripted, "worktree", "add", "-q", "--detach", pin, "HEAD")
+        self.assertFalse(os.path.exists(os.path.join(unscripted, "merge", "install_from_main.sh")),
+                         "the fixture clone holds the install script, so the control tests nothing")
+        return unscripted, pin
+
+    def test_a_pin_beside_a_clone_without_the_install_script_prints_no_live_pin_line(self):
+        unscripted, pin = self.pin_beside_a_clone_without_the_script()
+        self.assert_no_live_pin_line(session_cwd=pin)
+
+    def test_a_link_to_a_pin_beside_a_clone_without_the_install_script_prints_no_live_pin_line(self):
+        unscripted, pin = self.pin_beside_a_clone_without_the_script()
+        link = self.link_to(pin, unscripted + "-live")
+        self.assert_no_live_pin_line(session_cwd=link)
 
 
 if __name__ == "__main__":
