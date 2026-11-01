@@ -2,26 +2,29 @@
 
 ## The ruling
 
-Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each one is global. `frontend-design` floats on the newest
-`claude-plugins-official` main (owner, 2026-11-01 11:43 CST, waiting-page item 120, pick c, frontend-design pin). Each other source is pinned.
-The procedure is in `skills/design-review/SKILL.md`, the builder line in `agents/builder.md`, the designer steps in `agents/designer.md`, the
+Owner, 2026-10-10: three third-party skills apply to any repo with screens. Each one is global and pinned. The owner ruled that
+`frontend-design` floats on `claude-plugins-official` main (2026-11-01 11:43 CST, waiting-page item 120, pick c, frontend-design pin). The
+float is not live while the `claude-code-plugins` ref is held at v2.1.311 (`settings.json`): at that tag the plugin comes from
+`./plugins/frontend-design` inside the tag. The procedure is in `skills/design-review/SKILL.md`, the builder line in `agents/builder.md`, the designer steps in `agents/designer.md`, the
 reviewer clause in `agents/reviewer.md`.
 
 - `frontend-design`: a builder loads it by name before it writes styling for a new screen, or in a repo with no design yet. A designer loads it
-  by name before it draws (owner, 2026-10-30, waiting-page item 82 b, designer skills). It comes from the `claude-code-plugins` marketplace
-  (`settings.json`). From claude-code v2.1.312 that marketplace lists it as a git-subdir of `anthropics/claude-plugins-official` at ref `main`.
-  A fresh session at v2.1.312 or later does not auto-install it (measured 0 of 8 starts, review of lane fd-float-cc-newest); an explicit
-  `claude plugin install` works. The marketplace ref therefore stays at v2.1.311, the newest tag that passes, until auto-install works on a newer tag.
+  by name before it draws (owner, 2026-10-30, waiting-page item 82 b, designer skills). At claude-code v2.1.312, v2.1.314
+  and v2.1.316 the `claude-code-plugins` marketplace lists it as a git-subdir of `anthropics/claude-plugins-official` at ref `main` (review
+  round 1 of lane fd-float-cc-newest read `marketplace.json` at these tags and at v2.1.311). A fresh headless start auto-installed it on 0 of
+  8 starts, measured at v2.1.312 and v2.1.316 (v2.1.313 to v2.1.315 not started). It installed on 1 of 2 starts at v2.1.311 (review of lane
+  fd-float-cc-newest, 2026-11-01). `claude plugin install` works at v2.1.316. The ref stays held at v2.1.311 until a fresh start on a newer
+  tag installs it.
 - Vercel `web-design-guidelines`: no plugin. A blind reviewer checks the changed pages against the rules at a pinned URL, after the build.
 - `impeccable`: a pinned copy of its skill folder in `skills/impeccable`. No plugin. A second blind reviewer runs `/impeccable audit` and
   `/impeccable critique` only. A designer also runs `critique <mockup path>` on its own mockup before hand-off, and fixes each finding
   inside its write scope (owner, 2026-10-30, waiting-page item 82 b, designer skills). That pass is not the design review.
-- Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month and waits 14 days after a release
-  (`minimumReleaseAge`). The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt`, the
+- Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month. The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt`, the
   commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `anthropics/claude-code` ref in `settings.json`. Each pin moves to the
   newest version that passes its checks (`verification-newest-that-passes`). The `claude-code` ref is the one that carries `frontend-design`.
-- Narrowing of `verification-newest-that-passes`: every pin takes the newest release only after it has waited 14 days (`minimumReleaseAge`,
-  global in `renovate.json`). The owner wants their improvements.
+- Narrowing of `verification-newest-that-passes`: the impeccable and `claude-code` pins take the newest release only after it has waited 14
+  days (`minimumReleaseAge`, global in `renovate.json`). The Vercel pin's wait is unknown: its `git-refs` source has no release time, and
+  `renovate.json` sets `timestamp-optional` for it. The owner wants their improvements.
 - No Vercel plugin: the upstream skill fetches from `main` on every run, so a plugin update would move the rules without a decision. No
   impeccable plugin: it installs hooks that run `impeccable hook` on SessionStart, PostToolUse and Stop in every session, and an agent with
   Write and Edit. The guard sees neither.
