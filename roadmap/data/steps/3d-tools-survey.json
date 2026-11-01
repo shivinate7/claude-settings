@@ -1,0 +1,9 @@
+{
+  "title": "Survey 3D and game-engine MCP servers: what to think about as 3D work grows",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.3378,
+  "why": "shiv, Nov 1 12:24 CST, in chat to triage (page item 126): \"spawn another opus session that looks at 3d and engine mcps (unity/blender/adobe/everything) to determine as we start doing more 3d what i may need to start thinking about\". Owner named Opus for this lane (agent-model-cap grant for this spawn).",
+  "note": "Research only; installs nothing. 1) Find MCP servers and Claude skills for 3D and engines: Unity, Unreal, Godot, Blender, Adobe (Substance, Photoshop, Illustrator, Firefly), three.js and WebGL tooling, glTF and asset pipelines, and any other well-used ones. 2) For each: what it lets Claude do, who maintains it and how active it is, what it needs (a desktop app, a licence, a GPU, an API key), and whether it can run in a cloud session or only on Shivam's computer. A read-only vet note for each (decision on outside code: vet before any install). 3) Name what Shivam may need to start thinking about as 3D work grows, each judged by the outcome it serves: licences and cost, hardware, where assets live and how big they get in git, build and test of 3D scenes (how a reviewer checks a scene), performance budgets, and how this fits our design rules (step web-design-guidelines covers browser 3D design; do not repeat it). Keep owner ruling Nov 1 12:23 CST: no optional regulation or standard load on builders. Output: a ranked list in the lane's report, plus page questions to triage for any pick Shivam must make. Done check: the report holds the list with a source link per tool, and every pick is on the page. Needs no answer.",
+  "updatedAt": "2026-11-01T18:24:30Z"
+}
