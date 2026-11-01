@@ -1648,9 +1648,9 @@ def _build_worktrees():
     _require_clean(WTSTALESTART)
 
     # A live session record, built against THIS TEST RUNNER'S OWN pid, which stays alive for the
-    # whole run. `startedAt` is read with `_real_process_start_ms`, a second, independent
-    # implementation of the same `ps`-plus-`mktime` read the guard makes, so the fixture cannot
-    # share a defect with the code it proves.
+    # whole run. `startedAt` is read with `_real_process_start_ms`, a zone-free `ps -o etime=`
+    # read, not the guard's `lstart=` parse, so the fixture cannot share a zone defect with the
+    # code it proves.
     self_pid = os.getpid()
     self_start_ms = _real_process_start_ms(self_pid)
     os.makedirs(os.path.join(WTLIVECFG, "sessions"), exist_ok=True)
@@ -14692,7 +14692,8 @@ def process_start_ms_case():
     got_alive = guard._process_start_ms(self_pid)
     if not isinstance(got_alive, int) or isinstance(got_alive, bool):
         problems.append("alive: did not return an int: %r" % (got_alive,))
-    elif abs(got_alive - want_alive) > 2000:
+    # Both reads floor to whole seconds, so a fresh child can differ by over 2 s; an hour is 3600000 ms.
+    elif abs(got_alive - want_alive) > 5000:
         problems.append("alive: got %r want near %r" % (got_alive, want_alive))
 
     if os.name == "nt":  # the alive read still runs and can fail; the split it names does not run here
