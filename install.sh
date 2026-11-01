@@ -423,17 +423,19 @@ use_main_mirror() {
 }
 
 # Cloud, a session's own checkout (no marker): a cloud session starts it detached at its creation commit, so its
-# hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
-# holds moves to origin/$REF, so nothing is lost. A branch, a dirty tree or a commit main lacks stays as it is and is
-# not the source: use_main_mirror takes the install's files from $REF, so no old branch's hooks go live.
+# hooks, lint and merge allow rules would never follow main. A clean checkout whose commit main already holds moves to
+# origin/$REF, so nothing is lost: a detached one detaches there, and one on the branch $REF fast-forwards (the move
+# git pull makes). A branch other than $REF, a dirty tree or a commit main lacks stays as it is and is not the
+# source: use_main_mirror takes the install's files from $REF, so no old branch's hooks go live.
 # When $REF cannot be fetched, the checkout stays the source as before, with a WARN.
 # The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
 # The live pin skips it.
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
    && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
   own_not_source=0
-  if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
-    log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
+  own_branch=$(git -C "$SRC" symbolic-ref -q --short HEAD 2>/dev/null)
+  if [ -n "$own_branch" ] && [ "$own_branch" != "$REF" ]; then
+    log "WARN: the checkout $SRC is on branch $own_branch; left as is, not moved to $REF"
     own_not_source=1
   elif [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
     log "WARN: the checkout $SRC has uncommitted changes; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
@@ -443,7 +445,7 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
   elif ! git -C "$SRC" merge-base --is-ancestor HEAD "refs/remotes/origin/$REF"; then
     log "WARN: the checkout $SRC is at $(git -C "$SRC" rev-parse --short HEAD), a commit $REF does not hold; left as is"
     own_not_source=1
-  elif git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; then
+  elif { if [ -n "$own_branch" ]; then git -C "$SRC" merge -q --ff-only "refs/remotes/origin/$REF"; else git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; fi; }; then
     log "moved the checkout $SRC to $REF at $(git -C "$SRC" rev-parse --short HEAD)"
   else
     log "WARN: could not move the checkout $SRC to $REF; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
