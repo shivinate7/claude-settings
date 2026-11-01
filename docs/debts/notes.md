@@ -833,3 +833,4 @@
 - bare-verdict-double-beat: in a bare `verdict x` background job each heartbeat shows twice in the output (stderr via LOG, and the beat relay); cost one extra line per heartbeat; kept because verdict keeps its stderr line on purpose. Decision: stall-watch
 - process-start-lc-all-unpinned: no test covers `LC_ALL=C` on the `ps -o lstart=` call; the fake ps ignores locale, so a mutant that drops it survives; no mutate_guard mutant covers the `env=` line or `calendar.timegm` (hooks/git_reads.py _process_start_ms)
 - ps-lstart-tz-macos-unmeasured: unmeasured: does real macOS BSD `ps` honour `TZ=UTC0` for lstart? macOS CI runners run in UTC, so they cannot show a non-UTC read; procps was measured and it does (hooks/git_reads.py _process_start_ms)
+- cloud-merge-pin-opus-try1: lane cloud-merge-moves-pin's builder ran Opus on try 1 (Nov 1), before spawn-model-check (#899, the spawn model check) landed. Decision: agent-model-cap
