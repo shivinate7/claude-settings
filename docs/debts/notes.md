@@ -753,3 +753,6 @@
 - ci-job-local-action-other-path: LOCAL_ACTION matches only `$/actions/` and `./actions/`, so a local action at another path reads as remote and borrows a copy; same on main (bin/ci-job).
 - test-ci-job-pipx-probe-windows: the pipx probe's 60 s timeout on Windows can wait on a pipx child that holds the pipe (lint/test_ci_job.py).
 - test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so a local run tests only committed bin/ci-job edits (lint/test_ci_job.py).
+- stale-stamped-tree-called-live-pin: session_start.sh calls an old `<clone>-live-<hex>` tree "the live pin" after the link has moved on, though hooks/guard_frozen.py leaves it writable; the cd advice still holds (hooks/session_start.sh)
+- pin-line-silent-on-failed-listing: when the worktree listing fails inside a pin, no pin line prints and the unknown line names only the agent count (hooks/session_start.sh)
+- pin-name-fifth-copy: install.ps1 also builds `<clone>-live`, which the copy list in install.sh's comment omits (install.sh, install.ps1)
