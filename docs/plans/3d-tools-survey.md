@@ -16,7 +16,7 @@ Each item names the outcome it serves.
    work. Browser 3D (three.js and glTF) is free and checks fully in a Linux container with no
    GPU. Godot is free, but its container check covers structure only; a rendered check is
    unverified. Unity and Unreal need the editor open on Shivam's computer, and Unity needs a licence
-   even in batch mode. Page question.
+   even in batch mode. Page item 130.
 2. **Code-running editor bridges.** Outcome: a bad tool call cannot harm Shivam's computer.
    Most engine and DCC servers run any code the model writes, on Shivam's computer, often over a
    local socket with no auth. Rule of thumb: prefer the vendor-official server; never
@@ -25,14 +25,18 @@ Each item names the outcome it serves.
 3. **Where assets live.** Outcome: repos stay fast to clone and CI keeps working. GitHub blocks
    files over 100 MiB. Git LFS on a free or Pro plan gives 10 GiB storage and 10 GiB download a
    month, and stops for the month when used up with a $0 budget. Each CI checkout with LFS spends
-   download quota. Page question.
+   download quota. Page item 131.
 4. **Asset licences.** Outcome: a site never ships a model file it may not redistribute. Poly
-   Haven is CC0 and safe. Fab (Epic) Standard-licence assets: whether a raw .glb may go to every
-   browser or a public repo is unknown; nobody has read the EULA (the fetch was refused). Page
-   question.
+   Haven is CC0 and safe. Fab (Epic) Standard licence: secondary sources quote it as barring
+   redistribution of content "on a standalone basis", and the Reference-Only tier gives no source
+   format ([Licenseware wiki](https://wiki.licenseware.io/wiki/fab-and-epic-content-licensing/),
+   [Epic forum](https://forums.unrealengine.com/t/fab-com-free-assets-license-question/2337478/8)).
+   Whether a raw .glb served to every browser, or put in a public repo, counts as standalone is
+   unresolved: [fab.com/eula](https://www.fab.com/eula?lang=en) refuses cloud reads. Until a person
+   reads it, use CC0 or self-made assets on sites and in public repos.
 5. **Who buys licences.** Outcome: the right tier, no audit surprise. Unity Personal ends at
    $200K revenue plus funding; Unreal non-game seats apply above $1M revenue. The tier depends on which
-   entity buys the licences. Page question.
+   entity buys the licences. Page item 132.
 6. **How a reviewer checks a scene.** Outcome: a scene is judged by a verdict, not by eye. All
    of this runs in a container with no GPU: `gltf-transform validate` or Khronos
    `gltf_validator` (non-zero exit on error); three.js `renderer.info` in a Playwright page for
@@ -146,6 +150,7 @@ All run in a Linux container with no GPU unless noted.
 
 ## Open checks
 
-- A person reads the Fab EULA on raw-file redistribution, and Epic's current seat price.
+- A session on Shivam's computer reads the Fab EULA on raw-file redistribution, and Epic's
+  current seat price. Both pages refuse cloud reads.
 - Confirm the Blender Lab connector's licence (page returned 403).
 - Confirm whether the Adobe connector exposes Firefly text-to-image.
