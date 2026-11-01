@@ -2009,20 +2009,17 @@ def role_model_table(pointer_root):
 
 
 def role_agent_keys(pointer_root):
-    """The frontmatter keys of each agents/*.md file in the pointer checkout, one dict per file with frontmatter,
-    or None when the folder or a file cannot be read. The one reader of agent frontmatter."""
+    """Yield the frontmatter keys of each agents/*.md file in the pointer checkout, one dict per file with
+    frontmatter, in file order, one file read at a time. Raises OSError when the folder or a file cannot be read, so
+    a caller that stops early never reads the files after its match. The reader of agent frontmatter for the role
+    rules; lint/check_agent_models.py frontmatter() reads the same files for its own model check."""
     folder = os.path.join(pointer_root, "agents")
-    try:
-        files = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
-    except OSError:
-        return None
-    found = []
-    for name in files:
+    for name in sorted(name for name in os.listdir(folder) if name.endswith(".md")):
         try:
             with open(os.path.join(folder, name), encoding="utf-8") as handle:
                 lines = handle.read(ROLE_TABLE_MAX).splitlines()
-        except (OSError, ValueError):
-            return None
+        except ValueError as exc:
+            raise OSError("agent file is not text: %s" % name) from exc
         if not lines or lines[0].strip() != "---":
             continue
         keys = {}
@@ -2031,43 +2028,52 @@ def role_agent_keys(pointer_root):
                 break
             key, _, value = line.partition(":")
             keys.setdefault(key.strip(), value.strip())
-        found.append(keys)
-    return found
+        yield keys
 
 
 def role_has_model_pin(pointer_root, role):
     """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
     frontmatter, False when none does, None when the folder cannot be read."""
-    found = role_agent_keys(pointer_root)
-    if found is None:
+    try:
+        for keys in role_agent_keys(pointer_root):
+            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+                return True
+    except OSError:
         return None
-    return any(keys.get("name", "").lower() == role.lower() and keys.get("model") for keys in found)
+    return False
 
 
-ROLE_BUILTINS = ("general-purpose", "claude", "Plan", "Explore")  # roles with no agents/ file that spawns can name
+# General-purpose and claude have no agents/ file, so they are listed here to count as real roles. Plan and Explore
+# have agents/ files and are listed too, so the check does not depend on those files.
+ROLE_BUILTINS = (ROLE_DEFAULT, "claude", "Plan", EXPLORE_ROLE)
 
 
 def role_list_drift(pointer_root):
     """One line per disagreement between the role table and the three role lists, [] when all agree or when the
-    table or the agents folder cannot be read (the lint check reports that as unknown). Lint-time only: one
-    table read and one agents/ read per run; floor_hit, opus_spawn_hit and hooks/override.py keep their constants.
+    table or the agents folder cannot be read (the lint check reports that as unknown). Lint-time only. Cost per
+    call: one table read and one agents/ read; lint/check_agent_models.py also reads each agent file once for its
+    own check, and calls this once per run. floor_hit, opus_spawn_hit and hooks/override.py keep their constants.
     A real role has an agents/ file `name` or is built in, which drops the table's non-role keys."""
-    table, agents = role_model_table(pointer_root), role_agent_keys(pointer_root)
-    if table is None or agents is None:
+    table = role_model_table(pointer_root)
+    if table is None:
+        return []
+    try:
+        agents = list(role_agent_keys(pointer_root))
+    except OSError:
         return []
     import override
     real = {keys["name"] for keys in agents if keys.get("name")} | set(ROLE_BUILTINS)
     on = {word: {role for role, model in table.items() if model == word and role in real} for word in ROLE_MODEL_RANK}
     # Bandaid: Explore stays in the Opus standing list until the owner rules items 127 and 137. Remove it then.
-    standing_want = on["opus"] | {"Explore"}
-    override_want = {role for role in table if role in real} - on["opus"] - {"Explore"}
+    standing_want = on["opus"] | {EXPLORE_ROLE}
+    override_want = {role for role in table if role in real} - on["opus"] - {EXPLORE_ROLE}
     lists = (("HAIKU_ROLES", "hooks/guard.py", set(HAIKU_ROLES), on["haiku"], "a haiku row"),
              ("OPUS_STANDING_ROLES", "hooks/guard.py", set(OPUS_STANDING_ROLES), standing_want, "an opus row"),
              ("OPUS_ROLES", "hooks/override.py", set(override.OPUS_ROLES), override_want, "a row below opus"))
     lines = []
     for name, home, have, want, row in lists:
         for role in sorted(have - want):
-            lines.append("%s lists %s, but the role table has no %s for it (%s)" % (name, role, row, home))
+            lines.append("%s lists %s, but the role table does not put it on %s (%s)" % (name, role, row, home))
         for role in sorted(want - have):
             lines.append("%s lacks %s, which the role table puts on %s (%s)" % (name, role, row, home))
     return lines

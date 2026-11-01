@@ -76,7 +76,12 @@ def lane_effort_problem(text: str) -> str:
 def role_list_problems() -> list:
     """The guard's role_list_drift lines for this repository, or one unknown line when the table or the agents
     folder cannot be read (verification-report-unknown-reads: unread is neither clear nor broken)."""
-    if _guard.role_model_table(ROOT) is None or _guard.role_agent_keys(ROOT) is None:
+    try:
+        list(_guard.role_agent_keys(ROOT))
+        unread = _guard.role_model_table(ROOT) is None
+    except OSError:
+        unread = True
+    if unread:
         return ["role lists: the role table or the agents folder could not be read, so drift is unknown."]
     return list(_guard.role_list_drift(ROOT))
 
