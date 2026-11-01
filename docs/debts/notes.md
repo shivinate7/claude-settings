@@ -822,3 +822,4 @@
 - pin-name-fifth-copy: install.ps1 also builds `<clone>-live`, which the copy list in install.sh's comment omits (install.sh, install.ps1)
 - bg-timeout-no-beat-file: A foreground Bash call that its timeout moves to the background skips `--hook`, so it gets no beat file. Only `--stop` lists it, and nothing strands it. Decision: stall-watch
 - merge-progress-stdout-only: merge/merge.py prints its progress line to stdout only, so `merge ... | grep` hides it from the stall watch; no incident (review round 1 of PR #932). Decision: stall-watch
+- bare-verdict-double-beat: in a bare `verdict x` background job each heartbeat shows twice in the output (stderr via LOG, and the beat relay); cost one extra line per heartbeat; kept because verdict keeps its stderr line on purpose. Decision: stall-watch

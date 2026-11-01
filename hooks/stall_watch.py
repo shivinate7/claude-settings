@@ -22,7 +22,7 @@ Hook: stall_watch.py --hook
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
-  Cost: one append per heartbeat by the tool, and one open or read of BEAT a second in the watcher's loop.
+  Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher, and one open attempt a second until BEAT exists.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
@@ -217,7 +217,7 @@ def report(pid, quiet, log, also=(), beat=None):
     lines += ["Last %d output lines:" % TAIL_LINES] + ["  " + l for l in tail or ["(no output)"]]
     lines.append("Log: " + log)
     lines += ["Named log, no growth either: " + os.path.abspath(p) for p in also]
-    if beat:
+    if beat and os.path.exists(beat):
         lines.append("Beat file (verdict heartbeat), no growth: " + os.path.abspath(beat))
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()

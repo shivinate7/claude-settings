@@ -64,7 +64,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   from the once-a-second check can be a second old, and miss a write or the job's end.
   Cost: no new process or timer. Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
-  heartbeat, and one open or read a second in the same loop. The wrapper removes it with the log.
+  heartbeat. The watcher reads it on each 0.2 s loop pass, and tries one open a second until it exists. The wrapper removes it with the log.
 
 ## The Stop-time check
 
