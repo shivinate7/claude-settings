@@ -11833,11 +11833,11 @@ sh("debug-port: an export of a WebView2 value that holds the port asks",
 sh("debug-port: a PowerShell set of a WebView2 value alone asks",
    "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"", "ask",
    "debug-port-ask", tool="PowerShell", cwd=NOGIT)
-# ask-alone (ask-commands-run-alone) denies a chained ask command, and `$env:NAME=value;` is no harmless
-# lead, so this chained form asks only once that lead is added. The lone form above pins the ask itself.
-sh("debug-port: a PowerShell set of a WebView2 value, then a launch, asks",
-   "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"; .\\app.exe", "ask",
-   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+# ask-alone (ask-commands-run-alone) denies this chained form. `$env:NAME=value;` is no harmless lead, and
+# widening it would turn a deny into an ask for every ask rule. The lone form above pins the ask itself.
+chained_ask("debug-port: a PowerShell set of a WebView2 value, then a launch, denies as a chained ask command",
+            "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"; .\\app.exe",
+            tool="PowerShell", cwd=NOGIT)
 sh("debug-port: a launch inside bash -c asks",
    "bash -c 'electron . --remote-debugging-port=9222'", "ask", "debug-port-ask", cwd=NOGIT)
 
