@@ -16,7 +16,7 @@ a turn end in these cases:
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
     never count for these two kinds (rule building-memory-is-short-term). When the cwd is in no git
     repo, or the layout cannot be read, these homes pass unchecked and a systemMessage says so;
-  - an open page item (`[page] -> page:<n>`: the owner's ruling answers waiting-page item n; checked in
+  - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
     `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
     or SendMessage naming n as a whole token, or an ArtifactData set, update or batch whose input has
