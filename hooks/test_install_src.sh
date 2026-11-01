@@ -2950,7 +2950,7 @@ s12() { printf '%.12s' "$1"; }
 merge_run() {
   mr_msg=""
   if ! live_pin_fixture "$1" install; then mr_msg="$lp_msg"; return 1; fi
-  mr_co="$lp_co"; mr_pin="$lp_pin"; mr_link="$lp_link"; mr_origin="$lp_origin"
+  mr_co="$lp_co"; mr_link="$lp_link"; mr_origin="$lp_origin"
   case "$2" in
     plain) ;;
     mirror) git -C "$mr_co" config claude-settings.cloudMirror true || { mr_msg="cannot set the cloudMirror marker"; return 1; } ;;
