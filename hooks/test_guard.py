@@ -19956,10 +19956,11 @@ ROLE_REAL_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author
 ROLE_TABLE_UNREADABLE = b"# Agent model cap\n\xff\xfe\x80 not text\n"
 
 
-def role_table(name, table=None, agents=()):
+def role_table(name, table=None, agents=(), files=None):
     """A pointer checkout under this run's folder, and its decision file when `table` is given: text,
     or bytes that are not text. Each name in `agents` gets an agents/ file whose frontmatter `name` is
-    that name, so the guard reads it as a real role. Returns the checkout's folder."""
+    that name, so the guard reads it as a real role. `files` maps each agents/ file name to its body:
+    text, or bytes that are not text, for a case that needs an exact file. Returns the checkout's folder."""
     pointer = os.path.join(ROOT, "rolepointer", name)
     os.makedirs(pointer, exist_ok=True)
     if table is not None:
@@ -19969,6 +19970,11 @@ def role_table(name, table=None, agents=()):
             handle.write(table if isinstance(table, bytes) else table.encode("utf-8"))
     for role in agents:
         write(os.path.join(pointer, "agents", role.lower() + ".md"), "---\nname: %s\n---\n# %s\n" % (role, role))
+    for file_name, body in (files or {}).items():
+        path = os.path.join(pointer, "agents", file_name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(body if isinstance(body, bytes) else body.encode("utf-8"))
     return pointer
 
 
@@ -20227,6 +20233,40 @@ def role_unread_bad_check():
                                  "unreadable")
 
 
+# ---- G: role_has_model_pin(pointer_root, role) reads the missing-model default (rule part 2). It reads the agents/
+# files in name order and stops at the first pin. An unreadable file ahead of the pin makes the answer None, which the
+# guard reads as fail open. A file after the pin is never read. The unreadable file holds bytes that are not UTF-8: the
+# suite runs as root, which reads any file whatever its mode.
+ROLE_PIN_HAIKU = "---\nname: reviewer\nmodel: haiku\n---\n# reviewer\n"
+ROLE_PIN_UNREADABLE = b"---\nname: scout\n\xff\xfe\x80 not text\n---\n"
+
+
+def role_pin_check(pointer, want, what):
+    """role_has_model_pin(pointer, "reviewer") gives `want` (True, False or None) for the agents/ folder there."""
+    reader = getattr(_load_guard_module(), "role_has_model_pin", None)
+    if reader is None:
+        return False, "the guard has no role_has_model_pin(root, role) to read the agents folder"
+    try:
+        got = reader(pointer, "reviewer")
+    except Exception as exc:
+        return False, "reading the agents folder raised %r" % (exc,)
+    if got is not want:
+        return False, "%s: role_has_model_pin reads %r, want %r" % (what, got, want)
+    return True, "%s: role_has_model_pin reads %r" % (what, want)
+
+
+def role_pin_first_check():
+    """A pinned file sorts first, so the reader stops there and never reads the unreadable file after it."""
+    pointer = role_table("pin-first", files={"a.md": ROLE_PIN_HAIKU, "b.md": ROLE_PIN_UNREADABLE})
+    return role_pin_check(pointer, True, "a pinned a.md sorts before an unreadable b.md")
+
+
+def role_pin_unreadable_first_check():
+    """An unreadable file sorts first, so the read fails there, before the pin after it is reached."""
+    pointer = role_table("pin-unreadable-first", files={"a.md": ROLE_PIN_UNREADABLE, "b.md": ROLE_PIN_HAIKU})
+    return role_pin_check(pointer, None, "an unreadable a.md sorts before a pinned b.md")
+
+
 # ---- F: the three role lists agree with the role table (decision agent-model-cap). role_list_drift(pointer_root)
 # in hooks/guard.py returns one line per disagreement, and [] when all agree. The lists are constants, and the table
 # is read from the pointer at run time. A real role is an agents/ file's `name`, or a built-in name. The junk rows
@@ -20327,6 +20367,8 @@ for _label, _check in (
     ("role-model: the table is read at each spawn, so an edited row changes the next verdict", role_live_check),
     ("role-model: a missing decision file logs one unread line and allows the spawn", role_unread_missing_check),
     ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
+    ("role-model: a pinned agent file sorts before an unreadable one, so the pin reads True", role_pin_first_check),
+    ("role-model: an unreadable agent file sorts before a pinned one, so the read gives None", role_pin_unreadable_first_check),
     ("role-list: the three role lists agree with the real decision record", role_list_real_check),
     ("role-list: the junk keys the reader yields on the record cause no drift", role_list_junk_check),
     ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
