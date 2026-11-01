@@ -2765,8 +2765,10 @@ pinlive2() {
 # Decision merge-reinstalls-from-main, ruling 1: no work runs in the pin. The pin is <clone>-live-<12 hex>, a
 # locked worktree detached at main, and <clone>-live is an absolute link to it (merge/install_from_main.sh).
 # install.sh's candidate loop takes the pointer dir first, so a pointer at either form makes the pin the source.
-# The cloud own-checkout block then moves that pin to origin/main, and the pointer is written to the pin.
-# Each case points the pointer at one form (pin, link or the clone) and asserts that the source is the clone.
+# The cloud own-checkout block never moves that pin, and the pointer is never written to it.
+# Each case points the pointer at one form (pin, link or the clone). pinmove1, pinmove2 and pinmove5 assert the candidate
+# pick, the clone. pinmove4 and pinmove5 assert what the install writes: the pointer never names the pin or its link, and
+# the pin keeps its HEAD. The final source may be the clone or a mirror of main: a clone on a branch takes the mirror.
 
 # live_pin_fixture TAG: pin_fixture's clone and bare origin, with origin/main 2 commits past the clone's main.
 # Its pin at main is renamed to <clone>-live-<12 hex>, locked, and <clone>-live is made a link to it. The clone's
@@ -2870,31 +2872,45 @@ pinmove3() {
   ok "$name"
 }
 
-# pinmove4: the pointer install.sh writes names the clone, never the pin, for either pointer form.
+# pointer_names_pin PTR: true when PTR names the live pin of the last pinmove_run or its link, literally, or by a path
+# that resolves to the pin. A "~/" pointer names neither: its HOME is not under the pin.
+pointer_names_pin() {
+  pnp_n=$(normalize_path "$1")
+  pnp_r=$(realpwd "$1" 2>/dev/null)
+  if [ "$pnp_n" = "$(normalize_path "$pm_pin")" ] || [ "$pnp_n" = "$(normalize_path "$lp_link")" ]; then return 0; fi
+  if [ -n "$pnp_r" ] && [ "$pnp_r" = "$(realpwd "$pm_pin")" ]; then return 0; fi
+  return 1
+}
+
+# pinmove4: for either pointer form, the pointer install.sh writes never names the live pin or its link, and the pin keeps
+# its HEAD. The pointer may name the clone or a mirror of main, so the case does not fix which source is picked.
 pinmove4() {
-  name="pinmove4: pointer at the live pin or its link: the written pointer names the clone, not the pin"
+  name="pinmove4: pointer at the live pin or its link: the written pointer names neither the pin nor its link, and the pin keeps its HEAD"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   for form in pin link; do
     if ! pinmove_run "pinmove4-$form" "$form"; then bad "$name" "fixture ($form): $pm_msg"; return; fi
     if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc ($form): $pm_out"; return; fi
-    if [ "$(normalize_path "$pm_ptr")" != "$(normalize_path "$pm_co")" ]; then
-      bad "$name" "a $form run wrote the pointer [$pm_ptr], want the clone [$pm_co]"; return
+    if pointer_names_pin "$pm_ptr"; then bad "$name" "a $form run wrote the pointer [$pm_ptr], which names the live pin"; return; fi
+    if [ "$pm_head_after" != "$pm_head_before" ]; then
+      bad "$name" "a $form run moved the pin from $pm_head_before to $pm_head_after"; return
     fi
   done
   ok "$name"
 }
 
-# pinmove5: control. The pointer at the clone itself still picks the clone, on the same fixture.
+# pinmove5: the pointer at the clone itself. The candidate pick is still the clone. The written pointer never names the
+# live pin or its link, and the pin keeps its HEAD. The clone is on a branch here, so the source may be a mirror of main.
 pinmove5() {
-  name="pinmove5: control: pointer at the clone itself: the log names the clone and the pointer keeps it"
+  name="pinmove5: pointer at the clone itself: the log names the clone, and the written pointer names neither the pin nor its link"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   if ! pinmove_run pinmove5 clone; then bad "$name" "fixture: $pm_msg"; return; fi
   src=$(pinmove_source "$pm_out")
   if [ "$pm_rc" -ne 0 ]; then bad "$name" "install.sh exited $pm_rc: $pm_out"
   elif [ "$(normalize_path "$src")" != "$(normalize_path "$pm_co")" ]; then
     bad "$name" "log names [$src] as the source, want the clone [$pm_co]"
-  elif [ "$(normalize_path "$pm_ptr")" != "$(normalize_path "$pm_co")" ]; then
-    bad "$name" "pointer [$pm_ptr] is not the clone [$pm_co]"
+  elif pointer_names_pin "$pm_ptr"; then bad "$name" "pointer [$pm_ptr] names the live pin"
+  elif [ "$pm_head_after" != "$pm_head_before" ]; then
+    bad "$name" "the run moved the pin from $pm_head_before to $pm_head_after"
   else ok "$name"; fi
 }
 
