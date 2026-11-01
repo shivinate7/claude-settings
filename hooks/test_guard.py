@@ -20004,6 +20004,9 @@ ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
 # the guard under test (ROLE_REVIEWER_FREE_ROUNDS), never copied here. A refusal for any other role names neither.
 ROUND_MARKER = "Round N of 3"
 FREE_ROUND_MARKERS = tuple("Round %s of 3" % n for n in _load_guard_module().ROLE_REVIEWER_FREE_ROUNDS)
+# The Explore audit marker (shiv, Nov 1 11:43 CST, page item 107, pick a). A literal, not the guard's EXPLORE_AUDIT_MARKER:
+# that constant is new, and a read at import time would fail every case on the old code.
+EXPLORE_MARKER = "Audit:"
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
 SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
@@ -20131,9 +20134,30 @@ role_model_refuse("role-model: role with a trailing space on sonnet is denied, m
 role_model_refuse("role-model: role Reviewer on sonnet with no round line is denied, matched to its row",
           "Reviewer", "sonnet", "Check the diff for typos.")
 
+# ---- B2: an Explore on Sonnet is denied unless its first non-blank line opens with the audit marker `Audit:`
+# (case-sensitive, line 1 only, markup allowed ahead of it). Shiv's ruling: Nov 1 11:43 CST, page item 107, pick a.
+role_model_refuse("role-model: Explore on sonnet with no marker is denied, and names the Audit: marker",
+          "Explore", "sonnet", "Find where X is defined.", carries=(EXPLORE_MARKER,))
+role_model_refuse("role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)",
+          "Explore", "sonnet", "Find where X is defined.\nAudit: check the glossary for meaning drift.",
+          carries=(EXPLORE_MARKER,))
+# Re-pointed from an allow case (shiv, Nov 1 11:43 CST, page item 107, pick a): plain prose on line 1 is not the marker.
+role_model_refuse("role-model: Explore on sonnet whose first line is plain prose is denied",
+          "Explore", "sonnet", "Audit the glossary for meaning drift.", carries=(EXPLORE_MARKER,))
+role_model_refuse("role-model: Explore on sonnet with lowercase audit: on line 1 is denied (case-sensitive)",
+          "Explore", "sonnet", "audit: check the glossary for meaning drift.", carries=(EXPLORE_MARKER,))
+
 # ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
-role_model_allow("role-model: Explore on sonnet is allowed (an audit Explore)", "Explore", "sonnet",
-           "Audit the glossary for meaning drift.")
+# An Explore on Sonnet passes with the marker on line 1, with or without markup ahead of it. An Explore on Haiku or
+# Opus passes with no marker. (shiv, Nov 1 11:43 CST, page item 107, pick a)
+role_model_allow("role-model: Explore on sonnet with Audit: on line 1 is allowed", "Explore", "sonnet",
+           "Audit: check the glossary for meaning drift.")
+role_model_allow("role-model: Explore on sonnet with **Audit:** on line 1 is allowed (markup ahead of the marker)",
+           "Explore", "sonnet", "**Audit:** check the glossary for meaning drift.")
+role_model_allow("role-model: Explore on haiku is allowed, with no marker", "Explore", "haiku",
+           "Find where X is defined.")
+role_model_allow("role-model: Explore on opus is allowed, with no marker (standing grant, unchanged)", "Explore", "opus",
+           "Find where X is defined.")
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
            "Round 2 of 3. Re-check the diff.")
 role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
