@@ -83,7 +83,10 @@ def kinds(root=None):
             if name in found and kind["path"].strip("/") in _kept(name):
                 continue  # the extras file repeats a place legacy-repos keeps this kind
             if name in found:
-                raise LayoutError("%s: kind %s is in the layout already" % (_extras(root), name))
+                extras, held = _extras(root), found[name]["path"].strip("/")
+                if kind["path"].strip("/") == held:
+                    raise LayoutError("%s: the layout holds kind %s at %s now; delete it from %s" % (extras, name, held, extras))
+                raise LayoutError("%s: kind %s is in the layout at %s; this file puts it at %s" % (extras, name, held, kind["path"].strip("/")))
             _safe(kind["path"], _extras(root))
             found[name] = dict(kind, set="extra")
     return found
