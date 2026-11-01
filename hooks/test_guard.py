@@ -95,6 +95,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
+    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "cite": "cite by id",
     "frozen": "frozen paths",
@@ -463,6 +464,13 @@ GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is 
 # else on PATH to run: the GITBLIND cases run it on a one-folder PATH too. build_fixtures fails
 # setup if gh resolves here.
 GHNONE_PATH = GHNONE
+# lane-closes-after-records: the step slug a lane's cs-step tag carries, and the head its pull request names.
+ARCHIVE_SLUG = "lane-closes-after-records"
+ARCHIVE_HEAD = "claude/" + ARCHIVE_SLUG + "-x1"
+ARCHOPEN = os.path.join(ROOT, "archopen")      # the slug's pull request is open: the refusal
+ARCHCLOSED = os.path.join(ROOT, "archclosed")  # the slug's pull request was closed as replaced
+ARCHMERGED = os.path.join(ROOT, "archmerged")  # the slug's pull request was merged
+ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on page two of the open list
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -891,9 +899,12 @@ else:
     if re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
-        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": "feat%d" % o["number"], "sha": o["head"]},
-                       base={"ref": o.get("base", "main")}) for o in state["others"]]
-        print(listing([dict(state["pr"], number=state["number"])] + others, None, fields, flags))
+        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
+                       base={"ref": o.get("base", "main")}, state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
+        rows = [dict(state["pr"], number=state["number"])] + others
+        if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
+            rows = [row for row in rows if row["state"] == "open"]
+        print(listing(rows, None, fields, flags))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
@@ -975,7 +986,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
         "page_cap": page_cap,
-        "others": [dict(o) for o in others],  # more open pull requests on the base, each {number, head, draft, checks}: the batch brake reads them
+        "others": [dict(o) for o in others],  # more pull requests on the base, each {number, head, draft, checks, ref, state, merged}: the batch brake and the archive guard read them; ref defaults to feat<number>, state to open
         "required": list(required),  # the names the base's protection requires
         "protection": protection,  # None: the read answers `required`; "absent": 404; "server": 500; "network": a refused connection
         "runs": runs if runs is not None else [
@@ -1180,6 +1191,18 @@ def build_fixtures():
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
     make_fake_gh(GHDEV, "dev", delay=1)
+    # lane-closes-after-records. `need` pins the repo the guard reads: from the lane's cs-repo tag, as `repos/o/r/...`.
+    # A call that names another repo, or `{owner}/{repo}`, answers as a broken tool.
+    slug_head = {"number": 13, "head": "d" * 40, "ref": ARCHIVE_HEAD}
+    make_fake_gh(ARCHOPEN, "main", need=["o/r"], others=[slug_head])
+    make_fake_gh(ARCHCLOSED, "main", need=["o/r"], others=[dict(slug_head, state="closed")])
+    make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
+    # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
+    # every page sees it. The two rows before it name other lanes.
+    make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
+        {"number": 13, "head": "1" * 40, "ref": "claude/other-lane-x1"},
+        {"number": 14, "head": "2" * 40, "ref": "claude/other-lane-x2"},
+        dict(slug_head, number=15, head="3" * 40)])
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -8082,11 +8105,21 @@ def role_tag_call(tool_id, session=ROLE_OWN):
             role_result(tool_id, "ok")]
 
 
+def role_target_call(tool_id, tags, target=ROLE_OTHER):
+    """One paired get_session call for another session, `target`, whose record carries `tags`."""
+    return [role_use(tool_id, GET_SESSION, {"session_id": target}),
+            role_result(tool_id, role_record(tags, target, "a lane session"))]
+
+
 def role_said(text):
     """A user message: words typed or pasted, never a tool's result."""
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
 
 
+# lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
+ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
+ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
 # A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
 ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
 ROLE_LINES = {
@@ -8114,6 +8147,14 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # lane-closes-after-records shapes. The batch runner (ROLE_OWN) reads its own record, then the target
+    # (ROLE_OTHER) with its own get_session call, as it does before it archives that target.
+    "archive-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_TAGS),
+    "archive-triage": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_TAGS),
+    "archive-no-target": role_call("r0", RUNNER_TAGS),
+    "archive-own-lane": role_call("r0", LANE_TAGS),
+    "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
+                               + role_target_call("t2", ARCH_LANE_TAGS),
 }
 
 
@@ -8291,6 +8332,74 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
+
+
+# =========================================================================== 5g. archive of a lane
+FAMILY = "lane-closes-after-records"
+#
+# Rule lane-closes-after-records. Incident 2026-11-01: a home-repo lane was archived before its records pull
+# request landed. The close act is archive_session on a lane. The guard reads the target's newest get_session
+# record in this session's own transcript, as merge-role-proof and trust-card-in-build read theirs:
+#   - the record has no cs-build:lane tag: allow, the target is not a lane;
+#   - a lane, with no record of the target in the transcript: deny, and the remedy steers to get_session;
+#   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
+#     cs-step slug denies. None allows. A read that cannot run denies: guards fail closed.
+# The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
+ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
+ARCHIVE_RULE = "lane-closes-after-records"
+ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
+ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
+ARCHIVE_OWNER = "5c2e7d1a-0000-4000-8000-00000000a7c1"  # the calling session's payload id, which an override names
+
+
+def fake_gh_path(folder):
+    """The PATH a guard run gets to find the fake gh in `folder`, as the merge cases give it."""
+    return folder + os.pathsep + PY_PATH
+
+
+def archive_refuse(name, transcript, env_path, carries=()):
+    """An archive_session of the target the guard refuses. The reason names its rule, never the tool."""
+    add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+        lacks=ARCHIVE_NAMED, carries=carries, transcript=transcript, env=ROLE_ENV, env_path=env_path,
+        session_id=ROLE_OTHER)
+
+
+def archive_allow(name, transcript, env_path):
+    """An archive_session of the target the guard lets through silently."""
+    add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
+        transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
+
+
+# A lane whose slug pull request is open is refused.
+archive_refuse("a lane with an open pull request on its slug is refused", role_path("archive-lane"),
+               fake_gh_path(ARCHOPEN))
+# A lane whose slug pull request was closed as replaced, or merged, has no open one: the archive is allowed.
+archive_allow("a lane whose slug pull request was closed as replaced is allowed", role_path("archive-lane"),
+              fake_gh_path(ARCHCLOSED))
+archive_allow("a lane whose slug pull request was merged is allowed", role_path("archive-lane"),
+              fake_gh_path(ARCHMERGED))
+# A target whose record names no lane is not judged, even with an open pull request on the slug.
+archive_allow("a target tagged cs-build:triage is allowed, though a slug pull request is open",
+              role_path("archive-triage"), fake_gh_path(ARCHOPEN))
+# No record of the target: the guard cannot tell it is no lane, so it refuses and steers to get_session. The
+# gh here has no open slug pull request, so a guard that skips the record and reads gh alone would allow.
+archive_refuse("no record of the target in the transcript is refused, and the remedy steers to get_session",
+               role_path("archive-no-target"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+# The calling session's own lane record is not the target's: a lane-tagged own record does not stand for it.
+archive_refuse("an own lane record with no record of the target is refused, and the remedy steers to get_session",
+               role_path("archive-own-lane"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
+# A read that cannot run denies: a broken gh, and a missing gh.
+archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
+               fake_gh_path(GHBROKEN))
+archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
+# Every page of the open list is read: the slug's pull request sits on page two.
+archive_refuse("a lane whose slug pull request is on page two of the open list is refused",
+               role_path("archive-lane"), fake_gh_path(ARCHPAGE))
+# The newest record of the target counts. A read untagged, then a read tagged lane, is a lane.
+archive_refuse("a target read untagged, then tagged lane, is refused: the newest record counts",
+               role_path("archive-stale-then-lane"), fake_gh_path(ARCHOPEN))
+# No transcript at all: no record can be read, so the target's tags are unknown, and the call is refused.
+archive_refuse("a payload with no transcript_path is refused", None, fake_gh_path(ARCHOPEN))
 
 
 # =========================================================================== 5d. cite by id
@@ -11213,6 +11322,51 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
+# several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
+# impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
+FAMILY = "lane-closes-after-records"
+
+
+def archive_override_call(config, seconds):
+    """One archive_session of a lane at OV_T0 + seconds, from the calling session the override names."""
+    return decide({
+        "raw": None, "tool": ARCHIVE_TOOL, "cwd": NOGIT, "session": ARCHIVE_OWNER,
+        "env_path": fake_gh_path(ARCHOPEN), "config": config, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": dict(ROLE_ENV, LOCAL_TIME_NOW=ov_clock(seconds)),
+        "tool_input": {"session_id": ROLE_OTHER}, "transcript": role_path("archive-lane"),
+    })
+
+
+def archive_override_case():
+    """The owner override lifts the archive refusal: refused before a timed override, allowed under it."""
+    config = ov_config("archive-lane")
+    problem = ov_want(*archive_override_call(config, 0), "deny", ARCHIVE_RULE)
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, ARCHIVE_OWNER, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: archive_override_call(config, 60), "allow",
+                         ARCHIVE_RULE)], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def archive_matcher_case():
+    """A guard matcher in settings.json covers archive_session, so the guard sees the call at all."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        entries = json.load(handle)["hooks"]["PreToolUse"]
+    matchers = [entry.get("matcher", "") for entry in entries
+                if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+    if any(re.fullmatch(matcher, ARCHIVE_TOOL) for matcher in matchers):
+        return True, "a guard matcher covers archive_session"
+    return False, "no guard matcher covers archive_session: %r" % (matchers,)
+
+
+FIXTURELESS_CHECKS.add(archive_matcher_case)
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an owner override lifts the archive refusal",
+                         archive_override_case))
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a settings.json matcher routes archive_session to the guard",
+                         archive_matcher_case))
 
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
