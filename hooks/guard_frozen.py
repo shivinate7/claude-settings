@@ -94,6 +94,10 @@ _LIVE_PIN = re.compile(r"(?P<clone>.+)" + re.escape(LIVE_PIN_SUFFIX) + r"(?P<sta
 _CLONE_MARKER = os.path.join("merge", "install_from_main.sh")
 from shared_names import PROJECT_FROZEN_FILES  # noqa: E402  the one home, shared with the config watch
 PROJECT_FROZEN_DIR = "/.claude/hooks/"
+# THE MAIN MIRROR IS FROZEN TOO. A cloud install whose session checkout is on a branch takes its files from a mirror of
+# main at `$HOME/claude-settings-main`, and the CLAUDE.md pointer names it, so a write there changes what every session
+# runs. install.sh's MAIN_MIRROR builds the same name and must stay equal to this one.
+MAIN_MIRROR_NAME = "claude-settings-main"
 
 FROZEN_REASON = (
     "Rule (configuration): this file decides what a session is allowed to do, so a session "
@@ -134,9 +138,15 @@ def _in_live_pin(target: str) -> bool:
         target = parent
 
 
+def _in_main_mirror(target: str) -> bool:
+    """True when the path is the main mirror folder directly under the home directory, or inside it."""
+    root = os.path.normcase(os.path.normpath(os.path.join(os.path.expanduser("~"), MAIN_MIRROR_NAME)))
+    return target == root or target.startswith(root + os.sep)
+
+
 def is_frozen(path: str, cwd: str) -> bool:
     """True when the path is part of the harness configuration under the config directory, or is
-    the live pinned checkout (`_in_live_pin`).
+    the live pinned checkout (`_in_live_pin`), or the main mirror (`_in_main_mirror`).
 
     A path is frozen when EITHER its literal spelling (no symlink followed) OR its fully
     resolved spelling (every symlink followed) sits under the config directory. The literal
@@ -160,6 +170,8 @@ def is_frozen(path: str, cwd: str) -> bool:
     except Exception:
         return False
     if _in_live_pin(literal) or _in_live_pin(resolved):
+        return True
+    if _in_main_mirror(literal) or _in_main_mirror(resolved):
         return True
     for target, root in ((literal, literal_root), (resolved, resolved_root)):
         if not target.startswith(root + os.sep):
@@ -384,6 +396,9 @@ _PARAM_OPERATOR = re.compile(r"\$\{[^}]*@")
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
 _REDIRECT_CHARS = frozenset("0123456789<>&|")
 _NULL_TARGETS = ("/dev/null", "nul", "$null")
+# A descriptor dup or close after a redirect (`&1`, `&2-`, `&-`) names a descriptor, not a file.
+# Digits only: `>&name` writes the file `name`.
+_DESCRIPTOR = r"&(?:\d+-?|-)"
 
 
 def _scan(segment: str):
@@ -439,7 +454,7 @@ def _writes_a_file(words) -> bool:
     for index, word in enumerate(words):
         if ">" in word and _is_redirect(word) and not word.endswith("&"):
             target = words[index + 1].strip("'\"").lower() if index + 1 < len(words) else ""
-            if target not in _NULL_TARGETS and not target.startswith("&"):
+            if target not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target):
                 return True
     return False
 
@@ -510,7 +525,7 @@ _CP_FLAGS = re.compile(r"-[RrfiaHLPpnvuxTS]+|--[a-z][a-z-]*(?:=.*)?|--")
 _CP_TARGET = re.compile(r"-[RrfiaHLPpnvuxTS]*t|--target-directory")
 _CP_LINK_LONG = ("link", "symbolic-link")
 # A redirect to the null device or onto another descriptor writes no file.
-_NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>&\d+-?", re.IGNORECASE)
+_NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>" + _DESCRIPTOR, re.IGNORECASE)
 _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 
@@ -528,7 +543,7 @@ def _copy_reads(raw, predicate, cwd):
             index += 1
             continue
         if _OPEN_REDIRECT.fullmatch(word) and words[index + 1:index + 2] and \
-                (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(r"&\d+-?", words[index + 1])):
+                (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(_DESCRIPTOR, words[index + 1])):
             index += 2
             continue
         if word != "--" and word.startswith("--") and any(
@@ -654,16 +669,23 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, stood_in, written = [], set(), set()
+        words, shown, stood_in, written = [], [], set(), set()
         for index, word in enumerate(raw):
             if index in data:
                 stood_in.add(len(words))
                 words.append('""')   # data, a `cp` source or a sed script: no redirect or `tee` in it runs
+                shown.append('""')
+            elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
+                # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
+                # The raw word is unquoted: a quoted "&1" is a file and is judged.
+                shown.append("dup")
             else:
-                words.extend(_words_of(word) if "'" in word or '"' in word else [word])
+                pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                words.extend(pieces)
+                shown.extend(pieces)
                 if index in files:
                     written.add(_unquoted(word))
-        text = " ".join(words)
+        text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         for place, word in enumerate(words):
             if word.startswith("-") or REDIRECT.fullmatch(word):

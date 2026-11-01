@@ -223,7 +223,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Workflow|Skill|mcp__ccd_session__start_session|mcp__Claude_Code_iOS_Simulator__control|ArtifactData|ExitWorktree",
+        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|Workflow|Skill|mcp__ccd_session__start_session|mcp__claude-code-remote__create_session|mcp__Claude_Code_iOS_Simulator__control|ArtifactData|ExitWorktree|mcp__claude-code-remote__confirm_repository_trust|mcp__claude-code-remote__request_computer_folder",
         "hooks": [
           {
             "type": "command",
@@ -243,7 +243,7 @@
         ]
       },
       {
-        "matcher": "Agent|AskUserQuestion",
+        "matcher": "Agent|AskUserQuestion|ArtifactData",
         "hooks": [
           {
             "type": "command",
@@ -405,7 +405,7 @@
     "baseRef": "head"
   },
   "enabledPlugins": {
-    "ponytail@ponytail": true,
+    "ponytail@ponytail": false,
     "frontend-design@claude-code-plugins": true,
     "token-weather@claude-settings": true,
     "desktop-statusline@claude-settings": true,
@@ -430,7 +430,7 @@
       "source": {
         "source": "github",
         "repo": "anthropics/claude-code",
-        "ref": "v2.1.296"
+        "ref": "v2.1.311"
       }
     },
     "claude-settings": {

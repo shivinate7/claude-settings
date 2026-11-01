@@ -25,6 +25,8 @@ REPO_ROOT = os.path.dirname(HERE)
 INSTALLER = os.path.join(HERE, "install_launchd.py")
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import guard  # noqa: E402
 import install_launchd  # noqa: E402
 

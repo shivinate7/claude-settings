@@ -33,13 +33,16 @@ Short and plain are one goal. Never trade one for the other.
 - Give each question with two or more options the question form, in the question box, in this order:
   `Goal: <the goal>` in the user's terms; `Problem (<stake>): <the problem in one plain sentence, and
   why it needs their word>`. The stake is one of goal, money, risk, rule, cannot undo. Then one to
-  three `Based on (<kind>): <one premise>`. The kind is one of `premise-format`'s kinds. Each
+  three `Based on (<kind>): <one premise>`. The kind is one of `premise-format`'s kinds. Then a
+  line `Departs from: <what on main> — <what changes>`: both sides filled, and a change that differs from
+  main, never "none", "stays" or "as today". A new thing is `Departs from: main — adds <X>`. A question that
+  restates main is not asked. Each
   option's description says `Gain:` and `Lose:`, as effects on the user. An option that widens
   what a shared tool accepts, such as a second form, an allow-list entry or a per-repo exception,
-  carries "Goes against your uniform ruling (t18)" and is never the recommended option. On the
+  carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. On the
   waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
   true` on a widening one. `hooks/question_form.py` checks the box and the page
-  (decision `question-form`).<!-- rule:style-question-form -->
+  (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show. While work runs there is no box (rule
   `questions-go-to-owner`): put the same lines in the reply, under Input Needed, so that the
@@ -56,14 +59,16 @@ Short and plain are one goal. Never trade one for the other.
   names their cleanup in the same ask, so one yes covers both. When the act is mine, give
   the most direct way: the exact button path, or each command as its own fenced block. The block
   runs as is: it starts with its `cd` (Git Bash: after the comment `# open Git Bash`), has no
-  blank lines, and needs no admin. On Windows, a pasted block is PowerShell 5.1-safe. A Mac
-  block is bash or zsh. Never mix shells in one block. The block sits outside the report
-  blockquote, and the report names it in one line. Where a screen tool can do it, offer to take
-  over the screen.<!-- rule:output-never-hand-off-doable-step -->
+  blank lines, and needs no admin. A gh command block opens, after its `cd`, with
+  `gh auth switch -u shivinate7`, or `-u ssemwal-cdc` where shivinate7 has no access (decision
+  `act-in-place`: the owner acts where he reads). On Windows, a pasted block is PowerShell
+  5.1-safe. A Mac block is bash or zsh. Never mix shells in one block. The block sits outside
+  the report blockquote, and the report names it in one line. Where a screen tool can do it,
+  offer to take over the screen.<!-- rule:output-never-hand-off-doable-step -->
 - An option or step that asks the owner to press in a web app carries a link to that exact page,
   on the option or task that presses.<!-- rule:style-press-has-link -->
 - A step never sends the owner to a file for a command. The command sits in the item's `command`
-  field, and the step says "paste the command below".<!-- rule:style-command-in-item -->
+  field as `{powershell, mac}`, and the step says "paste the command below".<!-- rule:style-command-in-item -->
 - A table that compares things carries a column for what good looks like: the gold standard or
   the target. Each row then shows its gap.<!-- rule:style-table-gold-column -->
 - Give times in US Central, 24-hour clock, with the zone named once, such as 21:40 CDT. Never

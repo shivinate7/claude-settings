@@ -62,7 +62,8 @@ ships in. Give a verdict per screen, never a description.<!-- rule:verification-
 Prefer a headless or isolated browser over my own, and use my login only when needed.<!-- rule:verification-browser-login-only-needed --> Before
 a window or a screen capture lands on my screen, say so in one line.<!-- rule:verification-announce-own-screen --> Trust a guard only once it goes red on
 the defect it guards.<!-- rule:verification-trust-guard-after-red --> A guard that goes red when nothing is wrong is
-spent, because the reader learns to scroll past it.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
+spent, because the reader learns to scroll past it. Before you route around a refusal, read the
+guard's record. If it seems to allow the act, your report flags a possible false alarm.<!-- rule:verification-cry-wolf-guard-is-spent --> A green check proves only its platform
 and the states its fixtures build.<!-- rule:verification-green-proves-only-its-fixtures --> A recovery control must not depend
 on the state it recovers, or it fails on the one day it is needed.<!-- rule:verification-recovery-independent-of-state --> Verify long work against the repo, not your status line.<!-- rule:verification-verify-against-repo --> Never dry-run a refusal list.<!-- rule:verification-never-dry-run-refusal-list --> Take the newest version that passes its checks. Read its changelog
 first. If it breaks a check, pin the newest one that passes and say why.<!-- rule:verification-newest-that-passes --> If this repo lints markdown, give every
@@ -75,7 +76,7 @@ rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's
 verdict with one bounded command. Never scroll a log to find out whether something
 passed.<!-- rule:tokens-verdict-not-stream --> Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log.<!-- rule:tokens-run-through-verdict --> Point a brief at files. Never paste them in.<!-- rule:tokens-point-brief-at-files --> Read an agent's report,
 never its transcript.<!-- rule:tokens-read-report-not-transcript --> When compacting, keep the files, the commands, each ruling's home, and the pid and port of each server still running.
-Drop the narration.<!-- rule:tokens-compacting-keep-essentials --> Move a CLAUDE.md section that matters only under one folder to a path-scoped rule. Keep it when it is needed before the first file read.<!-- rule:tokens-folder-rules-load-by-path -->
+Drop the narration.<!-- rule:tokens-compacting-keep-essentials --> Move a CLAUDE.md section that matters only under one folder to a path-scoped rule. Keep it when it is needed before the first file read.<!-- rule:tokens-folder-rules-load-by-path --> Before you answer how code in a repo works, read its `docs/map/`.<!-- rule:tokens-read-map-first -->
 
 **Building.** Never guess an answer the code should give you.<!-- rule:building-never-guess-answer --> A port or redesign keeps the existing app's behaviour as the default. Each choice cites where it was read, file and symbol. A question goes to the owner only when the work departs from that behaviour, says so in a "Departs from:" line, and is never marked blocking. A question the code or a standing grant answers is not asked.<!-- rule:building-port-keeps-behaviour --> Surface ambiguity instead
 of resolving it silently.<!-- rule:building-surface-ambiguity --> Never drop an item without saying so.<!-- rule:building-never-drop-item-silently --> Give

@@ -44,11 +44,28 @@ class Matcher(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers))
 
+    def test_guard_matcher_covers_lane_effort_tool(self):
+        # Rule lane-effort-pin reads the create_session call that starts a lane, so the guard must see it.
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        tool = "mcp__claude-code-remote__create_session"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
     def test_guard_matcher_covers_exit_worktree(self):
         # Rule session-home deletes a session's record on ExitWorktree, so the guard must see that call.
         matchers = guard_matchers()
         self.assertTrue(any(re.fullmatch(m, "ExitWorktree") for m in matchers),
                         "no guard matcher covers ExitWorktree: %r" % matchers)
+
+    def test_guard_matcher_covers_trust_card_tools(self):
+        # Rule trust-card-in-build refuses these two calls in a cs-build session, so the first guard.py
+        # matcher must fire on both full tool names.
+        matcher = guard_matchers()[0]
+        for tool in ("mcp__claude-code-remote__confirm_repository_trust",
+                     "mcp__claude-code-remote__request_computer_folder"):
+            with self.subTest(tool=tool):
+                self.assertTrue(re.fullmatch(matcher, tool), "the first guard matcher does not cover %s: %r" % (tool, matcher))
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
@@ -309,6 +326,23 @@ class QuestionReviewer(unittest.TestCase):
                          "AskUserQuestion hooks are %s, want one command hook" % [h.get("type") for h in hooks])
         self.assertIn("call_judge.py", script_names(hooks[0].get("command", "")))
 
+    def test_the_waiting_page_write_runs_the_call_judge_hook(self):
+        # Ruled Nov 1 11:51 CST: a waiting-page item write gets the same model review as a chat question,
+        # so the one command hook that runs call_judge.py also runs on ArtifactData. Its matcher keeps the two
+        # chat tools, so one override path lifts a refusal on any of the three.
+        rows = call_judge_entries()
+        self.assertEqual(len(rows), 1, "want one call_judge.py command hook, found %d" % len(rows))
+        entry = rows[0][0]
+        self.assertTrue(covers(entry, "ArtifactData"),
+                        "call_judge.py does not run on ArtifactData: matcher %r" % entry.get("matcher"))
+        self.assertTrue(covers(entry, "Agent") and covers(entry, "AskUserQuestion"),
+                        "call_judge.py lost a chat tool: matcher %r" % entry.get("matcher"))
+
+    def test_no_prompt_or_agent_hook_on_the_waiting_page_write(self):
+        bad = [h.get("type") for e in pre_tool_entries() if covers(e, "ArtifactData") for h in e["hooks"]
+               if h.get("type") in JUDGE_TYPES]
+        self.assertEqual(bad, [], "a prompt or agent hook runs on ArtifactData: %s" % bad)
+
     def test_the_reviewer_runs_an_opus_id(self):
         model = call_judge_judges()["AskUserQuestion"][1]
         self.assertTrue(isinstance(model, str) and model.startswith(OPUS_PREFIX),
@@ -422,7 +456,8 @@ class SendMessageJudge(unittest.TestCase):
 # Every judge in hooks/call_judge.py must have a row in the model-per-role table
 # (docs/decisions/agent-model-cap.md), and that row's model must equal the module's model.
 RECORD = os.path.join(os.path.dirname(SETTINGS), "docs", "decisions", "agent-model-cap.md")
-ROW_NAMES = {"Agent": "Agent spawn judge", "AskUserQuestion": "question reviewer"}  # first-cell words of each row
+ROW_NAMES = {"Agent": "Agent spawn judge", "AskUserQuestion": "question reviewer",
+             "ArtifactData": "question reviewer"}  # first-cell words of each row; the question reviewer row covers both
 
 
 def table_rows(text):

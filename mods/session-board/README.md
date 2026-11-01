@@ -94,6 +94,7 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 - Known limit, the clear race: after `/clear` or a resume, a store write already held at the host can land late. The mod removes it again after it lands. The old entry can show for a short moment.
 - Known limit, the idle git read: the tree can change between reads, so a clean tree can read as clean for up to 5 minutes after an edit made outside the session. A turn end reads again.
 - Known limit, the config folder: under Git Bash, `HOME` is a path like `/c/Users/x`. `/safe-stop` uses `USERPROFILE` first when it starts with a drive letter. Another setup can pick the wrong folder. Set `CLAUDE_CONFIG_DIR` to be sure.
+- Known limit, no turn-end reset: the built-in sec-default mod sends every `classic.*` event past user mods, so a `classic.Stop` hook never runs. The mod has none, so a turn end resets nothing. See `docs/decisions/session-board-mod-limits.md`, section "A missed notice".
 - A mod error is not shown in the session. It goes to the debug log (`claude --debug`), one line starting "session-board:".
 
 ## Try in the desktop app
@@ -114,7 +115,7 @@ Checked: the session id in `claude agents --json` equals the id the mod writes. 
 
 AskUserQuestion is refused while an agent, a background command or a workflow of this session runs. It is also refused for the rest of the session once the session has started another session. A box stops the session until the owner answers, and the running work and the started sessions wait or go on with no brake.
 
-- Agents come from the host's agent list, read once per box. Background commands and workflows are the ones the mod saw start and not yet end. A monitor does not count. The engine's list at each turn end resets them.
+- Agents come from the host's agent list, read once per box. Background commands and workflows are the ones the mod saw start and not yet end. A monitor does not count. A task's notice clears a task. So does a TaskStop call on its id, also for a task that already ended. A missed notice holds the box until Claude runs TaskStop on that id or the session ends.
 - A start is a desktop `start_session` or cloud `create_session` call that answers without error. A start inside an agent counts too; a Routine does not. The count lives in the store key `started:<id>`, so it survives a mod reload and a restart or resume under the same id. A `/clear` carries it; an in-process resume takes the resumed session's own count.
 - The refusal says to ask in the reply, send the question to the waiting page's writer after 5 minutes unanswered, and keep working.
 - An unreadable agent list lets the box through, and the debug log and `guard.log` say unknown.

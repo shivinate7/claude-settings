@@ -27,9 +27,30 @@ guard rule, so the watcher does the waiting and the session is told once.
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
   of the session. The guard refuses a stop of a process outside the session, unless the owner's override
   covers it (`owner-override`, the owner's typed override).
+- The one allowed wait on a stranded job is `wait-pid <pid> [--timeout SECS]` (`bin/wait-pid`). Incident,
+  2026-10-31: a stall left a lane with its job's pid, and the guards refused a `kill -0` loop, a `/proc`
+  poll and `tail --pid`. Those loops stay refused; the remedies of the `waiter` and `live-stream` rules
+  and the STALL report name the helper. It waits only on a pid that `guard_kill.pid_is_session_job`
+  calls this session's, and exits 2 at once for any other pid. A pid is this session's in three cases. It
+  descends from the session root. Or its walk reaches init with this session's tag on the pid or an
+  ancestor below init. Or it has PPID 1 and a descendant holds the tag. The last covers the STALL report's first pid, the
+  untagged stub. It also owns a foreign PPID-1 process with a descendant this session started; the harm
+  is a wait, never a signal. Unmeasured: a stub adopted by a subreaper (PPID above 1, such as
+  `systemd --user`) reads foreign, so the helper exits 2 on it. The descendant scan skips the helper's own chain and stops at depth 8 or 512 pids. Exit
+  0 when the pid ends, 124 at the timeout (default 540 s), 3 when a liveness read fails (unknown, never
+  read as ended). A foreground Bash call stops at 120 s by default, so the STALL report says to run a long
+  wait with `run_in_background`. It prints a `still waiting` line every 120 s, so a background wait draws
+  no STALL. It cannot read the job's exit code: the job is not its child. Start-time check against pid
+  reuse. Not on Windows. Cost: one process per wait, no file written. At start, the ownership walk runs up to
+  three short `ps` reads per ancestor level and at most one process-table read (unmeasured count). While it waits, four `/proc` reads a second
+  on Linux, one `ps` a second elsewhere. Unmeasured: no test pins the cost.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
-  the push. `verdict` prints a `still running` line every 120 seconds.
+  the push. `verdict` prints a `still running` line to stderr every 120 seconds, so a pipe on stdout does not hide it.
+  It also appends the line to the beat file, which the hook names next to its log, exports to the job as
+  `STALL_WATCH_BEAT`, and passes to the watcher as `--beat`. The watcher relays the file's new bytes to its
+  own output, the harness output file. So a redirect in the command (`2>&1 | grep`, `2>/dev/null`)
+  hides the line from neither the watcher nor the Stop check.
 - A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
   2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
   `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to
@@ -41,8 +62,9 @@ guard rule, so the watcher does the waiting and the session is told once.
   relative path after a `cd` resolves against the shell's directory, so that job can still stall falsely.
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
-  Cost: no new process, timer or file. Each named log gets one stat a second in the watcher's own loop,
-  one more before each stall report, and one at each Stop check.
+  Cost: no new process or timer. Each named log gets one stat a second in the watcher's own loop,
+  one more before each stall report, and one at each Stop check. The beat file costs one append per
+  heartbeat. The watcher reads it on each 0.2 s loop pass, and tries one open a second until it exists. The wrapper removes it with the log.
 
 ## The Stop-time check
 

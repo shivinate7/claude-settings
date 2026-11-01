@@ -218,8 +218,14 @@ jobs:
       - name: Verdict runner fixture suite
         run: python3 lint/test_verdict.py
 
+      - name: Wait-pid helper fixture suite
+        run: python3 lint/test_wait_pid.py
+
       - name: Fixture copy helper suite
         run: python3 lint/test_tracked_tree.py
+
+      - name: Test-run signing opt-out fixture suite
+        run: python3 lint/test_test_git.py
 
       - name: Debt notes union merge fixture suite
         run: python3 lint/test_notes_union_merge.py
@@ -281,6 +287,11 @@ jobs:
 
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
+
+      # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
+      # The script says why it runs `npm ci` first.
+      - name: Map check
+        run: bash .github/scripts/map-check.sh
 
       - name: Layout fixture suite
         run: python3 lint/test_layout.py
@@ -790,6 +801,10 @@ jobs:
       - name: Verdict runner fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_verdict.py
+
+      - name: Wait-pid helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_wait_pid.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}

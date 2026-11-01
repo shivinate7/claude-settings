@@ -34,6 +34,7 @@
 //   hooks/register.mjs: reads isStdoutTruncated into report.truncated; passes gitDiffArgs to git
 //   README.md: wording 'at most 5 calls per run, shared by overlapping runs'; names the empty tree
 // Known limit, not pinned: a rename that git shows as a new file (no 'rename from' line).
+import '../../lint/_test_git.mjs'  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'

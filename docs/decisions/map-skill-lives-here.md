@@ -1,4 +1,4 @@
-# The map skill lives in claude-settings, and a host pins a copy
+# The map skill lives in claude-settings, and a host pins the install link
 
 ## The question
 
@@ -18,8 +18,12 @@ The install links it whole into `~/.claude/skills/plain-english-map`.
   `scripts/lib/lazy-typescript.mjs` resolves the package from its own real path. Through the
   install link, that path is inside the clone, so the skill finds the `node_modules` of
   claude-settings, and the host installs nothing.
-- A host may pin a copy of the skill folder, and it need not stay byte-equal to this one.
-  A host may bind its own readers. With none bound, the AI calls tab is empty.
+- A host pins the install link, never a copy. No repository vendors or pins its own copy of the
+  skill (owner, 2026-10-28 02:40 CDT, roadmap step c146 "The map says how the code fits together,
+  in checked prose, in every repo", waiting-page item 29, pick a: "fix map-skill-lives-here.md, no
+  pinned copies"). This is the uniform ruling: topic t18 (one home, then variants), decision
+  `uniform-over-variants`. A repo changes to match the shared skill, and the skill grows no second form.
+- A host may bind its own readers. With none bound, the AI calls tab is empty.
 - The skill's tests live in `skills/plain-english-map/tests/`, with a small fixture
   repository. The `checks` workflow runs them after `npm ci`.
 

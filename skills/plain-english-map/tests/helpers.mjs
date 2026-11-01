@@ -5,13 +5,14 @@
 // A child process gets the parent's env with every `GIT_*` variable and `NODE_PATH` removed. A `GIT_*` variable would
 // win over the child's cwd, so `git init` in a scratch folder could hit the parent repository. `NODE_PATH` would hide
 // where `typescript` is found, and the tests must see exactly that.
+import { apply } from '../../../lint/_test_git.mjs';  // test-run signing opt-out (lint/_test_git.mjs)
 import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { removeRunFolder, runFolder } from './temp-root.mjs';
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
 export const SKILL = join(HERE, '..'); // skills/plain-english-map
@@ -21,8 +22,8 @@ export const FIXTURE = join(HERE, 'fixture');
 /** Fail with the missing path, so a case that needs a skill file goes red for that reason and no other. */
 export const needFile = (rel) => assert.ok(existsSync(join(SKILL, rel)), `skills/plain-english-map/${rel} is missing`);
 
-/** The parent's env, with no `GIT_*` key and no `NODE_PATH`. */
-export const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GIT_.*|NODE_PATH)$/i.test(k)));
+/** The parent's env, with no `GIT_*` key and no `NODE_PATH`, and the test-run signing opt-out added back, so no child signs. */
+export const cleanEnv = () => apply(Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GIT_.*|NODE_PATH)$/i.test(k))));
 
 /** A path in one comparable form. `native` expands 8.3 names such as SHIVAM~1. Windows paths compare in lower case. */
 export const real = (p) => (process.platform === 'win32' ? realpathSync.native(p).toLowerCase() : realpathSync.native(p));
@@ -33,20 +34,15 @@ export const run = (args, cwd, input, env = {}) => {
   return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 };
 
-const dirs = [];
 const links = [];
 after(() => {
   // A junction goes first, and by `unlinkSync`, so no remove ever walks through it into the folder it names.
   for (const l of links) { try { unlinkSync(l); } catch { /* already gone */ } }
-  for (const d of dirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  removeRunFolder();
 });
 
-/** A new folder under os.tmpdir(), removed when the file's tests end. */
-export const tmpFolder = (prefix) => {
-  const d = mkdtempSync(join(tmpdir(), prefix));
-  dirs.push(d);
-  return d;
-};
+/** A new folder in this process's run folder (test-temp-standard), removed when the file's tests end. Never a folder of the system temp dir itself. */
+export const tmpFolder = (prefix) => mkdtempSync(join(runFolder(), prefix));
 
 /** A junction (a symlink on POSIX) in its own tmp folder, to the folder `target`. It stands for the install link in ~/.claude/skills. */
 export const junction = (target) => {
@@ -71,15 +67,21 @@ export const gitIn = (dir, ...a) =>
 export const scratchRepo = ({ commit = false } = {}) => {
   const dir = tmpFolder('pemap-repo-');
   cpSync(FIXTURE, dir, { recursive: true });
+  // A Windows checkout (core.autocrlf) holds the fixture with CRLF. The cases edit it by `\n` and by exact text, so the copy is LF on every platform.
+  // Every fixture file is text. The product reads CRLF fine, and format-version.test.mjs builds its CRLF repositories itself.
+  for (const rel of readdirSync(dir, { recursive: true })) {
+    const p = join(dir, rel);
+    if (statSync(p).isFile()) writeFileSync(p, readFileSync(p, 'utf8').replace(/\r\n/g, '\n'));
+  }
   const git = (...a) => gitIn(dir, ...a);
   git('init', '-q');
   if (commit) {
     git('add', '.');
-    git('-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture');
+    git('-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'fixture');
   } else git('add', '-N', '.');
   // The scope first: the copy must be a git repository that tracks the fixture, or a verdict below says nothing about the skill.
   const tracked = git('ls-files').split('\n').map((l) => l.trim());
-  for (const f of ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'docs/map/core.md', 'docs/map/traces/home.md'])
+  for (const f of ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md'])
     assert.ok(tracked.includes(f), `the scratch repository does not track ${f}`);
   if (commit) assert.match(git('rev-parse', 'HEAD').trim(), /^[0-9a-f]{40}$/, 'the scratch repository has no commit');
   return dir;
@@ -94,7 +96,7 @@ export const dropMapLine = (dir, file) => {
   writeFileSync(p, kept.join('\n'));
 };
 
-export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8'];
+export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9'];
 
 /** The verdict lines of a run as one string, such as `MAP1=PASS MAP2=FAIL`. A line looks like `[PASS] MAP1`. */
 export const verdicts = (out) =>

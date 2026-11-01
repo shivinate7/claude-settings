@@ -9,18 +9,27 @@ Every session that starts agents is an orchestrator. The tiers below are kinds o
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order, and talks with the owner. The load brake, not a
+  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. The load brake, not a
   number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
+  A lane session also gets `cs-step:<step id>`, so triage can see the step is live.
 - **Triage.** A standing session. The gatekeeper of the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Only triage writes the waiting page.
+  At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
+  `waiting-page`, "Make a repo's page").
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
-  and `--live`. Triage, as the waiting-page writer, splices it into the repo's one page and
+  and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
+  `id`, `session_status` and `tags`. The builder reads it to list steps in progress with no live lane.
+  Triage, as the waiting-page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving finished lanes. It runs the merge tool on a machine that can run it.
+  It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
+  records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
+  the PR ready, so the branch is final at ready (claude-settings
+  record `records-index-at-merge`). Then it runs `--confirm` again to merge.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
   runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
   runs names `frozen at <sha>`. It prints the merge output on the terminal, never

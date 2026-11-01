@@ -20,8 +20,10 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
-  text. It is never captured, and it does not count toward a burst. Messages from other sessions are
-  not captured.
+  text. It is never captured, and it does not count toward a burst. Hand-backs and the
+  `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01
+  04:29 CST, covering this skip only; debt `inbox-saves-other-notices`, which tracks other notices
+  the inbox saves). Other peer messages are skipped only where a tag marks them.
 - **Burst.** A turn's messages are the ones captured since the last Stop. They are a burst when there
   are two or more, or when one message has three or more non-blank lines or two or more bullet lines.
   Only a burst's messages need items. A lone message of one or two plain lines never triggers the guard.
@@ -40,10 +42,27 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
 - **The guard.** A Stop check refuses to end a turn in four cases. A burst's message has no items. An
   item has no kind or home. A ruling or task, open or closed, names a home that is not a file under its
   kind's layout paths that some branch's tree holds. An open standing item id is missing from the
-  handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. It exits on
+  handoff. It reads ids, so a whole-file handoff rewrite that drops a standing item goes red. A message
+  with no items is reported with the inbox file's path, its heading line and line number, and an
+  example item, then each kind's home (`ruling -> <homes>; task -> <homes>; question -> answered; note -> noted;
+  standing -> handoff; page -> page:<n>`). Items added in any later turn count, so the session needs no new heading. A home outside
+  its kind's paths is reported as not a tracked home of that kind, with the homes listed. It exits on
   `stop_hook_active`, so it cannot loop, but it still counts that turn's messages. When the session's
   folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
   in one line.
+- **Pages.** `page` (the owner's ruling answers waiting-page item n): the home is `page:<n>`. The guard
+  checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
+  It blocks until the transcript shows a send after the owner's message. The send is a send_message or
+  SendMessage naming n, or an ArtifactData write (set, update or batch) whose input has `n` equal to the
+  item number in collection `items` (rule `questions-go-to-owner`). The k-th block with text T anchors to
+  the k-th owner record with text T. An owner record is a user record, or a queued message (an owner
+  message typed while the session runs, a `queued_command` attachment). A peer's words and machine
+  notices are never owner records. A missing transcript passes every block with a systemMessage. A block
+  with no owner record for its text passes alone, with a systemMessage. Cost: one whole transcript read
+  per Stop, only while an open page item exists. It writes no file and starts no process. Risk kind:
+  named incident. On 2026-10-30, item 98 was answered in a coordinator's chat at 15:41 and never sent to
+  the page writer, who asked again at 16:07. Landed 2026-10-30. Known gap: a session that never writes the `[page]` item is not caught. The guard
+  cannot know which owner messages answer a page item.
 - **Closing an item.** An item closes when its inbox line gains `[closed]`, after its work is done or its
   home holds it for good. The guard stops asking for a closed standing id in the handoff.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # verdict <cmd...>: run the command, keep the full output in a log, print only the verdict.
 # Log: $VERDICT_LOG (appended, never truncated), else a new file in $TMPDIR. Exit code is the command's.
-# While it runs, print "verdict: still running, <elapsed>, log=<path>" every $VERDICT_HEARTBEAT s (default 120).
-# Why: a quiet background verdict over 300 s draws a false STALL (decision stall-watch, "Tools that are quiet by design").
+# While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
+# Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # Exit 0 is FAIL if the output holds a runner marker.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
@@ -51,14 +51,19 @@ def main(argv):
         try: proc = _nowindow.Popen(argv, stdout=f, stderr=subprocess.STDOUT)
         except OSError as e: proc = None; f.write(f"verdict: cannot run {argv[0]}: {e}\n".encode()); rc = 127
         if proc:
-            say = True
+            say, beat_file = True, os.environ.get("STALL_WATCH_BEAT")
             try:
                 while True:
                     try: rc = proc.wait(timeout=beat); break
                     except subprocess.TimeoutExpired:
+                        line = f"verdict: still running, {time.time() - t:.0f}s, log={log}"
                         if say:
-                            try: print(f"verdict: still running, {time.time() - t:.0f}s, log={log}", flush=True)
+                            try: print(line, file=sys.stderr, flush=True)
                             except OSError: say = False  # reader gone: keep waiting, keep the child's rc
+                        if beat_file:  # apart from say: a gone stderr reader must not stop the beat to the watch
+                            try:
+                                with open(beat_file, "a", encoding="utf-8") as b: b.write(line + "\n")
+                            except OSError: pass
             except KeyboardInterrupt:
                 rc = 130
                 try:

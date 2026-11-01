@@ -54,7 +54,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
-    an allow-list entry or a per-repo exception. Its card shows "Goes against your uniform ruling (t18)": a repo
+    an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
     that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
@@ -66,23 +66,28 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
-    recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
-    with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick` and offers "Take my pick".
+    recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+    Never use the key `none`. The page adds its own "None of these" option
+    with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
       `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
       On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
-      A `pick` that does not fit the kind of item is not shown: no star, and no "Take my pick". A list `pick` on a pick-one item is one such pick.
+      A `pick` that does not fit the kind of item is not shown: no star. A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
-    `gain` and `lose`. The writer refuses a decision without it (guard rules `question-form` and `owner-judge`). A decision with
+    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
-  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`
-    (a number, or text such as `3 min`). The item shows `command` in a closed "Show the command" disclosure with a Copy
-    button that works while it is closed. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
-    A step never sends the owner to a file for a command: put it in `command` and say "paste the command below"
-    (guard rule `command-in-item`).
+  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
+    strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
+    `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
+    button that works while it is closed, PowerShell first on Windows. A stored one-string `command` shows as one block
+    with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
+    A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
+    command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
+    (guard rule `command-in-item`). Each shell in `command` opens with its own `gh auth switch -u shivinate7`, or
+    `-u ssemwal-cdc` where shivinate7 has no access, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
@@ -105,9 +110,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
-  a note with no `done`. "Take my pick", and a pick that
-  stands, write `choice` equal to `pick`, with the note `accepted pick`. On a `multi` item `choice` is a
-  list of option keys, in rank order when `ranked` and in option order otherwise. "Take my pick" writes the whole `pick` list in that order. "None of these" writes
+  a note with no `done`. A pick that stands writes `choice` equal to `pick`, with the note
+  `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
+  list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `pick` list in that order. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
@@ -164,7 +169,10 @@ gives no page URL: no item exists yet.
 - No timer counts the 5 minutes. At each wake, check the age of each chat question still open.
   Gap: a session with no wake after 5 minutes (one in an open box with nothing running) sends the
   question only when the owner answers or the session wakes.
-- A chat answer: still send the question and the answer, with its time, to the writer.
+- A chat answer: still send the question and the answer, with its time, to the writer. Jot
+  `- <id> [page] -> page:<n>` under the owner's message in the inbox; the Stop guard blocks until
+  the transcript shows that send. The writer puts the item's `n` in every items write, set or update,
+  so the guard can match it.
   - No item yet: the writer writes the item closed (`status: "closed"`), with the answer and its
     time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
     close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
@@ -210,14 +218,16 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
    and make it equal to the key. After the `set`, read the item back (`ArtifactData get
-   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
-   unique key, and no key `none`. On a look question, check that each option has its own mockup
+   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each keyed
+   `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
    - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
      An undoable choice on internals he has no stake in is not asked. Take your own pick and set `stands: true`.
      A question stays only when it touches his goals, his money, a risk he would care about, a rule, or an act that
      cannot be undone. Name which as the stake of the Problem line of `context`. The writer refuses a decision with no such line.
+     Then write the Departs from line: what main does now, and what your question changes. For a new thing, write `Departs from: main — adds <X>`.
+     A question that changes nothing is not asked: act on main's behaviour.
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
@@ -232,7 +242,7 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
      and a one-sentence `why`. Set `group` on both items.
    - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
-     The page hides "Take my pick" when the ticks equal `pick`, and shows none when `pick` is not valid.
+     The page stars no option when `pick` is not valid.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
@@ -270,7 +280,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" step 3 (new options) or step 4 (context) says. With no answer, there is no
+  Do it as "Route and close" step 3 (new options, or a close when they are not ready) or step 4 (context) says. With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -317,11 +327,14 @@ item and leaves it open until the lane takes the answer. Then it closes the item
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
-3. If the answer is `none`, write new `options`, `pick` and `why` from the
-   owner's note (a `multi` item's new `pick` is a list), and set `added` to now. Write `lastAnswer` from the answer
-   in the same update, without `choice`, because the new `options` replace the old keys. Then delete `answers/<id>` (pinned to its version), and
-   leave the item open. Say in the terminal that the item has new options. If the note is not
-   enough to write them, ask in the terminal what the owner wants.
+3. If the answer is `none` and you write the new `options`, `pick` and `why` from the
+   owner's note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
+   the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
+   `answers/<id>` (pinned to its version), and
+   leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
+   close the item (step 2) with a home that names the rework, and add a fresh item when the options are
+   ready. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
+   enough to write the options, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
@@ -336,7 +349,12 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
 ## Make a repo's page
 
-Do this at the repo's roll-out to the layout, on the owner's grant for that repo.
+Triage runs this when `python3 ~/.claude/lint/layout.py waiting-page <repo root>` prints `unknown`.
+The repo has no page. The coordinator-and-triage setup is the grant: the first triage does this, with no
+separate grant. It never marks the repo rolled out.
+
+A fork (a worktree whose work never reaches main) makes its own page and writes its own `waiting-page`
+key. It never reuses main's.
 
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
@@ -344,13 +362,16 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
    `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
-3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
+3. Triage writes `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
    `python3 ~/.claude/lint/repo_colour.py identity <repo root>`. It reads the repo's own extras keys
    `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
    then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
    invent a colour. The page still checks each text colour for 4.5:1 contrast.
-4. Put the URL in the repo's extras file: `"waiting-page": "<url>"`. The file alone does not mark the
-   repo as rolled out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
+4. Set the URL once: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`. It writes the
+   `waiting-page` key of the repo's extras file, `.claude/layout-extras.json`. Exit 0 wrote it. Exit 1 means
+   the key is already set: it prints the URL and writes nothing. Exit 2 means the URL is not an artifact
+   link, or the extras file cannot be read or written. The file alone does not mark the repo as rolled
+   out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
 5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.
 
 A local session can write to the database (measured on the Mac, Oct 26). A Windows session is

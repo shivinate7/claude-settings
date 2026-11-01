@@ -50,7 +50,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (lanes-start-in-tool-worktrees)
   impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
                        (design-skills)
-  cite-by-id           deny. A commit message or PR body that cites a record by its path.
+  cite-by-id          deny. A commit message or PR body that cites a record by its path.
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
   machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
@@ -77,6 +77,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
+  trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
+                       get_session record (read from the transcript) proves no cs-build tag. No record,
+                       no transcript or no env id is a refusal.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -120,6 +123,13 @@ Other tools, in `judge` order:
                        The reason says to brief a lane session. An override lifts it.
                        COORDINATOR_SCOPE_MODE "ask" turns the deny into an ask.
                        (session-tiers, roles-orchestrator-never-builds)
+  agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
+                       (haiku < sonnet < opus), or that names no model where the role has no `model:`
+                       pin and no default model is set. An Explore whose brief's first line
+                       carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
+                       spawn pass it. An unread record
+                       passes and is noted as `agent-role-model-unread`. No override lifts it.
+                       (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -130,6 +140,11 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
+                       not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
+                       any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
+                       string. A call with no lane tag passes. An override lifts it.
+                       `session_home_keep` skips this tool. (agent-model-cap)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-cap, simulator-boot-twin
@@ -173,7 +188,7 @@ next refused act through, or every refused act for a time. The narrower Opus ove
 only the Opus spawn ask, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
 No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
-`agent-model-floor`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
+`agent-model-floor`, `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
@@ -258,7 +273,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_head_hit,
+            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -271,7 +286,7 @@ while True:
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, _add_shape, _commit_shape,
             _is_python, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, records_page_hit, role_proof_hit, settings_roots,
-            undrafted_pr_create, uses_merge_tool,
+            TRUST_REASON, trust_card_hit, undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1421,6 +1436,7 @@ def disables_tests(new_lines, old_lines) -> bool:
 BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
+    " A merge conflict in a test file takes the same route."
 )
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
@@ -1718,6 +1734,15 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
+CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
+# The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
+LANE_EFFORT = "medium"
+LANE_TAG = "cs-build:lane"
+LANE_EFFORT_REASON = (
+    "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
+    "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
+    % LANE_EFFORT
+)
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
 HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "record-writer")
 MODEL_FLOOR_REASON = (
@@ -1844,6 +1869,22 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
+def lane_effort_hit(tool: str, tool_input) -> str:
+    """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
+    A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
+    tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
+    is not judged. A missing prompt is not the command."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL:
+        return ""
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return ""
+    prompt = tool_input.get("prompt")
+    return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
+
+
 STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
 # it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
@@ -1854,6 +1895,13 @@ FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 BUILDER_MARKERS = ("round", "try")
 
 
+def brief_first_line(brief) -> str:
+    """A brief's first non-blank line, or "" for a brief that is not text. The one home of the first-line pick."""
+    if not isinstance(brief, str):
+        return ""
+    return next((line for line in brief.split("\n") if line.strip()), "")
+
+
 def brief_markers(brief) -> list:
     """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
     marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
@@ -1861,7 +1909,7 @@ def brief_markers(brief) -> list:
     if not isinstance(brief, str):
         return []
     found = STEP_UP_MARKER.findall(brief)
-    first = next((line for line in brief.split("\n") if line.strip()), "")
+    first = brief_first_line(brief)
     lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
     return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
 
@@ -1904,6 +1952,159 @@ def step_up_reason(prompt: str, role, model) -> str:
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
         return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
+
+
+# THE ROLE MODEL ROW (rule agent-role-model, decision agent-model-cap). The model per role is read at each spawn from the
+# pointer checkout's decision record, so the guard holds no copy of the table. A row names a role in its first cell and a
+# model in its second; a first cell that holds anything but role words (a qualifier such as `reviewer, rounds 2 and 3`, a
+# skill, a hook) names no role, and the first row for a role wins. Cost per Agent or Task spawn: one read of the record and,
+# for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
+# `agent-role-model-unread` log line when a read fails.
+ROLE_MODEL_RANK = ("haiku", "sonnet", "opus")
+ROLE_TABLE_FILE = "agent-model-cap.md"   # inside the record folder that lint/layout.py names
+ROLE_TABLE_MAX = 256 * 1024
+ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
+ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
+ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
+ROLE_DEFAULT = "general-purpose"
+# One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
+# ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
+# An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
+# Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
+from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+EXPLORE_ROLE = "Explore"
+ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
+ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+ROLE_MODEL_REASON = (
+    "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
+    "field, or name the role's model%s. (decision agent-model-cap)"
+)
+# A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
+ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+# An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
+# does not lift a model the table does not rank.
+ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
+ROLE_NO_MODEL_REASON = (
+    "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
+    "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
+    "(decision agent-model-cap)"
+)
+
+
+def role_model_table(pointer_root):
+    """{role: first word of its Model cell} read from the pointer checkout's decision record, or None when the
+    record is missing, not text, or holds no row. The one reader of the table."""
+    if not pointer_root:
+        return None
+    lint = os.path.join(_HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    try:
+        folder = layout.layout()["kinds"]["decisions"]["path"].strip("/")
+        with open(os.path.join(pointer_root, *folder.split("/"), ROLE_TABLE_FILE), encoding="utf-8") as handle:
+            text = handle.read(ROLE_TABLE_MAX)
+    except (OSError, ValueError, layout.LayoutError):
+        return None
+    table = {}
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        names = [part.strip() for part in ROLE_PARENTHETICAL.sub("", cells[0]).replace("`", "").split(",")]
+        word = ROLE_FIRST_WORD.match(cells[1].replace("`", ""))
+        if not all(ROLE_WORD.match(name) for name in names) or not word or word.group(1).lower() not in ROLE_MODEL_RANK:
+            continue
+        for name in names:
+            table.setdefault(name, word.group(1).lower())
+    return table or None
+
+
+def role_has_model_pin(pointer_root, role):
+    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
+    frontmatter, False when none does, None when the folder cannot be read."""
+    folder = os.path.join(pointer_root, "agents")
+    try:
+        files = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+    except OSError:
+        return None
+    for name in files:
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                lines = handle.read(ROLE_TABLE_MAX).splitlines()
+        except (OSError, ValueError):
+            return None
+        if not lines or lines[0].strip() != "---":
+            continue
+        keys = {}
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            key, _, value = line.partition(":")
+            keys.setdefault(key.strip(), value.strip())
+        if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+            return True
+    return False
+
+
+def role_name(table, subagent_type) -> str:
+    """The role a spawn names, as the table spells it: matched without case and without surrounding space.
+    A role the table lacks keeps its own spelling, stripped. An empty role is the default role."""
+    role = str(subagent_type or "").strip() or ROLE_DEFAULT
+    return next((name for name in table if name.lower() == role.lower()), role)
+
+
+def role_model_check(tool: str, tool_input):
+    """(reason, matched, unread) for an Agent or Task spawn against its role's row. `reason` is the deny, or "".
+    `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
+    opus_spawn_hit. An Explore on an audit brief
+    (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too."""
+    if tool not in SPAWN_TOOLS:
+        return "", "", False
+    pointer = pointer_checkout()
+    if not pointer:
+        return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
+    table = role_model_table(pointer)
+    if table is None:
+        return "", pointer, True
+    role = role_name(table, tool_input.get("subagent_type"))
+    model = str(tool_input.get("model") or "").strip()
+    if model:
+        top = len(ROLE_MODEL_RANK) - 1
+        named = next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in model.lower()), None)
+        row = table.get(role)
+        if named is None:
+            # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
+            named = top if row == ROLE_MODEL_RANK[top] else top + 1
+        if named == top or row is None:
+            return "", "", False
+        if role == EXPLORE_ROLE and named < top and re.search(r"\b%s" % re.escape(EXPLORE_AUDIT_MARKER),
+                                                              brief_first_line(tool_input.get("prompt"))):
+            return "", "", False
+        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
+                                                      for kind, n in brief_markers(tool_input.get("prompt"))):
+            return "", "", False
+        if named > ROLE_MODEL_RANK.index(row):
+            extra = ""
+            if role == EXPLORE_ROLE and named < top:
+                extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
+            if role == "reviewer":
+                extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
+                                                    ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
+            return ROLE_MODEL_REASON % extra, model, False
+        return "", "", False
+    if os.environ.get(ROLE_MODEL_ENV, "").strip():
+        return "", "", False
+    pinned = role_has_model_pin(pointer, role)
+    if pinned is None:
+        return "", pointer, True
+    if pinned:
+        return "", "", False
+    row = table.get(role, "sonnet")
+    # A remedy never names Haiku: a role on a Haiku row has an agent file that pins it, so it rarely gets here.
+    return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), "no model, role " + role, False
 
 
 # THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
@@ -2542,54 +2743,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `task-names-check`, `owner-judge`, `question-form`). This check runs them only for a
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-DATA_TOOL = "ArtifactData"
-WAITING_ITEMS = "items"
-
-
-def _is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page (lint/layout.py, the one home). A repo
-    with no page reads as unknown, and its calls are not judged."""
-    lint = os.path.join(_HERE, "..", "lint")
-    if lint not in sys.path:
-        sys.path.append(lint)
-    import layout
-    root = _git_root_of(cwd)
-    page = layout.waiting_page(root) if root else "unknown"
-    url = str(tool_input.get("url") or "").rstrip("/")
-    return page != "unknown" and url == page.rstrip("/")
-
-
-def _git_root_of(cwd):
-    here = os.path.realpath(cwd or os.getcwd())
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
 def data_tool_hit(tool_input, cwd=""):
-    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", "")."""
-    if not isinstance(tool_input, dict):
-        return "", ""
-    if tool_input.get("action") == "batch":
-        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
-    else:
-        entries = [(tool_input.get("action"), tool_input)]
-    writes = [(op, e) for op, e in entries
-              if op in ("set", "update", "str_replace") and e.get("collection") == WAITING_ITEMS]
-    if not writes or not _is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
-        return "", ""
+    """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
+    filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
     import question_form
-    for op, entry in writes:
-        hit = question_form.item_hit(op, entry)
-        if hit[0]:
-            return hit
-    return "", ""
+    return question_form.page_item_hit(tool_input, cwd)[0]
 
 
 # ------------------------------------------------------------------ impeccable is review-only
@@ -2906,7 +3069,8 @@ def session_home_record(payload, primary: str):
 def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither."""
-    if not isinstance(payload, dict) or payload.get("agent_id"):
+    if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
+        # create_session reaches the guard only for rule lane-effort-pin; it keeps no record
         return
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     primary, lane = session_home_place(where)
@@ -3416,7 +3580,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
     check."""
-    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input) or role_model_check(tool, tool_input)[0]
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
     if tool in SHELL_TOOLS:
@@ -3482,6 +3646,20 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
+    # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
+    # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
+    lane_prompt = lane_effort_hit(tool, tool_input)
+    if lane_prompt:
+        refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
+
+    # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
+    # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
+    role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
+    if role_unread:
+        record(tool, "noted", "agent-role-model-unread", role_matched)
+    if role_reason:
+        refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
+
     # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
     # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
@@ -3512,6 +3690,12 @@ def judge(payload) -> None:
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
+    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
+    trust_transcript = payload.get("transcript_path")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    if matched:
+        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
         if matched:
@@ -3531,12 +3715,20 @@ def judge(payload) -> None:
             refuse(tool, "deny", "press-link", question_form.PAGE_REASONS["press-link"], matched)
         if rule == "command-in-item":
             refuse(tool, "deny", "command-in-item", question_form.PAGE_REASONS["command-in-item"], matched)
+        if rule == "gh-login-switch":
+            refuse(tool, "deny", "gh-login-switch", question_form.PAGE_REASONS["gh-login-switch"], matched)
         if rule == "task-names-check":
             refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
+        if rule == "option-letter-keys":
+            refuse(tool, "deny", "option-letter-keys", question_form.PAGE_REASONS["option-letter-keys"], matched)
+        if rule == "rework-off-page":
+            refuse(tool, "deny", "rework-off-page", question_form.PAGE_REASONS["rework-off-page"], matched)
         if rule == "question-form":
             refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
+        if rule == "question-departs":
+            refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         return

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, or an open standing item whose id is missing from the handoff.
+"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item with no send to the page writer, or an open standing item whose id is missing from the handoff.
 
 Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes for every owner message,
 and the session's handoff beside it. A burst is the messages saved since the last Stop when they are
@@ -9,13 +9,26 @@ Only a burst's messages need items: a lone short message never triggers the guar
 were bursts. Each Stop updates it, even with stop_hook_active, so a message is classed once, in the
 turn it arrived. A missing or damaged state file counts every saved message as this turn's. It blocks
 a turn end in these cases:
-  - a burst's message has no item lines under it;
-  - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing;
+  - a burst's message has no item lines under it. The reason gives the inbox file's absolute path, the
+    message's heading line and its line number, and an example item. Items added in any later turn
+    count, because each Stop reads the whole file;
+  - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page;
   - a ruling or task item, open or closed, whose home is not a file under a home of its kind
     (HOME_KINDS, paths from lint/layout.py for the repo of the hook's cwd) that some branch's tree
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
-    never count for these two kinds (rule building-memory-is-short-term). When the cwd is in no git
+    never count for these two kinds (rule building-memory-is-short-term). A home outside them is
+    reported as "<path> is not a tracked <kind> home", with the homes listed (kind_homes). When the cwd is in no git
     repo, or the layout cannot be read, these homes pass unchecked and a systemMessage says so;
+  - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
+    every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
+    `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
+    or SendMessage naming n as a whole token, or an ArtifactData set, update or batch whose input has
+    key n equal to the item number under collection `items` (Pages; lint/_transcript.py reads the
+    transcript). The k-th block with text T anchors to the k-th owner record with text T, line ends made
+    the same. Owner records are user records and queued_command attachments (_transcript.owner_text):
+    a peer's words and machine notices never count. A missing or unreadable transcript passes every
+    block with a systemMessage. A block with no owner record for its text passes with a systemMessage,
+    and the other blocks are still checked;
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
@@ -35,18 +48,32 @@ LINT = os.path.join(HERE, "..", "lint")
 if LINT not in sys.path:
     sys.path.insert(0, LINT)
 
+import _transcript  # noqa: E402  the one home of the transcript readers and the owner-record test
 import local_time  # noqa: E402  the one home of the inbox paths
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
+from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
-JOT = re.compile(r"\[(ruling|task|question|note|standing)\]\s+->\s+\S")
-HEADER = re.compile(r"### \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT|CST) \(UTC-0[56]:00\)$")
+KINDS = ("ruling", "task", "question", "note", "standing", "page")
+JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
+PAGE_HOME = re.compile(r"page:(\d+)")
+SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
+WRITE_VERBS = ("set", "update", "batch")
+HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer emits
+HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
+STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
+# The home each kind without a file home takes, as the decision gives it.
+KIND_WORDS = {"question": "answered", "note": "noted", "standing": "handoff", "page": "page:<n>"}
+EXAMPLE_KIND = "note"  # a key of KIND_WORDS
+EXAMPLE_HOME = KIND_WORDS[EXAMPLE_KIND]
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
 # Layout keys (lint/layout.json, or a repo's extras file) whose paths may hold each kind's home.
 HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
               "task": ("todo", "debts", "debt-notes")}
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
+FAIL_OPEN_PAGES = "Feedback guard: page sends not checked (%s)."
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
 
 
@@ -80,10 +107,10 @@ def burst_indexes(blocks, turns):
 
 
 def parse(text):
-    """[{stamp, text, items}] from the inbox. Lines inside a fence are never headers or items, and a
+    """[{stamp, line, text, items}] from the inbox, `line` being the heading's 1-based line number. Lines inside a fence are never headers or items, and a
     `### ` line that is not the hook's own Central header is plain text."""
     blocks, fence = [], None
-    for ln in text.split("\n"):
+    for number, ln in enumerate(text.split("\n"), 1):
         ln = ln.rstrip("\r")
         if fence is not None:
             if re.fullmatch(r"`+", ln) and len(ln) >= len(fence):
@@ -91,7 +118,8 @@ def parse(text):
             else:
                 blocks[-1]["text"] = ln if blocks[-1]["text"] is None else blocks[-1]["text"] + "\n" + ln
         elif HEADER.match(ln):
-            blocks.append({"stamp": ln[4:], "text": None, "items": [], "fenced": False})
+            blocks.append({"stamp": ln[len(HEADING_PREFIX):], "line": number, "text": None, "items": [],
+                           "fenced": False})
         elif blocks and not blocks[-1]["fenced"] and re.fullmatch(r"`{3,}", ln):
             fence, blocks[-1]["fenced"] = ln, True
         elif blocks and ln.startswith("- fb-"):
@@ -117,6 +145,39 @@ def open_ids(blocks, kinds=OPEN_KINDS):
             if it and it[2] and not it[3] and it[1].startswith(kinds):
                 ids.append(it[0])
     return ids
+
+
+def example_item(stamp):
+    """An item line the check accepts (ITEM and JOT) for the message at `stamp`: id `fb-HHMM-1`."""
+    m = STAMP_HHMM.match(stamp)
+    return "- fb-%s%s-1 [%s] -> %s" % (m.group(1), m.group(2), EXAMPLE_KIND, EXAMPLE_HOME) if m else None
+
+
+def no_items_problem(block, inbox, homes_line=""):
+    """The reason for a burst message with no items: where the items go, what one looks like, and each kind's home."""
+    first = (block["text"] or "").split("\n")[0][:40]
+    where = "add items under the line `%s%s` (line %d of %s)" % (HEADING_PREFIX, block["stamp"], block["line"], inbox)
+    example = example_item(block["stamp"])
+    return "the message at %s (%s) has no items: %s%s%s" % (
+        block["stamp"], first, where, ", one per line, for example `%s`" % example if example else "",
+        ". Kind homes: %s" % homes_line if homes_line else "")
+
+
+def kind_homes(layout, root, kind):
+    """The paths under `root` that may hold a `kind` item's home: each HOME_KINDS layout key the
+    repo has, as its layout path and its base path, that exist. The check and the block text both use it."""
+    known, base = layout.kinds(root), layout.layout()["kinds"]
+    homes = []
+    for key in HOME_KINDS[kind]:
+        if key in known:
+            homes += [layout.path(root, key)] + ([base[key]["path"].strip("/")] if key in base else [])
+    return [h for h in dict.fromkeys(homes) if os.path.exists(os.path.join(root, *h.split("/")))]
+
+
+def home_word(rest):
+    """The first word after `->`, or "" when there is none."""
+    words = rest.split("->", 1)[1].split() if "->" in rest else []
+    return words[0] if words else ""
 
 
 def home_path(rest):
@@ -160,43 +221,161 @@ class Homes:
                     return None
                 rel = os.path.normpath(found)
             rel = rel.replace(os.sep, "/")
-            known = layout.kinds(root)
-            base = layout.layout()["kinds"]
-            homes = []
-            for key in HOME_KINDS[kind]:
-                if key in known:
-                    homes += [layout.path(root, key)] + ([base[key]["path"].strip("/")] if key in base else [])
-            homes = [h for h in dict.fromkeys(homes) if os.path.exists(os.path.join(root, *h.split("/")))]
+            homes = kind_homes(layout, root, kind)
             keys = ", ".join(HOME_KINDS[kind])
             if not homes:
                 return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
                         % (item_id, kind, kind, keys))
             if not any(rel == h or rel.startswith(h + "/") for h in homes):
-                return ("%s [%s] needs a home under %s (layout keys %s), never the handoff or memory"
-                        % (item_id, kind, ", ".join(homes), keys))
+                return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home"
+                        % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes)))
             if not ruling_home.value_resolves(rel, root):
                 return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
             return None
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
 
+    def homes_line(self):
+        """`ruling -> <homes>; task -> <homes>; question -> answered; ...` for every kind in KINDS. The file homes
+        come from kind_homes; when the layout or the repo cannot be read, such a kind names "a tracked file"."""
+        found = {}
+        try:
+            import layout
+        except ImportError:
+            layout = None
+        if layout is not None:
+            try:
+                start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+                root = self._root(start) if start else None
+                if root is not None:
+                    found = {k: kind_homes(layout, root, k) for k in HOME_KINDS}
+            except (layout.LayoutError, ruling_home._GitFailure):
+                found = {}
+        return "; ".join("%s -> %s" % (k, KIND_WORDS[k] if k in KIND_WORDS
+                                       else ", ".join(found.get(k) or ()) or "a tracked file") for k in KINDS)
+
     def _stand_down(self, e):
         self.skip = self.skip or " ".join(str(e).split()) or type(e).__name__
         return None
 
 
-def problems(blocks, handoff, homes=None, burst=()):
-    out = []
+class Pages:
+    """Checks that each page item's number was sent to the page writer after the owner's message.
+    The transcript loads once, on the first open page item. `skip` holds the reasons a block stood
+    down, for the systemMessage line. An unreadable transcript stands down every block; a block with
+    no owner record stands down alone."""
+
+    def __init__(self, path):
+        self.path, self.records, self.owners, self.unread, self.skip = path, None, None, False, []
+
+    def _load(self):
+        if self.records is None:
+            self.records, self.owners = [], []
+            try:
+                if not self.path:
+                    raise OSError("no transcript_path in the payload")
+                self.records = _transcript.read_transcript(self.path)
+            except (OSError, ValueError) as e:
+                self.unread = True
+                self.skip.append("the transcript cannot be read: %s" % (" ".join(str(e).split())
+                                                                       or type(e).__name__))
+            for i, rec in enumerate(self.records):
+                text = _transcript.owner_text(rec, MACHINE_TAGS)
+                if text is not None:
+                    self.owners.append((i, norm(text)))
+        return not self.unread
+
+    def sent(self, text, k, n, stamp):
+        """True when a send naming item n follows the owner record that anchors the k-th block with
+        this text. True too when the check stands down: no transcript, or no such owner record."""
+        if not self._load():
+            return True
+        anchors = [i for i, said in self.owners if said == text]
+        if len(anchors) < k:
+            self.skip.append("the transcript has no owner record %d for the message at %s" % (k, stamp))
+            return True
+        return any(_proves(use, n) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
+                   for use in _transcript.tool_uses(r))
+
+
+def norm(text):
+    """A message text with CRLF and CR line ends made LF, ends trimmed."""
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _proves(use, n):
+    """True when a tool_use sends page item n: a message naming n as a whole token, or an
+    ArtifactData write with key n == n under collection `items`."""
+    name, tool_input = use.get("name") or "", use.get("input")
+    if not isinstance(tool_input, dict):
+        return False
+    if name in SEND_TOOLS:
+        msg = tool_input.get("message")
+        return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
+    return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
+
+
+def _in_items(d):
+    return (d.get("collection") == "items"
+            or any(isinstance(d.get(k), str) and d[k].startswith("items/") for k in ("doc_id", "path")))
+
+
+def _is_write(d):
+    """False for a dict whose action or op is a verb other than set, update, batch."""
+    verb = d.get("action", d.get("op"))
+    return not isinstance(verb, str) or verb in WRITE_VERBS
+
+
+def _has_n(node, n):
+    if isinstance(node, dict):
+        if not _is_write(node):
+            return False
+        v = node.get("n")
+        if (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
+                isinstance(v, str) and v.isdigit() and int(v) == int(n)):
+            return True
+        return any(_has_n(c, n) for c in node.values())
+    return isinstance(node, list) and any(_has_n(c, n) for c in node)
+
+
+def _writes_n(node, n):
+    """True when a write dict that names the items collection holds key n == n at any depth below it."""
+    if isinstance(node, dict):
+        if not _is_write(node):
+            return False
+        return (_in_items(node) and _has_n(node, n)) or any(_writes_n(c, n) for c in node.values())
+    return isinstance(node, list) and any(_writes_n(c, n) for c in node)
+
+
+def page_problem(item_id, rest, text, k, stamp, pages):
+    """None when the page item's home is page:<n> and the send is proved, or the check stood down."""
+    m = PAGE_HOME.fullmatch(home_word(rest))
+    if m is None:
+        return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
+    if pages is None or pages.sent(text, k, m.group(1), stamp):
+        return None
+    return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
+            " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
+            " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
+
+
+def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
+    out, seen = [], {}
     for n, b in enumerate(blocks):
+        text = norm(b["text"])
+        seen[text] = seen.get(text, 0) + 1
         if not b["items"] and n in burst:
-            out.append("the message at %s (%s) has no items" % (b["stamp"], (b["text"] or "").split("\n")[0][:40]))
+            out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
         for ln in b["items"]:
             it = item(ln)
             if it is None:
                 out.append("the item line `%s` is malformed: it needs `- <id> [kind] -> home`" % ln[2:])
             elif not it[2]:
-                out.append("%s needs `[kind] -> home`, kind one of ruling, task, question, note, standing"
-                           % it[0])
+                out.append("%s needs `[kind] -> home`, kind one of %s" % (it[0], ", ".join(KINDS)))
+            elif it[1].startswith("[page]"):
+                found = None if it[3] else page_problem(it[0], it[1], text, seen[text], b["stamp"], pages)
+                if found:
+                    out.append(found)
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
                 found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1])
                 if found:
@@ -214,6 +393,7 @@ def main():
         if paths is None:
             return 0
         inbox, turns = paths
+        inbox = os.path.abspath(inbox)  # CLAUDE_CONFIG_DIR may be relative; the reason promises an absolute path
         out = {}
         try:
             with open(inbox, encoding="utf-8") as f:
@@ -235,14 +415,17 @@ def main():
                     handoff = f.read()
             except OSError:
                 handoff = ""
-            homes = Homes(hook.get("cwd"))
-            reasons = problems(blocks, handoff, homes, burst)
-            if homes.skip:
-                out["systemMessage"] = FAIL_OPEN % homes.skip
+            homes, pages = Homes(hook.get("cwd")), Pages(hook.get("transcript_path"))
+            reasons = problems(blocks, handoff, homes, burst, pages, inbox)
+            notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + (
+                [FAIL_OPEN_PAGES % "; ".join(pages.skip)] if pages.skip else [])
+            if notes:
+                out["systemMessage"] = " ".join(notes)
         if reasons:
             out.update(decision="block", reason="Feedback inbox: " + "; ".join(reasons)
-                       + ". Jot each burst message as `- <id> [kind] -> home` under it, file each ruling and task"
-                       " in its tracked home, and put open standing ids in the handoff.")
+                       + ". The check reads the inbox file at each Stop, so items added in any later turn count,"
+                       " and no new heading is needed. Send each page ruling to the page writer, and put open"
+                       " standing ids in the handoff.")
         if out:
             print(json.dumps(out))
     except Exception as e:  # advisory: a crash passes, and says so on stderr

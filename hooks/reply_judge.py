@@ -44,6 +44,18 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdlib only; the one home of the gh logins
+
+# The widening words come from question_form.WIDENS_TEXT, the one home. If the import fails, the prompt
+# keeps its sentence without the quoted words, one stderr line says so, and the hook still runs.
+try:
+    from question_form import WIDENS_TEXT  # noqa: E402
+except Exception as exc:
+    WIDENS_TEXT = None
+    print("reply judge: cannot read WIDENS_TEXT (%s: %s); the prompt names the label without its words"
+          % (type(exc).__name__, exc), file=sys.stderr)
+WIDENS_LABEL_SENTENCE = ("Also flag an option that widens a shared tool offered without the owner's widening label"
+                         + (", the words \"%s\". " % WIDENS_TEXT if WIDENS_TEXT else ". "))
 
 OK_SHAPE = {"ok": (True, False)}
 MODEL_TIMEOUT = 20  # the Stop entry allows 25
@@ -61,6 +73,12 @@ JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
+# The gh login clause of output-never-hand-off-doable-step (decision act-in-place): a gh command runs as
+# whichever login is active on the owner's computer.
+GH_SWITCH_SENTENCE = ("A block that hands the owner a gh command starts, after any cd, with gh auth switch -u %s, "
+                      "and switches to %s only for a repo %s cannot reach; flag a block with no such switch. "
+                      % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
+
 INSTRUCTIONS = (
     "Judge the final reply below against eight rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
@@ -70,6 +88,7 @@ INSTRUCTIONS = (
     "output-never-hand-off-doable-step: a command left to the owner needs its own fenced code block, "
     "ready to run as is, with one shell in the block. "
     "A button path needs no block; a command needs one, even a login command such as gh auth login. "
+    + GH_SWITCH_SENTENCE +
     "The block sits outside the report blockquote. "
     "A command the reply already ran is not a step left to the owner. "
     "A command named in a report line as done work, a line that says what ran, is not a step left to the owner. "
@@ -107,7 +126,7 @@ INSTRUCTIONS = (
     "Flag only a limit or rule named as a note on the session's own conduct. "
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
     "such as a second accepted form, an allow-list entry or a per-repo exception. "
-    "Also flag an option that widens a shared tool offered without the words \"Goes against your uniform ruling (t18)\". "
+    + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "

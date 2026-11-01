@@ -88,7 +88,7 @@ let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -104,6 +104,8 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
   await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
+  // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
+  if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
   await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
@@ -113,22 +115,11 @@ const card = (page, it) => page.locator(`#item-${it.id}`);
 const answers = (page) => page.evaluate(() => window.__answers());
 // A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
-const takePick = (page, it) => card(page, it).getByRole("button", { name: /Take my pick/ }).click();
-// The keyboard way to take a pick: focus the button and press Enter. Resolves to what holds focus one frame later, so a fix that focuses in a frame still counts.
-// `place` is an optional step that scrolls the page between the focus and the key press.
-const enterTakePick = async (page, it, place) => {
-  await page.locator(`#b-take-${it.id}`).focus();
-  if (place) await place();
-  await page.keyboard.press("Enter");
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
-  return page.evaluate(() => ({ tag: document.activeElement.tagName, id: document.activeElement.id }));
+// A tap on the starred option picks it. A pick partly ticked already taps only the keys not yet ticked, so the card ends with the whole pick.
+const takePick = async (page, it) => {
+  for (const k of [].concat(it.pick)) if (!(await page.isChecked(`#o-${it.id}-${k}`))) await tick(page, it, k);
 };
-// After Take my pick hides, focus belongs on the input of the pick's first key, as the A to C key handler leaves it.
-const assertFocusOnFirstPick = (at, it, key) => {
-  assert.notEqual(at.tag, "BODY", `${it.id}: focus fell to BODY after Enter on Take my pick`);
-  assert.equal(at.id, `o-${it.id}-${key}`, `${it.id}: focus is not on the first key of the pick`);
-};
-const addNote = async (page, it, text) => { await card(page, it).getByRole("button", { name: "Add a note" }).click(); await page.fill(`#n-${it.id}`, text); };
+const addNote = async (page, it, text) => { await page.fill(`#n-${it.id}`, text); };
 const send = (page) => page.click("#send");
 const written = (page) => page.waitForFunction(() => window.__log.some((l) => l[0] === "set"));
 const geo = (page) => page.evaluate(() => ({
@@ -143,7 +134,7 @@ const optFrame = (it, key) => `label.opt[for="o-${it.id}-${key}"] iframe`;
 
 // ---------------------------------------------------------------- the final design
 
-test("a rule question starts blank, my pick is starred in its card, and Take my pick fills it in one tap", async (t) => {
+test("a rule question starts blank, my pick is starred in its card, and a tap on the star fills it in", async (t) => {
   const page = await open(t); if (!page) return;
   assert.equal(await page.locator(`input[name="g-${DECISION.id}"]:checked`).count(), 0, "an option is preselected");
   const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick`);
@@ -158,7 +149,7 @@ test("a rule question starts blank, my pick is starred in its card, and Take my 
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
   const a = (await answers(page))[DECISION.id];
-  assert.deepEqual([a.item, a.n, a.choice, a.note], [DECISION.id, 27, "a", "accepted pick"]);
+  assert.deepEqual([a.item, a.n, a.choice, a.note], [DECISION.id, 27, "a", ""]);
 });
 
 test("the list has three tiers read from holds and by, then Pick stands last", async (t) => {
@@ -231,7 +222,7 @@ test("one Send writes every ready answer in the old record shape and leaves the 
   const a = await answers(page);
   assert.deepEqual(Object.keys(a).sort(), ["d-one", "d-two", TASK.id]);
   assert.deepEqual([a["d-one"].item, a["d-one"].n, a["d-one"].choice, a["d-one"].note], ["d-one", 1, "b", ""]);
-  assert.equal(a["d-two"].note, "accepted pick");
+  assert.deepEqual([a["d-two"].choice, a["d-two"].note], ["a", ""]);
   assert.equal(a[TASK.id].done, true);
   assert.ok(!Number.isNaN(Date.parse(a["d-one"].at)), "at is an ISO time");
   assert.equal(await page.evaluate(() => window.__log.filter((l) => l[0] === "set").length), 3);
@@ -311,10 +302,10 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
     };
     await choose(page, items[0], "b"); await same("a pick");
     await choose(page, items[0], "a"); await same("a second pick");
-    await takePick(page, items[3]); await same("Take my pick");
+    await takePick(page, items[3]); await same("a tap on the star");
     await choose(page, items[3], "a"); await same("a click on the selected pick");
-    await card(page, items[4]).getByRole("button", { name: /Take my pick/ }).click();
-    await choose(page, items[4], "c"); await same("a pick after Take my pick");
+    await takePick(page, items[4]);
+    await choose(page, items[4], "c"); await same("a pick after a tap on the star");
     await card(page, items[2]).getByRole("button", { name: "Mark done" }).click(); await same("Mark done");
     sent = true;
     // A Send shrinks each receipt at once (shiv, 15:06 CDT Oct 30, receipt-tightens-at-once). The anchor is the first card whose bottom is below the band's
@@ -409,15 +400,6 @@ test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   await page.keyboard.press("Control+Enter");
   await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
   assert.equal((await answers(page))[DECISION.id].choice, "b");
-});
-
-// The pick is B, not the first option, so a fix that focuses the first radio of the card fails.
-test("Enter on Take my pick puts focus on the pick's input, on a pick-one card", async (t) => {
-  const it = mk("take-focus", 40, { pick: "b" });
-  const page = await open(t, { items: [it] }); if (!page) return;
-  const at = await enterTakePick(page, it);
-  assert.equal(await page.isChecked(`#o-${it.id}-b`), true, "Enter did not take the pick");
-  assertFocusOnFirstPick(at, it, "b");
 });
 
 // ---------------------------------------------------------------- repo colour
@@ -961,16 +943,17 @@ test("a press on the scrollbar gutter opens nothing and picks nothing, and a pre
   assert.equal(await page.locator("#dsheet").isVisible(), true, "a press on the picture did not open View");
 });
 
-test("a right-button press on the scrollbar, then Escape, leaves Enter working on Add a note, at 1280 wide", async (t) => {
+test("a right-button press on the scrollbar, then Escape, leaves Enter working on None of these, at 1280 wide", async (t) => {
   const it = picItem("stale-right", 43);
   const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 1280, height: 900 } }); if (!page) return;
   await frameSettled(page, 2400);
   const r = await page.locator(boxSel(it.id)).boundingBox();
   await page.mouse.click(r.x + r.width - 4, r.y + 100, { button: "right" });
   await page.keyboard.press("Escape");
-  await card(page, it).getByRole("button", { name: "Add a note" }).focus();
+  await card(page, it).getByRole("button", { name: "None of these" }).focus();
   await page.keyboard.press("Enter");
-  assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, "the note did not open: a right press on the scrollbar left a stale state");
+  await page.waitForFunction((id) => document.getElementById(`b-none-${id}`)?.getAttribute("aria-pressed") === "true", it.id);
+  assert.equal(await page.getAttribute(`#b-none-${it.id}`, "aria-pressed"), "true", "Enter did not press None of these: a right press on the scrollbar left a stale state");
 });
 
 test("a middle press on the scrollbar leaves Space working on an option, at 1280 wide", async (t) => {
@@ -1259,7 +1242,7 @@ test("a second click unselects a stood pick, and it stays unselected", async (t)
   await takePick(page, it);
   assert.equal(await page.isChecked(`#o-${it.id}-a`), true);
   await choose(page, it, "a");
-  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a pick taken with Take my pick cannot be unselected");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a second click unselects a pick taken by a tap");
 });
 
 test("emptying a note drops it", async (t) => {
@@ -1304,6 +1287,33 @@ test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   await send(page);
   await c.getByText("Not withdrawn (denied)", { exact: false }).waitFor();
   assert.ok((await answers(page))[DECISION.id], "the saved answer is gone");
+});
+
+// The note box is open on every open card, with no Add a note button. A sent card has no box; a card under Change is open.
+test("the note box is open on every open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
+  const FRESH = mk("fresh-decision", 29);
+  const page = await open(t, { items: [DECISION, FRESH, TASK], answers: SAVED_A }); if (!page) return;
+  assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "a sent card shows a note box");
+  for (const it of [FRESH, TASK]) {
+    assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, `${it.id}: the note box is not open on a fresh card`);
+  }
+  assert.equal(await page.getByRole("button", { name: "Add a note" }).count(), 0, "a card renders an Add a note button");
+  await card(page, DECISION).getByRole("button", { name: "Change" }).click();
+  assert.equal(await page.locator(`#n-${DECISION.id}`).isVisible(), true, "a sent card under Change shows no note box");
+});
+
+// The send bar is fixed at the bottom of the viewport. The page is scrolled so the note box starts 2px above the bar's top.
+test("a focused note box at 390 wide ends above the send bar", async (t) => {
+  const it = mk("note-low", 62, { context: LONG });
+  const page = await open(t, { items: [mk("filler-a", 60, { context: LONG }), it, mk("filler-b", 61, { context: LONG })], viewport: { width: 390, height: 844 } }); if (!page) return;
+  const edge = (id) => page.evaluate((k) => ({ bottom: document.getElementById(k).getBoundingClientRect().bottom, barTop: document.getElementById("bar").getBoundingClientRect().top }), id);
+  await page.evaluate((k) => window.scrollBy(0, document.getElementById(k).getBoundingClientRect().top - document.getElementById("bar").getBoundingClientRect().top + 2), `n-${it.id}`);
+  const before = await edge(`n-${it.id}`);
+  assert.ok(before.bottom > before.barTop, `setup: the note box ends at ${Math.round(before.bottom)}, not under the send bar at ${Math.round(before.barTop)}`);
+  await page.locator(`#n-${it.id}`).focus();
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  const at = await edge(`n-${it.id}`);
+  assert.ok(at.bottom <= at.barTop, `the focused note box ends at ${Math.round(at.bottom)}, under the send bar at ${Math.round(at.barTop)}`);
 });
 
 test("a note with no option picked is an answer: choice none plus the note", async (t) => {
@@ -1430,7 +1440,7 @@ test("a second send replies into the stored thread", async (t) => {
   assert.equal(s[0].anchor, undefined);
 });
 
-test("Take my pick on two cards and one Send gives exactly one notice for the batch", async (t) => {
+test("a tap on each star on two cards and one Send gives exactly one notice for the batch", async (t) => {
   const two = { ...DECISION, id: "pick-a-shape", n: 29, title: "Pick a shape" };
   const page = await open(t, { items: [DECISION, two, TASK] }); if (!page) return;
   await takePick(page, DECISION); await takePick(page, two);
@@ -1517,7 +1527,7 @@ test("canSendToClaude is asked before the answer write", async (t) => {
 test("a batch of many items with long owners is cut to 4 KiB and keeps Owners", async (t) => {
   const many = Array.from({ length: 70 }, (_, i) => ({ ...DECISION, id: i ? "pick-" + i : DECISION.id, n: 100 + i, owner: ("owner" + i + " ").padEnd(120, "o") }));
   const page = await open(t, { items: many }); if (!page) return;
-  await page.evaluate(() => document.querySelectorAll("button.takepick").forEach((b) => b.click()));
+  for (const it of many) await takePick(page, it);
   await send(page);
   await page.waitForFunction(() => window.__sent.length >= 1);
   const text = (await sent(page))[0].text;
@@ -1675,16 +1685,13 @@ test("an option chip shows its letter by position, never a raw key longer than o
   assert.deepEqual(chips, ["A", "B", "C"]);
 });
 
-test("a pick is named by the option's title, shortened with an ellipsis, never by its raw key", async (t) => {
+test("a pick is named by the option's title in the ready line, shortened with an ellipsis, never by its raw key", async (t) => {
   const it = mk("pick-names", 41, { options: WORDY, pick: "value", why: "Value fits." });
   const page = await open(t, { items: [it] }); if (!page) return;
-  const take = card(page, it).getByRole("button", { name: /Take my pick/ });
-  const name = await take.textContent();
-  assert.doesNotMatch(name, /VALUE|value\)/, "the button shows the raw key: " + name);
-  assert.match(name, /^Take my pick \(Value for the card.*…\)$/, name);
-  await take.click();
+  await takePick(page, it);
   const ready = await card(page, it).locator(".ready").textContent();
-  assert.match(ready, /^Ready to send: Value for the card.*…, my pick\.$/, ready);
+  assert.doesNotMatch(ready, /VALUE|value\)/, "the ready line shows the raw key: " + ready);
+  assert.match(ready, /^Ready to send: Value for the card.*…, your choice\.$/, ready);
   await choose(page, it, "watch");
   assert.equal(await card(page, it).locator(".ready").textContent(), "Ready to send: Watch, your choice.");
 });
@@ -2070,7 +2077,7 @@ test("a decision with a duplicate option key, no options, or a none key warns an
   assert.equal(await warn(page, "good").count(), 0, "a sound item warns");
   // A staged draft on a broken item must still not go out; Send carries only the sound one.
   await page.evaluate(() => { for (const k of ["dup-keys", "none-key"]) setDraft(byId(k), { choice: "a", auto: true }); render(); });
-  await takePick(page, { id: "good" });
+  await takePick(page, { ...DECISION, id: "good" });
   assert.equal(await page.locator("#send").textContent(), "Send 1 answer");
   await send(page);
   await written(page);
@@ -2102,10 +2109,10 @@ test("a blocked card says it cannot be sent, disables its controls, and Copy ans
   await page.evaluate(() => { setDraft(byId("dup-keys"), { choice: "a", auto: true }); render(); });
   const c = card(page, { id: "dup-keys" });
   assert.equal(await c.locator(".ready").textContent(), "This item cannot be sent.");
-  assert.equal(await c.locator(".takepick").isDisabled(), true);
   assert.equal(await c.locator(".nonebtn").isDisabled(), true);
   assert.equal(await c.locator(".opts input").first().isDisabled(), true);
-  await takePick(page, { id: "good" });
+  assert.equal(await page.locator("#n-dup-keys").isDisabled(), true, "the note box of a blocked card is open");
+  await takePick(page, { ...DECISION, id: "good" });
   assert.equal(await page.evaluate(() => answerLine()), "43 a");
 });
 
@@ -2785,7 +2792,7 @@ test("an option that widens a shared tool says it goes against the uniform rulin
   const page = await open(t, { items: [it] }); if (!page) return;
   const a = card(page, it).locator('label.opt[for="o-wide-q-a"]'), b = card(page, it).locator('label.opt[for="o-wide-q-b"]');
   assert.equal(await a.locator(".widens").count(), 1, "the widening option carries no label");
-  assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your uniform ruling (t18)");
+  assert.equal((await a.locator(".widens").innerText()).trim(), "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo");
   assert.equal(await b.locator(".widens").count(), 0, "an option that does not widen is labelled");
 });
 
@@ -2838,6 +2845,13 @@ const CMD = "cd ~/sample-repo\n\necho \"a < b & 'c'\"\n  git status --short";
 const CMD_LINES = CMD.split("\n").map((l) => l.trim()).filter(Boolean);
 const RUN = { ...TASK, id: "run-the-command", n: 31, title: "Run the command", steps: ["Open a terminal", "Paste the command and run it"], command: CMD, links: [{ label: "Sample repo on GitHub", url: "https://github.example.test/sample-repo" }] };
 const WIDE_RUN = { ...RUN, id: "wide-command", n: 32, title: "Deploy the release", command: "npm run deploy -- --environment production --region us-east-1 --confirm --message 'a line that runs past the width of a phone and must wrap, not scroll'\n" + CMD };
+// Ruling (shiv, 2026-10-30 14:47 CDT): a task's command is {powershell, mac}, one string per shell, each in its own block.
+// A string command keeps the legacy render that RUN and WIDE_RUN above test.
+const PS_CMD = "Set-Location ~/sample-repo\nWrite-Output \"a < b & 'c'\"";
+const PS_LINES = PS_CMD.split("\n").map((l) => l.trim()).filter(Boolean);
+const BOTH = { ...TASK, id: "both-shells", n: 34, title: "Clear the cache", steps: ["Open a terminal", "Paste the command below and run it"], command: { powershell: PS_CMD, mac: CMD } };
+const MAC_ONLY = { ...BOTH, id: "mac-only", n: 35, title: "Clear the Mac cache", command: { mac: CMD } };
+const BOTH_WIDE = { ...BOTH, id: "wide-both", n: 36, title: "Deploy on both shells", command: { powershell: "Invoke-Deploy -Environment production -Region us-east-1 -Confirm -Message 'a line that runs past the width of a phone and must wrap, not scroll'\n" + PS_CMD, mac: WIDE_RUN.command } };
 const STATUS_REFUSED = "Not copied. The text is selected; copy it by hand.";
 // A missing element fails with its own message, not as a locator timeout.
 const need = async (loc, msg) => assert.equal(await loc.count(), 1, msg);
@@ -2948,6 +2962,92 @@ for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
     assert.ok((await boxHeight(copy)) >= 44, "Copy is under 44px tall");
     await need(box.locator(".cmd-text"), "no command text in the block");
     assert.equal(await box.locator(".cmd-text").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, "the command runs past its block");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+  });
+}
+
+test("a task with a command for each shell shows two blocks, each closed behind its own summary, with its own Copy", async (t) => {
+  const page = await open(t, { items: [BOTH] }); if (!page) return;
+  assert.equal(await card(page, BOTH).locator(".cmd").count(), 2, "a task with a command for each shell does not show two blocks");
+  for (const [shell, label] of [["ps", "PowerShell"], ["mac", "Mac"]]) {
+    const box = card(page, BOTH).locator(`#cmd-${BOTH.id}-${shell}`);
+    await need(box, `no ${label} command block`);
+    const more = box.locator("details");
+    await need(more, `the ${label} command is not in a closed disclosure`);
+    assert.equal(await more.evaluate((d) => d.open), false, `the ${label} disclosure starts open`);
+    assert.equal((await more.locator("summary").textContent()).trim(), `Show the ${label} command`, `the ${label} summary is not Show the ${label} command`);
+    await need(box.locator(`#cc-${BOTH.id}-${shell}`), `the ${label} text has no id cc-${BOTH.id}-${shell}`);
+    const copy = box.locator("button.cmd-copy");
+    await need(copy, `no Copy on the ${label} command`);
+    assert.equal(await copy.getAttribute("aria-label"), `Copy the ${label} command for No. ${BOTH.n}`, `the ${label} Copy is not named for its shell`);
+    assert.equal(await copy.getAttribute("aria-controls"), `cc-${BOTH.id}-${shell}`, `the ${label} Copy does not control its own text`);
+    assert.equal(await copy.evaluate((b) => !!b.closest("details")), false, `the ${label} Copy sits inside its disclosure`);
+  }
+});
+
+test("Copy on each shell's block writes that shell's string exactly, while its block is closed", async (t) => {
+  const page = await open(t, { items: [BOTH] }); if (!page) return;
+  await stubClipboard(page, false);
+  for (const [shell, text] of [["ps", PS_CMD], ["mac", CMD]]) {
+    const box = card(page, BOTH).locator(`#cmd-${BOTH.id}-${shell}`);
+    await need(box, `no ${shell} command block`);
+    assert.equal(await box.locator("details").evaluate((d) => d.open), false, `the ${shell} block is open before Copy`);
+    await box.locator("button.cmd-copy").click();
+    assert.equal(await holds(page, ({ id, shell }) => !!document.querySelector(`#cmd-${id}-${shell}.copied`), { id: BOTH.id, shell }), true, `a copy that worked did not mark the ${shell} block copied`);
+    assert.equal(await page.evaluate(() => window.__copied), text, `Copy did not write the ${shell} command exactly`);
+  }
+});
+
+for (const [platform, first, label] of [["Win32", "ps", "PowerShell"], ["MacIntel", "mac", "Mac"]]) {
+  test(`on ${platform} the ${label} block comes first`, async (t) => {
+    const page = await open(t, { items: [BOTH], platform }); if (!page) return;
+    const order = await card(page, BOTH).locator(".cmd").evaluateAll((els) => els.map((e) => e.id));
+    const second = first === "ps" ? "mac" : "ps";
+    assert.deepEqual(order, [`cmd-${BOTH.id}-${first}`, `cmd-${BOTH.id}-${second}`], `on ${platform} the blocks are not in this order`);
+  });
+}
+
+test("a command with only a mac string shows one Mac block and no PowerShell block, never a fallback label", async (t) => {
+  const page = await open(t, { items: [MAC_ONLY] }); if (!page) return;
+  const one = card(page, MAC_ONLY);
+  assert.equal(await one.locator(".cmd").count(), 1, "a mac-only command did not show exactly one block");
+  await need(one.locator(`#cmd-${MAC_ONLY.id}-mac`), "no Mac command block");
+  assert.equal(await one.locator(`#cmd-${MAC_ONLY.id}-ps`).count(), 0, "a mac-only command shows a PowerShell block");
+  assert.equal((await one.locator(".cmd-more > summary").textContent()).trim(), "Show the Mac command", "the mac-only summary is not Show the Mac command");
+  assert.equal((await one.textContent()).includes("PowerShell"), false, "a mac-only command names PowerShell on the page");
+});
+
+test("a refused copy on one shell's block opens and selects only that block", async (t) => {
+  const page = await open(t, { items: [BOTH] }); if (!page) return;
+  await stubClipboard(page, true);
+  const ps = card(page, BOTH).locator(`#cmd-${BOTH.id}-ps`), mac = card(page, BOTH).locator(`#cmd-${BOTH.id}-mac`);
+  await need(ps, "no PowerShell command block");
+  await need(mac, "no Mac command block");
+  await ps.locator("button.cmd-copy").click();
+  assert.equal(await holds(page, (id) => !!document.querySelector("#cmd-" + id + "-ps.failed"), BOTH.id), true, "a refused PowerShell copy did not mark its block failed");
+  assert.equal(await ps.locator("details").evaluate((d) => d.open), true, "a refused copy did not open its own block");
+  assert.equal(await mac.locator("details").evaluate((d) => d.open), false, "a refused copy opened the other block");
+  assert.equal(await mac.evaluate((e) => e.classList.contains("failed")), false, "a refused copy marked the other block failed");
+  const sel = await page.evaluate(() => getSelection().toString());
+  for (const line of PS_LINES) assert.ok(sel.includes(line), "the PowerShell text is not selected: " + line);
+  for (const line of CMD_LINES) assert.equal(sel.includes(line), false, "the Mac text is selected: " + line);
+  assert.equal(await page.evaluate(() => window.__copied), undefined, "a refused copy wrote something");
+});
+
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
+  test(`both shells' Copy is 44px tall or more, and neither command block scrolls sideways, at ${width} wide, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [BOTH_WIDE], scheme, viewport: { width, height: 900 } }); if (!page) return;
+    for (const shell of ["ps", "mac"]) {
+      const box = card(page, BOTH_WIDE).locator(`#cmd-${BOTH_WIDE.id}-${shell}`);
+      await need(box, `no ${shell} command block on the wide task`);
+      const copy = box.locator("button.cmd-copy");
+      await need(copy, `no Copy on the ${shell} block`);
+      assert.ok((await boxHeight(copy)) >= 44, `the ${shell} Copy is under 44px tall`);
+      await box.locator("summary").click();
+      await need(box.locator(".cmd-text"), `no ${shell} command text in the block`);
+      assert.equal(await box.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, `the ${shell} block scrolls sideways`);
+      assert.equal(await box.locator(".cmd-text").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, `the ${shell} command runs past its block`);
+    }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
   });
 }
@@ -3221,12 +3321,6 @@ const needBoxes = async (page, it, n) => assert.equal(await boxes(page, it).coun
 // A ranked card's label stretches over the whole card, so a press on its text lands on that label: press the label.
 const tick = (page, it, key) => (it.ranked ? page.locator(`label[for="o-${it.id}-${key}"]`).click() : choose(page, it, key));
 const labelOf = (it, key) => it.options.find((o) => o.key === key).label;
-// Take my pick keeps its place when it does not apply (`.gone`, visibility hidden), so a hidden one is still one element in the card.
-const takeShown = async (page, it) => {
-  const b = page.locator(`#b-take-${it.id}`);
-  assert.equal(await b.count(), 1, `${it.id}: Take my pick left its place in the card`);
-  return b.isVisible();
-};
 const rankText = (page, it, key) => page.locator(`#item-${it.id} .opt:has(#o-${it.id}-${key})`).textContent();
 // "2nd of 3". A card's text runs its spans together with no space, so a digit guard stands in for a word boundary.
 const rank = (ord, n) => new RegExp(`(?<!\\d)${ord} of ${n}(?!\\d)`);
@@ -3297,25 +3391,22 @@ test("a press on a marked row ticks its option, on a ranked card as on a plain m
   }
 });
 
-test("Take my pick on a multi item writes the whole pick list with the note accepted pick, ranked or not", async (t) => {
+test("a tap on the stars of a multi item and a ranked item writes each whole pick list, ranked or not", async (t) => {
   const m = digest(), r = ranked("rk-take", 32);
   const page = await open(t, { items: [m, r] }); if (!page) return;
   await needBoxes(page, m, 3); await needBoxes(page, r, 4);
-  const take = card(page, m).getByRole("button", { name: /Take my pick/ });
-  assert.match(await take.textContent(), /^Take my pick \(.*Open items.*Answers that.*\)$/, "the button does not name both picks by title");
-  await take.click(); await takePick(page, r);
+  await takePick(page, m); await takePick(page, r);
   assert.deepEqual(await ticked(page, m), ["a", "c"]);
   assert.deepEqual(await ticked(page, r), ["a", "c", "d"]);
   for (const [k, n] of [["c", "1st"], ["a", "2nd"], ["d", "3rd"]]) assert.match(await rankText(page, r, k), rank(n, 3), `rank of ${k}`);
-  assert.equal(await takeShown(page, m), false, "Take my pick is not hidden after it was taken");
-  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden on a ranked item after it was taken");
-  assert.match(await card(page, m).locator(".ready").textContent(), /, my pick\.$/);
+  assert.match(await card(page, m).locator(".ready").textContent(), /^Ready to send: .+, your choice\.$/);
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
   await send(page);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
   const a = await answers(page);
-  assert.deepEqual([a[m.id].choice, a[m.id].note], [["a", "c"], "accepted pick"]);
-  assert.deepEqual([a[r.id].choice, a[r.id].note], [["c", "a", "d"], "accepted pick"]);
+  assert.deepEqual(a[m.id].choice, ["a", "c"]);
+  assert.deepEqual(a[r.id].choice, ["c", "a", "d"]);
+  assert.deepEqual([a[m.id].note, a[r.id].note], ["", ""]);
 });
 
 test("a note on a multi item with nothing ticked is choice none plus the note; with ticks it rides on the list", async (t) => {
@@ -3379,7 +3470,7 @@ test("a saved multi answer lists each pick with its letter and title in order, a
   assert.match(await rankText(page, r, "a"), rank("2nd", 3));
 });
 
-test("the ready line names the picks by title, shortened, never by letter, a ranked line gives the order, and Take my pick hides once the ticks equal my pick", async (t) => {
+test("the ready line names the picks by title, shortened, never by letter, and a ranked line gives the order", async (t) => {
   const m = multi("rd-m", 41, { options: WORDY, pick: ["value", "watch"] }), r = ranked("rd-r", 42, { options: WORDY, pick: ["nothing", "value"] });
   const page = await open(t, { items: [m, r] }); if (!page) return;
   await needBoxes(page, m, 3); await needBoxes(page, r, 3);
@@ -3390,33 +3481,19 @@ test("the ready line names the picks by title, shortened, never by letter, a ran
   await tick(page, m, "nothing");
   const three = await ready(m);
   assert.ok(three.indexOf("Value for the card") < three.indexOf("Watch") && three.indexOf("Watch") < three.indexOf("Nothing") && /^Ready to send: /.test(three) && / and /.test(three), "three picks are not named in a list: " + three);
-  // The same two picks in another order than my pick (nothing, then value): the button stays, and it names my pick by title.
+  // Picks ticked in the order value, then nothing: the ranked line gives that order, not the pick's.
   await tick(page, r, "value"); await tick(page, r, "nothing");
   assert.match(await ready(r), /^Ready to send: Value for the card.*…, Nothing, your order\.$/);
-  assert.equal(await takeShown(page, r), true, "Take my pick is hidden while the order differs from my pick");
-  assert.match(await card(page, r).getByRole("button", { name: /Take my pick/ }).textContent(), /^Take my pick \(Nothing.*Value for the card.*…\)$/, "Take my pick does not name the picks by title");
-  await takePick(page, r);
-  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, my pick\.$/);
-  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden once the ticks equal my pick");
-  // Ticking exactly my pick by hand hides it too, and the line says the order is the owner's.
-  await tick(page, r, "value"); await tick(page, r, "nothing");
-  await tick(page, r, "nothing");
-  assert.equal(await takeShown(page, r), true, "Take my pick is hidden while only part of my pick is ticked");
-  await tick(page, r, "value");
-  assert.equal(await takeShown(page, r), false, "Take my pick is not hidden after the owner ticked exactly my pick");
-  assert.match(await ready(r), /^Ready to send: Nothing.*Value for the card.*…, your order\.$/);
 });
 
 // An unranked multi item has no order to keep: its ticks stay in option order, whatever order they were ticked in (ruling of 15:55 CDT, c135 round 3).
-test("an unranked multi item keeps its ticks in option order: C then A equals my pick a+c, hides Take my pick, and the answer and the notice read a+c", async (t) => {
+test("an unranked multi item keeps its ticks in option order: C then A equals my pick a+c, and the answer and the notice read a+c", async (t) => {
   const it = multi("un-order", 61, { pick: ["a", "c"] });
   const page = await open(t, { items: [it] }); if (!page) return;
   await needBoxes(page, it, 3);
   await tick(page, it, "c");
-  assert.equal(await takeShown(page, it), true, "Take my pick is hidden while only C is ticked");
   await tick(page, it, "a");
   assert.deepEqual(await ticked(page, it), ["a", "c"]);
-  assert.equal(await takeShown(page, it), false, "Take my pick is not hidden after C then A, the same set as my pick");
   assert.match(await card(page, it).locator(".ready").textContent(), /^Ready to send: Red and Green, your choice\.$/, "the ready line does not name the ticks in option order");
   await send(page);
   await told(page, "Claude was told");
@@ -3427,27 +3504,20 @@ test("an unranked multi item keeps its ticks in option order: C then A equals my
   assert.match(s[0].text, /(?<!\d)61 a\+c(?![+\w])/, "the notice does not read a+c: " + s[0].text);
 });
 
-// An unranked multi pick out of option order must not keep Take my pick: an unranked pick is saved and compared in option order;
-// a ranked pick keeps the order it was ticked or picked in.
-test("a multi item whose pick is out of option order: option-order ticks hide Take my pick, Take my pick saves option order, and a ranked pick keeps its order", async (t) => {
+// An unranked pick out of option order is saved in option order; a ranked pick keeps the order it was ticked or tapped in.
+test("a multi item whose pick is out of option order: an unranked pick saves in option order, and a ranked pick keeps its order", async (t) => {
   const uHand = multi("po-u-hand", 81, { pick: ["c", "a"] }), uTake = multi("po-u-take", 82, { pick: ["c", "a"] });
   const rHand = ranked("po-r-hand", 83), rTake = ranked("po-r-take", 84);
   const page = await open(t, { items: [uHand, uTake, rHand, rTake] }); if (!page) return;
   await needBoxes(page, uHand, 3); await needBoxes(page, uTake, 3); await needBoxes(page, rHand, 4); await needBoxes(page, rTake, 4);
   for (const k of ["c", "a", "d"]) await tick(page, rHand, k);
-  assert.equal(await takeShown(page, rHand), false, "a ranked item ticked in its pick order: Take my pick is not hidden");
   await tick(page, uHand, "a"); await tick(page, uHand, "c");
-  const uShown = await takeShown(page, uHand);
   await takePick(page, uTake); await takePick(page, rTake);
   await send(page);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 4);
   const a = await answers(page);
   assert.deepEqual([a[rTake.id].choice, a[rHand.id].choice], [["c", "a", "d"], ["c", "a", "d"]], "a ranked pick is not saved in its pick order");
-  assert.deepEqual(
-    { shown: uShown, take: a[uTake.id].choice, hand: a[uHand.id].choice },
-    { shown: false, take: ["a", "c"], hand: ["a", "c"] },
-    "an unranked pick out of option order: Take my pick must hide once the ticks are A and C, and must save option order"
-  );
+  assert.deepEqual([a[uTake.id].choice, a[uHand.id].choice], [["a", "c"], ["a", "c"]], "an unranked pick out of option order is not saved in option order");
 });
 
 const LONGER = [opt("a", "Open items older than a week, listed oldest first"), opt("b", "Picks that stood since the last digest went out"), opt("c", "Answers that failed to save and need a second chance"), opt("d", "A fourth title that is long enough to wrap")];
@@ -3462,7 +3532,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 
     await tick(page, items[0], "a"); await same("a first tick");
     await tick(page, items[0], "b"); await same("a second tick");
     await tick(page, items[0], "a"); await same("an untick");
-    await takePick(page, items[0]); await same("Take my pick on a multi item");
+    await takePick(page, items[0]); await same("a tap on the stars of a multi item");
     for (const k of ["c", "a", "d"]) { await tick(page, items[1], k); await same("a tick on a ranked item"); }
     await moveBtn(page, items[1], "a", "up").click(); await same("Up");
     await moveBtn(page, items[1], "d", "up").click(); await same("a second Up");
@@ -3470,7 +3540,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 800 
     const first = moveBtn(page, items[1], "a", "up");
     await first.focus(); await page.keyboard.press("Enter"); await same("Up on the first");
     await tick(page, items[1], "d"); await same("an untick on a ranked item");
-    await takePick(page, items[1]); await same("Take my pick on a ranked item");
+    await takePick(page, items[1]); await same("a tap on the stars of a ranked item");
   });
 }
 
@@ -3506,7 +3576,7 @@ for (const viewport of [{ width: 390, height: 800 }, { width: 1280, height: 900 
     assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
   });
 
-  test(`a multi item of six 28-character titles shows the tail of its ready line, your choice or my pick, and no card moves, at ${viewport.width} wide`, async (t) => {
+  test(`a multi item of six 28-character titles shows the tail of its ready line, and no card moves, at ${viewport.width} wide`, async (t) => {
     assert.ok(T28.every((l) => l.length === 28), "a title is not 28 characters");
     const six = titles28(6), it = multi("rl-six", 63, { options: six, pick: six.map((o) => o.key) });
     const page = await open(t, { items: [it], viewport }); if (!page) return;
@@ -3522,9 +3592,9 @@ for (const viewport of [{ width: 390, height: 800 }, { width: 1280, height: 900 
     assert.deepEqual(await geo(page), base, "a card moved between nothing ticked and all ticked");
     await tick(page, it, "f"); await takePick(page, it);
     const mine = await readyFit(page, it);
-    assert.match(mine.text, /^Ready to send: .+, my pick\.$/);
-    assert.ok(mine.clip <= 0 && mine.need <= mine.box + 1, `the ready line cuts the tail ", my pick." (box ${mine.box}px, text needs ${mine.need}px)`);
-    assert.deepEqual(await geo(page), base, "a card moved on Take my pick");
+    assert.match(mine.text, /^Ready to send: .+, your choice\.$/);
+    assert.ok(mine.clip <= 0 && mine.need <= mine.box + 1, `the ready line cuts its tail (box ${mine.box}px, text needs ${mine.need}px)`);
+    assert.deepEqual(await geo(page), base, "a card moved on a tap on the star");
   });
 }
 
@@ -3596,18 +3666,27 @@ test("a pick that stands, as a list, sits in the last section, goes with Send as
   assert.deepEqual([a[s2.id].choice, a[s2.id].note], [["c", "a", "d"], "accepted pick"]);
 });
 
-test("a pick that is not a valid list shows no star and no Take my pick; a valid list does", async (t) => {
+test("a pick that is not a valid list shows no star; a valid list does", async (t) => {
   const bad = [multi("bad-str", 51, { pick: "a" }), multi("bad-key", 52, { pick: ["a", "zzz"] }), multi("bad-dup", 53, { pick: ["a", "a"] }), multi("bad-empty", 54, { pick: [] }), mk("bad-one", 55, { pick: ["a", "b"] })];
   const good = multi("good-list", 56);
   const page = await open(t, { items: [...bad, good] }); if (!page) return;
   for (const it of [...bad.slice(0, 4), good]) await needBoxes(page, it, 3);
   assert.equal(await card(page, good).locator(".opt .pick").count(), 2, "a valid list is not starred on each pick");
   assert.match(await page.locator(`#item-${good.id} .opt:has(#o-${good.id}-a) .pick`).textContent(), /Red and Green cover it\./);
-  assert.equal(await card(page, good).getByRole("button", { name: /Take my pick/ }).count(), 1);
-  for (const it of bad) {
-    assert.equal(await card(page, it).locator(".opt .pick").count(), 0, `${it.id}: a star shows for a bad pick`);
-    assert.equal(await card(page, it).getByRole("button", { name: /Take my pick/ }).count(), 0, `${it.id}: Take my pick shows for a bad pick`);
+  for (const it of bad) assert.equal(await card(page, it).locator(".opt .pick").count(), 0, `${it.id}: a star shows for a bad pick`);
+});
+
+// The starred option is the one control for a pick: a tap on it readies the card. The stood card has no tap, because its pick already stands.
+test("a tap on the star readies each card, and no card draws a Take my pick button", async (t) => {
+  const single = mk("nb-single", 70), multiPick = digest(), rk = ranked("nb-rank", 71), stood = mk("nb-stood", 72, { stands: true });
+  const page = await open(t, { items: [single, multiPick, rk, stood] }); if (!page) return;
+  const endings = [[single, /^Ready to send: .+, your choice\.$/], [multiPick, /^Ready to send: .+, your choice\.$/], [rk, /^Ready to send: .+, your order\.$/]];
+  for (const [it, ending] of endings) {
+    await takePick(page, it);
+    assert.match(await card(page, it).locator(".ready").textContent(), ending, `${it.id}: a tap on the star did not ready the card`);
   }
+  assert.equal(await page.locator('[id^="b-take-"]').count(), 0, "a card draws a Take my pick button");
+  assert.equal(await page.locator(".takepick").count(), 0, "a card draws a takepick button");
 });
 
 test("the notice to Claude writes a list pick as 31 a+c, in rank order when ranked", async (t) => {
@@ -3639,81 +3718,39 @@ test("Undo puts a list pick back as a draft, in its order", async (t) => {
   assert.equal(await page.locator("#send").textContent(), "Send 2 answers");
 });
 
-// The first option is in no pick, so a fix that focuses the first box of the card fails. An unranked pick shows in option order, so ["c","b"] starts with B: a fix that reads it.pick[0] fails. The ranked pick starts with C, so a fix that reads option order fails.
-test("Enter on Take my pick puts focus on the first key of the pick, on a multi card", async (t) => {
-  const it = multi("take-focus-multi", 41, { pick: ["c", "b"] });
-  const page = await open(t, { items: [it] }); if (!page) return;
-  await needBoxes(page, it, 3);
-  const at = await enterTakePick(page, it);
-  assert.deepEqual(await ticked(page, it), ["b", "c"], "Enter did not take the pick");
-  assertFocusOnFirstPick(at, it, "b");
-});
-
-test("Enter on Take my pick puts focus on the first key of the pick, in rank order, on a ranked card", async (t) => {
-  const it = ranked("take-focus-ranked", 42);
-  const page = await open(t, { items: [it] }); if (!page) return;
-  await needBoxes(page, it, 4);
-  const at = await enterTakePick(page, it);
-  assert.deepEqual(await ticked(page, it), ["a", "c", "d"], "Enter did not take the pick");
-  assert.match(await rankText(page, it, "c"), rank("1st", 3), "the pick's first key is not ranked 1st");
-  assertFocusOnFirstPick(at, it, "c");
-});
-
-// At 390 wide a card is taller than the screen and Take my pick sits below its options, so the focused option can end under the sticky header (.hdr) or the fixed bar (.bar).
-// The pick starts with A in both cards: the option is far above the button, and the page must show it whole.
-const SPOTS = {
-  "just above the bar": (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.bottom - (document.querySelector(".bar").getBoundingClientRect().top - 8)); },
-  centred: (id) => { const b = document.getElementById("b-take-" + id).getBoundingClientRect(); scrollBy(0, b.top + b.height / 2 - innerHeight / 2); },
-};
 const FILL = [mk("take-fill-1", 50), mk("take-fill-2", 51), mk("take-fill-3", 52)];
 const TAKE_CARDS = {
   "pick-one": () => mk("take-clear", 43, { options: COLOURS, pick: "a" }),
   "multi A and D": () => multi("take-clear-multi", 44, { options: COLOURS, pick: ["a", "d"] }),
 };
-for (const [kind, build] of Object.entries(TAKE_CARDS)) for (const [spot, scrollTo] of Object.entries(SPOTS)) {
-  test(`Enter on Take my pick keeps the focused option clear of the header and the bar, ${kind}, button ${spot}, at 390 wide`, async (t) => {
-    const it = build();
-    const page = await open(t, { items: [it, ...FILL], viewport: { width: 390, height: 800 } }); if (!page) return;
-    const at = await enterTakePick(page, it, () => page.evaluate(scrollTo, it.id));
-    assertFocusOnFirstPick(at, it, "a");
-    const m = await page.evaluate(() => {
-      const o = document.activeElement.closest(".opt"), r = o && o.getBoundingClientRect();
-      return { top: r && Math.round(r.top), bottom: r && Math.round(r.bottom), hdr: Math.round(document.querySelector(".hdr").getBoundingClientRect().bottom), bar: Math.round(document.querySelector(".bar").getBoundingClientRect().top) };
-    });
-    assert.ok(m.top !== null && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A is not between the header and the bar: ${JSON.stringify(m)}`);
-  });
-}
 
-// "Nothing on the page moves" (page.html, top comment): an option already between the header and the bar needs no scroll, so Enter on Take my pick leaves scrollY as it was.
+// "Nothing on the page moves" (page.html, top comment): an option already between the header and the bar needs no scroll, so a tap on its star leaves scrollY as it was.
 // `gap` is the px from the header's bottom to option A's top. A scroll that moves the page, even by 10px, fails.
-const stillAfterTake = async (t, it, width, gap, buttonInView) => {
+// The taps run in the DOM, so a tap on a star below the bar does not scroll the page to reach it.
+const stillAfterTap = async (t, it, width, gap) => {
   const page = await open(t, { items: [it, ...FILL], viewport: { width, height: 800 } }); if (!page) return;
-  let m;
-  const at = await enterTakePick(page, it, async () => {
-    m = await page.evaluate(({ id, gap }) => {
-      const hdr = document.querySelector(".hdr").getBoundingClientRect().bottom, bar = document.querySelector(".bar").getBoundingClientRect().top;
-      const o = document.getElementById(`o-${id}-a`).closest(".opt");
-      scrollBy(0, o.getBoundingClientRect().top - (hdr + gap));
-      const r = o.getBoundingClientRect(), b = document.getElementById("b-take-" + id).getBoundingClientRect();
-      return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), btnTop: Math.round(b.top), btnBottom: Math.round(b.bottom), hdr: Math.round(hdr), bar: Math.round(bar) };
-    }, { id: it.id, gap });
-  });
+  const m = await page.evaluate(({ id, gap }) => {
+    const hdr = document.querySelector(".hdr").getBoundingClientRect().bottom, bar = document.querySelector(".bar").getBoundingClientRect().top;
+    const o = document.getElementById(`o-${id}-a`).closest(".opt");
+    scrollBy(0, o.getBoundingClientRect().top - (hdr + gap));
+    const r = o.getBoundingClientRect();
+    return { y: scrollY, top: Math.round(r.top), bottom: Math.round(r.bottom), hdr: Math.round(hdr), bar: Math.round(bar) };
+  }, { id: it.id, gap });
   assert.ok(m.y > 0 && m.top >= m.hdr && m.bottom <= m.bar, `${it.id}: option A was not placed in view with the page scrolled: ${JSON.stringify(m)}`);
-  if (buttonInView) assert.ok(m.btnTop >= m.hdr && m.btnBottom <= m.bar, `${it.id}: Take my pick was not placed in view: ${JSON.stringify(m)}`);
-  assertFocusOnFirstPick(at, it, "a");
-  assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: Enter on Take my pick scrolled the page`);
+  await page.evaluate(({ id, keys }) => { for (const k of keys) document.querySelector(`label[for="o-${id}-${k}"]`).click(); }, { id: it.id, keys: [].concat(it.pick) });
+  assert.equal(await page.evaluate(() => scrollY), m.y, `${it.id}: a tap on the star scrolled the page`);
 };
 // Option A starts 56px under the 44px header, so 100px from the top of the screen: whole and clear of the 64px scroll margin. A scroll that centres it moves the page.
 for (const width of [390, 1280]) for (const [kind, build] of Object.entries(TAKE_CARDS)) {
-  test(`Enter on Take my pick does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 56, false));
+  test(`a tap on the star does not scroll the page when the pick's option is already in view, ${kind}, at ${width} wide`, (t) => stillAfterTap(t, build(), width, 56));
 }
-// Option A is fully visible 10px under the header, inside the 64px scroll margin, and Take my pick is in view too. These cards hold two options, so both fit at 390 wide.
+// Option A is fully visible 10px under the header, inside the 64px scroll margin. These cards hold two options, so both fit at 390 wide.
 const NEAR_CARDS = {
   "pick-one": () => mk("take-near", 45, { pick: "a" }),
   "multi A and B": () => multi("take-near-multi", 46, { options: COLOURS.slice(0, 2), pick: ["a", "b"] }),
 };
 for (const width of [390, 1280]) for (const [kind, build] of Object.entries(NEAR_CARDS)) {
-  test(`Enter on Take my pick does not scroll the page when the pick's option sits 10px under the header, ${kind}, at ${width} wide`, (t) => stillAfterTake(t, build(), width, 10, true));
+  test(`a tap on the star does not scroll the page when the pick's option sits 10px under the header, ${kind}, at ${width} wide`, (t) => stillAfterTap(t, build(), width, 10));
 }
 
 test("a multi item keeps each option's picture in its card: a tap on the picture opens the viewer, a tap on the card ticks", async (t) => {
@@ -4084,8 +4121,8 @@ test("a card with none of lastAnswer, reply and lane draws as today, and so does
   const emptyD = mk("em-d", 3, { reply: "", lane: "", lastAnswer: null }), emptyT = { ...TASK, id: "em-t", n: 4, reply: "", lane: "", lastAnswer: null };
   const page = await open(t, { items: [plainD, plainT, emptyD, emptyT] }); if (!page) return;
   const shape = (it) => card(page, it).evaluate((c) => ({ kids: [...c.children].map((e) => e.tagName + "." + e.className), top: c.querySelector(".top").innerText.replace(/No\. \d+/, "").replace(/\s+/g, " ").trim() }));
-  // The children of a plain open card, read from page.html at 2b66f6a3: a build that adds a wrapper or a row to a card with nothing to show fails here.
-  const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.opts", "P.ready", "DIV.alts", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "P.dest"] };
+  // The children of a plain open card, read from page.html at 2b66f6a3 plus the always-open note box (step note-always-open): a build that adds a wrapper or a row to a card with nothing to show fails here.
+  const TODAY = { decision: ["DIV.top", "H3.title", "P.ctx", "P.about", "DIV.opts", "P.ready", "DIV.alts", "DIV.note", "P.dest"], task: ["DIV.top", "H3.title", "P.ctx", "P.about", "OL.steps", "P.ready", "DIV.alts", "DIV.note", "P.dest"] };
   for (const [plain, empty] of [[plainD, emptyD], [plainT, emptyT]]) {
     assert.equal(await laPanel(page, plain).count() + await laPanel(page, empty).count(), 0, `${plain.id}: a panel is drawn with nothing to show`);
     assert.doesNotMatch(await card(page, plain).innerText() + await card(page, empty).innerText(), /Your last answer|Reply:|waits on lane/i);

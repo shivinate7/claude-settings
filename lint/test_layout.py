@@ -96,7 +96,7 @@ class LayoutFile(Tree):
         want = {"claude-md": "CLAUDE.md", "agents-md": "AGENTS.md", "rules": ".claude/rules",
                 "decisions": "docs/decisions", "debts": "docs/debts", "debt-notes": "docs/debts/notes.md",
                 "plans": "docs/plans", "specs": "docs/specs", "records-index": "docs/records.md",
-                "todo": "docs/todo.md", "scorecard": "docs/health/compliance.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots"}
+                "todo": "docs/todo.md", "map": "docs/map", "scorecard": "docs/health/compliance.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots"}
         self.assertEqual({k: v["path"] for k, v in kinds.items()}, want)
         self.assertEqual(self.layout.layout()["extras"], EXTRAS)
 
@@ -123,6 +123,36 @@ class LayoutFile(Tree):
         self.roll_out({"decisions": {"path": "elsewhere"}})
         with self.assertRaises(self.layout.LayoutError):
             self.layout.kinds(self.tree)
+
+    def refusal_of_kinds(self, kinds):
+        """The LayoutError text that kinds() raises for an extras file that holds `kinds`."""
+        self.roll_out(kinds)
+        with self.assertRaises(self.layout.LayoutError) as caught:
+            self.layout.kinds(self.tree)
+        return str(caught.exception)
+
+    def test_extras_repeat_of_a_layout_kind_at_its_path_is_refused_with_the_remedy(self):
+        self.origin("https://github.com/shivinate7/q_max")  # the repo whose extras file repeats map at docs/map
+        for path in ("docs/map", "docs/map/"):
+            with self.subTest(path=path):
+                msg = self.refusal_of_kinds({"map": {"path": path}})
+                self.assertIn("docs/map", msg)  # the layout path, so the lane knows where map lives
+                self.assertIn("delete", msg.lower())  # the remedy: delete the repeat
+                self.assertIn("layout-extras.json", msg)  # the file to edit
+
+    def test_extras_repeat_of_a_layout_kind_at_another_path_names_both_paths(self):
+        msg = self.refusal_of_kinds({"map": {"path": "notes/map"}})
+        self.assertIn("docs/map", msg)  # the layout path
+        self.assertIn("notes/map", msg)  # the extras path that differs from it
+
+    def test_extras_repeat_that_legacy_repos_keeps_is_still_accepted(self):
+        for url, path, want in (("https://github.com/shivinate7/home", "records", "docs/todo.md"),
+                                ("https://github.com/shivinate7/q_max", "specs/todo.md", "docs/todo.md")):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.roll_out({"todo": {"path": path}})
+                self.assertEqual(self.layout.kinds(self.tree)["todo"]["path"], want)
 
     def test_extras_path_outside_the_repo_is_an_error(self):
         for bad in ("../x", "/etc", "a/../../b", "C:/x"):
@@ -245,6 +275,188 @@ class WaitingPage(Tree):
     def test_the_real_repo_prints_its_current_page(self):
         code, out = run([os.path.join(LINT, "layout.py"), "waiting-page", REPO], REPO)
         self.assertEqual((code, out.strip()), (0, "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"))
+
+
+class RecordBranch(Tree):
+    """A fork worktree names its own record branch in its extras file (decision session-tiers).
+    A repo with no key reads the main record branch, "roadmap"."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_no_extras_file_is_roadmap(self):
+        self.assertEqual(self.layout.record_branch(self.tree), "roadmap")
+
+    def test_extras_file_without_the_key_is_roadmap(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": "https://claude.ai/artifact/abc123"}))
+        self.assertEqual(self.layout.record_branch(self.tree), "roadmap")
+
+    def test_key_set_returns_its_value(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "record-branch": "roadmap-fork"}))
+        self.assertEqual(self.layout.record_branch(self.tree), "roadmap-fork")
+
+    def test_a_slash_in_the_name_is_a_plain_branch_path(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "record-branch": "roadmap/fork-2"}))
+        self.assertEqual(self.layout.record_branch(self.tree), "roadmap/fork-2")
+
+    def test_a_value_that_is_not_a_plausible_branch_name_is_an_error(self):
+        for bad in ("", "   ", "two words", "a..b", "-rm", 5, ["roadmap-fork"], None):
+            with self.subTest(bad=bad):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "record-branch": bad}))
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.record_branch(self.tree)
+
+
+class SetWaitingPage(Tree):
+    """Triage makes a repo's waiting page when the repo has none (decision session-tiers). It writes
+    only the "waiting-page" key, never marks the repo rolled out, and never overwrites a key already set."""
+    URL = "https://claude.ai/artifact/abc123"
+    OTHER = "https://claude.ai/artifact/zzz999"
+
+    # Ids are letters, digits, `_` and `-`. A page with no id, or an id with any other character, is no link.
+    BAD_LINKS = ("https://example.com/x", "", "claude.ai/artifact/abc", "https://claude.ai/artifact/",
+                 "https://claude.ai/code/artifact/", "https://claude.ai/artifact/ab c",
+                 "https://claude.ai/artifact/abc!", "https://claude.ai/artifact/abc\n",
+                 "https://claude.ai/artifact/abcé", "https://claude.ai/artifact/abc/items",
+                 "https://claude.ai/artifact/abc?x=1")
+    REAL_LINKS = ("https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx", "https://claude.ai/artifact/waitpage1",
+                  "https://claude.ai/code/artifact/example-two",
+                  "https://claude.ai/code/artifact/3f2a9c1e-7b4d-4e8a-9c2b-1d5e6f7a8b9c",
+                  "https://claude.ai/artifact/a_b-9")
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.extras = os.path.join(self.tree, *EXTRAS.split("/"))
+        self.sub = os.path.join(self.tree, "sub")  # a folder under the repo root, the CLI's working folder
+        os.makedirs(self.sub)
+
+    def read_bytes(self):
+        with open(self.extras, "rb") as handle:
+            return handle.read()
+
+    def test_no_key_writes_it_and_returns_true(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "visibility": "public"}))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        found = json.loads(self.read_bytes())
+        self.assertEqual(found["waiting-page"], self.URL)
+        self.assertEqual(found["visibility"], "public")
+        self.assertEqual(found["kinds"], {})
+
+    def test_missing_extras_file_is_created_with_the_key(self):
+        self.assertFalse(os.path.exists(self.extras))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        found = json.loads(self.read_bytes())
+        self.assertLessEqual(set(found), {"kinds", "waiting-page"}, found)  # no other key is written
+        self.assertEqual(found["waiting-page"], self.URL)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)  # the file reads back
+        self.assertFalse(self.layout.rolled_out(self.tree))
+
+    def test_second_call_writes_nothing(self):
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        before = self.read_bytes()
+        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER))
+        self.assertEqual(self.read_bytes(), before)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def test_key_already_set_returns_false_and_file_is_byte_identical(self):
+        self.put(EXTRAS, '{"kinds": {}, "waiting-page": "%s"}\n' % self.URL)  # hand-formatted, never re-dumped
+        before = self.read_bytes()
+        self.assertFalse(self.layout.set_waiting_page(self.tree, self.OTHER))
+        self.assertEqual(self.read_bytes(), before)
+
+    def test_rolled_out_mark_is_kept(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": True}))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertIs(json.loads(self.read_bytes())["rolled-out"], True)
+        self.assertTrue(self.layout.rolled_out(self.tree))
+
+    def test_a_repo_with_no_mark_is_not_marked_rolled_out(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}}))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        self.assertNotIn("rolled-out", json.loads(self.read_bytes()))
+        self.assertFalse(self.layout.rolled_out(self.tree))
+
+    def test_a_url_that_is_not_an_artifact_link_is_an_error_and_writes_nothing(self):
+        for bad in self.BAD_LINKS:
+            with self.subTest(bad=bad):
+                if os.path.exists(self.extras):
+                    os.remove(self.extras)
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.set_waiting_page(self.tree, bad)
+                self.assertFalse(os.path.exists(self.extras))
+
+    def test_a_real_artifact_link_in_either_form_is_accepted(self):
+        for url in self.REAL_LINKS:
+            with self.subTest(url=url):
+                if os.path.exists(self.extras):
+                    os.remove(self.extras)
+                self.assertTrue(self.layout.set_waiting_page(self.tree, url))
+                self.assertEqual(self.layout.waiting_page(self.tree), url)
+
+    def test_a_null_key_counts_as_unset_and_is_written(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": None, "visibility": "public"}))
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.URL))
+        found = json.loads(self.read_bytes())
+        self.assertEqual(found["waiting-page"], self.URL)
+        self.assertEqual(found["visibility"], "public")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def cli(self, url=None, root=None, cwd=None):
+        """The CLI, `set-waiting-page <root> <url>`, run from `cwd`. The default cwd is a subfolder of the
+        tree, so a run that writes into its working folder shows up there as a stray file."""
+        return run([os.path.join(LINT, "layout.py"), "set-waiting-page", root or self.tree, url or self.URL],
+                   cwd or self.sub)
+
+    def test_cli_writes_the_key_and_exits_0(self):
+        code, out = self.cli()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+
+    def test_cli_from_a_subfolder_writes_the_root_extras_and_no_other(self):
+        code, out = self.cli()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
+        self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the subfolder got a .claude folder")
+
+    def test_the_old_form_with_no_root_is_refused_and_writes_nowhere(self):
+        code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL], self.sub)
+        self.assertNotEqual(code, 0, out)
+        self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the old form wrote into the working folder")
+        self.assertFalse(os.path.exists(self.extras))
+
+    def test_cli_second_run_exits_1_prints_the_existing_url_and_writes_nothing(self):
+        code, out = self.cli()
+        self.assertEqual(code, 0, out)
+        before = self.read_bytes()
+        code, out = self.cli(self.OTHER)
+        self.assertEqual(code, 1, out)
+        self.assertIn(self.URL, out)
+        self.assertEqual(self.read_bytes(), before)
+
+    def test_cli_bad_url_exits_2_without_a_traceback(self):
+        for bad in ("https://example.com/x", "https://claude.ai/artifact/", "https://claude.ai/artifact/ab c"):
+            with self.subTest(bad=bad):
+                code, out = self.cli(bad)
+                self.assertEqual(code, 2, out)
+                self.assertNotIn("Traceback", out)
+                self.assertFalse(os.path.exists(self.extras))
+
+    def test_cli_exits_2_with_a_message_when_a_directory_sits_at_the_extras_path(self):
+        os.makedirs(self.extras)
+        code, out = self.cli()
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("Traceback", out)
+        self.assertTrue(out.strip(), "the failure printed nothing")
+
+    def test_cli_exits_2_with_a_message_when_dot_claude_is_a_file(self):
+        # makedirs fails here, before any open(): a write fault in either step is the same exit 2.
+        self.put(".claude", "not a folder\n")
+        code, out = self.cli()
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("Traceback", out)
+        self.assertTrue(out.strip(), "the failure printed nothing")
 
 
 class WaitingPageBranding(Tree):

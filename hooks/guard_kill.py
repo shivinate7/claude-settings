@@ -160,6 +160,102 @@ def pid_is_owned(pid: int, root: int):
     return None
 
 
+def pid_is_session_job(pid: int, session_id: str) -> bool:
+    """True when `pid` is this session's to wait on (`bin/wait-pid`, the one caller). It never
+    signals: waiting is no kill, so the kill verdict (`foreign_pid_kill`) is unchanged.
+
+    Owned: the pid is dead or descends from the session root (as `pid_is_owned`). A job stranded
+    after a stall is not a descendant: its stub shell is under init. So a pid is also this
+    session's when its parent walk reaches init and the pid, or any ancestor below init, holds
+    `CLAUDE_CODE_SESSION_ID=<session_id>` (`proc_env.holds_session_tag`). On Linux the forked stub
+    holds no tag and the exec'd job under it does, so the walk reads each step. The stall report
+    names that stub first, so a pid whose own parent is init is also this session's when a
+    descendant of it holds the tag (`_tagged_descendant`). Unknown (no root, `ps` fails) answers
+    True, as `foreign_pid_kill` does. Pid 0, 1 and -1 are never this session's.
+    """
+    if pid <= 1:
+        return False
+    root = session_root_pid()
+    if not root:
+        return True
+    owned = pid_is_owned(pid, root)
+    if owned is not False:
+        return True   # descends from the root, dead, or unknown
+    current = pid
+    for _ in range(64):
+        if holds_session_tag(current, session_id):
+            return True
+        parent = _ps_ppid(current)
+        if parent is None or parent == 0:
+            return True   # unknown, or it ended during the walk
+        if parent <= 1:
+            return current == pid and _tagged_descendant(pid, session_id)
+        current = parent
+    return True
+
+
+DESCENDANT_DEPTH, DESCENDANT_COUNT = 8, 512   # the scan's bounds: a stranded job's tree is small
+
+
+def _process_parents():
+    """{pid: ppid} for every process, from one read (Linux /proc, else one `ps -A`), or None."""
+    table = {}
+    try:
+        if sys.platform.startswith("linux"):
+            for name in os.listdir("/proc"):
+                if not name.isdigit():
+                    continue
+                try:
+                    with open("/proc/%s/stat" % name, "rb") as handle:
+                        data = handle.read().decode("utf-8", "replace")
+                    table[int(name)] = int(data[data.rindex(")") + 2:].split()[1])
+                except (OSError, ValueError, IndexError):
+                    continue   # it ended during the read
+            return table
+        text = _nowindow.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True,
+                              timeout=10).stdout
+        for line in text.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and all(f.isdigit() for f in fields):
+                table[int(fields[0])] = int(fields[1])
+        return table or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _tagged_descendant(pid: int, session_id: str) -> bool:
+    """True when a descendant of `pid` holds the session tag. Unknown (no table) answers True.
+
+    This helper's own pid and its ancestors are skipped: it holds the tag, so a scan from the top
+    of its own chain would find itself and own a pid it can never see end. The scan is bounded
+    in depth and count; a tree past either bound is not proved this session's.
+    """
+    if not session_id:
+        return False
+    parents = _process_parents()
+    if parents is None:
+        return True
+    mine, step = set(), os.getpid()
+    while step > 1 and step not in mine:
+        mine.add(step)
+        step = parents.get(step, 0)
+    if pid in mine:
+        return False
+    children = {}
+    for child, parent in parents.items():
+        children.setdefault(parent, []).append(child)
+    level, seen = [pid], 0
+    for _ in range(DESCENDANT_DEPTH):
+        level = [c for p in level for c in children.get(p, ()) if c not in mine]
+        for child in level:
+            seen += 1
+            if seen > DESCENDANT_COUNT:
+                return False
+            if holds_session_tag(child, session_id):
+                return True
+    return False
+
+
 AGENT_WORKTREE_RE = re.compile(r"/\.claude/worktrees/agent-([A-Za-z0-9_-]{1,64})(?:/|$)")
 
 
@@ -220,16 +316,26 @@ def kills_group_pid(tokens) -> bool:
     return any(int(arg) in (0, 1, -1) for arg in _kill_pids(tokens))   # a whole group, init, every process
 
 
+def _under_init(pid: int) -> bool:
+    """True when the pid's parent is init, or its parent's parent is init (an orphan stub shell).
+    Each level is read once."""
+    parent = _ps_ppid(pid)
+    return parent == 1 or (bool(parent) and _ps_ppid(parent) == 1)
+
+
 def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
     """Return the first numeric pid a `kill` segment names that this session did not start.
 
     Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
     the remedy tells the agent to kill by `$!`. When the session root or `ps` cannot be read, the
-    answer is "" (unknown, so allowed), never a guess. A PPID-1 pid is also owned when its exec
-    environment holds `CLAUDE_CODE_SESSION_ID=<session_id>` exactly (`proc_env.holds_session_tag`),
-    read only after the walk says foreign, so an allowed kill costs nothing new. ponytail: a pid
-    reused since launch reads as foreign; a forked shell stub carries no tag, so a left-behind
-    shell reads foreign too; stop either through the harness.
+    answer is "" (unknown, so allowed), never a guess. A pid is also owned when its exec
+    environment holds `CLAUDE_CODE_SESSION_ID=<session_id>` exactly (`proc_env.holds_session_tag`)
+    and its parent is init, or its parent's parent is init (a stranded job under an orphan stub
+    shell). The tag is read on the pid itself, only after the walk says foreign. That adds at most
+    one `ps` read per level (the pid, then its parent) and one environment read; a pid the walk
+    owns pays nothing more. An agent call passes session_id "", so it owns no pid by tag.
+    ponytail: a pid reused since launch reads as foreign; an untagged PPID-1 stub reads foreign;
+    stop it through the harness.
     """
     root = None
     for arg in _kill_pids(tokens):
@@ -243,7 +349,7 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
         if in_own_agent_worktree(abs(number), transcript):
             continue
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
-            if _ps_ppid(abs(number)) == 1 and holds_session_tag(abs(number), session_id):
+            if _under_init(abs(number)) and holds_session_tag(abs(number), session_id):
                 continue
             return arg
     return ""

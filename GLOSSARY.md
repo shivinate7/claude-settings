@@ -36,6 +36,7 @@ one name for each thing, and a list of names to avoid.
 | finding | Anything a reviewer or an audit reports. An open finding becomes a debt or a note. | `rule:roles-findings-are-debts-or-notes` | `issue (this sense)` |
 | defect | Wrong behaviour in code or a check. | `rule:outcomes-tests-are-statements` | `bug` |
 | round | One review and the fix after it. A change gets at most three. The builder brief for the fix after review round N-1 still carries the marker `Round N of 3`, which the guard reads on a line that starts with it, or as the leftmost marker in a first line that starts with none. | `rule:roles-review-cap-three`, `rule:roles-third-round-steps-up` | — |
+| audit marker | The first `Audit:` on the brief's first non-blank line, with any text ahead of it. Case-sensitive. The guard lets an `Agent` or `Task` Explore spawn run Sonnet only with it; any other such spawn that names a model, except opus (the Opus aside, judged by the Opus ask), runs below Sonnet. | `docs/decisions/agent-model-cap.md`, `hooks/shared_names.py` | — |
 | safety hole | A guard or check that lets through an act that main refuses or asks about. Always both words. | `rule:roles-review-cap-three`, `docs/decisions/hold-unsafe-after-round-3.md` | `hole` |
 | refuse | What a guard does when it stops an act. The code wraps Claude Code's own `deny` and `block` values in `refuse()`. | `hooks/guard_core.py`, `docs/decisions/guard-guards-mistakes-only.md` | `block (this sense)`, `deny` |
 | owner | The person who owns these repos. Only the owner makes a grant. The owner makes a ruling. An arbiter makes one inside its own repo, and the owner can overturn it. `CLAUDE.md` speaks as the owner. | `rule:outcomes-grant-covers-named-act` | — |
@@ -67,3 +68,4 @@ one name for each thing, and a list of names to avoid.
 | blind lane | A designer lane whose brief names only the screen's job, users, data shapes and the house UX rules. Its brief withholds the current screen and the repo's design spec, and it is told not to read them. | `skills/design-explore/SKILL.md` | — |
 | informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
 | directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
+| fact line | An indented list line under a map line. Its prose ends with ` — ` and one backtick cite of a code symbol's value or of a `uses` relation. | `skills/plain-english-map/SKILL.md` | — |

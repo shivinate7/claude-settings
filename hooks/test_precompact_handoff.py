@@ -30,6 +30,7 @@ REPO_ROOT = os.path.dirname(HERE)
 MODULE = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
 

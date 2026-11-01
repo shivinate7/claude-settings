@@ -366,6 +366,16 @@ MUTATIONS = [
      '        return entries is not None and any(entry == want for entry in entries)',
      '        return entries is not None and any(want in entry for entry in entries)',
      "guard", 'kill: a PPID-1 pid whose session id entry has a suffix', "posix"),
+    ("machine-wide-kill: a tagged job under an orphan stub shell reads foreign (only PPID 1 owns)",
+     '    return parent == 1 or (bool(parent) and _ps_ppid(parent) == 1)',
+     '    return parent == 1',
+     "guard", 'kill: a job under an untagged PPID-1 stub, holding this session\'s id, from the main session',
+     "posix"),
+    ("machine-wide-kill: any pid under init owns the job, with no tag read",
+     '            if _under_init(abs(number)) and holds_session_tag(abs(number), session_id):',
+     '            if _under_init(abs(number)):',
+     "guard", 'kill: a job under an untagged PPID-1 stub, holding another session\'s id, stays refused',
+     "posix"),
     ("machine-wide-kill: an agent call owns a pid by the shared session tag",
      'foreign_pid_kill(tokens, transcript, "" if agent else session_id)',
      'foreign_pid_kill(tokens, transcript, session_id)',
@@ -789,6 +799,42 @@ MUTATIONS = [
     ("floor: a non-string model is skipped, so a list naming haiku walks past",
      '    return "haiku" in str(model).lower()',
      '    return isinstance(model, str) and "haiku" in model.lower()', "guard", 'floor: Agent with a list model naming haiku is denied'),
+    ("role-model: the rank test is dropped, so a spawn above its role's row passes",
+     '        if named > ROLE_MODEL_RANK.index(row):',
+     '        if False:', "guard", 'role-model: test-author on sonnet is denied'),
+    ("role-model: Explore loses its audit exemption, so an audit Explore on sonnet is denied",
+     'if role == EXPLORE_ROLE and named < top and re.search(',
+     'if False and re.search(', "guard", 'role-model: Explore on sonnet with Audit: on line 1 is allowed'),
+    ("role-model: the audit marker is read off any line, so an Explore with it on line 2 walks past on sonnet",
+     'brief_first_line(tool_input.get("prompt"))):',
+     'tool_input.get("prompt") or ""):', "guard",
+     'role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)'),
+    ("role-model: a reviewer round 2 or 3 loses its exemption, so it is denied on sonnet",
+     'for kind, n in brief_markers(tool_input.get("prompt"))):',
+     'for kind, n in brief_markers("")):', "guard", 'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
+    ("role-model: a reviewer round 1 is exempt too, so it walks past on sonnet",
+     'kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS',
+     'kind.lower() == "round" and n in ("1", "2", "3")', "guard",
+     'role-model: reviewer on sonnet with a Round 1 of 3 line is denied'),
+    ("role-model: Opus is no longer left to the ask, so a builder on opus is denied here",
+     'named == top or row is None:',
+     'row is None:', "guard",
+     'role-model: builder on opus with no round line asks'),
+    ("role-model: the default model is ignored, so a builder with no model is denied under a sonnet default",
+     '    if os.environ.get(ROLE_MODEL_ENV, "").strip():',
+     '    if False:', "guard", 'role-model: builder with no model is allowed when the default is sonnet'),
+    ("role-model: the agent file pin is ignored, so a reviewer with no model is denied",
+     '    if pinned:\n        return "", "", False',
+     '    if False:\n        return "", "", False', "guard",
+     'role-model: reviewer with no model is allowed when the default is unset'),
+    ("role-model: the no-model deny is dropped, so a builder with no model and no default passes",
+     '    return ROLE_NO_MODEL_REASON %',
+     '    return "", "", False; ROLE_NO_MODEL_REASON %', "guard",
+     'role-model: builder with no model is denied when the default is unset'),
+    ("role-model: an unread table is not logged, so the pass leaves no trace",
+     '    if role_unread:\n        record(',
+     '    if False:\n        record(', "guard",
+     'role-model: a missing decision file logs one unread line'),
     ("step-up: the marker regex loses its multiline flag, so a round line after the first line walks past",
      'STEP_UP_MARKER = re.compile(r"(?im)^',
      'STEP_UP_MARKER = re.compile(r"(?i)^', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
@@ -1205,9 +1251,9 @@ MUTATIONS = [
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
      # An agent call from an agent-named tree is also shielded by session_home_agent_tree further
-     # down, so dropping the agent_id return alone changes nothing the suite's case can see (it
-     # survived stage 1 and then ran the whole suite for minutes). The replacement switches both
-     # layers off, which is the rule broken: an agent call writes the session's record.
+     # down, so dropping the agent_id return alone changes nothing the suite's case can see: the
+     # mutant survives. The replacement switches both layers off, which is the rule broken: an
+     # agent call writes the session's record.
      '        globals()["session_home_agent_tree"] = lambda _lane: False\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
      "guard", "session-home: an agent call writes and rewrites no session record"),
     ("session-home: ExitWorktree leaves the session's record",
@@ -1778,7 +1824,10 @@ def report_main(argv) -> int:
 
 
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
-    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines)."""
+    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines).
+
+    The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
+    to know whether stage 1 ran the required case."""
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
@@ -1797,8 +1846,11 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         [sys.executable, suite], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
         env=env, timeout=1200,
     )
-    red = [line for line in result.stdout.splitlines() if line.startswith("FAIL")]
-    return result.returncode, red
+    lines = result.stdout.splitlines()
+    red = [line for line in lines if line.startswith("FAIL")]
+    # "PASS" and "FAIL" start each case line in every suite here; "ok " is test_call_judge.py's pass.
+    ran = [line for line in lines if line.startswith(("PASS", "FAIL", "ok "))]
+    return result.returncode, red, ran
 
 
 def mutation_parts(entry):
@@ -1957,6 +2009,11 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
+    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
+    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
+    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
 
     try:
         return mutate_shared.run_mutants(

@@ -18,6 +18,7 @@
 // so the judge derives them the way /dw does: $.session.id(), $.session.cwd() and the config folder's projects layout.
 // Guessed contract point, SAFETY HOLE 12 cases only: the real child's env is the host env merged with the env register.mjs
 // passes (the host may replace it instead). Those cases run the real hooks/decision_watch.py, not the fake.
+import '../../lint/_test_git.mjs'  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'

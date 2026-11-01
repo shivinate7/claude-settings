@@ -425,6 +425,27 @@ def case_owner_step_carve_outs_in_prompt():
               has_pin(sentences, ("report",), ("line",), ("name", "mention"), ("not", "never", "no ")), sentences)
 
 
+# --------------------------------------------------------------------------- case 5b, the gh login
+# The gh login clause of output-never-hand-off-doable-step: a gh command left to the owner opens its
+# block (after any cd) with `gh auth switch -u <login>`. The default login is shivinate7; the fallback
+# only where the default has no access. This is a text pin on a model prompt, so it is weak: it shows
+# the prompt names the switch, not that the judge flags a block that has none.
+
+GH_STEP = (  # a gh command left to the owner, with no switch in its block
+    "> **Done**\n> Input Needed: a branch-protection change on claude-settings main needs admin.\n\n"
+    "Run this in Git Bash:\n\n"
+    "```bash\ncd ~/claude-settings\n"
+    "gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks -f strict=true\n"
+    "```\n"
+)
+
+
+def case_owner_gh_step_prompt_names_the_login_switch():
+    sentences = run_owner_step_reply("gh login", GH_STEP)
+    check("owner step, gh login: a sentence says a gh command left to the owner opens with gh auth switch and the default login",
+          has_pin(sentences, ("gh auth switch",), ("shivinate7",)), sentences)
+
+
 # --------------------------------------------------------------------------- case 5c
 # The silent-limits rule, style-limits-kept-silently. As in case 5b the model is a stub, so the
 # prompt is what can go red: each case reads the rule text before the reply.
@@ -1209,7 +1230,8 @@ def case_port_finding_is_a_note_with_its_rule():
 # --------------------------------------------------------------------------- c139
 # Uniform ruling (topic t18): a repo that differs from a shared format changes to match, and the
 # shared tool never grows a second form. An option that widens what a shared tool accepts carries
-# "Goes against your uniform ruling (t18)" and is never the recommended option. Rule
+# "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never
+# the recommended option. Rule
 # `style-question-form` holds that text (the one question form, hooks/question_form.py).
 
 WIDENS_RULE = "style-question-form"
@@ -1253,7 +1275,9 @@ def case_prompt_flags_a_recommended_option_that_widens():
     check("prompt: a sentence flags a recommended option that widens what a shared tool accepts",
           has_pin(sentences, ("flag",), ("recommend",), ("widen",), ("shared tool",)), sentences)
     check("prompt: a sentence flags such an option offered without its label",
-          has_pin(sentences, ("flag",), ("widen",), ("goes against your uniform ruling (t18)",)), sentences)
+          has_pin(sentences, ("flag",), ("widen",),
+                  ("goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo",)),
+          sentences)
     check("prompt: a sentence spares an option where the repo changes to match",
           has_pin(sentences, ("never flag",), ("repo",), ("match",)), sentences)
     check("prompt: a sentence judges only offered options and spares a reply that describes the rule",
@@ -1365,6 +1389,7 @@ CASES = (
     case_owner_step_in_prose_prompt_asks_for_fenced_block,
     case_owner_step_block_outside_report_prompt_says_where,
     case_owner_step_carve_outs_in_prompt,
+    case_owner_gh_step_prompt_names_the_login_switch,
     case_limits_narration_prompt_flags_it,
     case_limits_blocked_work_prompt_passes_it,
     case_limits_dropped_item_prompt_passes_it,

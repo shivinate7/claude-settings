@@ -23,7 +23,9 @@ Without a project, each tier is one Claude Code session, and the owner acts as t
   (`templates/operating-model.md`, "Autopilot"). Under a standing merge grant,
   the coordinator gives each merge go, and the batch runner runs the merge tool on it. The owner is not asked.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
-  briefs and role handoff notes. It is never merged into main.
+  briefs and role handoff notes. It is never merged into main. A fork names its own record branch,
+  such as `roadmap-<fork>`, in the extras key `record-branch`. For a fork's page, see skill
+  `waiting-page`, "Make a repo's page".
 - **The outbox.** `roadmap/outbox/`, one file per session, for non-urgent notes to triage. Its
   README gives the format. `templates/operating-model.md` says when to message instead.
 - **Briefs and role handoffs.** `templates/brief.md` and `templates/role-handoff.md`.
@@ -59,7 +61,8 @@ that triage or the batch runner writes for its successor.
 `skills/roadmap` is the one home for building the roadmap block, for any checkout. This skill
 keeps no copy. Its `SKILL.md` says how to build (`--block`) and what `--live` passes. The build
 publishes nothing: the waiting-page writer splices the block into the repo's one page and alone
-publishes it (skill `waiting-page`). The scaffolded `roadmap/README.md`
+publishes it (skill `waiting-page`). At triage start, when the repo has no waiting page, triage makes
+it, with no separate grant (skill `waiting-page`, "Make a repo's page"). The scaffolded `roadmap/README.md`
 (`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.
 An adopting repo keeps its record in `roadmap/data/` on the record branch, and the builder
 reads it there.
