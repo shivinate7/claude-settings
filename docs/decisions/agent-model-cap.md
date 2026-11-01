@@ -54,7 +54,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`) | main model unless the owner names one | default |
-| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | default |
+| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
@@ -86,6 +86,19 @@ cannot time out, so the guard allows Opus at round 3 and the owner's grant stays
 `agent()` or `start_session` call whose `model` holds "haiku", unless the role is a Haiku role.
 `lint/check_agent_models.py` fails a Haiku `model:` in `agents/*.md` or `skills/*/SKILL.md` frontmatter,
 unless the file is a Haiku role. `agents/plan.md` pins Plan.
+
+**The lane effort pin.** A lane session runs at medium effort (owner, 2026-10-30 15:11 CDT). The
+coordinator starts a lane with a `create_session` prompt that is exactly `/effort medium`, then sends
+the brief with `send_message`. A slash command runs only when it is the whole prompt (coordinator
+probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same line with text after it
+set none). Guard rule `lane-effort-pin` (likely risk, landed 2026-10-30) refuses a `create_session`
+call tagged `cs-build:lane` with any other prompt. A lane started with no such tag is unseen; the
+tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards
+that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, pick a). `LANE_EFFORT` in `hooks/guard.py` is the one
+value; `lint/check_agent_models.py` fails when the lane row's effort cell does not start with it.
+Other tiers keep the model default. Ruled out: `effortLevel` in user settings does not count for Opus
+5.5, project settings and an environment's `CLAUDE_CODE_EFFORT_LEVEL` reach every tier, and a
+SessionStart hook reaches only Bash.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
