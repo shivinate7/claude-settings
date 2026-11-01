@@ -61,7 +61,13 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
-REPLACE_TRIES = 5  # tries at the log replace, 50 ms apart
+LOG_WAIT_SECONDS = 30  # one log() call waits at most this long for the lock and the replace together
+LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock or the replace
+LOG_DONE_BY = 58  # seconds after the hook started by which the done row stops waiting; the hook's own limit is 60
+
+
+class LogWaitTimeout(OSError):
+    """A log() call waited past its deadline for the lock or the replace."""
 
 
 def log_path() -> str:
@@ -69,42 +75,59 @@ def log_path() -> str:
 
 
 @contextlib.contextmanager
-def _log_lock(path: str):
-    """Hold an exclusive lock on `<log>.lock` so parallel hook runs take turns. `fcntl.flock`
-    on POSIX, `msvcrt.locking` on Windows (blocks up to about 10 s, then raises)."""
+def _log_lock(path: str, deadline: float):
+    """Hold an exclusive lock on `<log>.lock` so parallel hook runs take turns. `fcntl.flock` on
+    POSIX, `msvcrt.locking` on Windows, both non-blocking and tried every LOG_RETRY_SECONDS until
+    DEADLINE (a `time.monotonic` time), then LogWaitTimeout. The body never runs without the lock.
+    (`msvcrt.LK_LOCK` gives up after about 10 s on its own, so it is not used.)"""
     with open(path + ".lock", "a+") as handle:
-        if sys.platform.startswith("win"):
+        win = sys.platform.startswith("win")
+        if win:
             import msvcrt
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         else:
             import fcntl
-            fcntl.flock(handle, fcntl.LOCK_EX)
+        while True:
             try:
-                yield
-            finally:
+                if win:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:  # held by another run
+                if time.monotonic() >= deadline:
+                    raise LogWaitTimeout("payload log lock not taken before the deadline")
+                time.sleep(LOG_RETRY_SECONDS)
+        try:
+            yield
+        finally:
+            if win:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def log(record: dict, replace_run=None):
+def log(record: dict, replace_run=None, give_up_at=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
     fields the docs leave open (docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
     Parallel runs take turns on a lock file, because writers lost rows without it. The temp name
-    carries the pid. On Windows the replace can raise PermissionError while the destination is
-    held for a moment, so it retries a few times.
+    carries the pid. The replace can raise PermissionError while the destination is held (seen on
+    Windows), so it retries on every platform; a permanent refusal costs the whole wait.
+    The lock wait and the replace share one deadline: LOG_WAIT_SECONDS from now, or GIVE_UP_AT
+    (a `time.monotonic` time, the hook's own clock) when that is sooner.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
-    A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
+    A write that cannot finish by the deadline raises LogWaitTimeout, the only way a row is
+    dropped for waiting. A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
+    deadline = time.monotonic() + LOG_WAIT_SECONDS
+    if give_up_at is not None:
+        deadline = min(deadline, give_up_at)
     path = log_path()
     line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with _log_lock(path):
+        with _log_lock(path, deadline):
             try:
                 with open(path, encoding="utf-8") as handle:
                     kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
@@ -115,14 +138,14 @@ def log(record: dict, replace_run=None):
             temp = "%s.%d.tmp" % (path, os.getpid())
             with open(temp, "w", encoding="utf-8") as handle:
                 handle.writelines(kept + [line])
-            for attempt in range(REPLACE_TRIES):
+            while True:
                 try:
                     os.replace(temp, path)  # a reader never sees an empty or half-written file
                     break
-                except PermissionError:  # Windows: the destination is held a moment
-                    if attempt == REPLACE_TRIES - 1:
-                        raise
-                    time.sleep(0.05)
+                except PermissionError as exc:  # Windows: the destination is held a moment
+                    if time.monotonic() >= deadline:
+                        raise LogWaitTimeout("payload log replace refused until the deadline: %r" % exc)
+                    time.sleep(LOG_RETRY_SECONDS)
     except Exception as exc:
         print("agent_end_reap: payload log write failed: %r" % exc, file=sys.stderr)
 
@@ -502,12 +525,15 @@ def main() -> int:
         raw = ""
     started = time.monotonic()
     run = "%d-%d" % (os.getpid(), time.time_ns())
-    log({"raw": raw, "run": run, "state": "started"})  # a run the hook timeout kills leaves this row
+    # One hook clock: the start row stops waiting where the worktree stage stops, the done row
+    # LOG_DONE_BY seconds in, so the hook ends inside its 60 s limit even when the log stays held.
+    log({"raw": raw, "run": run, "state": "started"},  # a run the hook timeout kills leaves this row
+        give_up_at=started + HOOK_BUDGET)
     try:
         record = handle(raw, started)
     except Exception as exc:
         record = {"raw": raw, "error": repr(exc)}
-    log(dict(record, run=run, state="done"), replace_run=run)
+    log(dict(record, run=run, state="done"), replace_run=run, give_up_at=started + LOG_DONE_BY)
     return 0
 
 

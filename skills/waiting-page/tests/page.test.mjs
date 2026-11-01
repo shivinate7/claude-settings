@@ -88,7 +88,7 @@ let browser;
 const html = fs.readFileSync(PAGE, "utf8");
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -104,6 +104,8 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
   await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, dbExtra });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
+  // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
+  if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
   await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
@@ -2843,6 +2845,13 @@ const CMD = "cd ~/sample-repo\n\necho \"a < b & 'c'\"\n  git status --short";
 const CMD_LINES = CMD.split("\n").map((l) => l.trim()).filter(Boolean);
 const RUN = { ...TASK, id: "run-the-command", n: 31, title: "Run the command", steps: ["Open a terminal", "Paste the command and run it"], command: CMD, links: [{ label: "Sample repo on GitHub", url: "https://github.example.test/sample-repo" }] };
 const WIDE_RUN = { ...RUN, id: "wide-command", n: 32, title: "Deploy the release", command: "npm run deploy -- --environment production --region us-east-1 --confirm --message 'a line that runs past the width of a phone and must wrap, not scroll'\n" + CMD };
+// Ruling (shiv, 2026-10-30 14:47 CDT): a task's command is {powershell, mac}, one string per shell, each in its own block.
+// A string command keeps the legacy render that RUN and WIDE_RUN above test.
+const PS_CMD = "Set-Location ~/sample-repo\nWrite-Output \"a < b & 'c'\"";
+const PS_LINES = PS_CMD.split("\n").map((l) => l.trim()).filter(Boolean);
+const BOTH = { ...TASK, id: "both-shells", n: 34, title: "Clear the cache", steps: ["Open a terminal", "Paste the command below and run it"], command: { powershell: PS_CMD, mac: CMD } };
+const MAC_ONLY = { ...BOTH, id: "mac-only", n: 35, title: "Clear the Mac cache", command: { mac: CMD } };
+const BOTH_WIDE = { ...BOTH, id: "wide-both", n: 36, title: "Deploy on both shells", command: { powershell: "Invoke-Deploy -Environment production -Region us-east-1 -Confirm -Message 'a line that runs past the width of a phone and must wrap, not scroll'\n" + PS_CMD, mac: WIDE_RUN.command } };
 const STATUS_REFUSED = "Not copied. The text is selected; copy it by hand.";
 // A missing element fails with its own message, not as a locator timeout.
 const need = async (loc, msg) => assert.equal(await loc.count(), 1, msg);
@@ -2953,6 +2962,92 @@ for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
     assert.ok((await boxHeight(copy)) >= 44, "Copy is under 44px tall");
     await need(box.locator(".cmd-text"), "no command text in the block");
     assert.equal(await box.locator(".cmd-text").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, "the command runs past its block");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+  });
+}
+
+test("a task with a command for each shell shows two blocks, each closed behind its own summary, with its own Copy", async (t) => {
+  const page = await open(t, { items: [BOTH] }); if (!page) return;
+  assert.equal(await card(page, BOTH).locator(".cmd").count(), 2, "a task with a command for each shell does not show two blocks");
+  for (const [shell, label] of [["ps", "PowerShell"], ["mac", "Mac"]]) {
+    const box = card(page, BOTH).locator(`#cmd-${BOTH.id}-${shell}`);
+    await need(box, `no ${label} command block`);
+    const more = box.locator("details");
+    await need(more, `the ${label} command is not in a closed disclosure`);
+    assert.equal(await more.evaluate((d) => d.open), false, `the ${label} disclosure starts open`);
+    assert.equal((await more.locator("summary").textContent()).trim(), `Show the ${label} command`, `the ${label} summary is not Show the ${label} command`);
+    await need(box.locator(`#cc-${BOTH.id}-${shell}`), `the ${label} text has no id cc-${BOTH.id}-${shell}`);
+    const copy = box.locator("button.cmd-copy");
+    await need(copy, `no Copy on the ${label} command`);
+    assert.equal(await copy.getAttribute("aria-label"), `Copy the ${label} command for No. ${BOTH.n}`, `the ${label} Copy is not named for its shell`);
+    assert.equal(await copy.getAttribute("aria-controls"), `cc-${BOTH.id}-${shell}`, `the ${label} Copy does not control its own text`);
+    assert.equal(await copy.evaluate((b) => !!b.closest("details")), false, `the ${label} Copy sits inside its disclosure`);
+  }
+});
+
+test("Copy on each shell's block writes that shell's string exactly, while its block is closed", async (t) => {
+  const page = await open(t, { items: [BOTH] }); if (!page) return;
+  await stubClipboard(page, false);
+  for (const [shell, text] of [["ps", PS_CMD], ["mac", CMD]]) {
+    const box = card(page, BOTH).locator(`#cmd-${BOTH.id}-${shell}`);
+    await need(box, `no ${shell} command block`);
+    assert.equal(await box.locator("details").evaluate((d) => d.open), false, `the ${shell} block is open before Copy`);
+    await box.locator("button.cmd-copy").click();
+    assert.equal(await holds(page, ({ id, shell }) => !!document.querySelector(`#cmd-${id}-${shell}.copied`), { id: BOTH.id, shell }), true, `a copy that worked did not mark the ${shell} block copied`);
+    assert.equal(await page.evaluate(() => window.__copied), text, `Copy did not write the ${shell} command exactly`);
+  }
+});
+
+for (const [platform, first, label] of [["Win32", "ps", "PowerShell"], ["MacIntel", "mac", "Mac"]]) {
+  test(`on ${platform} the ${label} block comes first`, async (t) => {
+    const page = await open(t, { items: [BOTH], platform }); if (!page) return;
+    const order = await card(page, BOTH).locator(".cmd").evaluateAll((els) => els.map((e) => e.id));
+    const second = first === "ps" ? "mac" : "ps";
+    assert.deepEqual(order, [`cmd-${BOTH.id}-${first}`, `cmd-${BOTH.id}-${second}`], `on ${platform} the blocks are not in this order`);
+  });
+}
+
+test("a command with only a mac string shows one Mac block and no PowerShell block, never a fallback label", async (t) => {
+  const page = await open(t, { items: [MAC_ONLY] }); if (!page) return;
+  const one = card(page, MAC_ONLY);
+  assert.equal(await one.locator(".cmd").count(), 1, "a mac-only command did not show exactly one block");
+  await need(one.locator(`#cmd-${MAC_ONLY.id}-mac`), "no Mac command block");
+  assert.equal(await one.locator(`#cmd-${MAC_ONLY.id}-ps`).count(), 0, "a mac-only command shows a PowerShell block");
+  assert.equal((await one.locator(".cmd-more > summary").textContent()).trim(), "Show the Mac command", "the mac-only summary is not Show the Mac command");
+  assert.equal((await one.textContent()).includes("PowerShell"), false, "a mac-only command names PowerShell on the page");
+});
+
+test("a refused copy on one shell's block opens and selects only that block", async (t) => {
+  const page = await open(t, { items: [BOTH] }); if (!page) return;
+  await stubClipboard(page, true);
+  const ps = card(page, BOTH).locator(`#cmd-${BOTH.id}-ps`), mac = card(page, BOTH).locator(`#cmd-${BOTH.id}-mac`);
+  await need(ps, "no PowerShell command block");
+  await need(mac, "no Mac command block");
+  await ps.locator("button.cmd-copy").click();
+  assert.equal(await holds(page, (id) => !!document.querySelector("#cmd-" + id + "-ps.failed"), BOTH.id), true, "a refused PowerShell copy did not mark its block failed");
+  assert.equal(await ps.locator("details").evaluate((d) => d.open), true, "a refused copy did not open its own block");
+  assert.equal(await mac.locator("details").evaluate((d) => d.open), false, "a refused copy opened the other block");
+  assert.equal(await mac.evaluate((e) => e.classList.contains("failed")), false, "a refused copy marked the other block failed");
+  const sel = await page.evaluate(() => getSelection().toString());
+  for (const line of PS_LINES) assert.ok(sel.includes(line), "the PowerShell text is not selected: " + line);
+  for (const line of CMD_LINES) assert.equal(sel.includes(line), false, "the Mac text is selected: " + line);
+  assert.equal(await page.evaluate(() => window.__copied), undefined, "a refused copy wrote something");
+});
+
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
+  test(`both shells' Copy is 44px tall or more, and neither command block scrolls sideways, at ${width} wide, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [BOTH_WIDE], scheme, viewport: { width, height: 900 } }); if (!page) return;
+    for (const shell of ["ps", "mac"]) {
+      const box = card(page, BOTH_WIDE).locator(`#cmd-${BOTH_WIDE.id}-${shell}`);
+      await need(box, `no ${shell} command block on the wide task`);
+      const copy = box.locator("button.cmd-copy");
+      await need(copy, `no Copy on the ${shell} block`);
+      assert.ok((await boxHeight(copy)) >= 44, `the ${shell} Copy is under 44px tall`);
+      await box.locator("summary").click();
+      await need(box.locator(".cmd-text"), `no ${shell} command text in the block`);
+      assert.equal(await box.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, `the ${shell} block scrolls sideways`);
+      assert.equal(await box.locator(".cmd-text").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), true, `the ${shell} command runs past its block`);
+    }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
   });
 }

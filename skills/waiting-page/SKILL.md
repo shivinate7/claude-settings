@@ -66,8 +66,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - `designs` (a list of `{slug, label}`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
-    recommend) and `why`. Never use the key `none`. The page adds its own "None of these" option
-    with that key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
+    recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+    Never use the key `none`. The page adds its own "None of these" option
+    with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
       `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
       On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
@@ -78,10 +79,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
-  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (one string) and `minutes`
-    (a number, or text such as `3 min`). The item shows `command` in a closed "Show the command" disclosure with a Copy
-    button that works while it is closed. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
-    A step never sends the owner to a file for a command: put it in `command` and say "paste the command below"
+  - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
+    strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
+    `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
+    button that works while it is closed, PowerShell first on Windows. A stored one-string `command` shows as one block
+    with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
+    A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
+    command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
     (guard rule `command-in-item`).
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
@@ -210,8 +214,8 @@ one short read-only git process, with no fetch. It writes `<out>` only, and no f
 2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
    or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
    and make it equal to the key. After the `set`, read the item back (`ArtifactData get
-   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each with a
-   unique key, and no key `none`. On a look question, check that each option has its own mockup
+   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each keyed
+   `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
    - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
@@ -270,7 +274,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" step 3 (new options) or step 4 (context) says. With no answer, there is no
+  Do it as "Route and close" step 3 (new options, or a close when they are not ready) or step 4 (context) says. With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -317,11 +321,14 @@ item and leaves it open until the lane takes the answer. Then it closes the item
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
-3. If the answer is `none`, write new `options`, `pick` and `why` from the
-   owner's note (a `multi` item's new `pick` is a list), and set `added` to now. Write `lastAnswer` from the answer
-   in the same update, without `choice`, because the new `options` replace the old keys. Then delete `answers/<id>` (pinned to its version), and
-   leave the item open. Say in the terminal that the item has new options. If the note is not
-   enough to write them, ask in the terminal what the owner wants.
+3. If the answer is `none` and you write the new `options`, `pick` and `why` from the
+   owner's note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
+   the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
+   `answers/<id>` (pinned to its version), and
+   leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
+   close the item (step 2) with a home that names the rework, and add a fresh item when the options are
+   ready. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
+   enough to write the options, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
@@ -336,7 +343,12 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
 ## Make a repo's page
 
-Do this at the repo's roll-out to the layout, on the owner's grant for that repo.
+Triage runs this when `python3 ~/.claude/lint/layout.py waiting-page <repo root>` prints `unknown`.
+The repo has no page. The coordinator-and-triage setup is the grant: the first triage does this, with no
+separate grant. It never marks the repo rolled out.
+
+A fork (a worktree whose work never reaches main) makes its own page and writes its own `waiting-page`
+key. It never reuses main's.
 
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
@@ -344,13 +356,16 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
    `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
-3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
+3. Triage writes `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
    `python3 ~/.claude/lint/repo_colour.py identity <repo root>`. It reads the repo's own extras keys
    `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
    then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
    invent a colour. The page still checks each text colour for 4.5:1 contrast.
-4. Put the URL in the repo's extras file: `"waiting-page": "<url>"`. The file alone does not mark the
-   repo as rolled out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
+4. Set the URL once: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`. It writes the
+   `waiting-page` key of the repo's extras file, `.claude/layout-extras.json`. Exit 0 wrote it. Exit 1 means
+   the key is already set: it prints the URL and writes nothing. Exit 2 means the URL is not an artifact
+   link, or the extras file cannot be read or written. The file alone does not mark the repo as rolled
+   out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
 5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.
 
 A local session can write to the database (measured on the Mac, Oct 26). A Windows session is
