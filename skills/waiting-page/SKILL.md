@@ -340,7 +340,12 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
 ## Make a repo's page
 
-Do this at the repo's roll-out to the layout, on the owner's grant for that repo.
+Triage runs this when `python3 ~/.claude/lint/layout.py waiting-page <repo root>` prints `unknown`.
+The repo has no page. The coordinator-and-triage setup is the grant: the first triage does this, with no
+separate grant. It never marks the repo rolled out.
+
+A fork (a worktree whose work never reaches main) makes its own page and writes its own `waiting-page`
+key. It never reuses main's.
 
 1. Load the `artifact-capabilities` skill.
 2. Publish `page.html` from this skill folder as a new private artifact with the capabilities
@@ -348,13 +353,16 @@ Do this at the repo's roll-out to the layout, on the owner's grant for that repo
    `<title>` to "<repo> Queue". Change nothing else. A republish keeps the title (`splice.carry`). A page
    published with `db` only keeps working and wakes no one. Republish it with both capabilities
    to turn this on.
-3. Write `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
+3. Triage writes `meta/page` with `checked`, an empty `parked` and `identity`. Take `brand` and `icon` from
    `python3 ~/.claude/lint/repo_colour.py identity <repo root>`. It reads the repo's own extras keys
    `waiting-page-colour` (#rrggbb) and `waiting-page-icon` (an .svg or .png path in the repo) first,
    then `docs/design/repo-colours.json`. Exit 2 means the colour is unknown: leave `brand` out. Never
    invent a colour. The page still checks each text colour for 4.5:1 contrast.
-4. Put the URL in the repo's extras file: `"waiting-page": "<url>"`. The file alone does not mark the
-   repo as rolled out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
+4. Set the URL once: `python3 ~/.claude/lint/layout.py set-waiting-page <repo root> <url>`. It writes the
+   `waiting-page` key of the repo's extras file, `.claude/layout-extras.json`. Exit 0 wrote it. Exit 1 means
+   the key is already set: it prints the URL and writes nothing. Exit 2 means the URL is not an artifact
+   link, or the extras file cannot be read or written. The file alone does not mark the repo as rolled
+   out; that is its own key, `"rolled-out": true`, added only in the repo's roll-out.
 5. Check with `python3 ~/.claude/lint/layout.py waiting-page <repo root>`.
 
 A local session can write to the database (measured on the Mac, Oct 26). A Windows session is
