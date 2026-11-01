@@ -1,0 +1,9 @@
+{
+  "title": "A process start time reads right in the repeated fall-back hour",
+  "phase": "cleanup",
+  "status": "doing",
+  "order": 103.33763,
+  "why": "Incident (coordinator, Nov 1 01:05 CST): batch 43's checks-macos failed in the repeated 01:00 hour after the clocks fell back. hooks/git_reads.py `_process_start_ms` parses `ps -o lstart=` with mktime, so a process started in that hour reads one hour late. janitor/sweep.py can then reap a live agent's lock, and session liveness reads wrong.",
+  "note": "Triage judged it a debt with an incident (roles-findings-are-debts-or-notes): it fired in CI, and a wrong start time can reap a live agent's lock. The lane writes debt record process-start-dst and closes it with the fix. Fix the cause in `_process_start_ms`, one home: read the start time without local wall-clock parsing (for example elapsed seconds from `ps -o etime=` subtracted from now), or settle the ambiguous hour the safe way, the earlier time, so a live process never reads as younger than its lock. Done check: a test pins a start time in the repeated hour (TZ=America/Chicago, Nov 1 01:30) and reads the right epoch; red on main, green on the fix; checks-macos green. Needs no answer. Files: hooks/git_reads.py and its test; janitor/sweep.py only if a caller changes. Lane started Nov 1 01:05 CST (coordinator, rule parallelism-keep-going). Batch 43 is #931 alone; its failed job re-runs once after 02:00 CST.",
+  "updatedAt": "2026-11-01T07:08:00Z"
+}
