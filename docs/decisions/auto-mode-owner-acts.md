@@ -22,6 +22,8 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only the batch's integration pull request, named as such there | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted | this record |
+| `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
+| `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 
 The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
 
@@ -43,6 +45,18 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 - Risk: named incident. On the Mac, the probe branches of c53 (the cloud merge tool) were archived, then the deletes were refused and the owner was asked again.
 - Check: the test reads the remedy's commands from the guard constant and fails until the entry quotes each one.
 - Gap: the classifier sees commands, not their output. A failed archive push followed by a delete is still allowed by this entry. The guard's own remote-contains test still refuses the local `git branch -D` then.
+
+### Remote tool allow rules
+
+Both are permission allow rules, not `autoMode` entries, so the classifier does not judge them. The docs say: "Actions matching your allow, ask, or deny rules resolve immediately" (https://code.claude.com/docs/en/permission-modes#how-the-classifier-evaluates-actions). This is documented, not measured here.
+
+An MCP tool marked `requiresUserInteraction` still prompts. Unknown for these two tools.
+
+- Incident: the classifier refused `archive_session` from 2026-10-31 to 2026-11-01. About 40 idle sessions stayed open. It also refused `add_repo`.
+- `add_repo` loses nothing. It only attaches a repo.
+- `archive_session` does not fully pass "can be undone". Unarchive gives a fresh container, so unpushed work in the old one is lost. The rule covers any session in the account. It lands on the owner's verbatim ask, 2026-11-01 17:37 CST: "add mcp__claude-code-remote__add_repo and mcp__claude-code-remote__archive_session to settings.json permissions.allow".
+- Never covers `add_repo`: any other remote tool, or the server-level form.
+- Never covers `archive_session`: any other remote tool, or the server-level form.
 
 ### Incidents for the owner PR and owner message entries
 
