@@ -23,6 +23,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+# The audit marker comes from shared_names, the home guard.py also imports it from (rule
+# building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
+# shared_names is standard library only and adds about 2 ms.
+from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
+
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
 # THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
@@ -36,7 +41,8 @@ SPAWN_PROMPT = (
     "Explore spawn, block only when the brief asks it to audit, review, judge, rate or compare meaning "
     "(not only to find files, names or text) and the call's model field is neither sonnet nor opus "
     "(haiku, or no model field, blocks; text in the brief does not count); the fix is model sonnet or "
-    "opus with effort high (agent-model-cap, audit Explore row). Otherwise answer {\"ok\": true} for "
+    "opus with effort high, and put the `" + EXPLORE_AUDIT_MARKER + "` marker on the brief's first non-blank line "
+    "so the guard rule agent-role-model passes too (agent-model-cap, audit Explore row). Otherwise answer {\"ok\": true} for "
     "Explore. Only for builder, reviewer, and test-author briefs, apply roles-brief-contents (the brief "
     "carries the task, the files, governing rulings, and the check that proves done) and "
     "tokens-point-brief-at-files (the brief names files and never pastes their contents). Flag a brief that "
@@ -63,7 +69,9 @@ QUESTION_PROMPT = (
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
-              "the spawn brief breaks roles-brief-contents or the Explore row of agent-model-cap."),
+              "the spawn brief breaks roles-brief-contents or the Explore row of agent-model-cap "
+              "(an audit Explore: model sonnet or opus with effort high, and `" + EXPLORE_AUDIT_MARKER
+              + "` on the brief's first non-blank line)."),
     "AskUserQuestion": (QUESTION_PROMPT, QUESTION_MODEL, QUESTION_TIMEOUT, QUESTION_RULE,
                         "the question box misses an item of the question format."),
 }
