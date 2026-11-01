@@ -224,10 +224,12 @@ class Scaffold(TempDest):
         self.assertIn("tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`", flat)
         self.assertIn("a live session tagged both `cs-repo:<other owner>/<other name>` and `cs-build:coordinator`", flat)
         self.assertIn("filters the tags itself", flat)
+        coordinator = re.search(r"- \*\*Coordinator\.\*\*.*?(?=\n- \*\*)", tiers, re.S).group(0)
+        self.assertIn("`cs-step:<step id>`", " ".join(coordinator.split()))
 
     def test_brief_carries_repo_tag(self):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
-        self.assertIn("tags `cs-repo:<owner>/<name>` and `cs-build:lane`", flat)
+        self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
