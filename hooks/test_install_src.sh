@@ -3667,17 +3667,29 @@ caseL3() {
 }
 
 # ---- caseM: a cloud install moves a clean, detached session checkout to main, and only that one ----------------
-# move_fixture NAME: a GitHub fixture whose main went: the repo, then commit OLD without merge/cloud_allow.json,
+# move_fixture NAME [stale]: a GitHub fixture whose main went: the repo, then commit OLD without merge/cloud_allow.json,
 # then the file back. A session's own checkout at $work/NAME-co (unmarked, origin the GitHub URL) sits detached at
 # OLD, as a cloud session left on its creation commit. HOME $h sends GitHub to the fixture. Sets fx, h, co, old, want.
+# stale: OLD also holds a stale CLAUDE.md and a stale hooks/session_start.sh, so a checkout on OLD differs from main in
+# its settings, its hook and its CLAUDE.md. Main is the repo's own tree either way: the rules, CLAUDE.md and the hook come
+# back from the copy of the repo this run already made.
 move_fixture() {
   fx="$work/$1-fx"; h="$work/$1-home"; co="$work/$1-co"
   mkdir -p "$h"
   make_github_fixture "$fx"
   gc() { git -C "$fx/src" -c user.email=t@example.com -c user.name=t "$@"; }
-  gc rm -q merge/cloud_allow.json; gc commit -q -m "before the rules"
+  cp "$fx/src/merge/cloud_allow.json" "$work/$1-rules.json"
+  gc rm -q merge/cloud_allow.json
+  if [ "${2:-}" = stale ]; then
+    printf '# stale CLAUDE.md on an old merged branch\n' > "$fx/src/CLAUDE.md"
+    printf '# stale hook on an old merged branch\n' > "$fx/src/hooks/session_start.sh"
+  fi
+  gc add -A; gc commit -q -m "before the rules"
   old=$(git -C "$fx/src" rev-parse HEAD)
-  gc checkout -q HEAD~1 -- merge/cloud_allow.json; gc commit -q -m "the rules"
+  cp "$work/$1-rules.json" "$fx/src/merge/cloud_allow.json"
+  cp "$work/tarsrc/claude-settings-main/CLAUDE.md" "$fx/src/CLAUDE.md"
+  cp "$work/tarsrc/claude-settings-main/hooks/session_start.sh" "$fx/src/hooks/session_start.sh"
+  gc add -A; gc commit -q -m "the rules"
   git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/main
   want=$(fixture_sha "$fx")
   git clone -q "$fx/bare.git" "$co"
@@ -3687,7 +3699,8 @@ move_fixture() {
 }
 move_install() {
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
@@ -3768,6 +3781,129 @@ caseM4() {
   else
     ok "$name"
   fi
+}
+
+# ---- caseM5-M7: a cloud install takes main's files, whatever branch or change the session checkout holds ----------
+# The defect: the own-checkout block leaves a checkout on a branch, or a dirty one, or at a commit main lacks, and the
+# install takes settings.json, hooks and CLAUDE.md from that checkout. move_fixture NAME stale makes the checkout's commit
+# and main differ in all three, so a red case shows the source the install took. Each case first checks the fixture's
+# facts with stale_fixture_ok, so a fixture fault never reads as an install result.
+
+# stale_fixture_ok: prints the first fact of a stale fixture that does not hold, and returns 1. Uses fx, old and want.
+stale_fixture_ok() {
+  if [ "$(git -C "$fx/bare.git" rev-parse "$old:CLAUDE.md")" = "$(git -C "$fx/bare.git" rev-parse "$want:CLAUDE.md")" ]; then
+    printf 'old and main hold the same CLAUDE.md'; return 1
+  fi
+  if [ "$(git -C "$fx/bare.git" rev-parse "$old:hooks/session_start.sh")" = "$(git -C "$fx/bare.git" rev-parse "$want:hooks/session_start.sh")" ]; then
+    printf 'old and main hold the same hooks/session_start.sh'; return 1
+  fi
+  if git -C "$fx/bare.git" cat-file -e "$old:merge/cloud_allow.json" 2>/dev/null; then
+    printf 'old holds merge/cloud_allow.json'; return 1
+  fi
+  if ! git -C "$fx/bare.git" merge-base --is-ancestor "$old" "$want"; then
+    printf 'old is not an ancestor of main'; return 1
+  fi
+  if [ "$(want_merge_count)" -le 0 ]; then printf 'main has no merge allow rules'; return 1; fi
+  return 0
+}
+
+# installed_src CFG HOME: the source the CLAUDE.md pointer in CFG names, with ~/ expanded. Empty when there is no pointer.
+installed_src() {
+  ist_p=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$1/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$ist_p" in "~"/*) ist_p="$2${ist_p#\~}";; esac
+  printf '%s\n' "$ist_p"
+}
+
+# main_allow WANT: the allow rules a cloud install of commit WANT writes, sorted: its settings.json rules, then merge/cloud_allow.json's.
+main_allow() {
+  { git -C "$fx/bare.git" show "$1:settings.json" | jq -r '.permissions.allow[]?'
+    git -C "$fx/bare.git" show "$1:merge/cloud_allow.json" | jq -r '.permissions.allow[]?'; } | sort
+}
+
+# main_mismatch WANT CFG HOME: prints the first installed file that differs from origin/main at WANT, or nothing. The
+# settings and the hook are read from CFG. CLAUDE.md is read through the pointer, so the check holds for any source the
+# install picks (the checkout, a worktree or a mirror). Files are compared by blob sha, never by a copy.
+main_mismatch() {
+  if [ "$(jq -r '.permissions.allow[]?' "$2/settings.json" 2>/dev/null | sort)" != "$(main_allow "$1")" ]; then
+    printf 'settings.json allow rules differ from origin/main (merge rules %s, origin/main %s)' "$(merge_rule_count)" "$(want_merge_count)"; return 0
+  fi
+  if [ "$(git hash-object "$2/hooks/session_start.sh" 2>/dev/null)" != "$(git -C "$fx/bare.git" rev-parse "$1:hooks/session_start.sh")" ]; then
+    printf 'hooks/session_start.sh differs from origin/main'; return 0
+  fi
+  mm_src=$(installed_src "$2" "$3")
+  if [ -z "$mm_src" ] || [ ! -f "$mm_src/CLAUDE.md" ]; then
+    printf 'the CLAUDE.md pointer names no file [%s]' "$mm_src"; return 0
+  fi
+  if [ "$(git hash-object "$mm_src/CLAUDE.md")" != "$(git -C "$fx/bare.git" rev-parse "$1:CLAUDE.md")" ]; then
+    printf 'CLAUDE.md differs from origin/main, read through the pointer to [%s]' "$mm_src"; return 0
+  fi
+}
+
+# caseM5: a checkout on an old merged branch whose head main holds, clean.
+caseM5() {
+  name="caseM5: a checkout on an old merged branch whose head main holds, clean: the install takes main's files"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m5 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  git -C "$co" checkout -q -b old-merged
+  if [ "$(git -C "$co" symbolic-ref --short HEAD)" != old-merged ] || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "FIXTURE the checkout is not a clean branch at old"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm; the install's source is [$(installed_src "$h/.claude-cfg" "$h")], the checkout is [$co]"; return; fi
+  ok "$name"
+}
+
+# caseM6: a checkout on a branch with an unmerged commit and an uncommitted change. The install takes main's files, and
+# the checkout keeps its branch, head and change exactly.
+caseM6() {
+  name="caseM6: a checkout on a branch with unmerged commits and a change: the install takes main's files, the checkout keeps them"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m6 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  git -C "$co" checkout -q -b lane
+  printf 'lane work\n' > "$co/lane.txt"
+  git -C "$co" add lane.txt
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q -m "lane work"
+  printf 'local edit\n' >> "$co/README.md"
+  lane_head=$(git -C "$co" rev-parse HEAD)
+  lane_status=$(git -C "$co" status --porcelain)
+  lane_diff=$(git -C "$co" diff HEAD)
+  if [ "$(git -C "$co" symbolic-ref --short HEAD)" != lane ] || [ -z "$lane_status" ] \
+     || git -C "$co" merge-base --is-ancestor "$lane_head" refs/remotes/origin/main; then
+    bad "$name" "FIXTURE the checkout is not a dirty branch with an unmerged commit"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm; the install's source is [$(installed_src "$h/.claude-cfg" "$h")], the checkout is [$co]"; return; fi
+  if [ "$(git -C "$co" symbolic-ref --short HEAD 2>/dev/null)" != lane ] || [ "$(git -C "$co" rev-parse HEAD)" != "$lane_head" ] \
+     || [ "$(git -C "$co" status --porcelain)" != "$lane_status" ] || [ "$(git -C "$co" diff HEAD)" != "$lane_diff" ]; then
+    bad "$name" "the checkout's branch, head or change was moved or lost"; return
+  fi
+  ok "$name"
+}
+
+# caseM7: control. A clean, detached checkout at a commit main holds moves to origin/main and installs from it.
+caseM7() {
+  name="caseM7: control: a clean, detached checkout at a commit main holds moves to origin/main and installs its files"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m7 stale
+  if ! msg=$(stale_fixture_ok); then bad "$name" "FIXTURE $msg"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null \
+     || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "FIXTURE the checkout is not a clean detached checkout at old"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$want" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
+    bad "$name" "the checkout is not detached at origin/main [$want]: $(git -C "$co" rev-parse HEAD)"; return
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm"; return; fi
+  ok "$name"
 }
 
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
@@ -3884,6 +4020,9 @@ run caseM1
 run caseM2
 run caseM3
 run caseM4
+run caseM5
+run caseM6
+run caseM7
 run pinmove1
 run pinmove2
 run pinmove3
