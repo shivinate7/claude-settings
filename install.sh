@@ -144,8 +144,6 @@ live_pin_clone() {
 
 # Locate the source files: the clone this script lives in, else fetch from GitHub.
 SCRIPT_DIR=""
-SRC_FOUND=0
-FROM_LIVE_PIN=0
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
@@ -169,6 +167,10 @@ else
   for cand in "$PTR_DIR" "${CLAUDE_PROJECT_DIR:-}" "$PWD"; do
     [ -n "$cand" ] || continue
     t=$(checkout_at "$cand") || continue
+    # Cloud: the live pin is never the source and never moved; its clone is the source instead.
+    if [ "$CLOUD" = 1 ] && pin_clone=$(live_pin_clone "$t"); then
+      t=$(checkout_at "$pin_clone") || continue
+    fi
     SRC="$t"; break
   done
 
@@ -191,20 +193,18 @@ else
   if [ -z "$SRC" ]; then
     t=$(checkout_at "$HOME/claude-settings") && SRC="$t"
   fi
-  SRC_FOUND=1
+
+  [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
 fi
 
-# Cloud: the live pin is never the source and never moved; its clone is the source instead. This runs after every
-# source pick, the script's own folder too: merge/install_from_main.sh runs install.sh from the pin.
-if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && pin_clone=$(live_pin_clone "$SRC"); then
-  if ! t=$(checkout_at "$pin_clone"); then
-    log "ERROR: $SRC is the live pin and its clone $pin_clone is no checkout of $REPO; run the installer from a checkout of $REPO."
-    exit 1
-  fi
-  log "the source $SRC is the live pin; its clone $t is the source instead"
-  SRC="$t"; FROM_LIVE_PIN=1
+# Cloud, a run of the pin's own install.sh (merge/install_from_main.sh runs it there): the pin stays the source,
+# at the local main the merge set. Only that script moves the pin, so both cloud blocks below skip this source,
+# and the pin_off_main refusal below still checks it.
+FROM_LIVE_PIN=0
+if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$SRC" = "$SCRIPT_DIR" ] && live_pin_clone "$SRC" >/dev/null; then
+  FROM_LIVE_PIN=1
+  log "the source $SRC is the live pin; the cloud steps leave it as it is"
 fi
-[ "$SRC_FOUND" = 1 ] && [ -n "$SRC" ] && log "found existing checkout of $REPO at $SRC; using it as source"
 
 # True when the pinned checkout $1 is not detached at the clone's local main commit.
 pin_off_main() {
@@ -352,8 +352,7 @@ cloud_git() {
 # person's own: this block never moves it, and the block below moves it only when clean and detached. mirrorSha is the sha this script last set main to: a main that
 # differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
 # unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
-# new tip only, never the history under it. A failed fetch keeps the clone as it was. A source that was the live
-# pin skips the resume: the pin sits at local main, and moving main would leave the pin off it.
+# new tip only, never the history under it. A failed fetch keeps the clone as it was. The live pin skips it.
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
   mirror_sha=$(git -C "$SRC" config --get claude-settings.mirrorSha 2>/dev/null)
   if [ -n "$mirror_sha" ] && [ "$(git -C "$SRC" rev-parse -q --verify main 2>/dev/null)" != "$mirror_sha" ]; then
@@ -372,7 +371,8 @@ fi
 # hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
 # holds moves to origin/$REF, so nothing is lost. A branch, a dirty tree or a commit main lacks stays as it is.
 # The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
-if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] \
+# The live pin skips it.
+if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
    && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
   if git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
     log "WARN: the checkout $SRC is on branch $(git -C "$SRC" symbolic-ref --short HEAD); left as is, not moved to $REF"
