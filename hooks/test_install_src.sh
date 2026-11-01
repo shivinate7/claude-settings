@@ -37,24 +37,6 @@ bad() { FAIL=$((FAIL + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 has_bak() { for e in "$1"/*.bak.*; do [ -e "$e" ] && return 0; done; return 1; }
 skip() { SKIP=$((SKIP + 1)); printf 'SKIP - %s: %s\n' "$1" "$2"; }
 
-# Detect once whether this account can create a real symbolic link, and reuse the answer
-# everywhere below. Windows needs SeCreateSymbolicLinkPrivilege for `ln -s`. Developer Mode,
-# or an elevated account, grants it. Without that privilege, MSYS/git-bash's `ln -sfn` still
-# exits 0. It copies the target's bytes into a plain file instead of linking it. A case that
-# only checks the exit code never sees this. Checking `[ -L ]` on the result does. This is a
-# capability probe, never an OS-name check. A Windows machine with Developer Mode on still
-# runs every case below for real.
-probe_dir=$(mktemp -d)
-printf 'probe\n' > "$probe_dir/target"
-ln -sfn "$probe_dir/target" "$probe_dir/link" 2>/dev/null
-if [ -L "$probe_dir/link" ]; then
-  SYMLINK_CAPABLE=1
-else
-  SYMLINK_CAPABLE=0
-fi
-rm -rf "$probe_dir"
-NO_SYMLINK_REASON="this account cannot create a real symlink (SeCreateSymbolicLinkPrivilege is not held, turn on Developer Mode or run elevated on Windows)"
-
 # Canonicalize: on macOS, mktemp -d returns a /var/folders/... path where /var is itself
 # a symlink to /private/var. install.sh's checkout detection goes through
 # `git rev-parse --show-toplevel`, which resolves that symlink, so the pointer it writes
@@ -88,9 +70,31 @@ landed_dirs() {
   sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$REPO_ROOT/landed-dirs.txt" | grep -v '^$'
 }
 
-work=$(mktemp -d); work=$(realpwd "$work")
+# One run folder per test run (test-temp-standard): lint/_test_temp.py makes it under the repo's one temp
+# root and sweeps sibling run folders older than a day. Every temp path in this file sits under it.
+work=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())' "$REPO_ROOT/lint") || work=""
+[ -n "$work" ] || { echo "FAIL - run folder: lint/_test_temp.py made no run folder"; exit 1; }
+work=$(realpwd "$work")
 cleanup() { rm -rf "$work"; }
 trap cleanup EXIT
+
+# Detect once whether this account can create a real symbolic link, and reuse the answer
+# everywhere below. Windows needs SeCreateSymbolicLinkPrivilege for `ln -s`. Developer Mode,
+# or an elevated account, grants it. Without that privilege, MSYS/git-bash's `ln -sfn` still
+# exits 0. It copies the target's bytes into a plain file instead of linking it. A case that
+# only checks the exit code never sees this. Checking `[ -L ]` on the result does. This is a
+# capability probe, never an OS-name check. A Windows machine with Developer Mode on still
+# runs every case below for real.
+probe_dir=$(mktemp -d "$work/probe.XXXXXX")
+printf 'probe\n' > "$probe_dir/target"
+ln -sfn "$probe_dir/target" "$probe_dir/link" 2>/dev/null
+if [ -L "$probe_dir/link" ]; then
+  SYMLINK_CAPABLE=1
+else
+  SYMLINK_CAPABLE=0
+fi
+rm -rf "$probe_dir"
+NO_SYMLINK_REASON="this account cannot create a real symlink (SeCreateSymbolicLinkPrivilege is not held, turn on Developer Mode or run elevated on Windows)"
 
 # A stub uname for one answer: its dir goes first on PATH for the run that needs it.
 make_uname_stub() {
@@ -2236,9 +2240,10 @@ pinned_wt1() {
 # pin_fixture TAG BEHIND AT KIND: a bare origin on main, a clone whose main is one commit past its
 # first commit, origin/main BEHIND commits past that main, and a pin at main (AT=main) or at the
 # commit before it (AT=old). KIND=worktree makes the pin a linked worktree, KIND=clone a full clone.
-# Sets pf_pin, pf_cfg, and pf_msg (the reason it failed, when it returns 1).
+# INSTALL=install tracks install.sh and merge/install_from_main.sh in the clone's second commit, so the pin
+# holds them as a real pin does. Sets pf_pin, pf_cfg, and pf_msg (the reason it failed, when it returns 1).
 pin_fixture() {
-  pf_tag="$1"; pf_behind="$2"; pf_at="$3"; pf_kind="$4"; pf_msg=""
+  pf_tag="$1"; pf_behind="$2"; pf_at="$3"; pf_kind="$4"; pf_install="${5:-}"; pf_msg=""
   pf_co="$work/$pf_tag-clone"; pf_pin="$work/$pf_tag-clone-live"
   pf_cfg="$work/$pf_tag-cfg"; pf_bare="$work/$pf_tag-origin.git"; pf_extra="$work/$pf_tag-extra"
   git init -q --bare "$pf_bare"
@@ -2246,6 +2251,13 @@ pin_fixture() {
   make_checkout "$pf_co" "# $pf_tag content" "$pf_bare"
   force_main_branch "$pf_co"
   printf '# %s second\n' "$pf_tag" >> "$pf_co/CLAUDE.md"
+  if [ "$pf_install" = install ]; then
+    # The install files are tracked in the commit, as a real pin has them: an untracked copy makes the pin dirty.
+    mkdir -p "$pf_co/merge" && cp "$INSTALL_SH" "$pf_co/install.sh" \
+      && cp "$REPO_ROOT/merge/install_from_main.sh" "$pf_co/merge/install_from_main.sh" \
+      || { pf_msg="cannot copy the install files into the clone"; return 1; }
+    ( cd "$pf_co" && git add install.sh merge/install_from_main.sh ) || { pf_msg="cannot stage the install files"; return 1; }
+  fi
   if ! ( cd "$pf_co" && git add CLAUDE.md && git commit -q -m second && git push -q origin main ); then
     pf_msg="clone setup failed"; return 1
   fi
@@ -2762,7 +2774,7 @@ pinlive2() {
 # it failed, when it returns 1).
 live_pin_fixture() {
   lp_msg=""
-  if ! pin_fixture "$1" 2 main worktree; then lp_msg="$pf_msg"; return 1; fi
+  if ! pin_fixture "$1" 2 main worktree "${2:-}"; then lp_msg="$pf_msg"; return 1; fi
   lp_co="$pf_co"; lp_bare="$pf_bare"; lp_link="$pf_co-live"
   lp_pin="$lp_co-live-$(git -C "$pf_pin" rev-parse --short=12 HEAD 2>/dev/null)"
   git -C "$lp_co" worktree move "$pf_pin" "$lp_pin" >/dev/null 2>&1 \
@@ -2882,6 +2894,103 @@ pinmove5() {
     bad "$name" "log names [$src] as the source, want the clone [$pm_co]"
   elif [ "$(normalize_path "$pm_ptr")" != "$(normalize_path "$pm_co")" ]; then
     bad "$name" "pointer [$pm_ptr] is not the clone [$pm_co]"
+  else ok "$name"; fi
+}
+
+# ---- mergepin cases: a cloud merge run from the clone never moves the live pin off local main ----------
+# Decision merge-reinstalls-from-main, ruling 4: only merge/install_from_main.sh moves the pin. That run takes
+# the install lock and runs install.sh from the pin. In a cloud run install.sh takes the pin as its source (its
+# SCRIPT_DIR branch), so its cloud blocks see the pin, and they must leave it at local main. The one move is the
+# rename in merge/install_from_main.sh, and that runs only when local main is past the pin.
+# Each case runs the clone's own merge/install_from_main.sh from the clone, as the coordinator's merge does.
+
+s12() { printf '%.12s' "$1"; }
+
+# merge_run TAG SETUP: one cloud run of the clone's merge/install_from_main.sh, from live_pin_fixture TAG built
+# with its install files tracked. SETUP is plain; mirror (the clone carries claude-settings.cloudMirror, as a
+# clone install.sh made does); or local (main gets one commit that origin/main lacks). Sets mr_co, mr_pin, mr_link,
+# mr_origin, mr_want (the clone's local main after SETUP, before the run), mr_path_before (the link's resolved
+# path before the run), mr_out, mr_rc, mr_head_after (the pin's HEAD after) and mr_path_after (the link's resolved
+# path after). Returns 1 with mr_msg when the fixture or SETUP failed.
+merge_run() {
+  mr_msg=""
+  if ! live_pin_fixture "$1" install; then mr_msg="$lp_msg"; return 1; fi
+  mr_co="$lp_co"; mr_pin="$lp_pin"; mr_link="$lp_link"; mr_origin="$lp_origin"
+  case "$2" in
+    plain) ;;
+    mirror) git -C "$mr_co" config claude-settings.cloudMirror true || { mr_msg="cannot set the cloudMirror marker"; return 1; } ;;
+    local) git -C "$mr_co" commit -q --allow-empty -m "local main commit" || { mr_msg="cannot commit to the clone's main"; return 1; } ;;
+    *) mr_msg="unknown setup $2"; return 1 ;;
+  esac
+  mr_want=$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)
+  mr_path_before=$(realpwd "$mr_link")
+  h=$(new_home); write_redirect "$h" "$lp_bare"
+  cfg="$work/$1-cfg"; stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
+  mr_out=$(cd "$mr_co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
+        GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash ./merge/install_from_main.sh 2>&1)
+  mr_rc=$?
+  mr_head_after=$(git -C "$mr_link" rev-parse HEAD 2>/dev/null)
+  mr_path_after=$(realpwd "$mr_link")
+  rm -rf "$h"
+  return 0
+}
+
+# merge_pin_check NAME: after mr's run the pin keeps local main, the clone's main did not move, and the pin keeps
+# its path. A HEAD at origin/main is the defect's own mark, so it is named first. Returns 1 after a bad line.
+merge_pin_check() {
+  if [ "$mr_head_after" = "$mr_origin" ] && [ "$mr_origin" != "$mr_want" ]; then
+    bad "$1" "the cloud merge moved the live pin to origin/main ($(s12 "$mr_origin")), not local main ($(s12 "$mr_want"))"; return 1
+  fi
+  if [ "$mr_head_after" != "$mr_want" ]; then
+    bad "$1" "the live pin HEAD is ${mr_head_after:-unreadable} after the run, want local main $(s12 "$mr_want")"; return 1
+  fi
+  if [ "$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)" != "$mr_want" ]; then
+    bad "$1" "the run moved the clone's local main off $(s12 "$mr_want")"; return 1
+  fi
+  if [ "$mr_path_after" != "$mr_path_before" ]; then
+    bad "$1" "the live pin path moved from $mr_path_before to ${mr_path_after:-nothing}"; return 1
+  fi
+  return 0
+}
+
+# merge_run_check NAME: the run reached install.sh and exited 0. A run that stopped earlier leaves the pin where it
+# was, so that alone would pass for the wrong reason. Returns 1 after a bad line.
+merge_run_check() {
+  if [ "$mr_rc" -ne 0 ]; then bad "$1" "merge/install_from_main.sh exited $mr_rc: $mr_out"; return 1; fi
+  case "$mr_out" in *"Installing from "*) return 0 ;; esac
+  bad "$1" "install.sh did not run (no 'Installing from' line): $mr_out"; return 1
+}
+
+# mergepin1: a cloud merge from a plain clone leaves the live pin at local main, at its own path.
+mergepin1() {
+  name="mergepin1: cloud merge, plain clone: the live pin keeps local main and its own path"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin1 plain; then bad "$name" "fixture: $mr_msg"; return; fi
+  if merge_pin_check "$name" && merge_run_check "$name"; then ok "$name"; fi
+}
+
+# mergepin2: the same with the clone marked cloudMirror. The mirror resume is the other cloud block that can move the pin.
+mergepin2() {
+  name="mergepin2: cloud merge, clone marked cloudMirror: the live pin keeps local main and its own path"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin2 mirror; then bad "$name" "fixture: $mr_msg"; return; fi
+  if merge_pin_check "$name" && merge_run_check "$name"; then ok "$name"; fi
+}
+
+# mergepin3: control. Local main is one commit past origin/main, a commit origin/main lacks, so the cloud blocks
+# cannot move the pin to origin/main. The rename in merge/install_from_main.sh is the only move: the pin path
+# becomes <clone>-live-<new 12 hex> and its HEAD is the new local main.
+mergepin3() {
+  name="mergepin3: control: local main one commit past origin: the cloud merge moves the pin to it by the rename"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin3 local; then bad "$name" "fixture: $mr_msg"; return; fi
+  want_path=$(realpwd "$mr_co-live-$(git -C "$mr_co" rev-parse --short=12 "$mr_want")")
+  if ! merge_run_check "$name"; then return; fi
+  if [ -z "$want_path" ] || [ "$mr_path_after" != "$want_path" ]; then
+    bad "$name" "the pin path is ${mr_path_after:-nothing}, want the rename target ${want_path:-not made}"
+  elif [ "$mr_head_after" != "$mr_want" ]; then
+    bad "$name" "the pin HEAD is ${mr_head_after:-unreadable}, want the new local main $(s12 "$mr_want")"
   else ok "$name"; fi
 }
 
@@ -3068,7 +3177,7 @@ write_redirect() {
 # clone or fetch fails at once instead of reaching github.com.
 default_home() { mkdir -p "$1"; write_redirect "$1" "$work/no-such-github.git"; }
 # new_home: a fresh temp HOME with the default .gitconfig. Prints its physical path.
-new_home() { d=$(mktemp -d); d=$(realpwd "$d"); default_home "$d"; printf '%s\n' "$d"; }
+new_home() { d=$(mktemp -d "$work/home.XXXXXX"); d=$(realpwd "$d"); default_home "$d"; printf '%s\n' "$d"; }
 # The entries a run left under a fake HOME, not counting its default .gitconfig.
 home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
 # One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
@@ -3723,6 +3832,9 @@ run pinmove2
 run pinmove3
 run pinmove4
 run pinmove5
+run mergepin1
+run mergepin2
+run mergepin3
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
