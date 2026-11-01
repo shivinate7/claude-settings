@@ -1,9 +1,10 @@
 # Waiting page Ask box, step page-ask-box: design notes
 
 Mockup: `docs/design/page-ask-box.html`. Screen: `skills/waiting-page/page.html` (main ea92b0cc).
-Deep links: `#s=a|empty|loading|sent|failed|offline|b|c`, `&w=all|390|1280`, `&t=light|dark`,
-`&lab=off`, `&hide=b,c,rail,older`. The mockup uses page.html's own CSS, copied into it.
-Sizes: phone 390 and wide 1280, the brief's sizes. `layout.py devices` gives no list for this repo.
+Deep links: `#s=a|empty|loading|sent|failed|offline|b|c`, `&w=all|390|800|1280`, `&t=light|dark`,
+`&lab=off`, `&hide=a,b,c,rail,older`. Hide A also hides the five A states. The mockup uses page.html's own CSS, copied into it.
+Sizes: phone 390, mid 800 and wide 1280. The brief names 390 and 1280; 800 is page.html's mid band.
+`layout.py devices` gives no list for this repo.
 Themes: light and dark. The settled defaults of the step note are not opened again.
 
 ## 1. Placement
@@ -17,6 +18,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 - C: one line to type in the fixed answer bar, with the list at the page end. Gain: always in view.
   Lose: the bar has two Send buttons and grows to about 150px on a phone. It covers more of each card.
 - Owner grant: no for A. B and C depart from the step note ("at the bottom"), so each one needs a grant.
+- State and focus for a look item: A `a` and `#askA`, B `b` and `#askB`, C `c` and `#askC`.
+- Pick: A.
 
 ## 2. Layout of the section
 
@@ -24,6 +27,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   The heading and one line of help sit in the rail's column. The box and the asks sit in the list's column.
 - At 960 and narrower it is one column, as `.main` is.
 - Heading: a half-filled disc, "Ask", and a count pill of waiting asks (the shape of `.tier > header .ct`).
+- Gain: the box lines up with the cards above it. Lose: on a wide screen the left column holds only the heading.
+- Pick: the two columns.
 
 ## 3. The record, `asks/<id>`
 
@@ -40,6 +45,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   only thing that keeps the owner's words apart from a session's. It is the same as for `answers/` in SKILL.md, "Read the answers".
 - The names reuse `owner`, `reply`, `read`, `filed` and `home` from `items/` and `receipts/`.
 - An ask with `reply` is answered. An ask with no `reply` waits.
+- Gain: one record per ask, and the page draws each state from it. Lose: only a written rule keeps a session off `text` and `at`.
+- Pick: this shape. The step note settles one record for the ask and its answer.
 
 ## 4. An ask is never a grant
 
@@ -64,6 +71,9 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   Ctrl+Enter sends on a fine pointer. The hint drops those words on a touch screen.
 - The typed text is kept in `localStorage` `waiting.askDraft`, as `waiting.draft` keeps a note (ux-keep-what-was-made).
 - An ask cannot be changed after the Undo time. A follow-up is a new ask.
+- Departs from: page.html `openSent` and `renderSent` — the Undo for an ask shows at the box, with no stamp. The window, the clock read and the notices stay as today.
+- Gain: the answer to the press is at the press, and the box is never covered. Lose: two Undo places on one page.
+- Pick: Undo at the box.
 
 ## 6. Waiting and answered states
 
@@ -74,6 +84,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   A filed ask adds "Filed in <home>, <time>".
 - Shapes: a half-filled disc for waiting, today's `.g.done` check for answered. The hollow ring
   already means Whenever, so it is not used (ux-one-plain-name).
+- Gain: the owner sees who has each ask and how long it has waited. Lose: one more shape on the page.
+- Pick: these states.
 
 ## 7. A rail link (hide control: "Hide the rail link")
 
@@ -96,6 +108,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   The rows under it move down one row. That is the cost of "newest first" in the step note.
 - The other lane folds options behind `button.unfold`. I did not see its code. The control here
   uses the look of `.morebtn` and the class `unfold`. The lane that lands second matches the class.
+- Gain: the list stays short, and a new answer is not missed. Lose: an older answer needs a press to read.
+- Pick: fold, with new answers open.
 
 ## 9. Older asks (hide control: "Hide older asks")
 
@@ -112,6 +126,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   A Copy ask button shows beside Send ask, as "Copy answers" does today. Send ask stays on, so the owner can try again.
 - Store not reachable (`state.db === false`): Send ask is off, and the hint says why. Copy ask shows.
   The list says "Your asks cannot be read in this view." It never says "nothing asked".
+- Gain: each state has its own words, and no typed text is lost. Lose: four more strings to keep true.
+- Pick: these four states.
 
 ## 11. Send ask when off
 
@@ -125,11 +141,14 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 
 - The fixed bar stays. Today's `scroll-padding-bottom` (96px) keeps a focused box above it.
 - Unmeasured: a real phone with the keyboard up. The builder checks it on a 390 device.
+- Gain: no new behaviour. Lose: if the bar covers the box with the keyboard up, a later fix hides the bar while the box has focus.
+- Pick: keep the bar.
 
 ## 13. Ship together or apart
 
 - Apart. The Ask section has its own render function, its own database listener and its own
   state. It does not change `renderList`, the tiers or the cards. The two lanes share only the look of a fold control.
+- Item 7 adds one row at the end of `renderRail`. The tier lane may also change that function. That is a text conflict at merge, not a clash of behaviour.
 
 ## 14. Work outside this folder (for the builder)
 
