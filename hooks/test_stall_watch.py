@@ -26,7 +26,8 @@ Every case runs the real hook and the real rewritten command, the way the harnes
 case imports the module. Two environment variables steer the run:
 - STALL_WATCH_MODULE: the module under test (default hooks/stall_watch.py beside this file).
   Mutation runs point it at a copy with a defect in it.
-- STALL_WATCH_QUIET: the quiet seconds the hook writes into the rewritten command. The tests set 2.
+- STALL_WATCH_QUIET: the quiet seconds the hook writes into the rewritten command. The tests set 2,
+  and the verdict cases (24a-24c) set 3.
 
 Report format the tests read: `pid=<a>,<b>,...` on the STALL line lists the pids to stop, parent first.
 Its absolute path, ending in .log, names the log. Pids are found by regex, so spacing around `=` is
@@ -52,9 +53,12 @@ import time
 from case_runner_test import Skip, run_cases
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch.py")
 PY = sys.executable
-SCRATCH = tempfile.mkdtemp(prefix="test-stall-watch-")
+VERDICT = os.path.join(os.path.dirname(HERE), "bin", "verdict")
+SCRATCH = _test_temp.run_folder()
 PIDS = set()
 MARKS = []  # tokens in job shells' argv that no other process carries, so reap() finds a stray job
 CASES = []
@@ -183,8 +187,8 @@ def module_or_fail():
         raise Fail(f"{MODULE} is missing")
 
 
-def hook(command, os_name=None):
-    """Run the hook on one background Bash call. Return (rc, stdout, stderr)."""
+def hook(command, os_name=None, quiet="2"):
+    """Run the hook on one background Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr)."""
     module_or_fail()
     payload = {
         "session_id": "test-stall-watch",
@@ -194,7 +198,7 @@ def hook(command, os_name=None):
     }
     # TMPDIR makes the hook name its log under SCRATCH (case 7b): a stalled job's log is never
     # removed by the wrapper, so the run's cleanup must remove it. Every caller goes through here.
-    env = dict(os.environ, STALL_WATCH_QUIET="2", TMPDIR=SCRATCH)
+    env = dict(os.environ, STALL_WATCH_QUIET=quiet, TMPDIR=SCRATCH)
     if os_name is None:
         argv = [PY, MODULE, "--hook"]
     else:
@@ -208,9 +212,9 @@ def hook(command, os_name=None):
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
 
 
-def rewrite(command):
+def rewrite(command, quiet="2"):
     """Return (rewritten command, hookSpecificOutput) for a background call, or raise Fail."""
-    rc, out, err = hook(command)
+    rc, out, err = hook(command, quiet=quiet)
     if rc != 0:
         raise Fail(f"hook exit {rc}: {err.strip()[:200]}")
     try:
@@ -223,19 +227,28 @@ def rewrite(command):
     return ui["command"], hso
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None):
-    """Run the rewritten command in the given shell, with `env` as its environment (default: ours).
+def job_env(**extra):
+    """The environment a rewritten job runs in: ours, minus STALL_WATCH_BEAT (the rewrite exports
+    it for the job), plus `extra`."""
+    env = {k: v for k, v in os.environ.items() if k != "STALL_WATCH_BEAT"}
+    env.update(extra)
+    return env
+
+
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2"):
+    """Run the rewritten command in the given shell, with `env` as its environment (default: job_env()).
     Return (rc or None, text, seconds, cmd).
     The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
     names. Text added to the command would change it, for one ending in a backslash."""
-    cmd, _hso = rewrite(command)
+    cmd, _hso = rewrite(command, quiet=quiet)
     mark = mark or new_mark()
     d = new_dir()
     out_path = os.path.join(d, "harness.out")
     start = time.monotonic()
     with open(out_path, "wb") as out:
         proc = subprocess.Popen([shell, "-c", cmd, mark], cwd=d, stdin=subprocess.DEVNULL,
-                                stdout=out, stderr=subprocess.STDOUT, env=env)
+                                stdout=out, stderr=subprocess.STDOUT,
+                                env=job_env() if env is None else env)
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -951,6 +964,71 @@ def quiet_job_with_no_named_log_stalls():
     rc, text, secs, _cmd = run_rewritten("sleep 30 >%s 2>&1" % os.devnull)
     problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
     reap()
+    return problems
+
+
+VERDICT_QUIET = "3"  # the quiet time of the watch in the verdict cases
+VERDICT_SLEEP = 6  # the verdict child runs this many seconds, above the quiet time
+
+
+def verdict_job_env():
+    """A one-second heartbeat, and this run's folder for the logs verdict makes. Never STALL_WATCH_BEAT:
+    the rewrite must export it, as it does for a real job."""
+    env = job_env(VERDICT_HEARTBEAT="1", TMPDIR=SCRATCH)
+    env.pop("VERDICT_LOG", None)
+    return env
+
+
+def verdict_stall_problems(orig, want_rc=None):
+    """Run orig as a background job under a quiet watch. No STALL may come. Return a list of problems."""
+    rc, text, _secs, _cmd = run_rewritten(orig, timeout=30, env=verdict_job_env(), quiet=VERDICT_QUIET)
+    reap()
+    problems = expect(rc is not None, "the job did not end within 30 s")
+    problems += expect("STALL" not in text, "a STALL report came: the heartbeat never reached the watch")
+    problems += expect(rc != 3, "exit 3: the watch stalled and ended the job")
+    if want_rc is not None:
+        problems += expect(rc == want_rc, f"exit {rc}, want {want_rc}")
+    return problems
+
+
+@posix_case
+def verdict_heartbeat_through_grep_is_no_stall():
+    """24a. verdict sleep N 2>&1 | grep nomatch: the heartbeat reaches the watch, so no STALL"""
+    return verdict_stall_problems(f"{shlex.quote(VERDICT)} sleep {VERDICT_SLEEP} 2>&1 | grep nomatch")
+
+
+@posix_case
+def verdict_heartbeat_to_devnull_is_no_stall():
+    """24b. verdict sleep N 2>/dev/null: the child's stderr is dropped, yet the heartbeat reaches the watch"""
+    return verdict_stall_problems(f"{shlex.quote(VERDICT)} sleep {VERDICT_SLEEP} 2>/dev/null", want_rc=0)
+
+
+@posix_case
+def bare_verdict_is_no_stall():
+    """24c. bare verdict sleep N: the heartbeat lands in the job's log, so no STALL (no regression)"""
+    return verdict_stall_problems(f"{shlex.quote(VERDICT)} sleep {VERDICT_SLEEP}", want_rc=0)
+
+
+@posix_case
+def beat_file_is_removed_when_the_job_ends():
+    """24d. the rewrite names a beat file next to LOG, exports it as STALL_WATCH_BEAT, and removes it with LOG"""
+    orig = 'echo "beat=$STALL_WATCH_BEAT"; echo x >> "$STALL_WATCH_BEAT"; [ -s "$STALL_WATCH_BEAT" ] && echo held'
+    rc, text, _secs, cmd = run_rewritten(orig)
+    reap()
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    m = re.search(r"^beat=(\S+)$", text, re.M)
+    if not m:
+        return problems + ["the job saw no STALL_WATCH_BEAT: " + text[:200]]
+    beat = m.group(1)
+    problems += expect("held" in text.splitlines(), "the job could not write to the beat file")
+    problems += expect(beat.endswith(".beat"), f"beat path {beat} does not end in .beat")
+    tail = cmd.split(" --log ", 1)
+    if len(tail) != 2:
+        return problems + ["the rewrite has no --log"]
+    log = shlex.split(tail[1])[0]
+    problems += expect(os.path.realpath(os.path.dirname(beat)) == os.path.realpath(os.path.dirname(log)),
+                       f"beat {beat} is not in the folder of LOG {log}")
+    problems += expect(not os.path.exists(beat), f"beat file {beat} is still there after the job ended")
     return problems
 
 
