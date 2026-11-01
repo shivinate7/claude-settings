@@ -2253,10 +2253,11 @@ pin_fixture() {
   printf '# %s second\n' "$pf_tag" >> "$pf_co/CLAUDE.md"
   if [ "$pf_install" = install ]; then
     # The install files are tracked in the commit, as a real pin has them: an untracked copy makes the pin dirty.
-    mkdir -p "$pf_co/merge" && cp "$INSTALL_SH" "$pf_co/install.sh" \
+    mkdir -p "$pf_co/merge" "$pf_co/hooks" && cp "$INSTALL_SH" "$pf_co/install.sh" \
       && cp "$REPO_ROOT/merge/install_from_main.sh" "$pf_co/merge/install_from_main.sh" \
+      && printf 'main hook\n' > "$pf_co/hooks/probe_hook.sh" \
       || { pf_msg="cannot copy the install files into the clone"; return 1; }
-    ( cd "$pf_co" && git add install.sh merge/install_from_main.sh ) || { pf_msg="cannot stage the install files"; return 1; }
+    ( cd "$pf_co" && git add install.sh merge/install_from_main.sh hooks/probe_hook.sh ) || { pf_msg="cannot stage the install files"; return 1; }
   fi
   if ! ( cd "$pf_co" && git add CLAUDE.md && git commit -q -m second && git push -q origin main ); then
     pf_msg="clone setup failed"; return 1
@@ -2920,12 +2921,22 @@ merge_run() {
     plain) ;;
     mirror) git -C "$mr_co" config claude-settings.cloudMirror true || { mr_msg="cannot set the cloudMirror marker"; return 1; } ;;
     local) git -C "$mr_co" commit -q --allow-empty -m "local main commit" || { mr_msg="cannot commit to the clone's main"; return 1; } ;;
+    lane)
+      # A lane branch whose hook differs from main, and one uncommitted edit. Neither may reach the install.
+      git -C "$mr_co" switch -c lane >/dev/null 2>&1 \
+        && printf 'lane hook\n' > "$mr_co/hooks/probe_hook.sh" \
+        && git -C "$mr_co" commit -q -am "lane edit" \
+        && printf 'uncommitted edit\n' >> "$mr_co/CLAUDE.md" \
+        || { mr_msg="cannot set up the lane checkout"; return 1; }
+      mr_lane_head=$(git -C "$mr_co" rev-parse HEAD 2>/dev/null)
+      mr_lane_status=$(git -C "$mr_co" status --porcelain 2>/dev/null)
+      ;;
     *) mr_msg="unknown setup $2"; return 1 ;;
   esac
   mr_want=$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)
   mr_path_before=$(realpwd "$mr_link")
   h=$(new_home); write_redirect "$h" "$lp_bare"
-  cfg="$work/$1-cfg"; stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
+  cfg="$work/$1-cfg"; mr_cfg="$cfg"; stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
   mr_out=$(cd "$mr_co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_REMOTE=true \
         GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash ./merge/install_from_main.sh 2>&1)
@@ -2991,6 +3002,52 @@ mergepin3() {
     bad "$name" "the pin path is ${mr_path_after:-nothing}, want the rename target ${want_path:-not made}"
   elif [ "$mr_head_after" != "$mr_want" ]; then
     bad "$name" "the pin HEAD is ${mr_head_after:-unreadable}, want the new local main $(s12 "$mr_want")"
+  else ok "$name"; fi
+}
+
+# mergepin4: a cloud merge takes its files from main, never from the clone's lane branch. The clone keeps its branch,
+# head and uncommitted edit. Source pick: a checkout's branch must not be the install's source.
+mergepin4() {
+  name="mergepin4: cloud merge, clone on a lane branch with an edit: the install takes main's files and the clone keeps its state"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! merge_run mergepin4 lane; then bad "$name" "fixture: $mr_msg"; return; fi
+  if ! git -C "$mr_co" show "$mr_want:hooks/probe_hook.sh" > "$work/mergepin4-main-hook" 2>/dev/null; then
+    bad "$name" "fixture: main has no probe hook"; return
+  fi
+  if ! merge_run_check "$name"; then return; fi
+  if ! cmp -s "$mr_cfg/hooks/probe_hook.sh" "$work/mergepin4-main-hook"; then
+    bad "$name" "the installed hook is [$(cat "$mr_cfg/hooks/probe_hook.sh" 2>/dev/null)], want main's copy"; return
+  fi
+  if [ "$(git -C "$mr_co" symbolic-ref -q --short HEAD 2>/dev/null)" != lane ]; then
+    bad "$name" "the run moved the clone off its lane branch"; return
+  fi
+  if [ "$(git -C "$mr_co" rev-parse HEAD 2>/dev/null)" != "$mr_lane_head" ]; then
+    bad "$name" "the run moved the clone's lane head off $(s12 "$mr_lane_head")"; return
+  fi
+  if [ "$(git -C "$mr_co" status --porcelain 2>/dev/null)" != "$mr_lane_status" ]; then
+    bad "$name" "the run changed the clone's uncommitted edit"; return
+  fi
+  ok "$name"
+}
+
+# mergepin5: a pointer at the live pin whose clone is no checkout (no settings.json) does not stop a cloud install.
+# The run falls through to the next candidate and exits 0, as the candidate loop did before the live-pin swap.
+mergepin5() {
+  name="mergepin5: cloud install, pointer at the live pin whose clone is no checkout: the run falls through, does not exit 1"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  if ! live_pin_fixture mergepin5; then bad "$name" "fixture: $lp_msg"; return; fi
+  rm -f "$lp_co/settings.json" || { bad "$name" "fixture: cannot remove the clone's settings.json"; return; }
+  cfg="$work/mergepin5-cfg"; seed_pointer "$cfg" "$lp_pin"
+  h=$(new_home); write_redirect "$h" "$lp_bare"
+  elsewhere="$work/mergepin5-elsewhere"; mkdir -p "$elsewhere"
+  stub_bin="$work/mergepin5-bin"; make_curl_stub "$stub_bin"
+  out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+  rm -rf "$h"
+  if [ "$rc" -ne 0 ]; then bad "$name" "install exited $rc: $out"
+  elif printf '%s\n' "$out" | grep -q 'is the live pin and its clone'; then bad "$name" "the run stopped at the live pin's clone: $out"
   else ok "$name"; fi
 }
 
@@ -3835,6 +3892,8 @@ run pinmove5
 run mergepin1
 run mergepin2
 run mergepin3
+run mergepin4
+run mergepin5
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
