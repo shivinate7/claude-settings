@@ -12,10 +12,12 @@ Each case makes a temp git repo: the base commit on `main`, the head commit on `
 with the repo as cwd and the range as commit ids. The step cases run bin/ste-changed, which runs
 actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp files stay in the run folder.
 """
+import ast
 import atexit
 import collections
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 MODULE = os.environ.get("STALE_CITES_UNDER_TEST") or os.path.join(HERE, "stale_cites.py")
 STEP = os.path.join(ROOT, "bin", "ste-changed")
+STEP_SH = os.path.join(ROOT, "actions", "ste-lint", "run.sh")
+BASH = "/bin/bash" if os.path.exists("/bin/bash") else (shutil.which("bash") or "bash")
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree, for a base with no shared history
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
@@ -90,6 +95,43 @@ def parse(out):
     return [(m.group("path"), int(m.group("line")), m.group("code"), m.group("text")) for m in matches if m]
 
 
+def direct_step_env(rng, fail):
+    """The env bin/ste-changed sets for the step, with FAIL given. run.sh runs from here, so FAIL can differ."""
+    return dict(os.environ, TMPDIR=rng.case, GITHUB_STEP_SUMMARY=os.path.join(rng.case, "summary.md"),
+                EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main", REF_NAME="topic",
+                SCOPE="changed", FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="", CHANGED_PATHS_GLOB="*.md",
+                DECISIONS_DIR="")
+
+
+def tuple_named(path, name):
+    """The set of strings in the module-level tuple `name` of a Python file. Read with ast, never imported."""
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return set(ast.literal_eval(node.value))
+    raise AssertionError("%s binds no %s tuple" % (path, name))
+
+
+def repo_modules_imported(path):
+    """Repo files that `path` imports by bare name: lint/<name>.py or hooks/<name>.py, repo-relative."""
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    found = []
+    for name in sorted(names):
+        for folder in ("lint", "hooks"):
+            rel = "%s/%s.py" % (folder, name)
+            if os.path.isfile(os.path.join(ROOT, *rel.split("/"))):
+                found.append(rel)
+    return found
+
+
 class StaleCase(unittest.TestCase):
     def make_range(self, base, change):
         """Commit `base` on main, then run `change(repo)` on topic. `change` makes its own commit, so a case
@@ -109,10 +151,11 @@ class StaleCase(unittest.TestCase):
         change(repo)
         return Range(case, repo, base_sha, git(repo, "rev-parse", "HEAD"))
 
-    def run_check(self, rng):
+    def run_check(self, rng, base=None):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/stale_cites.py")
         env = dict(os.environ, TMPDIR=rng.case)
-        done = subprocess.run([sys.executable, MODULE, "--range", "%s...%s" % (rng.base, rng.head)],
+        spec = "%s...%s" % (rng.base if base is None else base, rng.head)
+        done = subprocess.run([sys.executable, MODULE, "--range", spec],
                               cwd=rng.repo, env=env, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
         return done.returncode, done.stdout + done.stderr
@@ -242,6 +285,15 @@ class MoveTests(StaleCase):
         self.assert_passes(self.make_range(base_files(), change))
 
 
+    def test_a_dash_or_a_dot_before_the_match_is_not_a_boundary(self):
+        notes = "# Notes\n\n- see `pre-hooks/guard.py`\n- see `x.hooks/guard.py`\n"
+
+        def change(repo):
+            git(repo, "rm", "-q", "hooks/guard.py")
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes), change))
+
+
 class ScanTests(StaleCase):
     def test_comment_openers_in_strings_and_a_multi_line_block_do_not_hide_later_lines(self):
         rows = [
@@ -364,6 +416,39 @@ class SymbolTests(StaleCase):
         self.assert_flags(self.make_range(base_files(notes, extra=extra), change), [(NOTES, 3, "STALE002")])
 
 
+    def test_a_module_level_def_under_if_or_try_still_counts_as_defined(self):
+        notes = "# Notes\n\n(lib.py foo)\n"
+        heads = {
+            "if": "if True:\n    def foo():\n        return 1\n",
+            "try": "try:\n    def foo():\n        return 1\nexcept ImportError:\n    pass\n",
+        }
+        for block, head_lib in heads.items():
+            with self.subTest(block=block):
+                def change(repo, head_lib=head_lib):
+                    write(repo, "lib.py", head_lib)
+                    commit(repo)
+                extra = {"lib.py": "def foo():\n    return 1\n"}
+                self.assert_passes(self.make_range(base_files(notes, extra=extra), change))
+
+    def test_a_name_is_cited_only_in_backtick_or_paren_form(self):
+        base_a = "def foo():\n    return 1\n\n\ndef read():\n    return 2\n"
+        rows = [
+            ("- `hooks/a.py` `foo`", True),
+            ("- (hooks/a.py foo)", True),
+            ("- (hooks/a.py read)", True),
+            ("- `hooks/a.py` foo the rest", False),
+            ("- hooks/a.py read more", False),
+        ]
+        text, lines = rows_text(rows)
+
+        def change(repo):
+            write(repo, "hooks/a.py", "def keep():\n    return 3\n")
+            write(repo, NOTES, text)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files("", extra={"hooks/a.py": base_a}), change),
+                          [(NOTES, n, "STALE002") for n in lines])
+
+
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
         def change(repo):
@@ -377,6 +462,86 @@ class StepTests(StaleCase):
         out = done.stdout + done.stderr
         self.assertNotEqual(done.returncode, 0, out)
         self.assertTrue(re.search(r"(?m)^%s:3: STALE001 " % re.escape(NOTES), out), out)
+
+
+    def test_fail_false_prints_the_stale_line_and_exits_zero(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        git(rng.repo, "update-ref", "refs/remotes/origin/main", rng.base)
+        done = subprocess.run([BASH, STEP_SH], cwd=rng.repo, env=direct_step_env(rng, "false"),
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+        out = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, out)
+        self.assertTrue(re.search(r"(?m)^%s:3: STALE001 " % re.escape(NOTES), out), out)
+
+
+class ReadAtHeadTests(StaleCase):
+    """The check reads what HEAD commits, never the working tree, and never skips a file it cannot read."""
+
+    def test_an_uncommitted_fix_in_the_tree_does_not_hide_a_stale_line_at_head(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, NOTES, "# Notes\n\n- refusal list in `hooks/lib.mjs`\n")
+            commit(repo)
+            write(repo, NOTES, "# Notes\n\n- refusal list in `%s`\n" % MOVED)  # the fix, left uncommitted
+        self.assert_flags(self.make_range(base_files(), change), [(NOTES, 3, "STALE001")])
+
+    def test_a_tracked_file_deleted_from_the_tree_is_still_read_at_head(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, NOTES, "# Notes\n\n- refusal list in `hooks/lib.mjs`\n")
+            commit(repo)
+            os.remove(os.path.join(repo, NOTES))
+        self.assert_flags(self.make_range(base_files(), change), [(NOTES, 3, "STALE001")])
+
+    def test_an_undecodable_markdown_file_is_named_not_passed_silently(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            os.makedirs(os.path.join(repo, "docs"), exist_ok=True)
+            with open(os.path.join(repo, "docs", "bad.md"), "wb") as f:
+                f.write(b"- refusal list in `hooks/lib.mjs`\n\xff\xfe not utf-8\n")
+            commit(repo)
+        rc, out = self.run_check(self.make_range(base_files(), change))
+        self.assertNotIn("stale-cites: PASS", out)
+        self.assertIn("docs/bad.md", out)
+
+
+class UnknownTests(StaleCase):
+    """A base the repo cannot resolve is unknown, not a finding: the check exits 0 and says so."""
+
+    def test_an_unresolvable_base_prints_unknown_and_exits_zero(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        rc, out = self.run_check(rng, base="1" * 40)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(any(line.startswith("stale-cites: unknown") for line in out.splitlines()), out)
+
+    def test_step_with_an_unresolvable_base_exits_zero(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        # A base with no shared history: origin/main resolves, but the three-dot range has no merge base.
+        orphan = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "unrelated")
+        git(rng.repo, "update-ref", "refs/remotes/origin/main", orphan)
+        done = subprocess.run([sys.executable, STEP, "main"], cwd=rng.repo, env=direct_step_env(rng, "true"),
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+        out = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, out)
+        self.assertIn("stale-cites: unknown", out)
+
+
+class PinTests(unittest.TestCase):
+    """bin/ste-changed LINT_FILES is the pin check's list of files the step runs. It must name each one."""
+
+    def test_lint_files_holds_every_repo_file_the_check_imports(self):
+        listed = tuple_named(os.path.join(ROOT, "bin", "ste-changed"), "LINT_FILES")
+        needed = repo_modules_imported(MODULE) + ["lint/stale_cites.py"]
+        self.assertEqual([f for f in needed if f not in listed], [], "bin/ste-changed LINT_FILES lacks these")
 
 
 if __name__ == "__main__":
