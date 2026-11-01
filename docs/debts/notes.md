@@ -154,7 +154,7 @@
 - linked-nm-other-managers: pnpm, yarn, bun, npx and npm.exe are not judged against a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - linked-nm-shell-c-cd: an inner cd inside bash -c or sh -c is not tracked, so the working folder is the outer one (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - live-pin-first-move-gap: the first pin move renames the live directory, so <clone>-live is absent for milliseconds and links dangle; no check proves the retry covers it (merge/install_from_main.sh)
-- liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/guard.py _process_start_ms)
+- liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/git_reads.py _process_start_ms)
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py)
 - local-time-line-cost-unmeasured: the token cost of one local time line per prompt is unmeasured (hooks/local_time.py)
 - lock-read-error-never-expires: GhLock.read returns an infinite expiry when the lock commit read fails for a non-network reason, so the lock never expires (merge/merge.py)

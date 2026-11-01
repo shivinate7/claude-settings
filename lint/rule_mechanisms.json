@@ -461,8 +461,9 @@
     },
     "speak-rewrite-superseded-in-place": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Judged by hooks/prose_judge.py, a PreToolUse command hook on Edit and Write that calls the model only for a path inside a decisions folder; it moves to a mechanism after the hook makes a real catch."
+        "kind": "check",
+        "ref": "lint/stale_cites.py",
+        "test": "lint/test_stale_cites.py::MoveTests.test_moved_file_named_by_a_line_the_range_adds_is_flagged_with_its_new_home"
       }
     },
     "output-write-in-ste": {
