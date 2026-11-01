@@ -406,7 +406,7 @@
   },
   "enabledPlugins": {
     "ponytail@ponytail": true,
-    "frontend-design@claude-code-plugins": true,
+    "frontend-design@frontend-design-pin": true,
     "token-weather@claude-settings": true,
     "desktop-statusline@claude-settings": true,
     "plain-diff@claude-settings": true,
@@ -426,11 +426,24 @@
         "repo": "DietrichGebert/ponytail"
       }
     },
-    "claude-code-plugins": {
+    "frontend-design-pin": {
       "source": {
-        "source": "github",
-        "repo": "anthropics/claude-code",
-        "ref": "v2.1.311"
+        "source": "settings",
+        "name": "frontend-design-pin",
+        "owner": {
+          "name": "Anthropic"
+        },
+        "plugins": [
+          {
+            "name": "frontend-design",
+            "source": {
+              "source": "git-subdir",
+              "url": "anthropics/claude-plugins-official",
+              "path": "plugins/frontend-design",
+              "sha": "a7ba5b93db0c7c8d17f3f1d25853adca79598a1a"
+            }
+          }
+        ]
       }
     },
     "claude-settings": {

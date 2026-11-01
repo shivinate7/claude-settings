@@ -29,10 +29,12 @@
         "/^settings\\.json$/"
       ],
       "matchStrings": [
-        "\"repo\": \"anthropics/claude-code\",\\s*\"ref\": \"(?<currentValue>v\\d+\\.\\d+\\.\\d+)\""
+        "\"url\": \"anthropics/claude-plugins-official\",\\s*\"path\": \"plugins/frontend-design\",\\s*\"sha\": \"(?<currentDigest>[0-9a-f]{40})\""
       ],
-      "datasourceTemplate": "github-tags",
-      "depNameTemplate": "anthropics/claude-code"
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/anthropics/claude-plugins-official",
+      "depNameTemplate": "anthropics/claude-plugins-official",
+      "currentValueTemplate": "main"
     },
     {
       "customType": "regex",
@@ -51,7 +53,8 @@
   "packageRules": [
     {
       "matchDepNames": [
-        "vercel-labs/web-interface-guidelines"
+        "vercel-labs/web-interface-guidelines",
+        "anthropics/claude-plugins-official"
       ],
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     }
