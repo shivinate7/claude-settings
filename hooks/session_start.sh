@@ -61,6 +61,7 @@ tier_line
 # pin says so, and names the clone to cd to. Same test as live_pin_clone in install.sh, repeated here
 # because sh cannot source install.sh. The pin is <clone>-live, or <clone>-live-<12 hex>, as a linked worktree
 # of a claude-settings clone: the clone holds merge/install_from_main.sh, as in hooks/guard_frozen.py.
+# The line prints git's own path forms ($toplevel, the listing's first entry), as the checkout line does; pwd -P forms are for the comparisons only.
 # This one bounded worktree listing (wl_out) also feeds the agent worktree count below, which removes it.
 wl_out=$(mktemp 2>/dev/null)
 wl_ok=0
@@ -78,7 +79,7 @@ if [ -n "$wl_out" ]; then
         *) [ "$lp_top" = "$(cd "$lp_base-live" 2>/dev/null && pwd -P)" ] && lp_is_pin=1 ;;
       esac
       if [ "$lp_is_pin" = 1 ]; then
-        printf 'checkout %s is the live pin: no work runs in it (decision merge-reinstalls-from-main). cd to the clone %s before you change anything.\n' "$lp_top" "$lp_base"
+        printf 'checkout %s is the live pin: no work runs in it (decision merge-reinstalls-from-main). cd to the clone %s before you change anything.\n' "$toplevel" "$lp_clone"
       fi
     fi
   fi
