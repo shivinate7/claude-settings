@@ -35,7 +35,7 @@ Banchi, a child repo, was read Oct 30. Its `server concurrency` audit row (banch
 - Process starts per run: one `node`, the two `git ls-files` reads that exist today, and at most one `python3 -I`. The `python3` start happens only when a fact cites a `.py` file. New: at most one start.
 - Files written: none.
 - How often: once per CI run of the checks job, and when a session runs the skill's check. Never per commit, tool call or session. No hook and no githook.
-- Measured Oct 30 on this branch: 1.2 s wall for MAP1 to MAP9 on the pilot, through `verdict`. It needs no `npm ci`.
+- Measured Oct 30 on this branch: 1.2 s wall for MAP1 to MAP9 on the pilot, through `verdict`, with typescript already installed. The CI step runs `npm ci` first, because the map cites `.mjs` files that MAP8 and MAP9 parse.
 
 ## Limits
 
