@@ -30,10 +30,11 @@ Interface the hook must match:
   any model call, with the rule chat_hit names. The model sees only a box that passes it, and judges only
   what code cannot (the cases are in hooks/test_question_form.py, which reuses run_hook below).
 - ArtifactData on the waiting page (ruled Nov 1 11:51 CST): a write of an item (set, update, a str_replace, or a
-  batch entry) on collection `items` that carries `options` or `context`, or a str_replace on field `context` or
-  `options`, and is not closed, gets one model call, claude-opus-5-5, rule `question-judge`, after
-  question_form.item_hit passes it. A str_replace is judged on its new_str only, under a fragment preamble. A batch
-  makes one call for all its qualifying writes. An item_hit hit, a read, another collection or url, a delete, a
+  batch entry) on collection `items` that is not closed and carries `options` or `context` on a decision, or
+  `context`, `steps` or `options` on a task (kind task, coordinator follow-up after the same ruling), or a str_replace
+  on field `context` or `options`, gets one model call, claude-opus-5-5, rule `question-judge`, after
+  question_form.item_hit passes it. A task's prompt carries the whole-unit replace rule. A str_replace is judged on
+  its new_str only, under a fragment preamble. A batch makes one call for all its qualifying writes. An item_hit hit, a read, another collection or url, a delete, a
   str_replace on another field, and an update with neither field make no call and no refusal from call_judge
   (guard.py refuses a hit). A read, and a write of another collection, never import question_form in the hook.
   The page's url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
@@ -255,6 +256,24 @@ def good_page_item(mark=PAGE_MARK, **over):
     return item
 
 
+# A task item (kind task) is judged like a decision (coordinator follow-up after the Nov 1 11:51 CST ruling). Its
+# `context` holds the Why yours line and its `steps` hold the text the owner reads. ITEM_99_STEP is item 99's step:
+# it told the owner to replace a line and quoted only the value, so following it dropped the script call.
+TASK_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+ITEM_99_STEP = "Find GUARD_SHELL_SKIP= ... change it to GUARD_SHELL_SKIP=tree. Change nothing else."
+GOOD_TASK_STEP = ("Find the line `GUARD_SHELL_SKIP= scripts/guard-shell.py --hook` and replace the whole line with "
+                  "`GUARD_SHELL_SKIP=tree scripts/guard-shell.py --hook`. Change nothing else.")
+TASK_FLAG = '{"ok": false, "reason": "a step that replaces text quotes the whole line before and after the change."}'
+
+
+def good_task_item(step=GOOD_TASK_STEP, **over):
+    """A task item that passes question_form.item_hit: its Why yours line in `context`, and one step. `over`
+    replaces fields, for a case that changes one."""
+    item = {"kind": "task", "title": "Set the guard skip", "status": "open", "context": TASK_WHY, "steps": [step]}
+    item.update(over)
+    return item
+
+
 def page_input(action="set", data=None, collection=PAGE_ITEMS, doc_id="p1", url=PAGE_URL, session=SID_A,
                agent=None, **extra):
     """One ArtifactData call, as the harness sends it, with the payload's cwd set to the fixture repo.
@@ -470,9 +489,9 @@ def case_page_reject_and_accept():
 
 
 def case_page_no_model_call():
-    # Cost proof: a model call only for an items write that carries options or context, or a str_replace on
-    # context or options, is not closed, and passes item_hit. Each input below would be denied if the judge were
-    # called on it, so a call shows as a deny.
+    # Cost proof: a model call only for an items write that is not closed, passes item_hit, and carries options or
+    # context on a decision, or context, steps or options on a task, or a str_replace on context or options. Each
+    # input below would be denied if the judge were called on it, so a call shows as a deny.
     item, bad_form = good_page_item(), good_page_item(context=GOAL_LINE + "\n" + PROBLEM_LINE + "\n" + DEPARTS_LINE)
     cases = (
         ("a receipts collection write", page_input("set", item, collection="receipts", doc_id="r1")),
@@ -491,6 +510,8 @@ def case_page_no_model_call():
         ("a context str_replace that removes the Goal line (fails item_hit)",
          page_input("str_replace", None, field="context", old_str=GOAL_LINE, new_str="")),
         ("an items update with neither options nor context", page_input("update", {"title": "Renamed"})),
+        ("a closed task item with item 99's step", page_input("set", good_task_item(ITEM_99_STEP, status="closed"))),
+        ("a task update with a title only", page_input("update", {"kind": "task", "title": "Renamed"})),
         ("a batch of a delete and a title-only update", page_batch_input([
             {"op": "delete", "collection": PAGE_ITEMS, "doc_id": "p1"},
             {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2", "data": {"title": "Renamed"}}])),
@@ -593,6 +614,48 @@ def case_page_str_replace_judged():
           and PAGE_MARK in prompt and PAGE_NEW in prompt and PAGE_OLD not in prompt, detail(r))
 
 
+def case_page_task_item_judged():
+    # Coordinator follow-up after the Nov 1 11:51 CST ruling: a task item (kind task) that carries context, steps or
+    # options gets one model call after item_hit passes it, and its prompt carries the whole-unit replace rule.
+    import question_form  # the one form check (hooks/question_form.py)
+    bad, good = good_task_item(ITEM_99_STEP), good_task_item()
+    for label, data in (("item 99's task", bad), ("the good task", good)):
+        got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "t99", "data": data})
+        check("task fixture: %s passes question_form.item_hit, so a refusal below is the judge's" % label,
+              got == ("", ""), got)
+    r = run_hook(page_input("set", bad), answer=TASK_FLAG)
+    d = r.deny() or {}
+    check("task item: item 99's step is denied by the judge, rule question-judge, one model call", r.code == 0
+          and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+          and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1, detail(r))
+    check("task item: the one call is claude-opus-5-5, no effort", len(r.calls) == 1
+          and model_of(r.calls[0]["argv"]) == QUESTION_MODEL and "--effort" not in r.calls[0]["argv"], detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("task item: the prompt holds item 99's step text", ITEM_99_STEP in prompt, prompt[:200])
+    # The item's own strings are cut out first, so only the prompt's words can satisfy the rule check.
+    rest = prompt.replace(ITEM_99_STEP, "").replace(TASK_WHY, "").lower()
+    sentences = re.split(r"[.\n]", rest)
+    check("task item: the prompt holds the whole-unit rule (quote the whole line or value, show the line after the change in full)",
+          any("whole" in s and any(w in s for w in ("line", "value", "unit")) for s in sentences)
+          and any("full" in s and any(w in s for w in ("after", "change")) for s in sentences), rest[:300])
+    upd = run_hook(page_input("update", {"kind": "task", "steps": [ITEM_99_STEP]}), answer=TASK_FLAG)
+    check("task item: an update that carries item 99's step (kind task) is denied after one model call",
+          (upd.deny() or {}).get("permissionDecision") == "deny" and len(upd.calls) == 1
+          and upd.log.count("\tdeny\tquestion-judge\t") == 1, detail(upd))
+    ok = run_hook(page_input("set", good), answer=ALLOW)
+    check("task item: a good task item (its step quotes the whole line before and after) is allowed after one model call",
+          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(ok.calls) == 1, detail(ok))
+    writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "t99", "data": bad},
+              {"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item()}]
+    batch = run_hook(page_batch_input(writes), answer=ALLOW)
+    prompt = batch.calls[0]["prompt"] if batch.calls else ""
+    check("task batch: a task item and a decision make exactly one model call, claude-opus-5-5",
+          batch.code == 0 and batch.out == "" and len(batch.calls) == 1
+          and model_of(batch.calls[0]["argv"]) == QUESTION_MODEL, detail(batch))
+    check("task batch: the one prompt carries the task's step and the decision",
+          ITEM_99_STEP in prompt and PAGE_MARK in prompt, prompt[:200])
+
+
 def case_page_reads_and_other_collections_skip_question_form():
     # Cost proof: a read and a write of another collection exit before the hook imports question_form, the heavy
     # import. The last check is a control: a judged items write imports it, so an empty record means an early exit.
@@ -658,7 +721,8 @@ def main():
                  case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
                  case_page_no_model_call, case_page_batch_one_call, case_page_override,
                  case_page_model_failure_fails_open, case_page_str_replace_judged,
-                 case_page_reads_and_other_collections_skip_question_form, case_fail_open, case_settings_row):
+                 case_page_task_item_judged, case_page_reads_and_other_collections_skip_question_form,
+                 case_fail_open, case_settings_row):
         try:
             case()
         except Exception as exc:
