@@ -853,10 +853,16 @@ def case_guard_unreadable_layout_fails_open_with_one_line():
 
 APPLE_STAMP = "2026-10-31 20:21 CDT (UTC-05:00)"
 APPLE_LATER = "2026-10-31 21:05 CDT (UTC-05:00)"
+APPLE_FIRST = "2026-10-31 20:10 CDT (UTC-05:00)"  # a jotted message that comes before the burst
 APPLE_BURST = ("Router note for the handoff:\n"
                "filed the ruling in router.md\n"
                "and the handoff, not the inbox.")
 FIXTURE_RULING_HOME = "CLAUDE.md"  # a ruling home the fixture tracks; the guard prints it in the list
+
+
+def heading_line(path, stamp):
+    """The 1-based line of a message heading in the inbox file, counted from the file's own text."""
+    return read_file(path).split("\n").index("### " + stamp) + 1
 
 
 def example_item_in(reason):
@@ -871,8 +877,8 @@ def example_item_in(reason):
 
 def case_guard_apple_tv_burst_names_where_items_go():
     """A burst with no items, then a later short message with its items under its own heading. The
-    reason names the inbox file, the burst's exact heading, an example item the check accepts, and
-    that items added in any later turn count."""
+    reason names the inbox file, the burst's exact heading and its line number, an example item the
+    check accepts, and that items added in any later turn count."""
     cfg, sid = new_cfg(), "apple-tv"
     write_file(inbox_of(cfg, sid),
                render_block(APPLE_BURST, header=APPLE_STAMP)
@@ -886,10 +892,34 @@ def case_guard_apple_tv_burst_names_where_items_go():
           inbox_of(cfg, sid) in reason, reason)
     check("apple tv: the reason names the burst's exact heading line",
           "### " + APPLE_STAMP in reason, reason)
+    inbox = inbox_of(cfg, sid)
+    check("apple tv: the reason gives the heading's real line number, as line N of the inbox file",
+          "line %d of %s" % (heading_line(inbox, APPLE_STAMP), inbox) in reason, reason)
     check("apple tv: the reason holds an example item line the check accepts",
           example_item_in(reason), reason)
     check("apple tv: the reason says items added in any later turn count",
           "any later turn" in reason, reason)
+
+
+def case_guard_burst_heading_after_a_jotted_message_names_its_line():
+    """A jotted message is on line 1 and a burst with no items comes after it. The reason gives the
+    burst's own heading line, not line 1, and does not name the jotted message."""
+    cfg, sid = new_cfg(), "burst-after-jot"
+    write_file(inbox_of(cfg, sid),
+               render_block("a jotted note first", header=APPLE_FIRST,
+                            items=("- fb-2030-1 [note] -> noted",))
+               + render_block(APPLE_BURST, header=APPLE_STAMP))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    inbox = inbox_of(cfg, sid)
+    line = heading_line(inbox, APPLE_STAMP)
+    check("burst after jot: the burst heading is not on line 1 (fixture)", line > 1, line)
+    p = guard(cfg, sid)
+    expect_block("burst after jot: a burst with no items blocks", p)
+    reason = block_reason(p) or ""
+    check("burst after jot: the reason gives the burst heading's line as line N of the inbox file",
+          "line %d of %s" % (line, inbox) in reason, reason)
+    check("burst after jot: the reason does not name the jotted message",
+          APPLE_FIRST not in reason, reason)
 
 
 def case_guard_router_home_names_the_tracked_ruling_homes():
@@ -1805,6 +1835,7 @@ CASES = (
     case_guard_task_home_from_the_todo_kind,
     case_guard_unreadable_layout_fails_open_with_one_line,
     case_guard_apple_tv_burst_names_where_items_go,
+    case_guard_burst_heading_after_a_jotted_message_names_its_line,
     case_guard_router_home_names_the_tracked_ruling_homes,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
