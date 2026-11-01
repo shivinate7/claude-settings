@@ -461,29 +461,11 @@ def _shell_reading(guard_core, script):
     return [(segment, guard_core.segment_tokens(segment)) for segment in guard_core.split_segments(script)]
 
 
-def gh_login_hit(data) -> str:
-    """The matched text when a task's `command` runs a gh command other than `gh auth ...` with no
-    `gh auth switch -u <a login in GH_LOGINS>` before it, or runs one as GH_FALLBACK_LOGIN while the
-    command names a GH_DEFAULT_LOGIN repo. A segment the shell reader cannot parse counts as a gh
-    command when the word gh is in it, and never as a switch: the check fails closed there.
-
-    Bash's rules read the command. When bash cannot read some segment and PowerShell's rules read
-    every one, the command is a PowerShell block and PowerShell's reading is judged: there `\\` is a
-    path character, so `Set-Location "C:\\repo\\"` closes its quote."""
-    if not isinstance(data, dict) or data.get("kind", "task") != "task":
-        return ""
-    command = data.get("command")
-    if not isinstance(command, str) or not GH_WORD.search(command):
-        return ""
-    # guard_core holds the one quote-aware shell reader, for bash and PowerShell. It loads here, so the
-    # chat-box path loads nothing more.
-    import guard_core
-    # The script type picks the rules, never the tool this call came from.
-    reading = _shell_reading(guard_core, guard_core.PosixScript(command))
-    if any(tokens is None for _, tokens in reading):
-        powershell = _shell_reading(guard_core, guard_core.PowerShellScript(command))
-        if all(tokens is not None for _, tokens in powershell):
-            reading = powershell
+def _gh_script_hit(guard_core, reading, command) -> str:
+    """The matched text when one shell's `reading` of `command` runs a gh command other than
+    `gh auth ...` with no switch to a login in GH_LOGINS before it, or runs one as GH_FALLBACK_LOGIN
+    while `command` names a GH_DEFAULT_LOGIN repo. A segment the reader cannot parse counts as a gh
+    command when the word gh is in it, and never as a switch: the check fails closed there."""
     names_default_repo = (GH_DEFAULT_LOGIN + "/").lower() in command.lower()
     login = ""
     for segment, tokens in reading:
@@ -505,6 +487,40 @@ def gh_login_hit(data) -> str:
                 return "gh command with no gh auth switch before it"
             if login == GH_FALLBACK_LOGIN and names_default_repo:
                 return "gh command as %s on a %s/ repo" % (GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN)
+    return ""
+
+
+def gh_login_hit(data) -> str:
+    """The matched text when a task's `command` fails _gh_script_hit in one shell. Each shell of
+    {powershell, mac} is judged on its own and needs its own switch: `powershell` by PowerShell's
+    rules, where `\\` is a path character, and `mac` by bash's rules. A `command` held as one string
+    is a `str_replace` new_str: bash's rules read it, or PowerShell's when bash cannot read some
+    segment and PowerShell reads every one."""
+    if not isinstance(data, dict) or data.get("kind", "task") != "task":
+        return ""
+    command = data.get("command")
+    if isinstance(command, dict):
+        scripts = [(k, command.get(k)) for k in COMMAND_SHELLS]
+    else:
+        scripts = [("", command)]
+    # guard_core holds the one quote-aware shell reader, for bash and PowerShell. It loads only when a
+    # command names gh, so the chat-box path loads nothing more.
+    for shell, text in scripts:
+        if not isinstance(text, str) or not GH_WORD.search(text):
+            continue
+        import guard_core
+        # The script type picks the rules, never the tool this call came from.
+        if shell == "powershell":
+            reading = _shell_reading(guard_core, guard_core.PowerShellScript(text))
+        else:
+            reading = _shell_reading(guard_core, guard_core.PosixScript(text))
+            if not shell and any(tokens is None for _, tokens in reading):
+                powershell = _shell_reading(guard_core, guard_core.PowerShellScript(text))
+                if all(tokens is not None for _, tokens in powershell):
+                    reading = powershell
+        hit = _gh_script_hit(guard_core, reading, text)
+        if hit:
+            return "%s: %s" % (shell, hit) if shell else hit
     return ""
 
 
