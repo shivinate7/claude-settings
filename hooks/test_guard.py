@@ -719,16 +719,11 @@ def _require_pointer_branch(where, branch):
 
 
 def _real_process_start_ms(pid):
-    """Return `pid`'s real start time in epoch milliseconds, read the same way the guard reads
-    it: `ps -o lstart=` on POSIX, parsed with `time.mktime` as this machine's own local clock;
-    `OpenProcess`/`GetProcessTimes` on Windows, called below when `sys.platform` says Windows.
+    """Return `pid`'s real start time in epoch milliseconds, read apart from the guard's own parse.
 
-    A session-liveness fixture built from ANY OTHER read (a rendered string compared by eye, a
-    guessed offset) could drift from what `hooks/guard.py` itself computes and pass or fail the
-    live-session cases for the wrong reason. This is a second, independent implementation of the
-    same read, not a call into the guard's own function, so a fixture and the code it proves
-    cannot share one defect. That holds on Windows too: the arm below copies guard.py's own
-    `_process_start_ms_windows` logic rather than calling it.
+    POSIX: `ps -o etime=` gives elapsed run time with no clock or zone, subtracted from now. The
+    guard parses `ps -o lstart=` instead, so a zone defect there cannot also sit here and agree
+    with it. Windows: copies `_process_start_ms_windows`, not a call into it, for the same reason.
     """
     if sys.platform.startswith("win"):
         import ctypes
@@ -759,16 +754,21 @@ def _real_process_start_ms(pid):
             return value // 10000 - 11644473600000
         finally:
             kernel32.CloseHandle(handle)
-    result = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+    now_ms = time.time() * 1000  # ps latency inflates etime, so this reads early by that latency
+    result = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
                              capture_output=True, text=True, timeout=5)
     text = result.stdout.strip()
     if result.returncode != 0 or not text:
         sys.exit(
-            "fixture setup failed in build_fixtures: `ps -o lstart= -p %d` answered nothing. "
+            "fixture setup failed in build_fixtures: `ps -o etime= -p %d` answered nothing. "
             "stderr: %s" % (pid, result.stderr.strip())
         )
-    parsed = time.strptime(text, "%a %b %d %H:%M:%S %Y")
-    return int(time.mktime(parsed) * 1000)
+    # [[dd-]hh:]mm:ss, the form both procps and macOS BSD ps print
+    days, _, clock = text.rpartition("-")
+    parts = [int(part) for part in clock.split(":")]
+    parts = [0] * (3 - len(parts)) + parts
+    elapsed = int(days or 0) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2]
+    return int(now_ms - elapsed * 1000)
 
 
 def make_repo(where, files):
@@ -1654,9 +1654,9 @@ def _build_worktrees():
     _require_clean(WTSTALESTART)
 
     # A live session record, built against THIS TEST RUNNER'S OWN pid, which stays alive for the
-    # whole run. `startedAt` is read with `_real_process_start_ms`, a second, independent
-    # implementation of the same `ps`-plus-`mktime` read the guard makes, so the fixture cannot
-    # share a defect with the code it proves.
+    # whole run. `startedAt` is read with `_real_process_start_ms`, a zone-free `ps -o etime=`
+    # read, not the guard's `lstart=` parse, so the fixture cannot share a zone defect with the
+    # code it proves.
     self_pid = os.getpid()
     self_start_ms = _real_process_start_ms(self_pid)
     os.makedirs(os.path.join(WTLIVECFG, "sessions"), exist_ok=True)
@@ -14873,7 +14873,8 @@ def process_start_ms_case():
     got_alive = guard._process_start_ms(self_pid)
     if not isinstance(got_alive, int) or isinstance(got_alive, bool):
         problems.append("alive: did not return an int: %r" % (got_alive,))
-    elif abs(got_alive - want_alive) > 2000:
+    # lstart (boot time) and etime (uptime) each floor to whole seconds on different clocks, so a fresh child can differ by over 2 s; an hour is 3600000 ms.
+    elif abs(got_alive - want_alive) > 5000:
         problems.append("alive: got %r want near %r" % (got_alive, want_alive))
 
     if os.name == "nt":  # the alive read still runs and can fail; the split it names does not run here
@@ -14922,6 +14923,73 @@ def process_start_ms_case():
             "unreadable (ps missing): got %r want PROCESS_START_UNREADABLE" % (got_missing,))
 
     return (not problems), "; ".join(problems) if problems else "alive/dead/unreadable read apart"
+
+
+# The repeated hour of 2026-11-01 in America/Chicago: 01:00 to 02:00 happens twice. These are the
+# two 01:30s. Both render as the same `ps` text, so the read alone decides which instant it gets.
+REPEATED_HOUR_CDT_MS = int(datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc).timestamp()) * 1000
+REPEATED_HOUR_CST_MS = int(datetime(2026, 11, 1, 7, 30, tzinfo=timezone.utc).timestamp()) * 1000
+
+FAKE_PS_BODY = '''import time
+EPOCH = @EPOCH@
+DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+t = time.localtime(EPOCH)  # in the zone of the TZ this process was started with
+# ps pads the day to two columns with a space, so the 1st prints as " 1", as real ps does.
+print("%s %s %2d %02d:%02d:%02d %d" % (DAYS[t.tm_wday], MONTHS[t.tm_mon - 1], t.tm_mday,
+                                       t.tm_hour, t.tm_min, t.tm_sec, t.tm_year))
+'''
+
+
+def in_chicago_with_fake_ps(epoch_ms, action):
+    """Run `action()` with TZ=America/Chicago in this process and its children, with a fake `ps`
+    first on PATH. The fake answers any `-o lstart=` read with EPOCH_MS, rendered in the zone of
+    the environment it is started with. It is a real child process, not a patch, so a read that
+    hands ps its own `env` changes what ps prints, and the case sees that read's zone.
+    POSIX only: the Windows arm never runs `ps`, so callers skip there.
+    """
+    folder = tempfile.mkdtemp(prefix="fake-ps-chicago-", dir=ROOT)
+    script = os.path.join(folder, "ps")
+    write(script, "#!%s\n" % sys.executable
+          + FAKE_PS_BODY.replace("@EPOCH@", str(epoch_ms // 1000)))
+    os.chmod(script, 0o755)
+    old_tz, old_path = os.environ.get("TZ"), os.environ.get("PATH", "")
+    os.environ["TZ"] = "America/Chicago"
+    os.environ["PATH"] = folder + os.pathsep + old_path
+    time.tzset()
+    try:
+        return action()
+    finally:
+        os.environ["PATH"] = old_path
+        if old_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old_tz
+        time.tzset()
+
+
+def _repeated_hour_read_case(epoch_ms, label):
+    """`_process_start_ms` must return the instant a process started at LABEL, not an hour off."""
+    if os.name == "nt" or not hasattr(time, "tzset"):
+        return SKIP, "the fake ps is POSIX-only; the Windows arm reads the kernel's FILETIME"
+    guard = _load_guard_module()
+    got = in_chicago_with_fake_ps(epoch_ms, lambda: guard._process_start_ms(4242))
+    if got != epoch_ms:
+        gap = got - epoch_ms if isinstance(got, int) and not isinstance(got, bool) else "n/a"
+        return False, "%s: got %r want %r (got minus want: %s ms)" % (label, got, epoch_ms, gap)
+    return True, "%s reads as its own instant" % label
+
+
+def process_start_ms_repeated_hour_cdt_case():
+    """The first 01:30 in Chicago (06:30 UTC, CDT). With TZ set to Chicago, the zone-free
+    `lstart=` text plus `time.mktime` can land on the other 01:30."""
+    return _repeated_hour_read_case(REPEATED_HOUR_CDT_MS, "01:30 CDT (06:30 UTC)")
+
+
+def process_start_ms_repeated_hour_cst_case():
+    """The second 01:30 in Chicago (07:30 UTC, CST). The pair of cases catches a read that is
+    wrong in either direction, whichever instant `mktime` picks for the ambiguous text."""
+    return _repeated_hour_read_case(REPEATED_HOUR_CST_MS, "01:30 CST (07:30 UTC)")
 
 
 def _fake_kernel32(open_process_result, get_last_error=0, get_process_times_ok=True,
@@ -15044,6 +15112,29 @@ def session_is_live_case():
             problems.append("unreadable: got %r want None (not False)" % (unreadable,))
 
     return (not problems), "; ".join(problems) if problems else "session_is_live carries all three states"
+
+
+def _repeated_hour_session_case(epoch_ms, label):
+    """A session record whose `startedAt` is the process's true start, read in Chicago through
+    the fake ps, must be live. An hour-off read lands outside the 60 s tolerance: None, or False."""
+    if os.name == "nt" or not hasattr(time, "tzset"):
+        return SKIP, "the fake ps is POSIX-only; the Windows arm reads the kernel's FILETIME"
+    guard = _load_guard_module()
+    record = {"pid": 4242, "startedAt": epoch_ms}
+    got = in_chicago_with_fake_ps(epoch_ms, lambda: guard.session_is_live(record))
+    if got is not True:
+        return False, "%s: session_is_live got %r want True" % (label, got)
+    return True, "%s: session_is_live says True" % label
+
+
+def session_is_live_repeated_hour_cdt_case():
+    """A session started at 01:30 CDT is live when its record holds that instant."""
+    return _repeated_hour_session_case(REPEATED_HOUR_CDT_MS, "01:30 CDT (06:30 UTC)")
+
+
+def session_is_live_repeated_hour_cst_case():
+    """A session started at 01:30 CST is live when its record holds that instant."""
+    return _repeated_hour_session_case(REPEATED_HOUR_CST_MS, "01:30 CST (07:30 UTC)")
 
 
 def worktree_live_session_unreadable_case():
@@ -15782,10 +15873,18 @@ LOG_CHECKS = (
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
+    ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
+     process_start_ms_repeated_hour_cdt_case),
+    ("liveness: process_start_ms reads a repeated-hour start (01:30 CST) as its instant, in Chicago",
+     process_start_ms_repeated_hour_cst_case),
     ("liveness: windows arm splits dead (error 87) from unreadable (error 5)",
      process_start_ms_windows_case),
     ("liveness: session_is_live carries True/False/None, never coercing unreadable to False",
      session_is_live_case),
+    ("liveness: session_is_live says True for a repeated-hour start (01:30 CDT) in Chicago",
+     session_is_live_repeated_hour_cdt_case),
+    ("liveness: session_is_live says True for a repeated-hour start (01:30 CST) in Chicago",
+     session_is_live_repeated_hour_cst_case),
     ("liveness: worktree_live_session answers None on an unreadable record under target",
      worktree_live_session_unreadable_case),
     ("liveness: worktree_live_session matches two spellings of one identity as under target",
@@ -20501,6 +20600,10 @@ LOG_RULE_FAMILY = (
     ("liveness: worktree_live_session matches two", "branch-worktree"),
     ("liveness: worktree_live_session answers None when", "branch-worktree"),
     ("liveness: session_is_live reads an implied", "branch-worktree"),
+    ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT)", "kill"),
+    ("liveness: process_start_ms reads a repeated-hour start (01:30 CST)", "kill"),
+    ("liveness: session_is_live says True for a repeated-hour start (01:30 CDT)", "branch-worktree"),
+    ("liveness: session_is_live says True for a repeated-hour start (01:30 CST)", "branch-worktree"),
     ("worktree-home: orchestrator", "worktree-home"),
     ("worktree-home: any session's write into another checkout", "worktree-home"),
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
