@@ -32,9 +32,9 @@ Banchi, a child repo, was read Oct 30. Its `server concurrency` audit row (banch
 
 ## Cost
 
-- Process starts per run: one `node`, the two `git ls-files` reads that exist today, and at most one `python3 -I`. The `python3` start happens only when a fact cites a `.py` file. New: at most one start.
-- Files written: none.
-- How often: once per CI run of the checks job, and when a session runs the skill's check. Never per commit, tool call or session. No hook and no githook.
+- Process starts per run: one `node`, the two `git ls-files` reads that exist today, and at most one `python3 -I`. The `python3` start happens only when a fact cites a `.py` file. In CI, one `npm ci` first, skipped when `node_modules/typescript` exists.
+- Files written: none by the check. In CI, `npm ci` writes `node_modules/` (gitignored).
+- How often: once per CI run of the checks job, and when a session runs the skill's check. Never per commit, tool call or session. No hook and no githook. When the mods flag is on, the checks job installs twice: here, and again in `.github/scripts/mod-tests.sh`.
 - Measured Oct 30 on this branch: 1.2 s wall for MAP1 to MAP9 on the pilot, through `verdict`, with typescript already installed. The CI step runs `npm ci` first, because the map cites `.mjs` files that MAP8 and MAP9 parse.
 
 ## Limits

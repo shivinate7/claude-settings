@@ -765,3 +765,5 @@
 - test-ci-job-archive-head: the in-repo code-check case runs `git archive HEAD`, so a local run tests only committed bin/ci-job edits (lint/test_ci_job.py).
 - map-kind-extra-clash-unread: a repo whose extras file already names a kind `map` now gets LayoutError from lint/layout.py ("kind map is in the layout already"), so its layout probe cannot run; other repos' extras files were not read. Decision: one-layout-every-repo.
 - map-path-hard-coded: skills/plain-english-map and its map-check write and read "docs/map" as a literal, not the layout kind `map` through lint/layout.py. Decision: one-layout-every-repo.
+- map-check-double-install: when the mods flag is on, the checks job runs `npm ci` twice on one lockfile, in .github/scripts/map-check.sh and in .github/scripts/mod-tests.sh; `npm ci` wipes node_modules, so the second never skips. Install time in CI is unmeasured. Decision: map-facts-are-checked.
+- map-check-install-no-step-cap: the Map check step runs a network install with no step timeout; the 36 min job cap covers it, and the code-check `npm ci` has the same gap. Decision: ci-job-caps.
