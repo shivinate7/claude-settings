@@ -117,7 +117,7 @@ def matches(template, live):
 
 
 def page_id(url):
-    # Not layout.artifact_id: single-page mode runs without lint/ on the path. Only the batch fetch names files by it.
+    # Not layout.artifact_id: this module imports no lint/ at load, so the guard and --page mode run without it.
     return url.rstrip("/").rsplit("/", 1)[-1]
 
 
