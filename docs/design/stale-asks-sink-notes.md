@@ -12,8 +12,8 @@ order in a tier, what folds, no fold on a draft, and `article.card[data-seen="tr
 
 ## 1. The divider between new and seen
 
-- 1A (pick): `p.seenhead` sits after the last new card of a tier. It holds an eye icon, then a dotted
-  rule (`border-top: 2px dotted var(--faint)`). The first divider on the page shows the words "Asked
+- 1A (pick): `p.seenhead` sits after the last new card of a tier. It holds an eye icon, the words, then a dotted
+  rule: `span.seenrule` (`border-top: 2px dotted var(--faint)`), a span and not `::after`. The first divider on the page shows the words "Asked
   before, not answered". Each later divider shows the eye and the rule only. Its words are in a `.sr`
   span and in `title`. Gain: a screen reader hears the words at every divider, and the page follows
   ux-label-once. Loss: a sighted reader who starts at a lower tier sees the shape before the words.
@@ -51,7 +51,7 @@ order in a tier, what folds, no fold on a draft, and `article.card[data-seen="tr
   item (`a11y.md`).
 - Markup: `aria-expanded`, and `aria-controls="fold-<n>"` on `div.foldbody` (not `.fold`: page.html
   uses `.fold` on the roadmap). A closed fold has the `hidden` attribute, so its controls leave the
-  tab order. The three labels (`.show`, `.hide`, `.lock`) share one grid cell, so the button keeps the
+  tab order. The three labels (`.uf-show`, `.uf-hide`, `.uf-lock`, in `.uf-labels`) share one grid cell, so the button keeps the
   box of its widest label and a press moves nothing beside it (ux-press-moves-nothing). CSS shows the
   label that matches `aria-expanded` and `aria-disabled`.
 - Keyboard: the native button. Enter and Space toggle. Focus stays on the button. The ring is the

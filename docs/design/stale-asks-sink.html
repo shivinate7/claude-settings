@@ -730,11 +730,11 @@ html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
 .card[data-plain] { background: var(--surface) !important; }
 
 /* ---------- New (page-stale-asks-sink). Only page tokens; no new colour. ---------- */
-/* The divider between the new and the seen part of a tier: an eye, then a dotted rule. Its words show once on the page;
+/* The divider between the new and the seen part of a tier: an eye, the words, then a dotted rule (a span, so no ::after is needed). Its words show once on the page;
    each later divider is the same shape, with the words for a screen reader only (ux-label-once). */
 .seenhead { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; min-height: 24px; color: var(--muted); font-size: 14px; font-weight: 600; }
 .seenhead > svg { flex: none; color: var(--faint); }
-.seenhead::after { content: ""; flex: 1 1 0; min-width: 24px; border-top: 2px dotted var(--faint); }
+.seenhead > .seenrule { flex: 1 1 0; min-width: 24px; border-top: 2px dotted var(--faint); }
 /* A seen card is quieter: the ground of a ruling card. The tier edge stays, because a seen blocking item still blocks. */
 .card[data-seen="true"]:not(.answered) { background: color-mix(in srgb, var(--surface) 55%, var(--ground)); }
 /* The fold control: one button where the options or the steps sit. All three labels share one grid cell, so the box
@@ -744,9 +744,9 @@ html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
 .unfold .chev { flex: none; width: 1em; text-align: center; }
 .unfold[aria-expanded="false"] .chev::before { content: "\25B8"; }
 .unfold[aria-expanded="true"] .chev::before { content: "\25BE"; }
-.unfold .ul { display: grid; min-width: 0; }
-.unfold .ul > span { grid-area: 1 / 1; visibility: hidden; }
-.unfold[aria-expanded="false"] .ul .show, .unfold[aria-expanded="true"]:not([aria-disabled="true"]) .ul .hide, .unfold[aria-disabled="true"] .ul .lock { visibility: visible; }
+.unfold .uf-labels { display: grid; min-width: 0; }
+.unfold .uf-labels > span { grid-area: 1 / 1; visibility: hidden; }
+.unfold[aria-expanded="false"] .uf-show, .unfold[aria-expanded="true"]:not([aria-disabled="true"]) .uf-hide, .unfold[aria-disabled="true"] .uf-lock { visibility: visible; }
 /* Locked open: the card holds an answer Send would submit, so the fold cannot close. The words say why (ux-control-earns-place). */
 .unfold[aria-disabled="true"] { border-style: solid; border-color: var(--line); background: transparent; color: var(--muted); cursor: default; }
 .foldbody { display: grid; gap: 14px; min-width: 0; }
@@ -779,7 +779,7 @@ const EYE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
 const SEEN_WORDS = "Asked before, not answered";
 // The divider. `words`: true on the first divider of the page (or on every one, in 1B). Later ones keep the words for a screen reader only.
 function seenDiv(words, id, tag) {
-  return `<p class="seenhead"${id ? ` id="${id}"` : ""}${words ? "" : ` title="${SEEN_WORDS}"`}${lab("new", tag)}>${EYE}<span class="${words ? "w" : "sr"}">${SEEN_WORDS}</span></p>`;
+  return `<p class="seenhead"${id ? ` id="${id}"` : ""}${words ? "" : ` title="${SEEN_WORDS}"`}${lab("new", tag)}>${EYE}<span class="${words ? "w" : "sr"}">${SEEN_WORDS}</span><span class="seenrule" aria-hidden="true"></span></p>`;
 }
 // The fold control. The words name the act and what it opens; the hidden words name the item (a11y.md: act and target).
 function foldWords(it) {
@@ -789,7 +789,7 @@ function foldWords(it) {
 }
 function unfoldBtn(it, open, locked, link, tag, focus) {
   const w = foldWords(it);
-  return `<button type="button" class="unfold${link ? " link" : ""}${focus ? " focusdemo" : ""}" id="unfold-${it.n}" aria-expanded="${open}" aria-controls="fold-${it.n}"${locked ? ' aria-disabled="true"' : ""}${lab("new", tag)}><span class="chev" aria-hidden="true"></span><span class="ul"><span class="show">${esc(w.show)}</span><span class="hide">${esc(w.hide)}</span><span class="lock">Stays open: your answer is ready</span></span><span class="sr"> for No. ${it.n}</span></button>`;
+  return `<button type="button" class="unfold${link ? " link" : ""}${focus ? " focusdemo" : ""}" id="unfold-${it.n}" aria-expanded="${open}" aria-controls="fold-${it.n}"${locked ? ' aria-disabled="true"' : ""}${lab("new", tag)}><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">${esc(w.show)}</span><span class="uf-hide">${esc(w.hide)}</span><span class="uf-lock">Stays open: your answer is ready</span></span><span class="sr"> for No. ${it.n}</span></button>`;
 }
 
 /* ---------- Cards, as buildCard() builds them ---------- */
