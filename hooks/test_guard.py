@@ -106,6 +106,7 @@ FAMILIES = {
     "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
+    "question-departs": "the waiting-page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
     "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
@@ -11793,24 +11794,29 @@ OJ_GOAL = "Goal: keep the CI checks fast, and keep every check"
 OJ_STAKE = "Problem (risk): a wrong pick here changes what the guard lets through, so it needs your word"
 OJ_BASED = "Based on (read): the stamp check runs in the lint job today"
 OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
+# The Departs from line a question carries (rule question-departs, its cases in that section). A port item
+# carries it too, so the port rule's own no-line cases build their item without it (pq_item's default).
+QD_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
 
 
-def with_stake(item):
-    """The item with OJ_FORM on the lines before its context, and a gain and a lose on each option that
-    lacks one. An item with no context, or no options, stays as it is."""
+def with_stake(item, departs=True):
+    """The item with OJ_FORM on the lines before its context, a Departs from line after them unless `departs`
+    is False, and a gain and a lose on each option that lacks one. An item with no context, or no options,
+    stays as it is."""
     if isinstance(item.get("context"), str):
-        item["context"] = OJ_FORM + "\n" + item["context"]
+        lines = [OJ_FORM] + ([QD_LINE] if departs else [])
+        item["context"] = "\n".join(lines) + "\n" + item["context"]
     if isinstance(item.get("options"), list):
         item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
                            for o in item["options"]]
     return item
 
 
-def pq_item(**over):
+def pq_item(departs=False, **over):
     item = {"id": "suspense-cards", "kind": "decision", "status": "open", "title": PQ_TITLE,
             "context": PQ_CTX, "holds": PQ_HOLDS}
     item.update(over)
-    return with_stake({k: v for k, v in item.items() if v is not None})
+    return with_stake({k: v for k, v in item.items() if v is not None}, departs=departs)
 
 
 def pq(name, expected, item, action="set", **extra):
@@ -11832,24 +11838,27 @@ pq("the Departs from line is read in any case, at a line start", "allow",
    pq_item(port=True, context=PQ_CTX + "\ndeparts from: a.ts:f \u2014 x", holds=None))
 pq("a Departs from phrase mid-line does not count", "deny",
    pq_item(port=True, context="This item departs from: a.ts:f", holds=None))
-pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False))
+pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False, departs=True))
 pq("a non-port item with holds is allowed", "allow",
-   pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits."))
+   pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits.", departs=True))
 pq("a database port question is not a port of an app", "allow",
-   pq_item(title="Which port should Postgres use?", context="Postgres needs a port.", holds="Setup waits."))
+   pq_item(title="Which port should Postgres use?", context="Postgres needs a port.", holds="Setup waits.",
+           departs=True))
 pq("switch ports in a rack are not a port of an app", "allow",
-   pq_item(title="Patch switch ports in rack A3", context="Rack A3 needs patching.", holds="Cabling waits."))
+   pq_item(title="Patch switch ports in rack A3", context="Rack A3 needs patching.", holds="Cabling waits.",
+           departs=True))
 pq("a taken port is not a port of an app", "allow",
-   pq_item(title="Dev setup", context="The port is taken.", holds="Setup waits."))
+   pq_item(title="Dev setup", context="The port is taken.", holds="Setup waits.", departs=True))
 pq("the incident's own wording is a known limit and is allowed", "allow",
    pq_item(title="Suspense cards when Card in Hand closes",
-           context="Duo version of the web screen.", holds="Card in Hand plan waits."))
-pq("an item with no kind is allowed", "allow", pq_item(kind=None))
+           context="Duo version of the web screen.", holds="Card in Hand plan waits.", departs=True))
+pq("an item with no kind is allowed", "allow", pq_item(kind=None, departs=True))
 pq("an items set to another artifact is allowed", "allow", pq_item(), url="https://claude.ai/artifact/other")
 pq("a dev server port is not a port of an app", "allow",
-   pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None))
+   pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None,
+           departs=True))
 pq("a port number is not a port of an app", "allow",
-   pq_item(title="Pick the port number", context="Port 3000 clashes.", holds="Server waits."))
+   pq_item(title="Pick the port number", context="Port 3000 clashes.", holds="Server waits.", departs=True))
 pq("redesign with no Departs from line is denied", "deny",
    pq_item(title="Redesign of the login screen", context="The login screen is new.", holds=None))
 pq("a task about a port with no Departs from line is denied", "deny",
@@ -12251,7 +12260,7 @@ ci("a terminal step with the command on the item is allowed", "allow",
    ci_task(CI_TERMINAL, command=CMD_BOTH_SHELLS))
 ci("a decision that opens a file and runs its command is not judged", "allow",
    {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
-    "context": OJ_FORM + "\nThe plan file lists them.",
+    "context": OJ_FORM + "\n" + QD_LINE + "\nThe plan file lists them.",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
@@ -12369,7 +12378,7 @@ tn("an update that carries kind task, context and a Why yours line is allowed", 
 tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 # The form lines keep this case on the task rule; the question form reads them (OJ_FORM).
-tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + TN_CTX))
+tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + QD_LINE + "\n" + TN_CTX))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
 add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -12427,9 +12436,10 @@ OJ_OPTIONS = [
      "gain": "The lint job gets faster.", "lose": "The test job runs longer."}]
 
 
-def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX):
-    """The context of a decision: the form lines, then the prose. A line passed as None or empty is left out."""
-    return "\n".join(line for line in (goal, problem, *based, tail) if line)
+def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE):
+    """The context of a decision: the form lines, the Departs from line, then the prose. A line passed as None or
+    empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, departs, tail) if line)
 
 
 OJ_GOOD = oj_ctx()
@@ -12643,9 +12653,124 @@ oj("file_path data with the form is allowed", "allow", None, file_path=OJ_FILE_G
 wp_write("owner judge: a widening pick with the form lines is refused by uniform-pick", "deny",
          "uniform-pick", oj_item(context=OJ_GOOD, options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
 wp_write("owner judge: a port with no Departs from line and the form lines is refused by port-question",
-         "deny", "port-question", oj_item(context=oj_ctx(tail=PQ_CTX)), doc_id=OJ_DOC)
+         "deny", "port-question", oj_item(context=oj_ctx(departs=None, tail=PQ_CTX)), doc_id=OJ_DOC)
 wp_write("owner judge: a press with no link and the form lines is refused by press-link", "deny",
          "press-link", oj_item(context=OJ_GOOD, options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
+
+
+# --------------------------------------------------------------------------- a question says how it departs from main
+FAMILY = "question-departs"
+#
+# Rule question-departs (decision owner-judge's ruling, Oct 30: a question to the owner that restates main is
+# not a question). A decision carries a line at a line start in `context`: `Departs from: <what on main> — <what
+# changes>`. Both sides are non-empty, and the change side is not a restatement of main. The check runs after
+# the form and the older rules, at the same ArtifactData call. A closed decision, a task, a note, an update that
+# carries no context, and another artifact's page are not judged. The line sits in `context` only.
+
+QD_DOC = "departs-item"
+QD_RESTATE = "Departs from: agent-model-cap — Opus above the row stays the existing ask"
+QD_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
+def qd_item(**over):
+    item = {"id": QD_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+            "context": oj_ctx(), "options": OJ_OPTIONS, "pick": "a",
+            "why": "The lint job already holds the other format checks."}
+    item.update(over)
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def qd(name, expected, item, action="set", **extra):
+    kw = dict(action=action, collection="items", doc_id=QD_DOC, data=item)
+    kw.update(extra)
+    add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
+
+
+qd("a decision with the form and no Departs from line is denied", "deny", qd_item(context=oj_ctx(departs=None)))
+qd("the refusal says to add the line", "deny", qd_item(context=oj_ctx(departs=None)), carries=("Departs from",))
+qd("an empty Departs from line is denied", "deny", qd_item(context=oj_ctx(departs="Departs from:")))
+qd("a line with no change side is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp —")))
+qd("a line with no separator is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp")))
+qd("a line with no left side is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: — the stamp check moves to the lint job")))
+qd("a line that restates main is denied", "deny", qd_item(context=oj_ctx(departs=QD_RESTATE)))
+qd("a line whose change side is none is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — none")))
+qd("a line whose change side is STAYS, in any case, is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — STAYS in the lint job")))
+qd("a Departs from phrase mid-line does not count", "deny",
+   qd_item(context=oj_ctx(departs="Why: Departs from: lint/stamp.py:run_stamp — the stamp moves")))
+qd("a line in why, not in context, is denied", "deny", qd_item(context=oj_ctx(departs=None), why=QD_LINE))
+qd("a line in an option, not in context, is denied", "deny",
+   qd_item(context=oj_ctx(departs=None), options=[dict(OJ_OPTIONS[0], how=QD_LINE), OJ_OPTIONS[1]]))
+qd("a valid line is allowed", "allow", qd_item())
+qd("a valid line with a hyphen separator is allowed", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp - the stamp moves to the lint job")))
+qd("a change side that holds the word nonetheless is allowed", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves")))
+qd("comment openers and an apostrophe in the change side are plain text", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — don't parse // or /* or # here")))
+
+qd("a closed decision with the chat answer and no Departs from line is allowed", "allow",
+   qd_item(status="closed", context=OJ_ANSWERED))
+qd("a closed decision with the form and no Departs from line is allowed", "allow",
+   qd_item(status="closed", context=oj_ctx(departs=None)))
+qd("a task with a Why yours line and no Departs from line is allowed", "allow",
+   {"id": QD_DOC, "kind": "task", "status": "open", "title": "Merge the batch", "steps": ["Open Terminal"],
+    "context": QD_WHY})
+qd("a note with the form and no Departs from line is allowed", "allow",
+   qd_item(kind="note", context=oj_ctx(departs=None)))
+qd("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+qd("an update that carries kind decision and no context is allowed", "allow",
+   {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
+qd("an update that carries kind decision and a context with no Departs from line is denied", "deny",
+   {"kind": "decision", "context": oj_ctx(departs=None)}, action="update")
+qd("an update that carries kind decision and a context with a restating line is denied", "deny",
+   {"kind": "decision", "context": oj_ctx(departs=QD_RESTATE)}, action="update")
+qd("an update that carries kind decision and a context with the line is allowed", "allow",
+   {"kind": "decision", "context": oj_ctx()}, action="update")
+qd("an items set to another artifact is allowed", "allow", qd_item(context=oj_ctx(departs=None)),
+   url="https://claude.ai/artifact/other")
+qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="answers")
+add("question departs: a repo with no waiting page allows a decision with no line", "allow", tool="ArtifactData",
+    cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=QD_DOC,
+    data=qd_item(context=oj_ctx(departs=None)))
+
+# The older rules and the form keep their ids: this check runs after them.
+wp_write("question departs: a decision with no Goal and no line is refused as question-form", "deny",
+         "question-form", qd_item(context=oj_ctx(goal=None, departs=None)), doc_id=QD_DOC)
+wp_write("question departs: a port with no line is refused as port-question", "deny", "port-question",
+         qd_item(context=oj_ctx(departs=None, tail=PQ_CTX)), doc_id=QD_DOC)
+wp_write("question departs: a widening pick with no line is refused as uniform-pick", "deny", "uniform-pick",
+         qd_item(context=oj_ctx(departs=None), options=[UP_WIDE, UP_MATCH], pick="a"), doc_id=QD_DOC)
+
+
+def qd_replace(name, expected, old, new, field="context"):
+    add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items", doc_id=QD_DOC,
+        field=field, old_str=old, new_str=new)
+
+
+qd_replace("a str_replace that drops the Departs from line from context is denied", "deny", QD_LINE, "")
+qd_replace("a str_replace that drops the line and keeps the form is denied", "deny", oj_ctx(), oj_ctx(departs=None))
+qd_replace("a str_replace that swaps the line for another valid line is allowed", "allow", QD_LINE,
+           "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job")
+qd_replace("a str_replace that keeps the line and changes the prose is allowed", "allow", oj_ctx(),
+           oj_ctx(tail="The stamp check runs in the test job today."))
+qd_replace("a str_replace whose old_str holds no Departs from line is allowed", "allow", OJ_CTX,
+           "The stamp check runs in the test job today.")
+qd_replace("a str_replace on the title is not judged", "allow", QD_LINE, "", field="title")
+
+add("question departs: a batch with a decision that has no line is denied", "deny", "question-departs",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": QD_DOC, "data": qd_item(context=oj_ctx(departs=None))}])
+add("question departs: a batch of decisions that each carry a line is allowed", "allow", tool="ArtifactData",
+    cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": QD_DOC, "data": qd_item()},
+            {"op": "set", "collection": "items", "doc_id": "departs-second", "data": qd_item(id="departs-second")}])
 
 
 # --------------------------------------------------------------------------- an item field the page renders
@@ -12681,7 +12806,8 @@ os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
 
 def if_item(**over):
     """A decision that every other waiting-page rule passes, with `over` on top. A None value drops a key."""
-    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None, **over})
+    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None,
+                      "departs": True, **over})
 
 
 def if_page(slug, body):
