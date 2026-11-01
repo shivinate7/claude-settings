@@ -40,13 +40,23 @@ file is missing or unreadable; its readAt is not an ISO time, has no time zone, 
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
 or a session row or pull row has the wrong shape.
 
+The upkeep list also names each closed waiting-page item whose home is an open step that never cites
+the item (step page-ruling-reaches-step). The live file's optional "items" list holds one row per item
+of the repo's waiting page: {"n": int, "status": str, "home": str}. An item is listed when its status
+is "closed", its home (trimmed, with an optional leading "step " dropped) equals the id of a step that
+is not done, and none of that step's note, why or ask matches `item <n>` (any case, an optional #).
+Each entry reads `<step id> (page item <n>)`. The row reads one unknown entry, never an empty list,
+when the live file is missing or unreadable, has no items list, or holds an item row of the wrong shape.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
 Cost per build: about six git processes, one read of each scanned file, one page written. No
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
-fields (id, session_status, tags) per session in the live file it already writes.
+fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
+one read of the waiting page's items (n, status, home) to that same publish. The builder adds no git
+process, file, timer or log for it.
 """
 import argparse
 import datetime
@@ -476,6 +486,8 @@ def live_work(path, steps, slug=None):
     `sessionSteps` holds the step ids of sessions that are not archived, carrying this repo's cs-repo tag, and `staleWhy`
     says why that row reads unknown, or None.
     A live file with no sessions list still renders Live work.
+    "items" (optional, the waiting page's rows `{"n", "status", "home"}`) feeds only the page-ruling upkeep row:
+    `pageItems` holds the rows, or None with `itemsWhy` saying why that row reads unknown.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -553,9 +565,18 @@ def live_work(path, steps, slug=None):
     if pulls_skipped:
         why.append("unknown (%d pull rows skipped)" % pulls_skipped)
     stale_why = why[0] if why else None
+    page_items, items_why = None, None
+    if not isinstance(raw.get("items"), list):
+        items_why = "unknown (the live file has no items list)"
+    elif not all(isinstance(r, dict) and type(r.get("n")) is int and isinstance(r.get("status"), str)
+                 and isinstance(r.get("home"), str) for r in raw["items"]):
+        items_why = "unknown (an items row has the wrong shape)"
+    else:
+        page_items = [{"n": r["n"], "status": r["status"], "home": r["home"]} for r in raw["items"]]
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
-            "sessionSteps": session_steps, "staleWhy": stale_why}
+            "sessionSteps": session_steps, "staleWhy": stale_why,
+            "pageItems": page_items, "itemsWhy": items_why}
 
 
 def live_age_minutes(read):
@@ -732,6 +753,26 @@ def unlaned(open_, marks, work):
     return out
 
 
+def unfiled(steps, work):
+    """Entries `<step> (page item <n>)` for each closed page item whose open home step never cites it, or one unknown entry."""
+    work = work or {"read": "unknown (no --live file)"}
+    if "itemsWhy" not in work:
+        return [work["read"]]
+    if work["itemsWhy"]:
+        return [work["itemsWhy"]]
+    out = []
+    for row in work["pageItems"]:
+        home = re.sub(r"^step\s+", "", row["home"].strip(), flags=re.IGNORECASE)
+        step = steps.get(home)
+        if row["status"] != "closed" or step is None or step.get("status") == "done":
+            continue
+        cited = re.compile(r"\bitem\s+#?%d\b" % row["n"], re.IGNORECASE)
+        words = " ".join(v for v in (step.get(key) for key in ("note", "why", "ask")) if isinstance(v, str))
+        if not cited.search(words):
+            out.append("%s (page item %d)" % (home, row["n"]))
+    return out
+
+
 def upkeep(steps, added, marks, strays, work=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
@@ -761,6 +802,7 @@ def upkeep(steps, added, marks, strays, work=None):
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),
+            ("page rulings not on their step", unfiled(steps, work)),
             ("landed, waiting for triage to close", ["%s (%s)" % (k, ", ".join(v)) for k, v in sorted(marks.items())]),
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
