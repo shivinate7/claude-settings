@@ -789,16 +789,19 @@ def page_item_hit(tool_input, cwd=""):
 
 
 def _judged_fragment(field):
-    """True for a str_replace field the model review reads: `context`, `options` or an options subfield."""
-    return field == "context" or field == "options" or str(field).startswith("options.")
+    """True for a str_replace field the model review reads: `context`, `options` or `steps`, or a subfield of
+    `options` or `steps`."""
+    return field in ("context", "options", "steps") or str(field).startswith(("options.", "steps."))
 
 
 def judged_item_writes(writes):
     """The writes of a page item that the model review reads. A set or update is read as
-    {"op", "doc_id", "data"} when it writes a decision (an update with no kind is read, as decision_form_hit
-    cannot see the stored kind), is not closed, and carries `options` or `context`. A str_replace on
-    `context` or `options` (a subfield too) is read as {"op", "doc_id", "field", "new_str"}: its new_str
-    alone, never old_str, because the rest of the item is unseen."""
+    {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
+    read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
+    task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
+    `steps`, since steps are task-only. A str_replace on `context`, `options` or `steps` (a subfield too) is
+    read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
+    item is unseen."""
     judged = []
     for op, entry in writes:
         if op == "str_replace":
@@ -809,7 +812,10 @@ def judged_item_writes(writes):
         data = _write_data(entry)
         if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
             continue
-        if data.get("kind", "decision") != "decision" or not (data.get("options") or data.get("context")):
+        if data.get("kind") == "task" or data.get("steps"):
+            if not (data.get("context") or data.get("steps") or data.get("options")):
+                continue
+        elif data.get("kind", "decision") != "decision" or not (data.get("options") or data.get("context")):
             continue
         judged.append({"op": op, "doc_id": entry.get("doc_id"), "data": data})
     return judged

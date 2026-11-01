@@ -16,7 +16,10 @@ For the rest, question_form.page_item_hit picks the item writes of this repo's w
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options or
 context (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
 many writes a batch holds. The page and the chat box share the seven judge items, so both places get the
-same review. A str_replace on `context` or `options` (a subfield too) that passes item_hit is judged on its
+same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
+options is judged too, on the same seven items and one task rule in PAGE_PROMPT: a step that replaces text
+quotes the whole line or value and shows the line after the change in full. A str_replace on `context`,
+`options` or `steps` (a subfield too) that passes item_hit is judged on its
 new_str alone, as a fragment: the prompt tells the model to judge only plain words, unexplained ids and
 pointers outside the item, and never to flag a missing line or option.
 
@@ -85,7 +88,13 @@ PAGE_PROMPT = (
     "Goal, Problem or premises, and one with no `pick` is not flagged for item 7, because the stored item "
     "is unseen. A write with op str_replace carries only `field` and `new_str`, a fragment of that field. "
     "Judge a fragment only for plain words, unexplained ids, and pointers outside the item (items 3 to 6), "
-    "and never flag a missing line or option, because the rest of the item is unseen. Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
+    "and never flag a missing line or option, because the rest of the item is unseen. A task item has "
+    "`context` (the Why yours line) and `steps` (the text the owner reads and follows), and may carry "
+    "options. Judge a task's `steps` and `context` on the items below, and on one more rule: a step that "
+    "tells the owner to replace text quotes the whole unit it replaces, the whole line or the whole value, "
+    "and shows the line after the change in full. A step that names only the changed part, such as "
+    "\"find X and change it to Y\", misses that rule, because the owner then drops the rest of the line. "
+    "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
