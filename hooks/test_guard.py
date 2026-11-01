@@ -20136,8 +20136,8 @@ role_model_refuse("role-model: role with a trailing space on sonnet is denied, m
 role_model_refuse("role-model: role Reviewer on sonnet with no round line is denied, matched to its row",
           "Reviewer", "sonnet", "Check the diff for typos.")
 
-# ---- B2: an Explore on Sonnet is denied unless its first non-blank line opens with the audit marker `Audit:`
-# (case-sensitive, line 1 only, markup allowed ahead of it). Shiv's ruling: Nov 1 11:43 CST, page item 107, pick a.
+# ---- B2: an Explore on Sonnet is denied unless the first `Audit:` on the brief's first non-blank line counts,
+# with any text ahead of it (case-sensitive). Shiv's ruling: Nov 1 11:43 CST, page item 107, pick a.
 role_model_refuse("role-model: Explore on sonnet with no marker is denied, and names the Audit: marker",
           "Explore", "sonnet", "Find where X is defined.", carries=(EXPLORE_MARKER,))
 role_model_refuse("role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)",
@@ -20154,12 +20154,14 @@ role_model_refuse("role-model: Explore on fable with Audit: on line 1 is denied,
           "Explore", "fable", "Audit: check the glossary for meaning drift.", lacks=ROLE_LACKS + (EXPLORE_MARKER,))
 
 # ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
-# An Explore on Sonnet passes with the marker on line 1, leftmost on line 1, with anything ahead of it. An Explore on
-# Haiku or Opus passes with no marker. (shiv, Nov 1 11:43 CST, page item 107, pick a)
+# An Explore on Sonnet passes when the first `Audit:` on the brief's first non-blank line counts, with any text ahead
+# of it. An Explore on Haiku or Opus passes with no marker. (shiv, Nov 1 11:43 CST, page item 107, pick a)
 role_model_allow("role-model: Explore on sonnet with Audit: on line 1 is allowed", "Explore", "sonnet",
            "Audit: check the glossary for meaning drift.")
 role_model_allow("role-model: Explore on sonnet with **Audit:** on line 1 is allowed (markup ahead of the marker)",
            "Explore", "sonnet", "**Audit:** check the glossary for meaning drift.")
+role_model_allow("role-model: Explore on sonnet with prose ahead of Audit: on line 1 is allowed", "Explore", "sonnet",
+           "Please read the Audit: docs section.")
 role_model_allow("role-model: Explore on haiku is allowed, with no marker", "Explore", "haiku",
            "Find where X is defined.")
 role_model_allow("role-model: Explore on opus is allowed, with no marker (standing grant, unchanged)", "Explore", "opus",
