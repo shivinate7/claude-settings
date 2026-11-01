@@ -2856,17 +2856,19 @@ def impeccable_command_hit(raw: str) -> str:
 # app, so the owner answers first. A launch ASKS when a token of its own arguments is the flag, or
 # when a WebView2 environment value holds it. Text that only names the flag is no launch: the flag
 # must be a launched program's argument and carry a value, and a text command's arguments are skipped.
-# A `-ArgumentList` string is read word by word. The limit: the guard reads no script file, so
-# `bash launch.sh` that holds the flag passes.
+# A `-ArgumentList` string is read word by word. An argument word also splits on `(`, `)`, `@` and
+# commas, so a PowerShell array (`@("…")`, `'a','b'`) shows its items. The limit: the guard reads no
+# variable it expands (`& app.exe @a`) and no script file, so `bash launch.sh` that holds the flag passes.
 DEBUG_PORT_REASON = ("this command opens a remote-debugging port on an app. Any local process can "
                      "then drive that app. Answer yes only if you want the port open.")
 DEBUG_PORT_FLAG = "--remote-debugging-port"
 DEBUG_PORT_ENV = re.compile(r"^(?:\$env:)?WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS(?:\+?=(.*))?$", re.I | re.S)
 DEBUG_PORT_ARGUMENT_LISTS = ("-argumentlist", "-args")   # PowerShell's launcher takes its arguments as one string
+# Programs that only search, filter or print text. None launches an app, so their arguments are skipped.
 DEBUG_PORT_TEXT_COMMANDS = {
     "echo", "printf", "cat", "grep", "egrep", "fgrep", "rg", "ag", "ack", "git", "gh", "sed", "awk",
     "head", "tail", "less", "more", "wc", "diff", "ls", "find", "write-host", "write-output",
-    "select-string", "findstr", "type", "get-content"}
+    "select-string", "findstr", "type", "get-content", "pgrep", "where-object", "where"}
 
 
 def debug_port_name(token: str) -> str:
@@ -2900,13 +2902,14 @@ def debug_port_segment_hit(segment: str) -> str:
             return segment.strip()[:100]
     if index is None or debug_port_name(tokens[index]) in DEBUG_PORT_TEXT_COMMANDS:
         return ""
-    # The launched program's own arguments; a launcher's argument string is read word by word.
+    # The launched program's own arguments, split at array marks; a launcher's argument string is
+    # also read word by word.
     arguments = []
     for at, word in enumerate(tokens[index + 1:], index + 1):
         if tokens[at - 1].lower() in DEBUG_PORT_ARGUMENT_LISTS:
-            arguments += [part.strip("'\"") for part in re.split(r"[\s,]+", word) if part]
+            arguments += [part.strip("'\"") for part in re.split(r"[\s,()@]+", word) if part]
         else:
-            arguments.append(word)
+            arguments += [part for part in re.split(r"[,()@]+", word) if part]
     # A launch gives the flag a value. A flag with none (`pgrep -f "--remote-debugging-port"`, a
     # `-match` pattern) is a search for the text, never a launch.
     for at, word in enumerate(arguments):
