@@ -9,7 +9,14 @@ The waiting page shows an option by its position, as a letter: the first option 
   - repeats another option's key;
   - has the key `none` (the page's `NONE`, which it reads as "none of these"); or
   - has a key that is not the lowercase letter of its position; or
-  - has a `label` that opens with a letter tag other than its key's letter. The tags are: `X:`, `X)`, `X.` or `X]`, then a space, a `*` or the end of the label; `(X)` or `[X]`; `X`, then a spaced dash (`X — `, `X – `, `X - `); and `Option X` in any case, where X is not followed by a word character or a hyphen. Each form may open with `**`. A tag equal to the key's letter passes. Text with no mark after its letter passes, such as "B", "B rail" and "I think". So do "A/B", "AI-first", "X-ray", "B2B", "E.g." and "A-frame". The check is a regex (`LABEL_TAG`), with no model call. An option's label and its mockup carry no letter of their own: the page's key is the only letter.
+  - has a `label` that opens with a letter tag other than its key's letter. A tag is one of these forms, each with an optional leading `**`:
+
+    - `X:`, `X)`, `X.` or `X]`, then a space, a `*` or the end of the label.
+    - `(X)` or `[X]`.
+    - `X`, then a spaced dash: `X — `, `X – ` or `X - `.
+    - `Option X` in any case. X is not followed by a word character or a hyphen.
+
+    A tag equal to the key's letter passes. Text with no mark after its letter passes, such as "B", "B rail" and "I think". Text such as "A/B", "AI-first", "X-ray", "B2B" and "A-frame" passes too. The check is a regex (`LABEL_TAG`), with no model call. An option's label and its mockup carry no letter of their own: the page's key is the only letter.
   - It also refuses an item whose text (title, context, why, an option's text or a step) names an option by a letter-and-digit key, such as "option e2". The words that start the match are option, pick and key, in any case. A colon, a bracket, a quote or markdown emphasis may stand between the word and the key, as in "Option: e2", "Option [e2]" and "Pick **e2**". The key also matches in any case, since the page shows its letter in capitals, so "Option E2" is refused. "Option A", "pick b" and "option 2" pass, and so do the decision id "D12" and the topic id "t18", each in that case only.
   - It judges a `str_replace` on the text it adds (`new_str`), in any field, by this text rule only. The stored item is unseen, so a `str_replace` that adds a key-named option is refused even on a task, a note or a closed item.
   - It reads each write in a batch and data read from `file_path`. It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
