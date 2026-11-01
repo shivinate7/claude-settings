@@ -1,9 +1,9 @@
 {
   "title": "Every owner question names what it changes from main",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33756,
   "why": "shiv, Oct 30 17:24 CDT remark (via coordinator 2). Incident: lane spawn-model-check's three 'departures' restated decision agent-model-cap and were relayed to shiv.",
-  "note": "Built Oct 31: draft PR #902, queued for batch 38 (coordinator, 15:55 CDT). Widens rule port-question in question_form.py so every owner question names what it changes from main. The lane filed debt departs-word-list-limits and note question-departs-edges. Done check: a question that names no change from main is refused.",
-  "updatedAt": "2026-10-31T20:56:00Z"
+  "note": "Built Oct 31: draft PR #902, queued for batch 38 (coordinator, 15:55 CDT). Widens rule port-question in question_form.py so every owner question names what it changes from main. The lane filed debt departs-word-list-limits and note question-departs-edges. Done check: a question that names no change from main is refused. Landed on main in batch 41, #929 (#902, Oct 31).",
+  "updatedAt": "2026-11-01T05:00:00Z"
 }
