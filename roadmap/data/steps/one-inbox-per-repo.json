@@ -1,0 +1,9 @@
+{
+ "title": "Each repo has one feedback inbox that every session writes to",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.337584,
+ "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
+ "note": "Shape: feedback given in any session (a triage of another repo, a lane, the wrong page thread) is written to the inbox of the repo it is about, not only the session's own. Today each session keeps its own inbox, so feedback typed elsewhere never reaches the repo. Ready: no open question. Port: yes, every repo.",
+ "updatedAt": "2026-11-01T23:47:00Z"
+}

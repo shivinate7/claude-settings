@@ -1,0 +1,9 @@
+{
+ "title": "New feedback is matched against old feedback, and a repeat is flagged",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.337582,
+ "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
+ "note": "Shape: logging a feedback item searches the repo's old inboxes, roadmap and backlog, through the glossary of the owner's words against code names (the owner said carousel; the repo said wheel), and flags a repeat on the item. Today nothing is matched. Ready: no open question. Port: yes, every repo.",
+ "updatedAt": "2026-11-01T23:47:00Z"
+}

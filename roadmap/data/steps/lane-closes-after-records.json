@@ -1,0 +1,9 @@
+{
+ "title": "A lane does not close until its records pull request has merged",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.337586,
+ "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
+ "note": "Shape: a lane's archive or close is refused while its record step (the records PR) is unmerged. Incident: home's wheel lane closed before its records PR landed. Ready: no open question. Port: yes, every repo.",
+ "updatedAt": "2026-11-01T23:47:00Z"
+}

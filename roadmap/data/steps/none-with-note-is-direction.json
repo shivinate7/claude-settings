@@ -1,0 +1,9 @@
+{
+ "title": "A \"none of these\" answer with a clear note closes the item and becomes a step",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.337588,
+ "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
+ "note": "Shape: when the owner answers \"none of these\" with a note that gives a clear direction, the item closes and the note becomes a step, instead of the item being asked again. Incident: home's triage re-asked items 48 and 49 after clear notes. Departs from: skill waiting-page treats \"none\" as no ruling (it never picks an option); this changes that rule, so the lane updates the skill and its record. Ready: no open question. Port: yes, every repo.",
+ "updatedAt": "2026-11-01T23:47:00Z"
+}

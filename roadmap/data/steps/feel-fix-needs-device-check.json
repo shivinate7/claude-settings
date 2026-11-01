@@ -1,0 +1,9 @@
+{
+ "title": "A fix for how something feels stays open until a device or simulator check is recorded",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 103.33758,
+ "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
+ "note": "Shape: a check keeps a feel-fix's step or debt open after CI passes, until a simulator or device check is recorded on it; then it opens a \"try it\" task for the owner on the waiting page. Today such a fix closes on CI alone while its record still says it waits on the owner. Ready: no open question. Port: yes, every repo.",
+ "updatedAt": "2026-11-01T23:47:00Z"
+}
