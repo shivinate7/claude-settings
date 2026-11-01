@@ -1,0 +1,9 @@
+{
+  "title": "How good tests and CI are made, how far the repos are from it, and a plan to close the gap",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33783,
+  "why": "shiv, Nov 1 16:20 CST, in chat to triage: \"spawn another session that will look into how to ensure tests are written/made/revised correctly -- tell it it can send lanes to surf the web, others to just see claude's own guidelines, and another set (and only that set) can review my repos, i need a write up basically of telling me how good tests/ci can/should be made, how far we're off of it, and a plan to get onto track\".",
+  "note": "One session with its own lanes, in three sets, each one role: 1) web lanes research how good tests and CI are written and revised (test design, red-first, flaky tests, mutation testing, CI speed and trust); they read no repo of Shivam's. 2) guideline lanes read only claude-settings' own rules and records on tests and CI (CLAUDE.md rules outcomes-tests-are-statements and roles-each-layer-proves-once, skill ci-hygiene, decisions on mutation tests and checks). 3) review lanes, the only set that reads Shivam's repos, measure each repo against the standard sets 1 and 2 produce. Keep owner ruling Nov 1 12:23 CST: a practice joins the standard only when it makes the build better, never as optional load on builders; judge each by outcome. Output: one write-up (docs/plans, record-writer and reviewer land it): the standard with sources, a per-repo gap table with a gold-standard column, and a ranked plan of lanes to close the gap. Picks go to triage as page questions. Done check: the write-up is on main with a source per practice and a measured or 'unmeasured' mark per gap. Needs no answer.",
+  "updatedAt": "2026-11-01T22:22:00Z"
+}
