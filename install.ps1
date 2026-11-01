@@ -652,11 +652,9 @@ function Complete-Retire {
                 $i = Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
                 if (-not $i) { continue }
                 try {
-                    if ($i.LinkType) {
-                        $tgt = [string]@($i.Target)[0]
-                        if ($tgt.StartsWith($RepoDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar) -or $tgt.StartsWith($RepoDir.TrimEnd('\', '/') + '/')) {
-                            Remove-Leftover $dest; Log "removed $dest (main no longer ships $rel)"
-                        }
+                    $tgt = if ($i.LinkType) { [string]@($i.Target)[0] } else { '' }
+                    if ($tgt -and ($tgt.StartsWith($RepoDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar) -or $tgt.StartsWith($RepoDir.TrimEnd('\', '/') + '/'))) {
+                        Remove-Leftover $dest; Log "removed $dest (main no longer ships $rel)"
                     } else { Move-ToRetired $rel }
                 } catch { Log "could not retire $dest ($($_.Exception.Message)); left in place"; $pending = $true }
             }

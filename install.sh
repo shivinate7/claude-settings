@@ -603,8 +603,9 @@ retire_recorded() {
 }
 
 # retire_listed: first run, no manifest. Act only on names in retired-files.txt (the format of
-# landed-dirs.txt) that main does not ship. A link into $SRC is removed; a real file or folder is moved to
-# backups/retired, never deleted. Prints PENDING when a name was held back, so the manifest is not written yet.
+# landed-dirs.txt) that main does not ship. A link into $SRC is removed; anything else (a real file or folder,
+# a link that points elsewhere or dangles) is moved to backups/retired, never deleted.
+# Prints PENDING when a name was held back, so the manifest is not written yet.
 retire_listed() {
   [ -f "$SRC/retired-files.txt" ] || return 0
   while IFS= read -r lp || [ -n "$lp" ]; do
@@ -615,9 +616,9 @@ retire_listed() {
     shipped "$lp" && continue
     if retire_blocked "${lp%/*}"; then echo PENDING; continue; fi
     ld="$CLAUDE_DIR/$lp"
-    if [ -L "$ld" ]; then
-      case "$(readlink "$ld")" in "$SRC"/*) rm -f "$ld" && log "removed $ld (main no longer ships $lp)" >&2 ;; esac
-    elif [ -e "$ld" ]; then
+    if [ -L "$ld" ] && case "$(readlink "$ld")" in "$SRC"/*) true ;; *) false ;; esac; then
+      rm -f "$ld" && log "removed $ld (main no longer ships $lp)" >&2
+    elif [ -e "$ld" ] || [ -L "$ld" ]; then
       mkdir -p "$RETIRED_DIR" || { echo PENDING; continue; }
       lto="$RETIRED_DIR/$(printf '%s' "$lp" | tr / -).$(date +%Y%m%d%H%M%S)"
       [ ! -e "$lto" ] || lto="$lto.$$"
