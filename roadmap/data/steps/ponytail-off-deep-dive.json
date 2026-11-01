@@ -1,0 +1,9 @@
+{
+  "title": "Ponytail is off until a deep dive finds what changed",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33775,
+  "why": "shiv, Nov 1 11:53 CST, page item 106: \"we've had it for months -- something went wrong recently. we even already had kept custom versions of its skills, if none of this happened, then just turn it off for now and we'll have to deep dive. this is a new and big problem.\"",
+  "note": "Two parts. 1) Turn the plugin off now: settings.json enabledPlugins ponytail@ponytail becomes false (one line, a lane; the install carries it to every machine). 2) Deep dive: find what changed recently so the whole plugin runs in every session, and where the owner's custom copies of its skills went. Read so far (triage): settings.json carries ponytail@ponytail true from this repo's first commit, b3443148 (Oct 27, an import of the whole file), so git here cannot show when it was turned on; no copy of its skills is tracked on main. Places to look: the earlier repo the import came from (the claude-sharables marketplace in settings.json), the owner's machines, plugin version changes (5.3.3, no pin), and when its session-start hook began to run. Done check: ponytail is off on main; the dive's report names what changed and when, or says unknown with what it read. Needs no answer.",
+  "updatedAt": "2026-11-01T18:02:00Z"
+}
