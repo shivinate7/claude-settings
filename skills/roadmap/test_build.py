@@ -706,6 +706,7 @@ class StaleInProgress(Fixture):
             self.publish(sessions=[], read_at=iso_ago(-2))
             self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
 
+    # Ruling: roadmap step stale-step-blocked-lane (coordinator, 2026-10-30 17:18 CDT) overturns the old STOPPED/COMPLETED case; an unseen status reads live, as in session-tiers' Live-coordinator check.
     def test_session_in_an_unseen_status_keeps_its_step_live(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
