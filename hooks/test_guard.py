@@ -19984,7 +19984,8 @@ role_model_refuse("role-model: test-author on sonnet with a Round 2 of 3 line is
           "test-author", "sonnet", "Round 2 of 3. Write the failing cases.",
           lacks=ROLE_LACKS + (ROUND_MARKER,) + FREE_ROUND_MARKERS)
 role_model_refuse("role-model: reviewer on sonnet with a Round 1 of 3 line is denied (round 1 runs on the row)",
-          "reviewer", "sonnet", "Round 1 of 3. Check the diff for typos.")
+          "reviewer", "sonnet", "Round 1 of 3. Check the diff for typos.",
+          carries=(ROLE_REMEDY, ROUND_MARKER) + FREE_ROUND_MARKERS)
 role_model_refuse("role-model: record-writer on sonnet is denied", "record-writer", "sonnet", "Record the decision.")
 role_model_refuse("role-model: claude-code-guide on sonnet is denied", "claude-code-guide", "sonnet",
           "How do the hooks load?")
