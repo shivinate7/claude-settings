@@ -71,6 +71,9 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     message by its Central stamp or the start of its text. Offences: a burst message with no
     items; an item with no kind, an unknown kind, or no home; an open standing item whose id is
     not in the handoff as a whole token. A missing handoff file means every open id is missing.
+    A burst message with no items also says where items go: the inbox file by its absolute path,
+    the message's exact `### ` heading line, an example `- fb-` item line the check accepts, and
+    that items added under the heading in any later turn count.
   - Tracked homes (decision owner-feedback-inbox, "Kinds and homes"). A ruling or task item, open
     or closed, names a path: relative to the repo of the payload's cwd, or absolute. The file sits
     under a home of its kind in lint/layout.json, read through lint/layout.py: ruling under the
@@ -78,6 +81,8 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
     handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
     names the layout keys, todo first for a task.
+  - A ruling whose tracked file sits outside the ruling homes is blocked with the reason
+    `<path> is not a tracked ruling home`, and the reason names the repo's ruling homes.
   - Fail open: when the cwd is not in a git repo, or the layout or the repo's extras file cannot
     be read, ruling and task homes pass unchecked and stdout carries one systemMessage line that
     starts "Feedback guard: ruling and task homes not checked".
@@ -285,10 +290,11 @@ FIXTURE = []
 
 def fixture_repo():
     """The shared fixture repo: not rolled out to the layout, so its homes sit at the legacy
-    paths claude-settings uses (decisions/, debts/), with a tracked decision and debt."""
+    paths claude-settings uses (decisions/, debts/), with a tracked decision and debt. router.md is
+    tracked too, and is no home of any kind."""
     if not FIXTURE:
         FIXTURE.append(make_repo("fixture", tracked=(
-            "decisions/a-ruling.md", "debts/a-task.md", "CLAUDE.md")))
+            "decisions/a-ruling.md", "debts/a-task.md", "CLAUDE.md", "router.md")))
     return FIXTURE[0]
 
 
@@ -842,6 +848,64 @@ def case_guard_unreadable_layout_fails_open_with_one_line():
     cfg = new_cfg()
     p = homed(cfg, "no-repo-standing", ("- fb-11 [standing] -> handoff",), cwd=cfg)
     check("homes: no ruling or task item, no fail-open line", fail_open_line(p) == [], p.desc())
+
+
+APPLE_STAMP = "2026-10-31 20:21 CDT (UTC-05:00)"
+APPLE_LATER = "2026-10-31 21:05 CDT (UTC-05:00)"
+APPLE_BURST = ("Router note for the handoff:\n"
+               "filed the ruling in router.md\n"
+               "and the handoff, not the inbox.")
+FIXTURE_RULING_HOMES = ("decisions/", "CLAUDE.md")  # the fixture's tracked ruling homes
+
+
+def example_item_in(reason):
+    """True when the reason holds a `- fb-...` line that the check's own ITEM and JOT regexes accept."""
+    import feedback_guard  # the check's own regexes, not a copy of them
+    for m in re.finditer(r"- fb-[^`\n]*", reason):
+        it = feedback_guard.ITEM.match(m.group(0).rstrip(" .;,"))
+        if it and feedback_guard.JOT.match(it.group(2) or ""):
+            return True
+    return False
+
+
+def case_guard_apple_tv_burst_names_where_items_go():
+    """A burst with no items, then a later short message with its items under its own heading. The
+    reason names the inbox file, the burst's exact heading, an example item the check accepts, and
+    that items added in any later turn count."""
+    cfg, sid = new_cfg(), "apple-tv"
+    write_file(inbox_of(cfg, sid),
+               render_block(APPLE_BURST, header=APPLE_STAMP)
+               + render_block("a short later message", header=APPLE_LATER,
+                              items=("- fb-2031-2 [note] -> noted",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\nThe 20:21 message is filed in router.md.\n")
+    p = guard(cfg, sid, stop_active=False)
+    expect_block("apple tv: a burst with no items blocks", p)
+    reason = block_reason(p) or ""
+    check("apple tv: the reason names the inbox file by its absolute path",
+          inbox_of(cfg, sid) in reason, reason)
+    check("apple tv: the reason names the burst's exact heading line",
+          "### " + APPLE_STAMP in reason, reason)
+    check("apple tv: the reason holds an example item line the check accepts",
+          example_item_in(reason), reason)
+    check("apple tv: the reason says items added in any later turn count",
+          "any later turn" in reason, reason)
+
+
+def case_guard_router_home_names_the_tracked_ruling_homes():
+    """A ruling homed to a tracked file that is no ruling home. The reason says so, and names a
+    ruling home the fixture repo has."""
+    cfg, sid = new_cfg(), "router-home"
+    write_file(inbox_of(cfg, sid),
+               render_block("Ruling filed in the router.\nSee the handoff.\nDone for now.",
+                            items=("- fb-2021-1 [ruling] -> router.md",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    expect_block("router home: a ruling homed to router.md blocks", p, named=("fb-2021-1",))
+    reason = block_reason(p) or ""
+    check("router home: the reason says router.md is not a tracked ruling home",
+          "router.md is not a tracked ruling home" in reason, reason)
+    check("router home: the reason names a ruling home path the fixture repo has",
+          any(h in reason for h in FIXTURE_RULING_HOMES), reason)
 
 
 # --------------------------------------------------------------------------- page cases
@@ -1742,6 +1806,8 @@ CASES = (
     case_guard_standing_homed_to_handoff_passes,
     case_guard_task_home_from_the_todo_kind,
     case_guard_unreadable_layout_fails_open_with_one_line,
+    case_guard_apple_tv_burst_names_where_items_go,
+    case_guard_router_home_names_the_tracked_ruling_homes,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
     case_page_artifactdata_n_proof_passes,
