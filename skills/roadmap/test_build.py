@@ -921,6 +921,44 @@ class PageRulings(Fixture):
         self.assertEqual(self.panel(page)["read"], value["readAt"])
         self.assertEqual([t["title"] for t in build_info(page)["live"]["threads"]], ["Build a"])
 
+    def test_a_read_at_over_an_hour_old_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        self.publish(items=[self.item(9)], read_at=iso_ago(5))  # control: a fresh read lists the item
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c153 (page item 9)"))
+        for minutes in (61, 120):
+            with self.subTest(minutes=minutes):
+                self.publish(items=[self.item(9)], read_at=iso_ago(minutes))
+                self.assert_unknown(self.out_with_live())
+
+    def test_a_read_at_that_is_not_an_iso_time_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        self.publish(items=[self.item(9)])  # control: a fresh read lists the item
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c153 (page item 9)"))
+        for read_at in ("yesterday", "2026-13-45T99:00:00Z"):
+            with self.subTest(read_at=read_at):
+                self.publish(items=[self.item(9)], read_at=read_at)
+                self.assert_unknown(self.out_with_live())
+
+    def test_a_read_at_more_than_five_minutes_ahead_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Waiting.")
+        self.publish(items=[self.item(9)], read_at=iso_ago(-2))  # control: within five minutes ahead, the item lists
+        self.assertEqual(self.rulings(self.out_with_live()), (1, "c153 (page item 9)"))
+        for minutes in (6, 90):
+            with self.subTest(minutes=minutes):
+                self.publish(items=[self.item(9)], read_at=iso_ago(-minutes))
+                self.assert_unknown(self.out_with_live())
+
+    def test_a_skipped_session_row_does_not_make_the_row_unknown(self):
+        """The sessions list feeds the stale-step row only. A wrong-shape session row is skipped there,
+        and this row still lists its uncited item."""
+        self.use_origin("owner/fixture")
+        self.commit_step("c153", note="Waiting.")
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING"), "session_test03"],
+                     items=[self.item(9)])
+        page, out = self.build_from_main("--live", str(self.live))
+        self.assertIn("session 2", build_info(page)["live"]["skipped"])
+        self.assertEqual(self.rulings(out), (1, "c153 (page item 9)"))
+
 
 OPEN, CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 
