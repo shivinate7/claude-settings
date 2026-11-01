@@ -316,16 +316,26 @@ def kills_group_pid(tokens) -> bool:
     return any(int(arg) in (0, 1, -1) for arg in _kill_pids(tokens))   # a whole group, init, every process
 
 
+def _under_init(pid: int) -> bool:
+    """True when the pid's parent is init, or its parent's parent is init (an orphan stub shell).
+    Each level is read once."""
+    parent = _ps_ppid(pid)
+    return parent == 1 or (bool(parent) and _ps_ppid(parent) == 1)
+
+
 def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
     """Return the first numeric pid a `kill` segment names that this session did not start.
 
     Only literal numbers are judged. `$!`, `$PID`, `%1` and `$(...)` cannot be read here, and
     the remedy tells the agent to kill by `$!`. When the session root or `ps` cannot be read, the
-    answer is "" (unknown, so allowed), never a guess. A PPID-1 pid is also owned when its exec
-    environment holds `CLAUDE_CODE_SESSION_ID=<session_id>` exactly (`proc_env.holds_session_tag`),
-    read only after the walk says foreign, so an allowed kill costs nothing new. ponytail: a pid
-    reused since launch reads as foreign; a forked shell stub carries no tag, so a left-behind
-    shell reads foreign too; stop either through the harness.
+    answer is "" (unknown, so allowed), never a guess. A pid is also owned when its exec
+    environment holds `CLAUDE_CODE_SESSION_ID=<session_id>` exactly (`proc_env.holds_session_tag`)
+    and its parent is init, or its parent's parent is init (a stranded job under an orphan stub
+    shell). The tag is read on the pid itself, only after the walk says foreign. That adds at most
+    one `ps` read per level (the pid, then its parent) and one environment read; a pid the walk
+    owns pays nothing more. An agent call passes session_id "", so it owns no pid by tag.
+    ponytail: a pid reused since launch reads as foreign; an untagged PPID-1 stub reads foreign;
+    stop it through the harness.
     """
     root = None
     for arg in _kill_pids(tokens):
@@ -339,7 +349,7 @@ def foreign_pid_kill(tokens, transcript: str = "", session_id: str = "") -> str:
         if in_own_agent_worktree(abs(number), transcript):
             continue
         if pid_is_owned(abs(number) if number < -1 else number, root) is False:
-            if _ps_ppid(abs(number)) == 1 and holds_session_tag(abs(number), session_id):
+            if _under_init(abs(number)) and holds_session_tag(abs(number), session_id):
                 continue
             return arg
     return ""
