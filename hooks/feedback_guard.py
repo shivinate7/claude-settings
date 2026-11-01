@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item with no send to the page writer, or an open standing item whose id is missing from the handoff.
+"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item with no send to the page writer, a repo item with no send naming the repo, or an open standing item whose id is missing from the handoff.
 
 Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes for every owner message,
 and the session's handoff beside it. A burst is the messages saved since the last Stop when they are
@@ -12,7 +12,7 @@ a turn end in these cases:
   - a burst's message has no item lines under it. The reason gives the inbox file's absolute path, the
     message's heading line and its line number, and an example item. Items added in any later turn
     count, because each Stop reads the whole file;
-  - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page;
+  - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page, repo;
   - a ruling or task item, open or closed, whose home is not a file under a home of its kind
     (HOME_KINDS, paths from lint/layout.py for the repo of the hook's cwd) that some branch's tree
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
@@ -29,6 +29,13 @@ a turn end in these cases:
     a peer's words and machine notices never count. A missing or unreadable transcript passes every
     block with a systemMessage. A block with no owner record for its text passes with a systemMessage,
     and the other blocks are still checked;
+  - an open repo item (`[repo] -> repo:<owner>/<name>`: the owner's feedback is about that other repo;
+    each part matches `[A-Za-z0-9._-]+`, any other home is a malformed repo home; checked in every block
+    that holds one, burst or not; a `[closed]` one is never checked) has no send after the owner's
+    message: send_message or SendMessage whose message names `<owner>/<name>` as a whole token, without
+    case (REPO_HOME, _names_repo). A sentence period or a URL path after the name still counts;
+    `acme/widgets.v2` and `acme/widgets-x` are other names. It needs no handoff id. It shares the
+    transcript read, the anchoring and the stand-downs of the page check (Pages.sent takes the proof);
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
@@ -55,9 +62,10 @@ import precompact_handoff  # noqa: E402  the one home of the handoff path
 from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
-KINDS = ("ruling", "task", "question", "note", "standing", "page")
+KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
 JOT = re.compile(r"\[(%s)\]\s+->\s+\S" % "|".join(KINDS))
 PAGE_HOME = re.compile(r"page:(\d+)")
+REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
@@ -65,7 +73,8 @@ HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer e
 HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
 STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
 # The home each kind without a file home takes, as the decision gives it.
-KIND_WORDS = {"question": "answered", "note": "noted", "standing": "handoff", "page": "page:<n>"}
+KIND_WORDS = {"question": "answered", "note": "noted", "standing": "handoff", "page": "page:<n>",
+              "repo": "repo:<owner>/<name>"}
 EXAMPLE_KIND = "note"  # a key of KIND_WORDS
 EXAMPLE_HOME = KIND_WORDS[EXAMPLE_KIND]
 OPEN_KINDS = ("[ruling]", "[task]", "[standing]")
@@ -285,16 +294,17 @@ class Pages:
                     self.owners.append((i, norm(text)))
         return not self.unread
 
-    def sent(self, text, k, n, stamp):
-        """True when a send naming item n follows the owner record that anchors the k-th block with
-        this text. True too when the check stands down: no transcript, or no such owner record."""
+    def sent(self, text, k, proof, stamp):
+        """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
+        k-th block with this text. True too when the check stands down: no transcript, or no such
+        owner record."""
         if not self._load():
             return True
         anchors = [i for i, said in self.owners if said == text]
         if len(anchors) < k:
             self.skip.append("the transcript has no owner record %d for the message at %s" % (k, stamp))
             return True
-        return any(_proves(use, n) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
+        return any(proof(use) for r in self.records[anchors[k - 1] + 1:] if r.get("type") == "assistant"
                    for use in _transcript.tool_uses(r))
 
 
@@ -352,11 +362,37 @@ def page_problem(item_id, rest, text, k, stamp, pages):
     m = PAGE_HOME.fullmatch(home_word(rest))
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
-    if pages is None or pages.sent(text, k, m.group(1), stamp):
+    n = m.group(1)
+    if pages is None or pages.sent(text, k, lambda use: _proves(use, n), stamp):
         return None
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
             " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
             " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
+
+
+def _names_repo(use, owner, name):
+    """True when a tool_use is a send whose message names owner/name as a whole token, without case.
+    The name ends at a character outside [A-Za-z0-9_-], and a period ends it only when no name
+    character follows, so a sentence period or a URL path still counts."""
+    tool_input = use.get("input")
+    if (use.get("name") or "") not in SEND_TOOLS or not isinstance(tool_input, dict):
+        return False
+    msg = tool_input.get("message")
+    return isinstance(msg, str) and re.search(
+        r"(?<![A-Za-z0-9._-])%s/%s(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])" % (re.escape(owner), re.escape(name)),
+        msg, re.IGNORECASE) is not None
+
+
+def repo_problem(item_id, rest, text, k, stamp, pages):
+    """None when the repo item's home is repo:<owner>/<name> and the send is proved, or the check stood down."""
+    m = REPO_HOME.fullmatch(home_word(rest))
+    if m is None:
+        return "%s [repo] has a malformed repo home: it needs `repo:<owner>/<name>`" % item_id
+    slug = "%s/%s" % m.groups()
+    if pages is None or pages.sent(text, k, lambda use: _names_repo(use, *m.groups()), stamp):
+        return None
+    return ("%s [repo] repo:%s: the transcript shows no send naming %s after the owner's message; send the"
+            " owner's message to that repo's triage session (send_message naming %s)" % (item_id, slug, slug, slug))
 
 
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
@@ -374,6 +410,10 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
                 out.append("%s needs `[kind] -> home`, kind one of %s" % (it[0], ", ".join(KINDS)))
             elif it[1].startswith("[page]"):
                 found = None if it[3] else page_problem(it[0], it[1], text, seen[text], b["stamp"], pages)
+                if found:
+                    out.append(found)
+            elif it[1].startswith("[repo]"):
+                found = None if it[3] else repo_problem(it[0], it[1], text, seen[text], b["stamp"], pages)
                 if found:
                     out.append(found)
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
@@ -424,7 +464,7 @@ def main():
         if reasons:
             out.update(decision="block", reason="Feedback inbox: " + "; ".join(reasons)
                        + ". The check reads the inbox file at each Stop, so items added in any later turn count,"
-                       " and no new heading is needed. Send each page ruling to the page writer, and put open"
+                       " and no new heading is needed. Send each page ruling to the page writer, each repo item's message to that repo's triage session, and put open"
                        " standing ids in the handoff.")
         if out:
             print(json.dumps(out))
