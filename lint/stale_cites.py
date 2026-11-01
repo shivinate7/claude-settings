@@ -137,13 +137,20 @@ def changed_paths(diff_args):
 
 
 def defs_in(source):
-    """Names of every def and class in a Python source, read with `ast`; None when it does not parse."""
+    """Names a prose line can cite: each module-level def and class, and each def directly in a module-level
+    class. A def nested in a function is no public name. Read with `ast`; None when it does not parse."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
     kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    return {node.name for node in ast.walk(tree) if isinstance(node, kinds)}
+    names = set()
+    for node in tree.body:
+        if isinstance(node, kinds):
+            names.add(node.name)
+            if isinstance(node, ast.ClassDef):
+                names.update(n.name for n in node.body if isinstance(n, kinds))
+    return names
 
 
 def disabled(line):
