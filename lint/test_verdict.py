@@ -16,6 +16,7 @@ def run(code, log=None, extra=None, timeout=None, launcher=None, shell=None):
     env = dict(os.environ)
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
+    env.pop("STALL_WATCH_BEAT", None)  # an inherited beat file would take the beat lines of these runs
     if log: env["VERDICT_LOG"] = log
     env.update(extra or {})
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
@@ -111,6 +112,19 @@ class T(unittest.TestCase):
                 self.assertTrue(b.endswith(f"log={log}"), b)
             self.assertFalse(any(l.startswith("PASS ") for l in merged.splitlines()), "grep passed stdout through: the pipe proves nothing")
 
+    def test_heartbeat_also_appends_to_stall_watch_beat_file(self):
+        """With STALL_WATCH_BEAT set, each beat line is appended to that file, so a watch reading it sees the job alive. Stderr keeps the same line (decision stall-watch)."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log, beat = os.path.join(d, "v.log"), os.path.join(d, "stall-watch-x.beat")
+            open(beat, "w").write("keep\n")
+            r = run("import time\ntime.sleep(2.5)\nprint('done')", log,
+                    {"VERDICT_HEARTBEAT": "1", "STALL_WATCH_BEAT": beat})
+            self.assertEqual(r.returncode, 0, r.stdout)
+            beats = beats_on_stderr_only(self, r)
+            lines = open(beat).read().splitlines()
+            self.assertEqual(lines[:1], ["keep"], "the beat file was truncated or not appended to")
+            self.assertEqual(lines[1:], beats, "the beat file lines differ from the stderr beat lines")
+
     def test_fast_command_prints_no_heartbeat(self):
         """A child shorter than the beat interval gets no beat; 30 s is wide enough that Python start cost cannot reach it."""
         r = run("print('quick')", None, {"VERDICT_HEARTBEAT": "30"})
@@ -175,6 +189,7 @@ class T(unittest.TestCase):
             open(script, "w").write(f"import os, time\nopen({pidfile!r}, 'w').write(str(os.getpid()))\ntime.sleep(3)\n")
             env = dict(os.environ)
             env.pop("VERDICT_HEARTBEAT", None)
+            env.pop("STALL_WATCH_BEAT", None)
             env.update({"VERDICT_HEARTBEAT": "1", "VERDICT_LOG": log})
             # 2>&1: the beat is on stderr, so the pipe must carry it or no beat meets the closed reader.
             cmd = " ".join(shlex.quote(p) for p in [sys.executable, V, sys.executable, script]) + " 2>&1 | head -n 1"
@@ -333,7 +348,7 @@ class T(unittest.TestCase):
             with open(script, "w", encoding="ascii") as f:
                 f.write("import sys\nsys.stdout.buffer.write(%s)\nsys.stdout.flush()\nsys.exit(7)\n" % expr)
             env = {k: v for k, v in os.environ.items()
-                   if k not in ("VERDICT_LOG", "VERDICT_HEARTBEAT", "PYTHONUTF8", "PYTHONIOENCODING")}
+                   if k not in ("VERDICT_LOG", "VERDICT_HEARTBEAT", "STALL_WATCH_BEAT", "PYTHONUTF8", "PYTHONIOENCODING")}
             env["VERDICT_LOG"] = os.path.join(d, "v.log")
             return subprocess.run([sys.executable, V, sys.executable, script], capture_output=True, env=env, timeout=60)
 
