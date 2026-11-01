@@ -1,9 +1,9 @@
 {
   "title": "A frozen path named inside a script's string is not read as a write",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33768,
   "why": "Possible false alarm (coordinator, Nov 1 07:32 CST, rule verification-cry-wolf-guard-is-spent): guard frozen-path refused a Bash python heredoc that wrote only the coordinator's handoff file under ~/.claude/handoffs; the script named the install mirror path /root/claude-settings-main inside a string. The same edit passed with the Edit tool.",
-  "note": "Triage judged it a note (roles-findings-are-debts-or-notes): one case, and the Edit tool is a working route. It becomes a debt if it repeats. A record lane adds one line to docs/debts/notes.md, slug frozen-path-string-mention, naming hooks/guard_frozen.py. Done check: the line is in notes.md and ste-lint passes. Needs no answer.",
-  "updatedAt": "2026-11-01T13:40:00Z"
+  "note": "Triage judged it a note (roles-findings-are-debts-or-notes): one case, and the Edit tool is a working route. It becomes a debt if it repeats. A record lane adds one line to docs/debts/notes.md, slug frozen-path-string-mention, naming hooks/guard_frozen.py. Done check: the line is in notes.md and ste-lint passes. Needs no answer. Built: draft PR #944 (head d8d2c605), written by the coordinator as records only; with the batch runner (coordinator, Nov 1 07:34 CST).",
+  "updatedAt": "2026-11-01T13:38:00Z"
 }
