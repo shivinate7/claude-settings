@@ -1100,6 +1100,7 @@ await test('log: holds the verdict line and timings, never the prompt text', asy
 
 const REPO_PY = fileURLToPath(new URL('../../hooks/decision_watch.py', import.meta.url))
 const SUBJECT = 'UNREAD-SUBJECT-ALPHA-3'
+const EARLY = 'UNREAD-SUBJECT-EARLY-6' // a line from before the turn: it must never be noticed
 // The form guard_core writes into guard.log: the time with its UTC offset, as ISO 8601 with a colon. The offset is a
 // literal +05:00, never this machine's zone, so the reader must convert it on any clock.
 const offsetStamp = d => new Date(d.getTime() + 5 * 3600000).toISOString().slice(0, 19) + '+05:00'
@@ -1139,8 +1140,11 @@ function unreadFixture() {
     { type: 'assistant', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
   ]
   writeFileSync(transcript, records.map(r => JSON.stringify(r)).join('\n') + '\n')
-  // guard.log fields: when, tool, decision, rule, matched, session
-  writeFileSync(join(cfg, 'guard.log'), [offsetStamp(new Date()), 'Bash', 'noted', 'subject-unread', SUBJECT, SID].join('\t') + '\n')
+  // guard.log fields: when, tool, decision, rule, matched, session. The second line is two hours before the turn,
+  // written as +05:00 wall time. Dropping its offset would move it into the turn.
+  writeFileSync(join(cfg, 'guard.log'),
+    [offsetStamp(new Date()), 'Bash', 'noted', 'subject-unread', SUBJECT, SID].join('\t') + '\n' +
+    [offsetStamp(new Date(Date.now() - 2 * 3600000)), 'Bash', 'noted', 'subject-unread', EARLY, SID].join('\t') + '\n')
   return { cfg, repo, transcript }
 }
 
@@ -1173,6 +1177,7 @@ await test('SAFETY HOLE 12: under the mod env, a real python run shows the unrea
   const notices = h.toasts.filter(t => /notice/i.test(t))
   same(notices.length, 1, 'notice toasts')
   assert.ok(notices[0].includes(SUBJECT), `the notice does not name the unread subject: ${JSON.stringify(notices[0].slice(0, 200))}`)
+  assert.ok(!notices[0].includes(EARLY), 'a line from before the turn was noticed')
 })
 
 // The control: the same fixture, read with the real folder as CLAUDE_CONFIG_DIR. It must pass on the old code too,
@@ -1188,6 +1193,7 @@ await test('SAFETY HOLE 12 control: the same log, read under the real folder, gi
   const out = JSON.parse(r.stdout)
   same(out.notices.length, 1, 'notices under the real folder')
   assert.ok(out.notices[0].includes(SUBJECT), `the notice does not name the unread subject: ${JSON.stringify(out.notices[0])}`)
+  assert.ok(!out.notices[0].includes(EARLY), 'a line from before the turn was noticed')
 })
 
 // SAFETY HOLE 13 (same decision): the END line is cut at MAX_LINE (2000 characters), so a notice past the cut leaves the log

@@ -38,6 +38,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -807,7 +808,25 @@ class OffsetStampReadTests(unittest.TestCase):
         row = glr.parse_line(PLUS_FIVE_LINE)
         self.assertEqual(row.at, utc(7))
         self.assertIsNone(row.when.tzinfo)
-        self.assertEqual(row.when, row.at.astimezone().replace(tzinfo=None))
+
+    @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset here, so the zone cannot be forced")
+    def test_offset_line_reads_as_local_wall_time_in_a_forced_non_utc_zone(self):
+        # Asia/Kolkata is +05:30. The +05:00 line at 12:00 is 07:00 UTC, which is 12:30 there. A reader that
+        # returns UTC-naive gives 07:00 here, so this fails where a UTC clock would pass it.
+        old = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Kolkata"
+        time.tzset()
+        try:
+            row = glr.parse_line(PLUS_FIVE_LINE)
+            self.assertEqual(row.at, utc(7))
+            self.assertIsNone(row.when.tzinfo)
+            self.assertEqual(row.when, datetime(2026, 11, 1, 12, 30))
+        finally:
+            if old is None:
+                del os.environ["TZ"]
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
 
     def test_minus_six_line_converts_the_same_way(self):
         row = glr.parse_line("2026-11-01T16:55:00-06:00\tBash\tdeny\tload-brake\tgit push\t" + SID)
