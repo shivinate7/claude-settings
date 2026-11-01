@@ -46,7 +46,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   on Linux, one `ps` a second elsewhere. Unmeasured: no test pins the cost.
 - A tool that is quiet by design must print a short progress line at least every 120 seconds. The merge
   tool prints `merge: waiting on ...` while it waits on checks, and while GitHub still shows the head before
-  the push. `verdict` prints a `still running` line every 120 seconds.
+  the push. `verdict` prints a `still running` line to stderr every 120 seconds, so a pipe on stdout does not hide it.
 - A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
   2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
   `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to

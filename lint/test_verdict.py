@@ -1,25 +1,40 @@
 #!/usr/bin/env python3
 """Fixture test for bin/verdict. Run: python lint/test_verdict.py -v"""
-import os, re, shlex, subprocess, sys, tempfile, time, unittest
+import os, re, shlex, shutil, subprocess, sys, tempfile, time, unittest
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()  # its sweep is proved in test_find_copies.py
 V = os.environ.get("VERDICT_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict")
 # The Windows launcher. It always runs its sibling bin/verdict, so VERDICT_UNDER_TEST does not reach it.
 CMD = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "verdict.cmd")]
 UTF8 = {"PYTHONIOENCODING": "utf-8"}  # the child prints the real \u2714/\u2718 marks; a cp1252 stdout cannot
 HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 
-def run(code, log=None, extra=None, timeout=None, launcher=None):
+def run(code, log=None, extra=None, timeout=None, launcher=None, shell=None):
+    """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect."""
     env = dict(os.environ)
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
     if log: env["VERDICT_LOG"] = log
     env.update(extra or {})
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         script = os.path.join(d, "fx.py")
         open(script, "w").write(code)
-        return subprocess.run((launcher or [sys.executable, V]) + [sys.executable, script], capture_output=True, text=True, env=env, timeout=timeout)
+        cmd = (launcher or [sys.executable, V]) + [sys.executable, script]
+        if shell: cmd = ["sh", "-c", shell.replace("{cmd}", " ".join(shlex.quote(p) for p in cmd))]
+        return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
 
 def heartbeats(out):
     return [l for l in out.splitlines() if l.startswith("verdict: still running")]
+
+def beats_on_stderr_only(case, r):
+    """The beat goes to stderr, never stdout: the stall watch reads the task's output file, which keeps
+    stderr when a pipe on stdout (`verdict ... | grep`) swallows the rest. Returns the beats."""
+    beats = heartbeats(r.stderr)
+    case.assertGreaterEqual(len(beats), 1, (r.stdout, r.stderr))
+    case.assertEqual(heartbeats(r.stdout), [], r.stdout)
+    return beats
 
 def alive(pid):
     try: os.kill(pid, 0)
@@ -74,18 +89,33 @@ class T(unittest.TestCase):
             log = os.path.join(d, "v.log")
             r = run("import time\ntime.sleep(3.5)\nprint('done')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
-            beats = heartbeats(r.stdout)
-            self.assertGreaterEqual(len(beats), 1, r.stdout)
+            beats = beats_on_stderr_only(self, r)
             for b in beats:
                 self.assertRegex(b, HB_FORMAT)
                 self.assertTrue(b.endswith(f"log={log}"), b)
             self.assertTrue(r.stdout.splitlines()[-1].startswith("PASS "), r.stdout)
 
+    @unittest.skipIf(os.name == "nt", "POSIX sh pipe")
+    def test_heartbeat_reaches_the_output_file_through_a_stdout_pipe(self):
+        """`verdict ... | grep` swallows stdout, so the beat must come on stderr to reach the output file the stall watch reads (decision stall-watch)."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log, out = os.path.join(d, "v.log"), os.path.join(d, "out")
+            run("import time\ntime.sleep(3)", log, {"VERDICT_HEARTBEAT": "1"}, timeout=30,
+                shell="({cmd} | grep nomatch) > " + shlex.quote(out) + " 2>&1")  # grep's exit 1 is no verdict here
+            merged = open(out).read()
+            self.assertIn("=== verdict run", open(log).read(), "verdict never ran")
+            beats = heartbeats(merged)
+            self.assertGreaterEqual(len(beats), 1, repr(merged))
+            for b in beats:
+                self.assertRegex(b, HB_FORMAT)
+                self.assertTrue(b.endswith(f"log={log}"), b)
+            self.assertFalse(any(l.startswith("PASS ") for l in merged.splitlines()), "grep passed stdout through: the pipe proves nothing")
+
     def test_fast_command_prints_no_heartbeat(self):
         """A child shorter than the beat interval gets no beat; 30 s is wide enough that Python start cost cannot reach it."""
         r = run("print('quick')", None, {"VERDICT_HEARTBEAT": "30"})
         self.assertEqual(r.returncode, 0)
-        self.assertEqual(heartbeats(r.stdout), [], r.stdout)
+        self.assertEqual(heartbeats(r.stdout + r.stderr), [], (r.stdout, r.stderr))
         self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
 
     def test_no_heartbeat_after_the_child_exits(self):
@@ -94,8 +124,8 @@ class T(unittest.TestCase):
         lines = r.stdout.splitlines()
         m = re.match(r"PASS .* \(([0-9.]+)s\)$", lines[-1])
         self.assertTrue(m, r.stdout)
-        self.assertGreaterEqual(len(heartbeats(r.stdout)), 1, r.stdout)
-        self.assertLessEqual(len(heartbeats(r.stdout)), int(float(m.group(1))), r.stdout)
+        beats = beats_on_stderr_only(self, r)
+        self.assertLessEqual(len(beats), int(float(m.group(1))), (r.stdout, r.stderr))
         self.assertEqual(heartbeats(lines[-1]), [], r.stdout)
 
     def test_slow_fail_heartbeats_then_same_excerpt(self):
@@ -104,13 +134,11 @@ class T(unittest.TestCase):
             log = os.path.join(d, "v.log")
             r = run("import sys, time\nprint('one')\ntime.sleep(2.5)\nprint('FAIL boom')\nprint('err', file=sys.stderr)\nsys.exit(7)", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 7)
-            beats = heartbeats(r.stdout)
-            self.assertGreaterEqual(len(beats), 1, r.stdout)
+            beats_on_stderr_only(self, r)
             lines = r.stdout.splitlines()
-            self.assertEqual(lines[:len(beats)], beats, r.stdout)
-            first = lines[len(beats)]
+            first = lines[0]
             self.assertTrue(first.startswith("FAIL ") and " rc=7 " in first and f"log={log}" in first, first)
-            body = lines[len(beats) + 1:]
+            body = lines[1:]
             self.assertIn("FAIL boom", body)
             self.assertNotIn("one", body)
             self.assertFalse(any("still running" in l for l in body), body)
@@ -121,12 +149,11 @@ class T(unittest.TestCase):
             log = os.path.join(d, "v.log")
             r = run("import time\nprint('SECRET-OUT-7731', flush=True)\ntime.sleep(2.5)\nprint('SECRET-OUT-7731 again')", log, {"VERDICT_HEARTBEAT": "1"})
             self.assertEqual(r.returncode, 0)
-            beats = heartbeats(r.stdout)
-            self.assertGreaterEqual(len(beats), 1, r.stdout)
+            beats = beats_on_stderr_only(self, r)
             for b in beats:
                 self.assertRegex(b, HB_FORMAT)
                 self.assertNotIn("SECRET-OUT-7731", b)
-            self.assertNotIn("SECRET-OUT-7731", r.stdout)
+            self.assertNotIn("SECRET-OUT-7731", r.stdout + r.stderr)
 
     def test_bad_heartbeat_value_still_runs_the_command(self):
         code = "import sys, time\nprint('MARK-RAN', flush=True)\ntime.sleep(2)\nsys.exit(7)"
@@ -137,7 +164,7 @@ class T(unittest.TestCase):
                 self.assertEqual(r.returncode, 7, (r.stdout[:300], r.stderr[-300:]))
                 self.assertIn("MARK-RAN", open(log).read())
                 self.assertNotIn("Traceback", r.stdout + r.stderr)
-                self.assertLess(len(heartbeats(r.stdout)), 5, len(heartbeats(r.stdout)))
+                self.assertLess(len(heartbeats(r.stdout + r.stderr)), 5, (r.stdout, r.stderr))
 
     @unittest.skipIf(os.name == "nt", "POSIX shell pipe and signals")
     def test_broken_pipe_does_not_orphan_child(self):
@@ -149,7 +176,8 @@ class T(unittest.TestCase):
             env = dict(os.environ)
             env.pop("VERDICT_HEARTBEAT", None)
             env.update({"VERDICT_HEARTBEAT": "1", "VERDICT_LOG": log})
-            cmd = " ".join(shlex.quote(p) for p in [sys.executable, V, sys.executable, script]) + " | head -n 1"
+            # 2>&1: the beat is on stderr, so the pipe must carry it or no beat meets the closed reader.
+            cmd = " ".join(shlex.quote(p) for p in [sys.executable, V, sys.executable, script]) + " 2>&1 | head -n 1"
             t0 = time.time()
             r = subprocess.run(cmd, shell=True, executable="/bin/bash", capture_output=True, text=True, env=env, timeout=30)
             elapsed = time.time() - t0
@@ -461,6 +489,9 @@ class MissingVerdictLine(unittest.TestCase):
             r = run("print('x')", os.path.join(d, "no-such-dir", "v.log"), timeout=60)
         self.assertNotEqual(r.returncode, 0)
         self.assertTrue(any(l.startswith("FAIL ") for l in r.stdout.splitlines()), (r.stdout, r.stderr[-300:]))
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 if __name__ == "__main__":
     unittest.main()
