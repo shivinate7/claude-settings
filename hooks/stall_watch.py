@@ -11,12 +11,17 @@ Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
   (no permissionDecision), with this command, run by the harness shell:
 
+    { export STALL_WATCH_BEAT=BEAT
     { <original>
-    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N;
-    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG; exit $rc
+    }
+    } > LOG 2>&1 & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --also BEAT;
+    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG BEAT; exit $rc
 
+  BEAT is stall-watch-<id>.beat next to LOG; the hook does not create it. A tool that is quiet by
+  design (bin/verdict) appends its heartbeat there too, so a redirect in the command cannot hide it.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
+  Cost: one append per heartbeat by the tool, and one stat a second of BEAT in the watcher's loop.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
@@ -278,7 +283,8 @@ def hook():
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
-    log = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s.log" % uuid.uuid4().hex)
+    base = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s" % uuid.uuid4().hex)
+    log, beat = base + ".log", base + ".beat"  # the job makes the beat file, if a tool writes to it
     q = shlex.quote
     # An odd run of trailing backslashes ends in a line continuation. Bare, a shell that keeps the
     # backslash at end of input runs it as a literal; the rewrite's `}` line would swallow it. So
@@ -286,12 +292,12 @@ def hook():
     if (len(original) - len(original.rstrip("\\"))) % 2 and eof_backslash_literal():
         original += "\\"
     wrapped = (
-        "{ " + original + "\n\n} > " + q(log) + " 2>&1 & pid=$!; "
+        "{ export STALL_WATCH_BEAT=" + q(beat) + "\n{ " + original + "\n\n}\n} > " + q(log) + " 2>&1 & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
-        + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet)
+        + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + " --also " + q(beat)
         + "".join(" --also " + q(p) for p in named_logs(original))
         + "; rc=$?; "
-        + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + "; exit $rc"
+        + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f " + q(log) + " " + q(beat) + "; exit $rc"
     )
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=wrapped)}}))

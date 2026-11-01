@@ -820,3 +820,4 @@
 - stale-stamped-tree-called-live-pin: session_start.sh calls an old `<clone>-live-<hex>` tree "the live pin" after the link has moved on, though hooks/guard_frozen.py leaves it writable; the cd advice still holds (hooks/session_start.sh)
 - pin-line-silent-on-failed-listing: when the worktree listing fails inside a pin, no pin line prints and the unknown line names only the agent count (hooks/session_start.sh)
 - pin-name-fifth-copy: install.ps1 also builds `<clone>-live`, which the copy list in install.sh's comment omits (install.sh, install.ps1)
+- bg-timeout-no-beat-file: A foreground Bash call that its timeout moves to the background skips `--hook`, so it gets no beat file. Only `--stop` lists it, and nothing strands it. Decision: stall-watch
