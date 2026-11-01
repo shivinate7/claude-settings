@@ -19737,9 +19737,10 @@ def cs_log_override_check():
     return True, "a typed override lets one write through and appends one override line naming coordinator-scope"
 
 
-def cs_log_unreadable_check():
-    """A refused coordinator write, with an override file that cannot be read, appends one guard.log line. The refusal
-    stands, so its line is the one the reader counts: decision deny, or override-unread, under rule coordinator-scope."""
+def cs_log_unreadable_diagnostic_check():
+    """An unreadable override file is two events, not a lift. The bad file writes one override-unread line, the corrupt-file
+    diagnostic that ov_corrupt_check reads and every rule shares. The refusal writes one deny line for coordinator-scope.
+    No override line is written, since nothing was lifted."""
     config = cs_config("cs-log-unreadable", "coordinator")
     write(ov_pass_path(config, CS_PAYLOAD_SID), "not an override")
     got, reason = ov_call("Edit", dict(CS_LOG_EDIT), GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE)
@@ -19747,11 +19748,13 @@ def cs_log_unreadable_check():
     if problem:
         return False, problem
     rows = cs_log_rows(config)
-    if len(rows) != 1:
-        return False, "the refusal wrote %d guard.log lines, want one: %r" % (len(rows), rows)
-    if rows[0][2:4] not in (["deny", CS_RULE], ["override-unread", CS_RULE]):
-        return False, "the line is %r, want rule coordinator-scope with decision deny or override-unread" % (rows[0],)
-    return True, "one line for the refusal with an unreadable override file"
+    deny = [row for row in rows if row[2:4] == ["deny", CS_RULE]]
+    unread = [row for row in rows if row[2] == "override-unread"]
+    overrides = [row for row in rows if row[2] == "override"]
+    if len(deny) != 1 or len(unread) != 1 or overrides or len(rows) != 2:
+        return False, "the refusal wrote decisions %r, want one deny for coordinator-scope and one override-unread, no override" % (
+            [row[2:4] for row in rows],)
+    return True, "an unreadable override file writes one override-unread line and one deny line, and no override line"
 
 
 def cs_log_allowed_check():
@@ -19812,8 +19815,8 @@ CS_CHECKS.append(("coordinator-scope refusal_logs_one_line: one denied coordinat
                   "names the rule and holds no remedy text", cs_log_refusal_check))
 CS_CHECKS.append(("coordinator-scope override_logs_one_line: a typed override that lifts a coordinator write appends one "
                   "line that marks it an override of coordinator-scope", cs_log_override_check))
-CS_CHECKS.append(("coordinator-scope unreadable_override_logs_one_line: a refusal with an unreadable override file appends "
-                  "one guard.log line, not two", cs_log_unreadable_check))
+CS_CHECKS.append(("coordinator-scope unreadable_override_logs_diagnostic_then_refusal: an unreadable override file writes one "
+                  "override-unread line and one deny line for the refusal, and no override line", cs_log_unreadable_diagnostic_check))
 CS_CHECKS.append(("coordinator-scope allowed_write_logs_nothing: a record write and two writes no coordinator scope covers "
                   "append no guard.log line", cs_log_allowed_check))
 CS_CHECKS.append(("coordinator-scope log_cost: a refusal and a lift each open guard.log for append once and start no "
