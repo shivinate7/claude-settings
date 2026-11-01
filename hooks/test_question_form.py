@@ -965,7 +965,7 @@ def case_call_judge():
           r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, tcj.detail(r))
 
 
-def case_widens_text_is_the_owner_words():
+def case_widens_text_is_the_set_words():
     got = getattr(question_form, "WIDENS_TEXT", None)
     check("widens: question_form.WIDENS_TEXT is the owner's exact words", got == WIDENS_WORDS, got)
 
@@ -1008,7 +1008,7 @@ def main():
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
-                 case_call_judge, case_widens_text_is_the_owner_words, case_widens_reasons_carry_no_topic_id,
+                 case_call_judge, case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt):
         try:
             case()

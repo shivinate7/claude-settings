@@ -252,8 +252,8 @@ CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool acce
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
-# The card words before 2026-11-01. Sessions started before that merge still write them in chat, so the
-# mark still reads them; no card, rule text or reason carries them.
+# Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
+# reason carries them.
 LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
 
 
