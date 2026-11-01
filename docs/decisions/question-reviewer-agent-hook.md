@@ -22,7 +22,7 @@ Dropped with the old judges, by the same ruling:
 
 Risk kind: likely risk. A session puts a question with no goal, no problem or no stated gain and loss to the owner in normal work. Landed 2026-10-22.
 
-Cost, per question with options: one `call_judge.py` process. A box that fails the code check makes no model call. Any other box costs one Opus call, capped at 60 s. Per `ArtifactData` call: one process. It exits at once unless the action is `set`, `update` or `batch`. It makes one Opus call only for an item write that carries `options` or `context` and passes the code check.
+Cost, per question with options: one `call_judge.py` process. A box that fails the code check makes no model call. Any other box costs one Opus call, capped at 60 s. Per `ArtifactData` call: one process. It exits at once unless the action is `set`, `update`, `str_replace` or `batch`. It makes one Opus call only for an item write that passes the code check and carries `options` or `context`, or is a `str_replace` on one of them.
 
 Kind: process
 Home: settings.json
