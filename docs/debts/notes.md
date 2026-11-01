@@ -875,3 +875,7 @@
 - option-letter-keys-label-word-tag: a label that opens with a word tag other than Option, such as "Approach B:" or "Plan B:", passes LABEL_TAG. It is kept out because "Plan B" is plain English (hooks/question_form.py LABEL_TAG; decision option-keys-are-letters)
 - report-guard-bash-gh-unseen: the report guard reads only git and four GitHub tools, so a `gh pr create` or `gh pr merge` run through Bash lands with no report (lint/report_guard.py). Found in PR #966 round 3.
 - report-guard-head-omits-pr: BLOCK_REASON_HEAD says "commit, push, or merge" and leaves out an opened PR, which the guard also checks (lint/report_guard.py). Found in PR #966 round 3.
+- pw-os-release-source-fail: pin.sh sources os-release under `set -eu` with stderr hidden, so a file with shell logic or an unset reference ends the step with no message. Real os-release files hold none (actions/playwright-setup/pin.sh). Decision: one-browser-setup-no-apt
+- pw-os-release-env-name: pin.sh's test hook `OS_RELEASE` is a generic env name. A job that sets it for another reason gets `os=Linux` and a warning (actions/playwright-setup/pin.sh). Decision: one-browser-setup-no-apt
+- pw-os-test-gaps: test_action.py has no case for an os-release with no ID, and no check that a normal Ubuntu run prints no warning (actions/playwright-setup/test_action.py). Decision: one-browser-setup-no-apt
+- pw-26-04-cause-unread: the decision cites `libicudata.so.74` on 26.04 from the joyous lane's report, not a log this lane read (docs/decisions/one-browser-setup-no-apt.md). Decision: one-browser-setup-no-apt
