@@ -6,7 +6,7 @@ import {
   AGENTS_TIMEOUT_MS, GC_MS, GIT_IDLE_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
   agentRows, configDir, mergeRows, num, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
-  GUARD_PY, QUESTION_RULE, answered, liveAgentCount, questionRefusal, startedCount, startsSession, stoppedTaskId, taskNotice,
+  GUARD_PY, QUESTION_RULE, answered, liveAgentCount, questionRefusal, startedCount, startsSession, stoppedTaskId, goneTaskId, taskNotice,
 } from './lib.mjs'
 
 const PANE = 'session-board'
@@ -108,11 +108,16 @@ export function register(on) {
   // The host runs the permission check inside next(): the ask is answered once next() returns.
   on('tool.call', async ($, e, next) => {
     try {
-      const result = await next(e)
+      let result
+      try { result = await next(e) } catch (err) {
+        if (e.tool === 'TaskStop') bgTasks.delete(goneTaskId(err))
+        throw err
+      }
       const out = result && result.result
       const task = e.tool === 'Bash' ? out && out.backgroundTaskId : e.tool === 'Workflow' ? out && out.taskId : undefined
       if (typeof task === 'string') bgTasks.add(task)
-      if (e.tool === 'TaskStop' && answered(result)) bgTasks.delete(stoppedTaskId(out, e.input)) // a stopped task sends no tracked notice
+      // A stopped task sends no tracked notice. A task that already ended answers "No task found": it is gone too.
+      if (e.tool === 'TaskStop') bgTasks.delete(answered(result) ? stoppedTaskId(out, e.input) : goneTaskId(result))
       if (startsSession(e.tool) && answered(result)) {
         started++
         startedFor = ''

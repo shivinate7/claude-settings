@@ -1320,6 +1320,61 @@ await test('question box: a TaskStop naming an unknown id leaves the other track
   assert.match(left.reason, /1 background task\b/, 'only the stopped task left the count')
 })
 
+await test('question box: a TaskStop of a task that already ended ("No task found") clears it, thrown or as an error result', async () => {
+  const gone = [
+    new Error('No task found with ID: task1'),
+    { result: 'No task found with ID: task1', isError: true },
+    { result: { message: 'No task found with ID: task1' }, is_error: true },
+  ]
+  for (const answer of gone) {
+    const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+    await fire(h, 'session.start', {})
+    await bashBackground(h, 'b1', 'task1')
+    await bashBackground(h, 'b2', 'task2')
+    await callTool(h, 'TaskStop', answer, { task_id: 'task1' })
+    const r = await askBox(h)
+    assert.match(r.reason, /1 background task\b/, `only task1 left the count (${answer instanceof Error ? 'throw' : JSON.stringify(answer)})`)
+  }
+})
+
+await test('question box: a TaskStop that fails any other way, or names another id, keeps the task', async () => {
+  const other = [
+    new Error('No task found with ID: task2'),
+    { result: 'No task found with ID: task2', isError: true },
+    { result: { message: 'permission refused' }, is_error: true },
+  ]
+  for (const answer of other) {
+    const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+    await fire(h, 'session.start', {})
+    await bashBackground(h, 'b1', 'task1')
+    await callTool(h, 'TaskStop', answer, { task_id: 'task1' })
+    same((await askBox(h)).decision, 'deny', `task1 stays tracked (${answer instanceof Error ? 'throw' : JSON.stringify(answer)})`)
+  }
+})
+
+await test('question box: a TaskStop result with is_error true is no stop', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await bashBackground(h, 'b1', 'task1')
+  await callTool(h, 'TaskStop', { result: { message: 'stopped', task_id: 'task1', task_type: 'local_bash' }, is_error: true }, { task_id: 'task1' })
+  same((await askBox(h)).decision, 'deny', 'verdict after an is_error stop')
+})
+
+await test('question box: a TaskStop with no task_id takes the id from the message "Successfully stopped task: <id>"', async () => {
+  const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await bashBackground(h, 'b1', 'task1')
+  await callTool(h, 'TaskStop', { result: { message: 'Successfully stopped task: task1 (sleep 99)' } }, {})
+  same((await askBox(h)).decision, 'allow', 'verdict after the stop')
+})
+
+await test('session start: a result with is_error true is no start', async () => {
+  const h = await start({ liveAgents: [], python: PYOK, env: { HOME: '/home/u' } })
+  await fire(h, 'session.start', {})
+  await callTool(h, 'mcp__ccd_session__start_session', { result: { content: [{ type: 'text', text: 'session_x started' }] }, is_error: true })
+  same((await askBox(h)).decision, 'allow', 'verdict')
+})
+
 await test('question box: a background workflow refuses it from its start, until its notice arrives', async () => {
   const h = await start({ python: PYOK, env: { HOME: '/home/u' } })
   await fire(h, 'session.start', {})
