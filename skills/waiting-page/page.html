@@ -253,8 +253,10 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px; }
 /* A command on a task: a head row (status, then Copy), then the command in a closed disclosure. Copy works while it is closed. */
 .cmd { display: grid; gap: 8px; min-width: 0; }
+.cmd + .cmd { border-top: 1px solid var(--line); padding-top: 14px; }
 .cmd-head { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .cmd-say { flex: 1 1 0; min-width: 0; margin: 0; font-size: 14px; line-height: 1.4; color: var(--muted); }
+.cmd.shell .cmd-say { color: var(--ink); font-weight: 600; }
 .cmd.failed .cmd-say { color: var(--due); font-weight: 600; }
 /* Both labels share one grid cell, so the button keeps the box of "Copied" in every state. */
 .btn.cmd-copy { flex: none; display: inline-grid; justify-items: center; }
@@ -1175,19 +1177,21 @@ function designPreview(it) {
   };
   draw(); return box;
 }
-// The command block of a task. Copy writes it.command as written, never the text on screen. A refused copy opens the command and selects it.
-function cmdBlock(it) {
-  const say = h("p", { class: "cmd-say", id: "cs-" + it.id, "aria-live": "polite" }, "Command");
-  const pre = h("pre", { class: "cmd-text", id: "cc-" + it.id }, h("code", {}, it.command.split("\n").map((l) => h("span", { class: "ln" }, l))));
-  const more = h("details", { class: "cmd-more" }, h("summary", {}, "Show the command"), pre);
+// The command block of a task. Copy writes `text` as written, never the text on screen. A refused copy opens the command and selects it.
+// `shell` names the block's shell ({ sfx, label }); a stored one-string command has none, so it shows with no shell label.
+function cmdBlock(it, text, shell) {
+  const sfx = shell ? "-" + shell.sfx : "", what = shell ? shell.label + " command" : "command", head = shell ? shell.label + " command" : "Command";
+  const say = h("p", { class: "cmd-say", id: "cs-" + it.id + sfx, "aria-live": "polite" }, head);
+  const pre = h("pre", { class: "cmd-text", id: "cc-" + it.id + sfx }, h("code", {}, text.split("\n").map((l) => h("span", { class: "ln" }, l))));
+  const more = h("details", { class: "cmd-more" }, h("summary", {}, "Show the " + what), pre);
   let timer = 0;
-  const box = h("div", { class: "cmd", id: "cmd-" + it.id });
-  const copy = h("button", { class: "btn alt cmd-copy", type: "button", "aria-label": "Copy the command for No. " + it.n, "aria-controls": "cc-" + it.id, onclick: async () => {
+  const box = h("div", { class: "cmd" + (shell ? " shell" : ""), id: "cmd-" + it.id + sfx });
+  const copy = h("button", { class: "btn alt cmd-copy", type: "button", "aria-label": "Copy the " + what + " for No. " + it.n, "aria-controls": "cc-" + it.id + sfx, onclick: async () => {
     clearTimeout(timer);
     box.classList.remove("copied", "failed");
-    if (await copyText(it.command)) {
-      box.classList.add("copied"); say.replaceChildren("Command", h("span", { class: "sr" }, " Copied."));
-      timer = setTimeout(() => { box.classList.remove("copied"); say.textContent = "Command"; }, 2000);
+    if (await copyText(text)) {
+      box.classList.add("copied"); say.replaceChildren(head, h("span", { class: "sr" }, " Copied."));
+      timer = setTimeout(() => { box.classList.remove("copied"); say.textContent = head; }, 2000);
     } else {
       box.classList.add("failed"); say.textContent = "Not copied. The text is selected; copy it by hand.";
       more.open = true;
@@ -1197,6 +1201,17 @@ function cmdBlock(it) {
   } }, h("span", { class: "go" }, "Copy"), h("span", { class: "ok", "aria-hidden": "true" }, "Copied"));
   box.append(h("div", { class: "cmd-head" }, say, copy), more);
   return box;
+}
+// The command blocks of a task: a one-string command as one block with no shell label, or one block per present shell of
+// {powershell, mac}, PowerShell first on Windows. A missing or blank shell shows no block.
+const SHELLS = [{ key: "powershell", sfx: "ps", label: "PowerShell" }, { key: "mac", sfx: "mac", label: "Mac" }];
+function onWindows() { return /^win/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ""); }
+function cmdBlocks(it) {
+  const c = it.command;
+  if (typeof c === "string") return c.trim() ? [cmdBlock(it, c)] : [];
+  if (!c || typeof c !== "object") return [];
+  const shells = onWindows() ? SHELLS : SHELLS.slice().reverse();
+  return shells.filter((sh) => typeof c[sh.key] === "string" && c[sh.key].trim()).map((sh) => cmdBlock(it, c[sh.key], sh));
 }
 // Block "nearest" honours the scroll margins, so it would move an option already whole between the header and the bar.
 function showOpt(o) {
@@ -1270,7 +1285,7 @@ function buildCard(it) {
         pk ? h("button", { class: "btn alt takepick" + ((multi ? sameList(d.choice, pickChoice(it)) : d.choice === it.pick) ? " gone" : ""), type: "button", id: "b-take-" + it.id, onclick: () => { edited(); setDraft(it, { choice: pickChoice(it), auto: true }); repaint(it); const r = $("o-" + it.id + "-" + pk[0]); if (r) { showOpt(r.closest(".opt")); r.focus({ preventScroll: true }); } } }, "Take my pick (" + namesOf(it, pk) + ")") : null));
   } else {
     card.append(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
-    if (typeof it.command === "string" && it.command.trim()) card.append(cmdBlock(it));
+    card.append(...cmdBlocks(it));
     if (linksOf(it).length) card.append(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     card.append(ready, h("div", { class: "alts" },
       h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done"),

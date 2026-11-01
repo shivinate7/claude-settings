@@ -9,3 +9,4 @@ Tasks a session caught and did not do. One line each.
 - Measure one step down per role (roadmap step c201, measure helper-agent cost): one lane per role on the lower model, same brief shape, compared with the numbers in the Measured part of `agent-model-cap` (the model-per-role table).
 - Apply the ci-hygiene audit to each owner repo (shiv, 2026-10-30 15:08 CDT): per-repo compliance lanes from the coordinator's audit.
 - fb-1511-1: Setup script installs claude-settings before a cloud session starts (waiting item 77, pick a; owner 2026-10-30 15:09 CDT). Lane setup-script-install builds cloud-setup.sh, its test and the README paste block. After merge, the owner pastes the block once per environment and runs one fresh-session test: a bare builder spawn reports Sonnet.
+- fb-1417-2: c95 part 2, robust timing asserts (branch c95-robust-timing-asserts, draft PR #896), queued for batch 39; remove this line when it lands.
