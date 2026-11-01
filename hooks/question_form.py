@@ -846,8 +846,8 @@ def _chat_question_hit(question, options):
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "task-names-check": TASK_REASON,
-                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, DEPARTS_RULE: PAGE_DEPARTS_REASON,
-                "item-field-rendered": ITEM_FIELD_REASON,
+                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
+                DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
