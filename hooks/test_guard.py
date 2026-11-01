@@ -19408,7 +19408,7 @@ def role_model_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_
         **role_input(role, model, prompt))
 
 
-def role_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, env=None):
+def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, env=None):
     add(name, "allow", tool=tool, config=config, env=env, **role_input(role, model, prompt))
 
 
@@ -19447,25 +19447,25 @@ role_model_refuse("role-model: role Reviewer on sonnet with no round line is den
           "Reviewer", "sonnet", "Check the diff for typos.")
 
 # ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
-role_allow("role-model: Explore on sonnet is allowed (an audit Explore)", "Explore", "sonnet",
+role_model_allow("role-model: Explore on sonnet is allowed (an audit Explore)", "Explore", "sonnet",
            "Audit the glossary for meaning drift.")
-role_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
+role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
            "Round 2 of 3. Re-check the diff.")
-role_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
+role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
            "Round 3 of 3. Re-check the diff.")
-role_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
+role_model_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
            "Fix the failing case.")
-role_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
+role_model_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
            "Draw the mockup.")
-role_allow("role-model: a role not in the table on sonnet is allowed", "scout", "sonnet", "Look around.")
-role_allow("role-model: test-author on haiku is allowed (its own row)", "test-author", "haiku",
+role_model_allow("role-model: a role not in the table on sonnet is allowed", "scout", "sonnet", "Look around.")
+role_model_allow("role-model: test-author on haiku is allowed (its own row)", "test-author", "haiku",
            "Write the failing cases.")
-role_allow("role-model: test-author on the full haiku id is allowed", "test-author", "claude-haiku-5-5",
+role_model_allow("role-model: test-author on the full haiku id is allowed", "test-author", "claude-haiku-5-5",
            "Write the failing cases.")
-role_allow("role-model: Plan on sonnet is allowed (below its row)", "Plan", "sonnet", "Plan the change.")
-role_allow("role-model: general-purpose on sonnet is allowed", "general-purpose", "sonnet", "Find the file.")
-role_allow("role-model: claude on sonnet is allowed", "claude", "sonnet", "Find the file.")
-role_allow("role-model: claude-code-guide on haiku is allowed", "claude-code-guide", "haiku",
+role_model_allow("role-model: Plan on sonnet is allowed (below its row)", "Plan", "sonnet", "Plan the change.")
+role_model_allow("role-model: general-purpose on sonnet is allowed", "general-purpose", "sonnet", "Find the file.")
+role_model_allow("role-model: claude on sonnet is allowed", "claude", "sonnet", "Find the file.")
+role_model_allow("role-model: claude-code-guide on haiku is allowed", "claude-code-guide", "haiku",
            "How do the hooks load?")
 role_ask("role-model: builder on opus with no round line asks, and is not this rule's deny",
          "builder", "opus", "Fix the failing case.")
@@ -19488,23 +19488,23 @@ role_model_refuse("role-model: a Task builder with no model is denied when the d
           env=UNSET_DEFAULT)
 role_model_refuse("role-model: builder with no model is denied when the default is empty",
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
-role_allow("role-model: builder with no model is allowed when the default is sonnet",
+role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
            "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
-role_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
+role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
            "reviewer", None, "Check the diff for typos.", env=UNSET_DEFAULT)
-role_allow("role-model: test-author with no model is allowed when the default is unset (its file pins haiku)",
+role_model_allow("role-model: test-author with no model is allowed when the default is unset (its file pins haiku)",
            "test-author", None, "Write the failing cases.", env=UNSET_DEFAULT)
-role_allow("role-model: Explore with no model is allowed when the default is unset (its file pins haiku)",
+role_model_allow("role-model: Explore with no model is allowed when the default is unset (its file pins haiku)",
            "Explore", None, "Audit the glossary for meaning drift.", env=UNSET_DEFAULT)
 
 # ---- E: a decision file that cannot be read fails open. The spawn passes, and the rule never denies.
-role_allow("role-model: a missing decision file fails open for test-author on sonnet",
+role_model_allow("role-model: a missing decision file fails open for test-author on sonnet",
            "test-author", "sonnet", "Write the failing cases.", config=ROLE_MISSING_CFG)
-role_allow("role-model: an unreadable decision file fails open for reviewer on sonnet",
+role_model_allow("role-model: an unreadable decision file fails open for reviewer on sonnet",
            "reviewer", "sonnet", "Check the diff for typos.", config=ROLE_UNREADABLE_CFG)
-role_allow("role-model: no pointer line fails open for test-author on sonnet",
+role_model_allow("role-model: no pointer line fails open for test-author on sonnet",
            "test-author", "sonnet", "Write the failing cases.", config=CFG)
-role_allow("role-model: a missing decision file never denies a builder with no model",
+role_model_allow("role-model: a missing decision file never denies a builder with no model",
            "builder", None, "Fix the failing case.", config=ROLE_MISSING_CFG, env=UNSET_DEFAULT)
 
 

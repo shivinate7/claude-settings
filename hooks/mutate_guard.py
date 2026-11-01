@@ -1989,6 +1989,11 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
+    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
+    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
+    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
 
     try:
         return mutate_shared.run_mutants(
