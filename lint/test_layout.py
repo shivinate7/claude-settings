@@ -124,6 +124,36 @@ class LayoutFile(Tree):
         with self.assertRaises(self.layout.LayoutError):
             self.layout.kinds(self.tree)
 
+    def refusal_of_kinds(self, kinds):
+        """The LayoutError text that kinds() raises for an extras file that holds `kinds`."""
+        self.roll_out(kinds)
+        with self.assertRaises(self.layout.LayoutError) as caught:
+            self.layout.kinds(self.tree)
+        return str(caught.exception)
+
+    def test_extras_repeat_of_a_layout_kind_at_its_path_is_refused_with_the_remedy(self):
+        self.origin("https://github.com/shivinate7/q_max")  # the repo whose extras file repeats map at docs/map
+        for path in ("docs/map", "docs/map/"):
+            with self.subTest(path=path):
+                msg = self.refusal_of_kinds({"map": {"path": path}})
+                self.assertIn("docs/map", msg)  # the layout path, so the lane knows where map lives
+                self.assertIn("delete", msg.lower())  # the remedy: delete the repeat
+                self.assertIn("layout-extras.json", msg)  # the file to edit
+
+    def test_extras_repeat_of_a_layout_kind_at_another_path_names_both_paths(self):
+        msg = self.refusal_of_kinds({"map": {"path": "notes/map"}})
+        self.assertIn("docs/map", msg)  # the layout path
+        self.assertIn("notes/map", msg)  # the extras path that differs from it
+
+    def test_extras_repeat_that_legacy_repos_keeps_is_still_accepted(self):
+        for url, path, want in (("https://github.com/shivinate7/home", "records", "docs/todo.md"),
+                                ("https://github.com/shivinate7/q_max", "specs/todo.md", "docs/todo.md")):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.roll_out({"todo": {"path": path}})
+                self.assertEqual(self.layout.kinds(self.tree)["todo"]["path"], want)
+
     def test_extras_path_outside_the_repo_is_an_error(self):
         for bad in ("../x", "/etc", "a/../../b", "C:/x"):
             with self.subTest(path=bad):
