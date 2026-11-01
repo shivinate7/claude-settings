@@ -13,16 +13,15 @@ check, the override line and the guard.log line. The rules are `spawn-judge` and
 An ArtifactData call exits first unless its action is set, update, str_replace or batch, before any heavy import.
 A call with no write on collection `items` exits before importing question_form.
 For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
-that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
-context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
+that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options or
+context (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
 many writes a batch holds. The page and the chat box share the seven judge items, so both places get the
 same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
 options is judged too, on the same seven items and one task rule in PAGE_PROMPT: a step that replaces text
 quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
-that passes item_hit is judged on its new_str alone, as a fragment: the prompt tells the model to judge
-only plain words, unexplained ids and pointers outside the item, and never to flag a missing line or
-option. The ArtifactData str_replace field is one top-level string key, so only `context` occurs in
-practice (note page-judge-dead-fragment-fields).
+or `options` (a subfield too) that passes item_hit is judged on its
+new_str alone, as a fragment: the prompt tells the model to judge only plain words, unexplained ids and
+pointers outside the item, and never to flag a missing line or option.
 
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.

@@ -32,8 +32,8 @@ Interface the hook must match:
 - ArtifactData on the waiting page (ruled Nov 1 11:51 CST): a write of an item (set, update, a str_replace, or a
   batch entry) on collection `items` that is not closed and carries `options` or `context` on a decision, or
   `context`, `steps` or `options` on a task (kind task, coordinator follow-up after the same ruling), or any write
-  that carries `steps` (steps are task-only, so no kind is read as a task), or a str_replace on field `context`,
-  `options` or `steps` (a subfield too), gets one model call, claude-opus-5-5, rule `question-judge`, after
+  that carries `steps` (steps are task-only, so no kind is read as a task), or a str_replace on field `context` or
+  `options`, judged on its new text, gets one model call, claude-opus-5-5, rule `question-judge`, after
   question_form.item_hit passes it. A task's prompt carries the whole-unit replace rule. A str_replace is judged on
   its new_str only, under a fragment preamble. A batch makes one call for all its qualifying writes. An item_hit hit, a read, another collection or url, a delete, a
   str_replace on another field, and an update with none of these fields make no call and no refusal from call_judge
