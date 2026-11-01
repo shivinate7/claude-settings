@@ -13,7 +13,7 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
   third-party skill rulings).
   The upstream skill fetches from `main` on every run, so there is no plugin.
 - impeccable: a pinned copy of `pbakaus/impeccable` `plugin/skills/impeccable` at tag
-  `skill-v4.5.2` (Apache 2.0), in `skills/impeccable`. No plugin. Renovate proposes each move of
+  `skill-v4.6.0` (Apache 2.0), in `skills/impeccable`. No plugin. Renovate proposes each move of
   the tag, and the `impeccable-sync` workflow replaces the copy with it. Guard rule
   `impeccable-review-only` lets it load only for `audit` or `critique` (decision design-skills,
   the impeccable ruling).
