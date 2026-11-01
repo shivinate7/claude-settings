@@ -25,6 +25,8 @@ THE OLDER RULES keep their ids and run first, in this order, then the form:
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`.
+The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
+position's letter) and `rework-off-page` (an open item never says it is being reworked).
 
 An update is judged only for the fields it carries. A closed item passes the form: it asks the owner
 nothing, and the chat-answer flow writes one. A str_replace on `context` that removes a form line is
@@ -227,8 +229,10 @@ PRESS_LINK_REASON = ("An option or step that asks the owner to press in a web ap
 CHAT_PRESS_LINK_REASON = ("An option that asks the owner to press in a web app carries a link to that exact "
                           "page. Put an https:// url of the page where he presses in that option's "
                           "description; for a pull request or an issue, the url of that number.")
-COMMAND_REASON = ("A step never sends the owner to a file for a command. Put the command in the item's "
-                  "`command` field, and say \"paste the command below\" in the step.")
+COMMAND_REASON = ("A step never sends the owner to a file for a command, and never holds one. Put the "
+                  "command in the item's `command` field as {powershell, mac}: a PowerShell 5.1-safe "
+                  "string (no &&, ||, <<, <<<, /dev/null or export) and a bash or zsh string for the Mac, both non-empty. "
+                  "Say \"paste the command below\" in the step.")
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
 # pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
@@ -252,13 +256,36 @@ PRESS_REF = re.compile(_REF, re.I)
 _FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
          r"|\b(?:plans|docs|notes)/[\w./-]+")
 COMMAND_FILE = re.compile(_FILE, re.I)
-# "the command in/from <file>" and "its command" (after a file step) point at a file. "run the
-# command" and the like count only with no `command` on the item; "the command below" never does.
+# "the command in/from <file>", and "its command" with a file named, point at a file even with a
+# `command` on the item. "run the command" and the like, with a file named, point at a file only when
+# the item has no `command`: the step may mean the item's own block. "the command below" never does.
 COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
                              + _FILE + ")", re.I)
 COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
-COMMAND_VERB = re.compile(r"\b(?:run|runs|copy|paste|execute|use|type)\b[^.\n]{0,40}\bcommands?\b(?!\s+below)"
+_RUN_VERB = r"\b(?:run|runs|copy|paste|execute|use|type)\b"
+COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
                           r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
+# A task's `command` is {powershell, mac}, each a non-empty string, so the owner's own shell gets a
+# block that runs in it. PowerShell 5.1 has none of the bash syntax below: the operators, the
+# /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
+COMMAND_SHELLS = ("powershell", "mac")
+PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
+# A shell line in a step's backtick span or fence: it chains with an operator, its first word is a
+# Verb-Noun cmdlet, or its first word is a program the owner would run with an argument after it. A
+# program alone (`git`) names the tool in prose, and any other backticked word (`main`) or a file name
+# is not a shell line. A path that starts ./ or ../ is a shell line when an argument follows it, when
+# its name has no extension (`./build`), or when it ends in a script extension and a run verb comes
+# before the span in its sentence, or the span is a fence. `./docs/a.md` and an edited
+# `./hooks/guard.py` are files.
+SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
+                            "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
+                            "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
+                            "gcloud", "bq", "winget"))
+SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
+SHELL_OPERATOR = re.compile(r"&&|<<<|[|;]")
+SHELL_SCRIPT_EXT = (".sh", ".ps1", ".py", ".bat", ".cmd")
+# A run verb in the step text before a span, back to the last sentence break.
+SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
 EFFECT_TEXT = re.compile(r"\b(?:Gain|Lose):.*?(?=\b(?:Gain|Lose):|$)", re.I | re.S)
 CHAT_URL = re.compile(r"https://[^\s)>\]\"']+", re.I)
 
@@ -313,20 +340,97 @@ def press_link_hit(op, data) -> str:
     return ""
 
 
+def _command_ok(command) -> bool:
+    """True when `command` is {powershell, mac} with both a non-empty string."""
+    return isinstance(command, dict) and all(isinstance(command.get(k), str) and command[k].strip()
+                                             for k in COMMAND_SHELLS)
+
+
+def _code_spans(text) -> list:
+    """Each backtick span and fenced block in `text`, read in one pass, as (start, body, fenced). A
+    run of n backticks opens a span that the next run of exactly n closes, as Markdown pairs them; a
+    run with no closer is plain text. A fence's first line is its info string and is dropped."""
+    spans, i, end = [], 0, len(text)
+    while i < end:
+        if text[i] != "`":
+            i += 1
+            continue
+        j = i
+        while j < end and text[j] == "`":
+            j += 1
+        run, k, close = j - i, j, -1
+        while k < end:
+            if text[k] != "`":
+                k += 1
+                continue
+            m = k
+            while m < end and text[m] == "`":
+                m += 1
+            if m - k == run:
+                close = k
+                break
+            k = m
+        if close < 0:
+            i = j
+            continue
+        body = text[j:close]
+        fenced = run >= 3 and "\n" in body
+        if fenced:
+            body = body.split("\n", 1)[1]
+        spans.append((i, body, fenced))
+        i = close + run
+    return spans
+
+
+def _relative_run(words, run) -> bool:
+    """True when `words`, whose first word starts ./ or ../, runs that path (see SHELL_PROGRAMS).
+    `run` is True when a run verb comes before the span or the span is a fence."""
+    name = words[0].rsplit("/", 1)[-1]
+    return len(words) >= 2 or "." not in name or (run and name.lower().endswith(SHELL_SCRIPT_EXT))
+
+
+def _shell_line(span, run) -> bool:
+    """True when a line of this code span is a shell line (see SHELL_PROGRAMS). `run` is as for
+    _relative_run."""
+    for line in span.splitlines():
+        words = line.split()
+        if SHELL_OPERATOR.search(line):
+            return True
+        if not words:
+            continue
+        if words[0].startswith(("./", "../")):
+            if _relative_run(words, run):
+                return True
+        elif SHELL_CMDLET.fullmatch(words[0]) or (len(words) >= 2 and words[0] in SHELL_PROGRAMS):
+            return True
+    return False
+
+
 def command_in_item_hit(data) -> str:
-    """The matched text when a task's steps, joined, send the owner to a file for a command. A
-    `command` on the item does not excuse it: the step still points at the file."""
+    """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
+    holds bash syntax, when its steps, joined, send the owner to a file for a command, or when a
+    step holds a shell line in backticks. A `command` on the item excuses only the loose verb match
+    (COMMAND_VERB); "the command in <file>" and "its command" still point at the file. An update
+    with no `command` key leaves the stored one alone."""
     if not isinstance(data, dict) or data.get("kind", "task") != "task":
         return ""
+    has_command = _command_ok(data.get("command"))
+    if "command" in data and not has_command:
+        return "command is not {powershell, mac}"
+    if has_command and PS_BASH_OPERATOR.search(data["command"]["powershell"]):
+        return "powershell command holds a bash operator"
     steps = data.get("steps")
     if not isinstance(steps, list):
         return ""
-    joined = "\n".join(_flat_text(s) for s in steps)
+    texts = [_flat_text(s) for s in steps]
+    joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
-    has_command = isinstance(data.get("command"), str) and data["command"].strip()
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
             or (has_file and not has_command and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
+    if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
+           for text in texts for start, body, fenced in _code_spans(text)):
+        return "step holds a shell line"
     return ""
 
 
@@ -506,7 +610,18 @@ def item_hit(op, entry):
             hit = gh_login_hit({"command": entry.get("new_str")})
             if hit:
                 return "gh-login-switch", hit
-        return form_str_replace_hit(entry)
+        hit = form_str_replace_hit(entry)
+        if hit[0]:
+            return hit
+        # The stored item is unseen, so the two text rules judge the text this edit adds, in any field.
+        new = [str(entry.get("new_str") or "")]
+        hit = key_named_hit(new)
+        if hit:
+            return "option-letter-keys", hit
+        hit = reworked_hit(new)
+        if hit:
+            return "rework-off-page", hit
+        return PASS
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
@@ -525,7 +640,112 @@ def item_hit(op, entry):
     hit = task_check_hit(op, data)
     if hit:
         return "task-names-check", hit
-    return decision_form_hit(op, data)
+    hit = decision_form_hit(op, data)
+    if hit[0]:
+        return hit
+    hit = option_letter_hit(op, data)
+    if hit:
+        return "option-letter-keys", hit
+    hit = rework_off_page_hit(data)
+    if hit:
+        return "rework-off-page", hit
+    return PASS
+
+
+# ------------------------------------------------------------------ an option's key is its position's letter
+#
+# docs/decisions/option-keys-are-letters.md, rule `option-letter-keys`, built against a named incident
+# (incident in the record): the page shows an option by its position, so an option keyed a that sat second
+# showed as B and the owner's answer was misread. The page's letter for index i is
+# String.fromCharCode(65 + i % 26) (skills/waiting-page/page.html, symbol letterOf); the key is that letter
+# in lowercase. The page reads the key "none" (symbol NONE, same file) as "none of these".
+OPTION_NONE_KEY = "none"
+# An option named in item text by a letter-and-digit key, as in "option e2": the word, then the key, both in
+# any case, since the page shows the key's letter in capitals and Claude can write "Option E2". Only D12, a
+# decision id, and t18, the owner's uniform-ruling topic id, are exempt, each in its own case. No shared
+# constant lists record ids: lint/report_guard.py CITE_ID_RE holds D-ids only, and roadmap step ids such as
+# c188 live on the roadmap branch, so a cell like A1, a lowercase id like c188 or a key like d4 reads as a key.
+KEY_NAMED = re.compile(
+    r"\b(?i:options?|picks?|keys?)[\s:(\[*_\"'`\u201c\u2018]+(?!D\d|t\d)(?i:[a-z])\d+\b")
+LETTER_KEYS_REASON = ("Each option's key is the letter the page shows for its position, in lowercase. Key the "
+                      "options a, b, c in the order shown, each once, never none, and name an option in the "
+                      "item's text by that letter (option A, pick b), never by any other key.")
+
+
+def _letter_of(index: int) -> str:
+    """The lowercase form of the page's letterOf for position `index`."""
+    return chr(97 + index % 26)
+
+
+def _item_text_fields(data):
+    """The item's own text: title, context, why, each option's fields and each step."""
+    out = [data.get(k) for k in ("title", "context", "why")]
+    for o in data.get("options") if isinstance(data.get("options"), list) else []:
+        out.append(_flat_text(o))
+    for st in data.get("steps") if isinstance(data.get("steps"), list) else []:
+        out.append(_flat_text(st))
+    return [t for t in out if isinstance(t, str)]
+
+
+def key_named_hit(texts) -> str:
+    """The matched text when one of `texts` names an option by a letter-and-digit key, else ""."""
+    for text in texts:
+        m = KEY_NAMED.search(text)
+        if m:
+            return "item text names an option by a key: " + m.group(0)
+    return ""
+
+
+def option_letter_hit(op: str, data) -> str:
+    """The matched text when this write of a waiting-page decision keys an option by anything but its
+    position's letter, or names an option in its text by a letter-and-digit key. A task, a note and a
+    closed item pass; an update that carries no `options` has no keys to judge."""
+    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
+        return ""
+    if data.get("status") == "closed":
+        return ""
+    options = data.get("options")
+    if isinstance(options, list):
+        seen = set()
+        for i, o in enumerate(options):
+            key = o.get("key") if isinstance(o, dict) else None
+            if not isinstance(key, str):
+                return "option with no string key"
+            if key == OPTION_NONE_KEY:
+                return "option keyed none"
+            if key in seen:
+                return "option key that repeats"
+            seen.add(key)
+            if key != _letter_of(i):
+                return "option key that is not its position's letter"
+    return key_named_hit(_item_text_fields(data))
+
+
+# ------------------------------------------------------------------ a reworked item is not answered on the page
+#
+# docs/decisions/rework-leaves-page.md, rule `rework-off-page`, built against a named incident (incident in
+# the record): an item whose options were being reworked stayed open, so the owner could answer options about
+# to change. Any item text counts, and a str_replace is judged on the text it adds.
+REWORKED = re.compile(r"\b(?:being\s+re-?worked|under\s+re-?work)\b", re.I)
+REWORK_REASON = ("An open item is for the owner to answer now, so it never says its options are being "
+                 "reworked. Close the item with a home that names the rework, and add a fresh item when the "
+                 "options are ready.")
+
+
+def reworked_hit(texts) -> str:
+    """The matched text when one of `texts` says the item is being reworked, else ""."""
+    for text in texts:
+        m = REWORKED.search(text)
+        if m:
+            return "item text says it is being reworked: " + m.group(0)
+    return ""
+
+
+def rework_off_page_hit(data) -> str:
+    """The matched text when this write puts "being reworked" in the item's text with no status closed."""
+    if not isinstance(data, dict) or data.get("status") == "closed":
+        return ""
+    return reworked_hit(_item_text_fields(data))
 
 
 # ------------------------------------------------------------------ an item field the page renders
@@ -638,7 +858,8 @@ def _chat_question_hit(question, options):
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON,
-                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON}
+                FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
+                "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
                      % ", ".join(OWNER_STAKES))
