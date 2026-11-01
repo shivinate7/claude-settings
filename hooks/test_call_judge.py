@@ -29,12 +29,14 @@ Interface the hook must match:
 - AskUserQuestion: a box that fails the code check (hooks/question_form.py chat_hit) is refused before
   any model call, with the rule chat_hit names. The model sees only a box that passes it, and judges only
   what code cannot (the cases are in hooks/test_question_form.py, which reuses run_hook below).
-- ArtifactData on the waiting page (ruled Nov 1 11:51 CST): a write of an item (set, update, or a
-  batch entry) on collection `items` that carries `options` or `context` and is not closed gets one model
-  call, claude-opus-5-5, rule `question-judge`, after question_form.item_hit passes it. A batch makes one call
-  for all its qualifying writes. An item_hit hit, a read, another collection or url, a delete, a str_replace and
-  an update with neither field make no call and no refusal from call_judge (guard.py refuses a hit). The page's
-  url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
+- ArtifactData on the waiting page (ruled Nov 1 11:51 CST): a write of an item (set, update, a str_replace, or a
+  batch entry) on collection `items` that carries `options` or `context`, or a str_replace on field `context` or
+  `options`, and is not closed, gets one model call, claude-opus-5-5, rule `question-judge`, after
+  question_form.item_hit passes it. A str_replace is judged on its new_str only, under a fragment preamble. A batch
+  makes one call for all its qualifying writes. An item_hit hit, a read, another collection or url, a delete, a
+  str_replace on another field, and an update with neither field make no call and no refusal from call_judge
+  (guard.py refuses a hit). A read, and a write of another collection, never import question_form in the hook.
+  The page's url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
   above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
 """
@@ -103,6 +105,21 @@ def _fake_run(argv, **kwargs):
 subprocess.run = _fake_run
 with open(os.path.join(os.environ["CJ_LOADED_DIR"], "loaded"), "w", encoding="utf-8") as f:
     f.write("1")
+
+
+import sys
+
+
+class _WatchQuestionForm:
+    # Records each import request for question_form in the child, so a case reads whether the hook loaded it.
+    def find_spec(self, name, path=None, target=None):
+        if name == "question_form":
+            with open(os.path.join(os.environ["CJ_LOADED_DIR"], "imports.log"), "a", encoding="utf-8") as f:
+                f.write(name + "\n")
+        return None
+
+
+sys.meta_path.insert(0, _WatchQuestionForm())
 '''
 
 
@@ -119,6 +136,8 @@ class Run:
         self.base, self.code = base, proc.returncode
         self.out, self.err = proc.stdout or "", proc.stderr or ""
         self.loaded = os.path.exists(os.path.join(base, "loaded"))
+        imports = os.path.join(base, "imports.log")
+        self.imports = open(imports, encoding="utf-8").read().split() if os.path.exists(imports) else []
         path = os.path.join(base, "calls.jsonl")
         self.calls = []
         if os.path.exists(path):
@@ -137,8 +156,8 @@ class Run:
 
 
 def detail(r):
-    return "code=%s out=%r err=%r calls=%d loaded=%s log=%r" % (
-        r.code, r.out[:200], r.err[-200:], len(r.calls), r.loaded, r.log[-200:])
+    return "code=%s out=%r err=%r calls=%d loaded=%s imports=%s log=%r" % (
+        r.code, r.out[:200], r.err[-200:], len(r.calls), r.loaded, r.imports, r.log[-200:])
 
 
 def write_pass(cfg, session, body):
@@ -219,6 +238,8 @@ def question_input(session=SID_A, agent=None, box=None):
 PAGE_FLAG = ('{"ok": false, "reason": "the gain is not a plain effect on the owner: say what he gets and what '
              'he gives up."}')
 PAGE_MARK, PAGE_MARK_B = "PAGEMARK-3f9c", "PAGEMARK-8d21"
+# A str_replace's old_str and new_str. The model sees only new_str, so a case checks that the marks split this way.
+PAGE_OLD, PAGE_NEW = "PAGEOLD-5a0e", "PAGENEW-7c3d"
 
 
 def good_page_item(mark=PAGE_MARK, **over):
@@ -449,8 +470,9 @@ def case_page_reject_and_accept():
 
 
 def case_page_no_model_call():
-    # Cost proof: a model call only for an items write that carries options or context, is not closed, and
-    # passes item_hit. Each input below would be denied if the judge were called on it, so a call shows as a deny.
+    # Cost proof: a model call only for an items write that carries options or context, or a str_replace on
+    # context or options, is not closed, and passes item_hit. Each input below would be denied if the judge were
+    # called on it, so a call shows as a deny.
     item, bad_form = good_page_item(), good_page_item(context=GOAL_LINE + "\n" + PROBLEM_LINE + "\n" + DEPARTS_LINE)
     cases = (
         ("a receipts collection write", page_input("set", item, collection="receipts", doc_id="r1")),
@@ -463,8 +485,11 @@ def case_page_no_model_call():
         ("a closed item", page_input("set", good_page_item(status="closed"))),
         ("an items update that closes an item with no form line",
          page_input("update", {"status": "closed", "context": "Answered: ship it."})),
-        ("an items str_replace", page_input("str_replace", None, field="context",
-                                            old_str="ship the change today", new_str="ship the change this week")),
+        ("a str_replace on the title", page_input("str_replace", None, field="title",
+                                                  old_str="Ship the change today?",
+                                                  new_str="Ship the change this week?")),
+        ("a context str_replace that removes the Goal line (fails item_hit)",
+         page_input("str_replace", None, field="context", old_str=GOAL_LINE, new_str="")),
         ("an items update with neither options nor context", page_input("update", {"title": "Renamed"})),
         ("a batch of a delete and a title-only update", page_batch_input([
             {"op": "delete", "collection": PAGE_ITEMS, "doc_id": "p1"},
@@ -524,6 +549,67 @@ def case_page_model_failure_fails_open():
           and "can't open file" not in errs[0], detail(r))
 
 
+def case_page_str_replace_judged():
+    # Ruled Nov 1 11:51 CST: a str_replace on `context` or `options` that item_hit passes gets the same model
+    # review as a chat question. The model sees only new_str, under a fragment preamble.
+    fragment = "The change lands this week. " + PAGE_NEW
+    for field in ("context", "options", "options.0.gain"):
+        r = run_hook(page_input("str_replace", None, field=field, old_str=PAGE_OLD, new_str=fragment),
+                     answer=PAGE_FLAG)
+        d = r.deny() or {}
+        check("page str_replace: a %s edit the judge rejects is denied, rule question-judge, one call" % field,
+              r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+              and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1, detail(r))
+        check("page str_replace: a %s edit is one model call, claude-opus-5-5, no effort" % field,
+              len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL
+              and "--effort" not in r.calls[0]["argv"], detail(r))
+    flagged = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
+                       answer=PAGE_FLAG)
+    prompt = flagged.calls[0]["prompt"] if flagged.calls else ""
+    check("page str_replace: the model sees new_str and not old_str", PAGE_NEW in prompt and PAGE_OLD not in prompt,
+          prompt[:200])
+    sentences = re.split(r"[.\n]", prompt.lower())
+    check("page str_replace: the prompt calls the text a fragment and never flags a missing line or option",
+          any("fragment" in s for s in sentences) and any("missing" in s and "option" in s for s in sentences),
+          prompt[:300])
+    check("page str_replace: the refusal ends with the override line",
+          override is not None and hasattr(override, "offer")
+          and flagged.reason().rstrip().endswith(override.offer("question-judge").strip()), flagged.reason()[-160:])
+    r = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
+                 answer=PAGE_FLAG, pass_=(SID_A, TIMED))
+    check("page str_replace: a timed override lifts the refusal", r.code == 0 and r.out == ""
+          and lifted_log(r, "question-judge"), detail(r))
+    ok = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
+                  answer=ALLOW)
+    check("page str_replace: a good fragment the judge accepts is allowed, after one model call",
+          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(ok.calls) == 1, detail(ok))
+    writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
+              {"op": "str_replace", "collection": PAGE_ITEMS, "doc_id": "p2", "field": "context",
+               "old_str": PAGE_OLD, "new_str": fragment}]
+    r = run_hook(page_batch_input(writes), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("page str_replace: a context edit joins a batch's one model call",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL
+          and PAGE_MARK in prompt and PAGE_NEW in prompt and PAGE_OLD not in prompt, detail(r))
+
+
+def case_page_reads_and_other_collections_skip_question_form():
+    # Cost proof: a read and a write of another collection exit before the hook imports question_form, the heavy
+    # import. The last check is a control: a judged items write imports it, so an empty record means an early exit.
+    item = good_page_item()
+    for label, inp in (
+        ("an items get", page_input("get", None, doc_id="p1")),
+        ("an items list", page_input("list", None, doc_id=None)),
+        ("a receipts write", page_input("set", item, collection="receipts", doc_id="r1")),
+    ):
+        r = run_hook(inp, answer=PAGE_FLAG)
+        check("page import: %s does not import question_form in the hook" % label,
+              r.code == 0 and r.out == "" and r.calls == [] and "question_form" not in r.imports, detail(r))
+    r = run_hook(page_input("set", item), answer=ALLOW)
+    check("page import: a judged items write imports question_form (the record sees the import)",
+          "question_form" in r.imports, detail(r))
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -571,7 +657,8 @@ def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed, case_question,
                  case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
                  case_page_no_model_call, case_page_batch_one_call, case_page_override,
-                 case_page_model_failure_fails_open, case_fail_open, case_settings_row):
+                 case_page_model_failure_fails_open, case_page_str_replace_judged,
+                 case_page_reads_and_other_collections_skip_question_form, case_fail_open, case_settings_row):
         try:
             case()
         except Exception as exc:
