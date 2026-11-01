@@ -879,3 +879,5 @@
 - pw-os-release-env-name: pin.sh's test hook `OS_RELEASE` is a generic env name. A job that sets it for another reason gets `os=Linux` and a warning (actions/playwright-setup/pin.sh). Decision: one-browser-setup-no-apt
 - pw-os-test-gaps: test_action.py has no case for an os-release with no ID, and no check that a normal Ubuntu run prints no warning (actions/playwright-setup/test_action.py). Decision: one-browser-setup-no-apt
 - pw-26-04-cause-unread: the decision cites `libicudata.so.74` on 26.04 from the joyous lane's report, not a log this lane read (docs/decisions/one-browser-setup-no-apt.md). Decision: one-browser-setup-no-apt
+- tracking-turn-mixed-row: the rule_mechanisms row for output-tracking-turn-one-line is kind check for its push case, and its tracking-only case stays judgment in the row's reason; one row holds one kind (lint/rule_mechanisms.json, lint/rule_audit.py JUDGMENT_EXPECTED).
+- tracking-turn-git-push-test: that row cites test_67 (push_files) only; Bash `git push` is proven by test_61 and test_64, which the row does not cite (lint/test_report_guard.py).
