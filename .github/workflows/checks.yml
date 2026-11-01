@@ -530,6 +530,7 @@ jobs:
         if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
         env:
           NODE_PATH: ${{ github.workspace }}/.github/shoot/node_modules
+          GUARD_CHROMIUM: "1"
         run: python3 hooks/test_guard.py
 
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the

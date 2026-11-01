@@ -12245,23 +12245,14 @@ def pd_node_ready():
     return probe.returncode == 0
 
 
-# The deny cases render a page through the checker, so they need Chromium. GUARD_CHROMIUM=1 is set only on the
-# CI step that installs Chromium: there, a node that cannot launch it fails the run. Without the marker, a
-# machine that cannot launch Chromium skips those cases and says so (the rule of testing/skip-locally-fail-in-ci.mjs).
-def pd_chromium_missing():
-    """The marker says this run has Chromium. A node that cannot launch it is a failure, not a skip."""
-    return False, ("GUARD_CHROMIUM=1, but node cannot launch Chromium through playwright, so the checker's deny "
-                   "cases cannot run")
-
-
-PD_MARKER = os.environ.get("GUARD_CHROMIUM") == "1"
+# Skip locally, fail in CI (the rule of testing/skip-locally-fail-in-ci.mjs): a laptop without node and
+# Chromium leaves out the cases that need the checker to render. In CI they stay in, and a missing node
+# turns them red, because the guard then answers unknown and allows.
 PD_NODE = pd_node_ready()
-PD_NEEDS_NODE = PD_NODE or PD_MARKER
-if PD_MARKER and not PD_NODE:
-    LOG_CHECKS_EXTRA.append(("page-item-design: GUARD_CHROMIUM=1 and node cannot launch Chromium", pd_chromium_missing))
-elif not PD_NODE:
-    print("page-item-design: no node with playwright and Chromium here, so the checker's deny cases are skipped",
-          file=sys.stderr)
+PD_NEEDS_NODE = PD_NODE or bool(os.environ.get("CI"))
+if not PD_NODE:
+    print("page-item-design: no node with playwright and Chromium here, so the checker's deny cases are skipped"
+          " (CI runs them)", file=sys.stderr)
 
 
 def pd_repo(name, record):
