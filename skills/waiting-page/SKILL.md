@@ -295,14 +295,22 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
   answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
-- `choice: "none"` asks for new options. It is never a ruling, and it never picks an option. Treat
-  it as step 3 of "Route and close" says. In the terminal, "27 none of these (note)" is the same
+- `choice: "none"` asks for new options, unless its note gives a clear direction. It never picks an option.
+  With a clear direction (see "An answer is clear only when"), it closes the item and the note becomes
+  a step: "Route and close" steps 1 and 2. The owner is not asked again. Otherwise treat it as step 3 of
+  "Route and close" says. Who judges: the routing session decides when it reads the answer. The page judge
+  (`hooks/call_judge.py`, whose rule name is `question-judge`) also checks a re-ask write: one that gives the
+  item new `options` and carries a `lastAnswer` note. It refuses that write when the note already names a
+  clear direction (decision `question-reviewer-agent-hook`, the judge's record). In the terminal, "27 none of these (note)" is the same
   answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
   `+`, in rank order when `ranked`.
 - `choice: "overturn"` is clear on an arbiter ruling only (an item with `arbiter: true`). It means the owner
   overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
 - An answer is clear only when three things hold. Its `item` is the item's `id`. Its `at` is
-  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`, or `overturn` on an arbiter ruling. On a `multi` item,
+  later than the item's `added`. Its `choice` is the `key` of one of the item's `options`, or `overturn` on an arbiter ruling,
+  or `none` with a clear direction. A clear direction is a note that names an act a session can take with no
+  further pick from the owner. A note that asks for other choices (cheaper, different, more) is not a direction:
+  that `none` answer takes step 3. On a `multi` item,
   `choice` is a list instead: not empty, with no repeat, and each entry the `key` of one of the item's `options`.
   A list on a pick-one item, or a string other than `none` on a `multi` item, is not clear.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
@@ -311,7 +319,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 
 ## Route and close
 
-Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer takes step 3 only. A task answer with no `done` is a question
+Sort the answer first. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with a clear direction takes steps 1 and 2 only. Any other `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
 step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
@@ -322,18 +330,20 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
-   home) says. When it is there, update the receipt with `filed` set to now.
+   home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
+   direction becomes a step: a roadmap step, sent to triage if the repo has a roadmap, or else a task record
+   in the repo's task home (layout `todo` or `debts`).
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
-3. If the answer is `none` and you write the new `options`, `pick` and `why` from the
-   owner's note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
+3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
+   note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
    `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
-   ready. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
+   ready. A `none` answer with a clear direction never takes this fallback: it closes at step 2. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.
 4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
