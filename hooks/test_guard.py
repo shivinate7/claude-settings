@@ -304,12 +304,12 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "no_root": no_root,
         # A case that must be judged within this many seconds. A slower verdict fails the case.
         "max_seconds": max_seconds,
+        # Variables this case sets on the guard's environment. A None value unsets one (see decide).
+        "env": env,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
         "temp": TEMP_DIR,
-        # Variables this case sets on the guard's environment. A None value unsets one (see decide).
-        "env": env,
         "tool_input": tool_input,
         # Tagged for GUARD_TESTS=windows-slice. A session case reads a live process's start time,
         # which on Windows is the ctypes arm of _process_start_ms (guard.py L1837-1905).
