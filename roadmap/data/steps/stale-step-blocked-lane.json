@@ -1,9 +1,9 @@
 {
   "title": "The roadmap stale check counts a lane waiting on action as live",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 103.33754,
   "why": "Coordinator 2, Oct 30 17:18 CDT: seen in review round 3 of lane roadmap-matches-lanes (#890).",
-  "note": "Debt: the stale check in skills/roadmap/build.py (#890) reads a lane in SESSION_STATUS_REQUIRES_ACTION as stale. Fix: count a lane that waits on action as live. Done check: a step whose lane reads REQUIRES_ACTION is not flagged. Needs no answer.",
-  "updatedAt": "2026-10-30T22:20:00Z"
+  "note": "Debt: the stale check in skills/roadmap/build.py (#890) reads a lane in SESSION_STATUS_REQUIRES_ACTION as stale. Fix: count a lane that waits on action as live. Done check: a step whose lane reads REQUIRES_ACTION is not flagged. Needs no answer. Lane started Nov 1 01:10 CDT (coordinator).",
+  "updatedAt": "2026-11-01T06:12:00Z"
 }
