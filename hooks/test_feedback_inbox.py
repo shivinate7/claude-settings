@@ -52,7 +52,7 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
     Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, page.
     home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
-    For page, the home is `page:<digits>`: the number of the waiting-page item the owner's ruling answers.
+    For page, the home is `page:<digits>`: the number of the waiting-page item the owner answers.
 
 Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd, and transcript_path when
@@ -89,7 +89,7 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
   - An unreadable inbox (a directory at its path, or bytes that are not UTF-8) gives one block that
     names the inbox file. Why: a Stop hook's stderr does not reach the owner, so a silent pass would
     drop feedback. stop_hook_active still gives nothing, so the block costs one turn at most.
-  - Pages. `- <id> [page] -> page:<n>` says that the owner's ruling answers waiting-page item n, the
+  - Pages. `- <id> [page] -> page:<n>` says that the owner answers waiting-page item n, the
     number the waiting page answers by. It is not an open id, so it needs no handoff id. It sits
     beside the `[ruling]` item that holds the decision, which still needs its own item and tracked
     home. A page item is checked in every block that holds one, burst or not, unless its line ends
