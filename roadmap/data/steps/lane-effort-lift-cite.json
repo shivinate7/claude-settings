@@ -1,0 +1,9 @@
+{
+  "title": "The record that an override lifts lane-effort-pin cites a true source",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 103.33762,
+  "why": "Coordinator, Nov 1 01:27 CDT: decision agent-model-cap (the lane-effort-pin sentence) cites 'owner, 2026-10-30 16:25 CDT, pick a', but no record holds that ruling. Triage read: 16:25 CDT is the commit time of a7dd4d5a (lane lane-effort-medium, #885), and no roadmap step or waiting-page item holds an owner pick on it. Judged a note-sized record fix, not a debt (roles-findings-are-debts-or-notes): the guard code already lets an override lift lane-effort-pin.",
+  "note": "Fix: find the real source of 'an owner override lifts lane-effort-pin' (the coordinator's brief or relay to lane lane-effort-medium near 16:20 CDT Oct 30). If an owner ruling is found, cite it with its true time. If none, mark the sentence as the orchestrator's call and send triage an owner question for the page: is lane-effort-pin one of the role and model guards that owner-override keeps beyond every override? Done check: every citation in that sentence of agent-model-cap names a source a reader can find. Record-only lane (record-writer). Needs no answer to start.",
+  "updatedAt": "2026-11-01T06:35:00Z"
+}
