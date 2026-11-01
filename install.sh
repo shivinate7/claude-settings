@@ -127,7 +127,8 @@ clone_of() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^wor
 
 # Prints the clone when DIR is its live pin (decision merge-reinstalls-from-main): a linked worktree whose
 # resolved path is the resolved <clone>-live, or is <clone>-live-<12 hex>. Returns 1 for anything else.
-# hooks/session_start.sh repeats this test in sh, since it cannot source this file; change both together.
+# The pin name has four copies; change all together: this file, hooks/session_start.sh (sh cannot source
+# this file), hooks/guard_frozen.py (LIVE_PIN_SUFFIX) and merge/install_from_main.sh (builds the name).
 live_pin_clone() {
   is_linked_worktree "$1" || return 1
   lp_clone=$(clone_of "$1")
