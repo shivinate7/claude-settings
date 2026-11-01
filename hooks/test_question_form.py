@@ -20,6 +20,11 @@ Interface the module must match (the lane's form contract):
   A stood pick (`stands: true`) may write `Problem: ...` with no stake kind. A line out of this order
   refuses. Only `Based on (<kind>):` is a Based on line: prose that starts with "Based on the log" is not.
 - Each option states gain and loss: page `gain` and `lose` fields; chat `Gain:` and `Lose:` in the description.
+- A question to the owner holds a line at a line start, `Departs from: <what on main> — <what changes>`
+  (rule question-departs), after the form passes. Both sides are non-empty, and the change side says a change,
+  not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
+  same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
+  box judges it in `question`; a page decision in `context`.
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your uniform ruling (t18)`
   in its label or description, and never `(Recommended)` in its label (rule uniform-pick).
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
@@ -70,6 +75,8 @@ with open(os.path.join(PAGE_REPO, ".claude", "layout-extras.json"), "w", encodin
     json.dump({"kinds": {}, "waiting-page": PAGE_URL}, _f)
 
 FORM_RULE = "question-form"
+DEPARTS_RULE = "question-departs"
+DEPARTS = tcj.DEPARTS_LINE  # the one valid Departs from line (hooks/test_call_judge.py builds the box from it)
 # A Problem line that is bare, or names a stake outside OWNER_STAKES: the contract does not say whether
 # question-form or owner-judge names it, so either id passes and the refusal must name the Problem line.
 STAKE_RULES = (FORM_RULE, "owner-judge")
@@ -90,15 +97,18 @@ BASED = ("Based on (measured): auto mode refused the runner's merge at 03:04 CDT
 THIRD = "Based on (ruling): your 16:54 CDT ruling says no owner step per merge."
 
 
+LINE_KEYS = ("goal", "problem", "based", "departs")
+
+
 def parts(**over):
     """The form lines as a dict. A part set to None is dropped; `based` is a list of lines."""
-    found = {"goal": GOAL, "problem": PROBLEM, "based": list(BASED)}
+    found = {"goal": GOAL, "problem": PROBLEM, "based": list(BASED), "departs": DEPARTS}
     found.update(over)
     return found
 
 
-def form_text(goal=GOAL, problem=PROBLEM, based=BASED):
-    return "\n".join(line for line in (goal, problem, *based) if line)
+def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
+    return "\n".join(line for line in (goal, problem, *based, departs) if line)
 
 
 def page_item(tail="", options=None, lines=None, **over):
@@ -106,17 +116,17 @@ def page_item(tail="", options=None, lines=None, **over):
     sets the whole context, one line each, for a case that changes the order of the lines."""
     item = copy.deepcopy(ITEM92)
     item["context"] = "\n".join(lines) if lines is not None else form_text(
-        **{k: v for k, v in over.items() if k in ("goal", "problem", "based")}) + tail
+        **{k: v for k, v in over.items() if k in LINE_KEYS}) + tail
     item["options"][1]["widens"] = True
     if options is not None:
         item["options"] = options
-    item.update({k: v for k, v in over.items() if k not in ("goal", "problem", "based")})
+    item.update({k: v for k, v in over.items() if k not in LINE_KEYS})
     return item
 
 
 def chat_box(options=None, **over):
     """A chat box with the same form lines. Options default to test_call_judge.good_options()."""
-    return tcj.good_box(options=options, **{k: v for k, v in over.items() if k in ("goal", "problem", "based")})
+    return tcj.good_box(options=options, **{k: v for k, v in over.items() if k in LINE_KEYS})
 
 
 def entry_of(data, **extra):
@@ -397,17 +407,18 @@ PROSE = "Based on the log, option A is safer."
 # (name, the context lines in order, verdict). Only `Based on (<kind>):` is a Based on line, so prose that
 # starts with the same two words is not one, and does not move a Based on line before Problem.
 LINE_VARIANTS = [
-    ("the lines in order", [GOAL, PROBLEM, *BASED], None),
-    ("Problem before Goal", [PROBLEM, GOAL, *BASED], (FORM_RULE, None)),
-    ("a Based on line before Problem", [GOAL, BASED[0], PROBLEM, BASED[1]], (FORM_RULE, None)),
-    ("every Based on line before Problem", [GOAL, *BASED, PROBLEM], (FORM_RULE, None)),
-    ("a Based on line before Goal", [BASED[0], GOAL, PROBLEM, BASED[1]], (FORM_RULE, None)),
-    ("prose that starts with Based on, after the form lines", [GOAL, PROBLEM, *BASED, PROSE], None),
-    ("prose that starts with Based on, between Goal and Problem", [GOAL, PROSE, PROBLEM, *BASED], None),
-    ("prose that starts with Based on, beside three Based on lines", [GOAL, PROBLEM, *BASED, THIRD, PROSE], None),
-    ("prose that starts with Based on is no Based on line", [GOAL, PROBLEM, PROSE], (FORM_RULE, "Based on")),
+    ("the lines in order", [GOAL, PROBLEM, *BASED, DEPARTS], None),
+    ("Problem before Goal", [PROBLEM, GOAL, *BASED, DEPARTS], (FORM_RULE, None)),
+    ("a Based on line before Problem", [GOAL, BASED[0], PROBLEM, BASED[1], DEPARTS], (FORM_RULE, None)),
+    ("every Based on line before Problem", [GOAL, *BASED, PROBLEM, DEPARTS], (FORM_RULE, None)),
+    ("a Based on line before Goal", [BASED[0], GOAL, PROBLEM, BASED[1], DEPARTS], (FORM_RULE, None)),
+    ("prose that starts with Based on, after the form lines", [GOAL, PROBLEM, *BASED, DEPARTS, PROSE], None),
+    ("prose that starts with Based on, between Goal and Problem", [GOAL, PROSE, PROBLEM, *BASED, DEPARTS], None),
+    ("prose that starts with Based on, beside three Based on lines",
+     [GOAL, PROBLEM, *BASED, THIRD, PROSE, DEPARTS], None),
+    ("prose that starts with Based on is no Based on line", [GOAL, PROBLEM, PROSE, DEPARTS], (FORM_RULE, "Based on")),
     ("a Based on kind outside PREMISE_KINDS still refuses beside the prose",
-     [GOAL, PROBLEM, BASED[0], "Based on (guess): the log is old.", PROSE], (FORM_RULE, "Based on")),
+     [GOAL, PROBLEM, BASED[0], "Based on (guess): the log is old.", PROSE, DEPARTS], (FORM_RULE, "Based on")),
 ]
 
 
@@ -442,7 +453,7 @@ def case_chat_press_scan_skips_gain_and_lose():
 # What each chat refusal must tell the agent to write, and the words that belong to the waiting page only:
 # a chat box has no `stands`, `context`, `links` or `pick` field to set.
 CHAT_REMEDY = {FORM_RULE: ("Goal", "Problem", "Based on", "Gain", "Lose"), "owner-judge": tuple(OWNER_STAKES),
-               "uniform-pick": ("(Recommended)",), "press-link": ("https://",)}
+               "uniform-pick": ("(Recommended)",), "press-link": ("https://",), DEPARTS_RULE: ("Departs from",)}
 PAGE_ONLY = ("stands", "`context`", "waiting page", "`links`", "`pick`", "`gain`", "`lose`")
 
 
@@ -502,7 +513,8 @@ def case_page_reasons_are_one_table():
     for name, data in (
             ("a decision with no Problem line", ITEM92),
             ("a stake outside the set", page_item(problem="Problem (internals): which job runs it")),
-            ("a port with no Departs from line", page_item(port=True)),
+            ("a port with no Departs from line", page_item(port=True, departs=None)),
+            ("a decision with no Departs from line", page_item(departs=None)),
             ("a pick that names the widening option", page_item(pick="b")),
             ("a press with no link", page_item(options=press)),
             ("a step that sends the owner to a file for a command",
@@ -683,6 +695,225 @@ def case_gh_login_switch_on_the_page():
          {"collection": "items", "doc_id": DOC, "field": "command", "old_str": "step one",
           "new_str": "step two"}, None)
 
+# ------------------------------------------------------------------ a question says how it departs from main
+#
+# Rule question-departs: a question is asked only when the work departs from main. A line that restates
+# main names no departure, so it is refused. Judged after the form passes, on the chat box (each question
+# with 2+ options, in `question`) and on a page decision (set, or an update that carries context, in `context`).
+
+# A line that restates main: its change side says there is no change. Each is refused.
+RESTATES = [
+    "Departs from: agent-model-cap — Opus above the row stays the existing ask",
+    "Departs from: lint/stamp.py:run_stamp — none",
+    "Departs from: lint/stamp.py:run_stamp — n/a",
+    "Departs from: lint/stamp.py:run_stamp — No change.",
+    "Departs from: lint/stamp.py:run_stamp - unchanged",
+    "Departs from: lint/stamp.py:run_stamp — as today",
+    "Departs from: lint/stamp.py:run_stamp — as on main",
+    "Departs from: lint/stamp.py:run_stamp — same as main",
+    "Departs from: lint/stamp.py:run_stamp — nothing changes",
+    "Departs from: lint/stamp.py:run_stamp — keeps the lint job",
+    "Departs from: lint/stamp.py:run_stamp — STAYS in the lint job",
+    "Departs from: lint/stamp.py:run_stamp — already in the lint job",
+]
+# A line with an empty side, no separator, or nothing after the colon. Each is refused.
+MALFORMED = [
+    "Departs from:",
+    "Departs from:   ",
+    "Departs from: lint/stamp.py:run_stamp —",
+    "Departs from: lint/stamp.py:run_stamp - ",
+    "Departs from: — the stamp check moves to the lint job",
+    "Departs from: lint/stamp.py:run_stamp",
+]
+# Valid lines: both sides non-empty, the change side a change. The word match is whole words only.
+VALID_LINES = [
+    DEPARTS,
+    "Departs from: lint/stamp.py:run_stamp - the stamp check moves to the lint job",
+    "Departs from: agent-model-cap — Opus above the row needs an owner grant",
+    "Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves to the lint job",
+    # Comment openers and a lone quote are plain text in the change side.
+    "Departs from: lint/stamp.py:run_stamp — don't parse // or /* or # here, the stamp moves",
+]
+DEPARTS_REFUSAL = (DEPARTS_RULE, "Departs")
+
+
+def dp_chat(name, body, want):
+    chat(name, chat_box(departs=body), want)
+
+
+def dp_page(name, body, want):
+    page(name, "set", entry_of(page_item(departs=body)), want)
+
+
+def case_departs_missing():
+    dp_chat("no Departs from line in the question is refused as question-departs", None, DEPARTS_REFUSAL)
+    dp_page("a decision with no Departs from line is refused as question-departs", None, DEPARTS_REFUSAL)
+    page("an update that carries kind decision and a context with no Departs from line is refused", "update",
+         entry_of({"kind": "decision", "context": form_text(departs=None)}), DEPARTS_REFUSAL)
+    page("an update that carries kind decision and a context with the line passes", "update",
+         entry_of({"kind": "decision", "context": form_text()}), None)
+    options = tcj.good_options()
+    options[0]["description"] += " " + DEPARTS
+    chat("a Departs from line in an option's description, not the question, is refused",
+         chat_box(options=options, departs=None), DEPARTS_REFUSAL)
+
+
+def case_departs_empty_or_malformed():
+    for body in MALFORMED:
+        dp_chat("a line %r is refused as question-departs" % body, body, DEPARTS_REFUSAL)
+        dp_page("a page line %r is refused as question-departs" % body, body, DEPARTS_REFUSAL)
+
+
+def case_departs_restates_main():
+    for body in RESTATES:
+        dp_chat("a line %r that restates main is refused" % body, body, DEPARTS_REFUSAL)
+        dp_page("a page line %r that restates main is refused" % body, body, DEPARTS_REFUSAL)
+
+
+def case_departs_valid_passes():
+    for body in VALID_LINES:
+        dp_chat("a valid line %r passes" % body, body, None)
+        dp_page("a valid page line %r passes" % body, body, None)
+    mid = "Why: " + DEPARTS
+    dp_chat("a Departs from phrase after other text on the line does not count", mid, DEPARTS_REFUSAL)
+    dp_page("a Departs from phrase after other text on the line does not count", mid, DEPARTS_REFUSAL)
+
+
+def case_departs_out_of_scope_passes():
+    one = tcj.good_box(departs=None)
+    one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
+    chat("a one-option question with no Departs from line passes", one, None)
+    task = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
+            "context": "Why yours: a session on your computer was asked first and none could reach the remote"}
+    page("a task with a Why yours line and no Departs from line passes", "set", entry_of(task), None)
+    page("a closed decision with no form lines and no Departs from line passes", "set",
+         entry_of(dict(ITEM92, status="closed", context="Answer from chat, 10:42: keep the check in the lint job.")),
+         None)
+    page("a note with form lines and no Departs from line passes", "set",
+         entry_of(page_item(departs=None, kind="note")), None)
+    page("an update of the status only passes", "update", entry_of({"status": "closed"}), None)
+
+
+def context_replace(name, old, new, want):
+    """One str_replace on a page item's `context`, judged by item_hit and by the guard."""
+    page("a str_replace " + name, "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": old, "new_str": new}, want)
+
+
+def case_departs_str_replace():
+    context_replace("that drops the Departs from line from context is refused", DEPARTS, "", DEPARTS_REFUSAL)
+    context_replace("that drops the line and keeps the form is refused", form_text(), form_text(departs=None),
+                    DEPARTS_REFUSAL)
+    context_replace("that swaps the line for another valid line is allowed", DEPARTS,
+                    "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job", None)
+    context_replace("whose old_str holds no Departs from line is allowed", "The lane merge-role-allow would do it.",
+                    "The lane would do it.", None)
+    context_replace("that keeps the line and changes the prose is allowed", form_text(),
+                    form_text() + "\nChanged prose.", None)
+
+
+def case_departs_ids_and_order():
+    # The older rules and the form keep their ids: the question-departs check runs after them.
+    wide = [dict(tcj.good_options()[0], label="Allow the second form (Recommended)",
+                 description="Gain: it lands today. Lose: two forms stay. Goes against your uniform ruling (t18)."),
+            tcj.good_options()[1]]
+    chat("a widening recommended option with no Departs from line is refused as uniform-pick",
+         chat_box(options=wide, departs=None), ("uniform-pick", None))
+    options = tcj.good_options()
+    options[1] = {"label": "Hold it", "description": "Lose: the change lands a day later."}
+    chat("a box with no Departs from line and an option with no gain is refused as question-form",
+         chat_box(options=options, departs=None), (FORM_RULE, "gain"))
+    page("a decision with no Goal and no Departs from line is refused as question-form", "set",
+         entry_of(page_item(goal=None, departs=None)), (FORM_RULE, "Goal"))
+    page("a port with no Departs from line keeps the port-question id", "set",
+         entry_of(page_item(port=True, departs=None)), ("port-question", None))
+
+
+def case_departs_reasons():
+    for surface, table in (("chat", getattr(question_form, "CHAT_REASONS", None)),
+                           ("page", getattr(question_form, "PAGE_REASONS", None))):
+        text = (table or {}).get(DEPARTS_RULE)
+        check("question departs: the %s reasons table holds a question-departs reason" % surface,
+              isinstance(text, str) and "Departs from" in text, MISSING if table is None else sorted(table))
+        if isinstance(text, str):
+            named = [word for word in PAGE_ONLY if word in text] if surface == "chat" else []
+            check("question departs: the %s reason names its line and no field the chat box lacks" % surface,
+                  not named, named)
+
+
+# A no-change word in the change side refuses when it comes before the first ";", or anywhere when the side
+# has no ";". A word after the ";" names what the change does: "keeps its timeout" and "already loads" are changes.
+REFUSED_NO_CHANGE = [
+    "Departs from: main — stays the existing ask",
+    "Departs from: x.py:f — keeps today's behaviour",
+    "Departs from: x — already does this",
+    "Departs from: x — none",
+    "Departs from: x — same as main",
+    "Departs from: x — as before",
+    "Departs from: x — no difference",
+    "Departs from: x — identical to main",
+    "Departs from: x — the phone app stays on the list when offline",
+]
+PASS_AFTER_SEMICOLON = [
+    "Departs from: x.py:f — adds a retry; the old call keeps its timeout",
+    "Departs from: x — moves the list; it already loads from cache",
+]
+PASS_NO_NO_CHANGE_WORD = [
+    "Departs from: x — the phone app shows the list when offline",
+]
+# The template copied verbatim, with an angle-bracket placeholder on either side. Each is refused.
+PLACEHOLDERS = [
+    "Departs from: <what on main> — <what changes>",
+    "Departs from: x — <what changes>",
+    "Departs from: <what on main> — adds y",
+]
+# Line forms that a Departs from line may take: a bullet, a bold label, a star bullet, a double hyphen
+# as the separator, and an em dash with no spaces. Each passes.
+LINE_FORMS = [
+    "- Departs from: x — adds y",
+    "**Departs from:** x — adds y",
+    "* Departs from: x — adds y",
+    "Departs from: x -- adds y",
+    "Departs from: x—adds y",
+]
+
+
+def case_departs_no_change_word_before_the_semicolon():
+    for body in REFUSED_NO_CHANGE:
+        dp_chat("a no-change word before the first ';' is refused: %r" % body, body, DEPARTS_REFUSAL)
+        dp_page("a page no-change word before the first ';' is refused: %r" % body, body, DEPARTS_REFUSAL)
+    for body in PASS_AFTER_SEMICOLON + PASS_NO_NO_CHANGE_WORD:
+        dp_chat("a change side with no no-change word before the first ';' passes: %r" % body, body, None)
+        dp_page("a page change side with no no-change word before the first ';' passes: %r" % body, body, None)
+
+
+def case_departs_placeholders_are_refused():
+    for body in PLACEHOLDERS:
+        dp_chat("a template placeholder %r is refused as question-departs" % body, body, DEPARTS_REFUSAL)
+        dp_page("a page template placeholder %r is refused as question-departs" % body, body, DEPARTS_REFUSAL)
+
+
+def case_departs_line_forms_pass():
+    for body in LINE_FORMS:
+        dp_chat("a line form %r passes" % body, body, None)
+        dp_page("a page line form %r passes" % body, body, None)
+    # CRLF line endings: the same form lines, joined with CR LF. The line's \r is no part of either side.
+    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS) if line)
+    box = chat_box()
+    box["questions"][0]["question"] = crlf
+    chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
+    page("a decision with CRLF line endings and a valid Departs from line passes", "set",
+         entry_of(dict(ITEM92, context=crlf)), None)
+
+
+def case_departs_str_replace_forms():
+    context_replace("that swaps a bold Departs from line for one whose change says keeps before any ';' is refused",
+                    "**Departs from:** x — adds X", "**Departs from:** x — keeps X", DEPARTS_REFUSAL)
+    context_replace("that swaps a plain Departs from line for one whose change says keeps before any ';' is refused",
+                    "Departs from: x — adds X", "Departs from: x — keeps X", DEPARTS_REFUSAL)
+    context_replace("that swaps a plain Departs from line for a valid one with keeps later in the change is allowed",
+                    "Departs from: x — adds X", "Departs from: x — adds X; the old call keeps its timeout", None)
+
 
 # ------------------------------------------------------------------ call_judge
 
@@ -727,7 +958,13 @@ def main():
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
-                 case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_call_judge):
+                 case_gh_login_hit_direct, case_gh_login_switch_on_the_page,
+                 case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
+                 case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
+                 case_departs_ids_and_order, case_departs_reasons,
+                 case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
+                 case_departs_line_forms_pass, case_departs_str_replace_forms,
+                 case_call_judge):
         try:
             case()
         except Exception as exc:

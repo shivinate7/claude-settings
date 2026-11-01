@@ -13,6 +13,10 @@ and git_reads.py, and `apply_mutant` lands a find-string in the one copied file 
 (zero matches is STALE, two or more is an error), so a guard split into sibling modules, or into
 git_reads.py, is still mutated in the right file. `build_scaffold` in janitor/mutate_sweep.py gets the same pin: a sibling is written into the
 scaffold's hooks/ folder, and a mutant aimed at a sibling lands there.
+
+The third part pins `staged_suite`'s stage-1 verdict: when stage 1 runs the required case, its result
+is the verdict and the full suite never runs. The full suite runs only when no line names the case,
+or when MUTATE_FULL=1 asks for it.
 """
 import contextlib
 import io
@@ -33,6 +37,8 @@ import mutate_sweep  # noqa: E402
 REQUIRED = "case: the rule under test"
 RED_RIGHT = ["FAIL  allow (want deny) [Bash] case: the rule under test"]
 RED_WRONG = ["FAIL  allow (want deny) [Bash] some other case"]
+PASS_RIGHT = "PASS  allow (want allow) [Bash] case: the rule under test"
+FULL_RED = ["FAIL  allow (want deny) [Bash] the full suite only"]
 
 
 def verdict(code, red):
@@ -210,6 +216,77 @@ class BuildScaffoldSiblingTests(unittest.TestCase):
         # import, so every mutant reads killed for a cause that is not the mutation.
         mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
         self.assertTrue(os.path.exists(os.path.join(self.scaffold, "hooks", "git_reads.py")))
+
+
+class FakeRun:
+    """A stand-in for one mutant's suite runner. `answers` maps each `only` it may get (REQUIRED,
+    or None for the full suite) to the (code, red, ran) that run returns. Every `only` it gets is
+    appended to `calls`, in order, so a case can prove which stages ran."""
+
+    def __init__(self, answers):
+        self.answers = answers
+        self.calls = []
+
+    def __call__(self, only):
+        self.calls.append(only)
+        return self.answers[only]
+
+
+def staged(answers, full=False):
+    """Run `staged_suite` on a FakeRun. MUTATE_FULL is set only when `full`, and cleared otherwise,
+    so a developer's own setting cannot change a case. Return the fake with `result` (what
+    staged_suite returned) and `error` (what it raised). Both are kept, not raised, so a case checks
+    `calls` before it reports an error."""
+    fake = FakeRun(answers)
+    fake.result = None
+    fake.error = None
+    with mock.patch.dict(os.environ):
+        os.environ.pop("MUTATE_FULL", None)
+        if full:
+            os.environ["MUTATE_FULL"] = "1"
+        try:
+            fake.result = mutate_shared.staged_suite(fake, REQUIRED)
+        except Exception as error:
+            fake.error = error
+    return fake
+
+
+class StagedSuiteTests(unittest.TestCase):
+    """`staged_suite(run, required)`: stage 1 runs only the required case. A stage-1 run whose `ran`
+    names the case gives the verdict, and the full suite never runs. Only a run that names no line
+    falls back to the full suite, once. MUTATE_FULL=1 runs the full suite alone."""
+
+    def assertStaged(self, fake, calls, result):
+        """The one assertion step for every case: the calls first, so a wrong fallback shows as a
+        wrong call list, then the error, then the pair staged_suite returned."""
+        self.assertEqual(fake.calls, calls)
+        self.assertIsNone(fake.error, "staged_suite raised %r" % (fake.error,))
+        self.assertEqual(fake.result, result)
+
+    def test_passed_in_stage_one_is_the_verdict_and_never_falls_back(self):
+        fake = staged({REQUIRED: (0, [], [PASS_RIGHT])})
+        self.assertStaged(fake, [REQUIRED], (0, []))
+
+    def test_red_without_the_name_in_stage_one_is_the_verdict_and_never_falls_back(self):
+        fake = staged({REQUIRED: (1, RED_WRONG, [PASS_RIGHT] + RED_WRONG)})
+        self.assertStaged(fake, [REQUIRED], (1, RED_WRONG))
+
+    def test_named_kill_in_stage_one_is_the_verdict_and_never_falls_back(self):
+        fake = staged({REQUIRED: (1, RED_RIGHT, RED_RIGHT)})
+        self.assertStaged(fake, [REQUIRED], (1, RED_RIGHT))
+
+    def test_zero_cases_selected_falls_back_to_the_full_suite_once(self):
+        fake = staged({REQUIRED: (0, [], []), None: (1, FULL_RED, FULL_RED)})
+        self.assertStaged(fake, [REQUIRED, None], (1, FULL_RED))
+
+    def test_crash_before_the_case_falls_back_to_the_full_suite_once(self):
+        fake = staged({REQUIRED: (1, ["ImportError: no module named guard_x"], []),
+                       None: (1, FULL_RED, FULL_RED)})
+        self.assertStaged(fake, [REQUIRED, None], (1, FULL_RED))
+
+    def test_mutate_full_runs_only_the_full_suite(self):
+        fake = staged({None: (1, FULL_RED, FULL_RED)}, full=True)
+        self.assertStaged(fake, [None], (1, FULL_RED))
 
 
 if __name__ == "__main__":

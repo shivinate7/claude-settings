@@ -58,6 +58,8 @@ REPO = os.path.dirname(HERE)
 # cases that pass.
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
@@ -105,6 +107,7 @@ FAMILIES = {
     "gh-login-switch": "the waiting-page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
     "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
     "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
+    "question-departs": "the waiting-page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
     "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, and its text names no option by a letter-and-digit key; a closed item is not judged; the page's letters are read from its own source",
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
@@ -3294,16 +3297,18 @@ TAG_CWD = os.path.join(ROOT, "tagged")   # a scratch folder, not an agent worktr
 TAG_HOLDER = "import os, time; os.setsid(); time.sleep(300)"
 
 
-def tag_orphan(env_entries=(), argv_extra=()):
+def tag_orphan(env_entries=(), argv_extra=(), holder=None):
     """A holder whose shell exits first, so init adopts it (PPID 1). `env_entries` are NAME=value
     strings for its environment, with the inherited tag removed first. `argv_extra` is appended to
-    its argv. Returns its pid, or None when it is not an orphan leading its own process group."""
+    its argv. `holder` replaces the holder's argv (a shell stub, which leads no group of its own,
+    so only PPID 1 is waited for). Returns its pid, or None when it is not an orphan leading its
+    own process group (an orphan, for a `holder`)."""
     env = {key: value for key, value in os.environ.items() if key != TAG}
     env.update(entry.split("=", 1) for entry in env_entries)
     os.makedirs(TAG_CWD, exist_ok=True)
     script = '"$@" </dev/null >/dev/null 2>&1 & echo $!'
     try:
-        answer = subprocess.run(["sh", "-c", script, "sh", sys.executable, "-c", TAG_HOLDER]
+        answer = subprocess.run(["sh", "-c", script, "sh"] + (holder or [sys.executable, "-c", TAG_HOLDER])
                                 + list(argv_extra), cwd=TAG_CWD, env=env, capture_output=True,
                                 text=True, timeout=20)
         pid = int(answer.stdout.strip())
@@ -3313,7 +3318,7 @@ def tag_orphan(env_entries=(), argv_extra=()):
                                         capture_output=True, text=True, timeout=5).stdout.split()
             if ppid != "1":
                 return None
-            if pgid == str(pid):
+            if holder or pgid == str(pid):
                 return pid
             time.sleep(0.05)
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -3321,11 +3326,38 @@ def tag_orphan(env_entries=(), argv_extra=()):
     return None
 
 
+def stranded_job(job_env_words):
+    """The `holder` of a stranded stub: a shell that runs one `sleep` as its child and waits. The
+    child's environment is set by `job_env_words`: `env NAME=value` gives it a tag, `env -u NAME`
+    takes the stub's away. The stub's own environment is `env_entries` of tag_orphan."""
+    return ["sh", "-c", '"$@" & wait', "sh"] + list(job_env_words) + ["sleep", "300"]
+
+
+def stub_job(stub):
+    """The pid of the one child of `stub`, once the stub has forked it, or None."""
+    for _ in range(100):
+        try:
+            rows = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
+                                  timeout=10).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for row in rows:
+            fields = row.split()
+            if len(fields) == 2 and fields[1] == str(stub) and fields[0].isdigit():
+                ORPHAN_PIDS.append(int(fields[0]))
+                return int(fields[0])
+        time.sleep(0.05)
+    return None
+
+
 def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
-             **who):
-    """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped. `who`
-    is agent_id and agent_type, the payload fields that mark an agent call."""
-    pid = tag_orphan(env_entries, argv_extra) if ORPHAN_CASES else None
+             holder=None, job=False, **who):
+    """One kill of a PPID-1 holder, or with `job` of the child under a stranded stub (`holder` from
+    stranded_job). Returns the killed pid, or None when it was skipped. `who` is agent_id and
+    agent_type, the payload fields that mark an agent call."""
+    pid = tag_orphan(env_entries, argv_extra, holder) if ORPHAN_CASES else None
+    if pid is not None and job:
+        pid = stub_job(pid)
     if pid is None:
         skip_case(name, NO_ORPHAN)
     else:
@@ -3366,6 +3398,19 @@ else:
     sh("kill: the group led by a PPID-1 pid whose environment holds this session's id",
        "kill -- -%d" % TAG_LEADER, "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
        transcript=SUB_TRANSCRIPT)
+# A STRANDED JOB (roadmap step wait-for-pid-form). After a stall the stub shell is under init, and
+# the job is its child. On Linux the forked stub holds no tag, and the exec'd job holds it.
+# `kill` keeps the predicate the owner ruled on (decision a-kill-by-pid-needs-an-owned-pid: the
+# PPID-1 pid itself). A wider kill needs the owner, so each job below stays refused. The wait form,
+# bin/wait-pid, owns these shapes by its own test (lint/test_wait_pid.py).
+tag_case("kill: a job under an untagged PPID-1 stub, the job holding this session's id, stays refused",
+         "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
+         carries="did not start")
+tag_case("kill: a job under a PPID-1 stub that holds this session's id, the job untagged, stays refused",
+         "deny", env_entries=[TAG + "=" + SUB_SESSION], holder=stranded_job(["env", "-u", TAG]),
+         job=True, carries="did not start")
+tag_case("kill: a job under a PPID-1 stub, neither holding a session id, stays refused", "deny",
+         holder=stranded_job(["env", "-u", TAG]), job=True, carries="did not start")
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -4736,6 +4781,35 @@ for _label, _trigger in (
         cwd=NOGIT, lacks=NO_RUN_WATCH, command=_trigger)
     add("ci-wait: the remedy of %s names the CI-wake notice" % _label, "deny",
         "waiter", cwd=NOGIT, carries=(CI_WAIT_REMEDY,), command=_trigger)
+
+# ------------------------------------------------------------------ wait-pid: the one wait on a pid
+#
+# Roadmap step wait-for-pid-form: after the stall watch trips, the session holds a stranded job's
+# pid and the guard refuses every way to wait on it. `bin/wait-pid PID [--timeout SECS]` is the one
+# allowed form (its own cases: lint/test_wait_pid.py). The guard allows the helper and keeps
+# refusing the loops, so each refusal case pins that it did not move. The three remedies below
+# point at the helper.
+WAIT_PID = "wait-pid"
+for _label, _command in (("a pid", "wait-pid 12345"), ("a pid and a timeout", "wait-pid 12345 --timeout 500")):
+    sh("wait-pid: %s is allowed in the foreground" % _label, _command, "allow", cwd=NOGIT)
+    add("wait-pid: %s is allowed under run_in_background" % _label, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
+sh("wait-pid: a kill -0 loop stays refused, and its remedy names the helper",
+   "while kill -0 12345; do sleep 5; done", "deny", "waiter", cwd=NOGIT, carries=(WAIT_PID,))
+sh("wait-pid: tail --pid with a follow stays refused", "tail --pid=12345 -f /dev/null", "deny",
+   "live-stream", cwd=NOGIT)
+sh("wait-pid: a pgrep loop stays refused", "while pgrep x; do sleep 5; done", "deny", "waiter",
+   cwd=NOGIT)
+# Each remedy is reached by its own trigger. The pattern remedy must not advise `kill -0`: a bare
+# kill -0 loop is a refused form, so that advice sends the reader into a second refusal.
+for _label, _trigger, _rule, _lacks in (
+        ("a followed stream", "tail -f app.log", "live-stream", ()),
+        ("a pause", "sleep 30", "waiter", ()),
+        ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter",
+         ("kill -0",)),
+):
+    add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
+        carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
 
 # Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
 # `--watch` is allowed on main, and stays so.
@@ -9165,6 +9239,54 @@ add("frozen: Write of X-live beside a clone with both markers and no install scr
 add("frozen: Write of X-live beside a clone that holds merge/install_from_main.sh is frozen",
     "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=slash(os.path.join(ROOT, "cloned-live", "CLAUDE.md")), content="rules\n")
+
+# --------------------------------------------------------------------------- frozen dup: a descriptor dup
+#
+# `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
+# `&1`, `&2` or `&-` as a path. From a cwd inside a frozen place, that read makes a plain `git fetch
+# 2>&1 | tail -1` a frozen write, and the guard refuses it with rule frozen-path. The ALLOW cases
+# are the false alarm. The DENY cases after them stay refused: a quoted `&1` is a real file, a dup
+# beside a real write still writes that file, and `&>` onto a frozen file is a write.
+# Run only this block: MUTATE_ONLY="frozen dup:" python3 hooks/test_guard.py (the name filter).
+DUP_HOOKS_CWD = slash(os.path.join(CFG, "hooks"))   # the config directory's hooks folder, as a cwd
+# ALLOW: a descriptor dup, from the live pin and from the config directory's hooks folder.
+sh("frozen dup: the REST branch delete from the live pin, a 2>&1 tail, is allowed",
+   'cd /home/user && for b in batch-38 batch-37; do gh api -X DELETE "repos/shivinate7/claude-settings/git/refs/heads/$b" 2>&1 | tail -1; echo "$b exit $?"; done',
+   "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the live pin's clone is allowed",
+   "cd /home/user/claude-settings && git fetch origin main 2>&1 | tail -1", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls >&2 from the live pin is allowed", "ls >&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 1>&2 from the live pin is allowed", "ls 1>&2", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 2>&- from the live pin is allowed", "ls 2>&-", "allow", cwd=LIVE_PIN)
+sh("frozen dup: git fetch 2>&1 from the config directory's hooks folder is allowed",
+   "git fetch 2>&1 | tail -1", "allow", cwd=DUP_HOOKS_CWD)
+# DENY: each one still writes a file, so each stays refused as frozen-path.
+sh("frozen dup: a quoted \"&1\" is a real file in the live pin and stays frozen",
+   'ls > "&1"', "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a dup beside a real write to a frozen file stays frozen",
+   "ls 2>&1 > " + CFG_SETTINGS, "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: &> onto a frozen file stays frozen", "ls &> " + CFG_SETTINGS, "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a relative redirect inside the live pin stays frozen", "echo x > f", "deny",
+   "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a redirect onto a frozen file from a plain folder stays frozen",
+   "echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A DUP WRITTEN BEFORE A PATH. `2>&1 PATH` is one redirect and one argument: the `2>` is joined to
+# `&1`, so the path after them is an argument, not the target of a `2>`. Each ALLOW reads the path
+# or closes a descriptor. Each DENY still writes the path, through cp or tee.
+sh("frozen dup: cat 2>&1 before a frozen settings file is allowed", "cat 2>&1 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: grep 2>&1 before a frozen hook is allowed", "grep x 2>&1 " + CFG_HOOK,
+   "allow", cwd=NOGIT)
+sh("frozen dup: echo >&2 before a frozen settings file is allowed", "echo x >&2 " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: ls >&- before a frozen settings file is allowed", "ls >&- " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
+sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
+   "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
+   "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
@@ -11673,24 +11795,29 @@ OJ_GOAL = "Goal: keep the CI checks fast, and keep every check"
 OJ_STAKE = "Problem (risk): a wrong pick here changes what the guard lets through, so it needs your word"
 OJ_BASED = "Based on (read): the stamp check runs in the lint job today"
 OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
+# The Departs from line a question carries (rule question-departs, its cases in that section). A port item
+# carries it too, so the port rule's own no-line cases build their item without it (pq_item's default).
+QD_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
 
 
-def with_stake(item):
-    """The item with OJ_FORM on the lines before its context, and a gain and a lose on each option that
-    lacks one. An item with no context, or no options, stays as it is."""
+def with_stake(item, departs=True):
+    """The item with OJ_FORM on the lines before its context, a Departs from line after them unless `departs`
+    is False, and a gain and a lose on each option that lacks one. An item with no context, or no options,
+    stays as it is."""
     if isinstance(item.get("context"), str):
-        item["context"] = OJ_FORM + "\n" + item["context"]
+        lines = [OJ_FORM] + ([QD_LINE] if departs else [])
+        item["context"] = "\n".join(lines) + "\n" + item["context"]
     if isinstance(item.get("options"), list):
         item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
                            for o in item["options"]]
     return item
 
 
-def pq_item(**over):
+def pq_item(departs=False, **over):
     item = {"id": "suspense-cards", "kind": "decision", "status": "open", "title": PQ_TITLE,
             "context": PQ_CTX, "holds": PQ_HOLDS}
     item.update(over)
-    return with_stake({k: v for k, v in item.items() if v is not None})
+    return with_stake({k: v for k, v in item.items() if v is not None}, departs=departs)
 
 
 def pq(name, expected, item, action="set", **extra):
@@ -11712,24 +11839,27 @@ pq("the Departs from line is read in any case, at a line start", "allow",
    pq_item(port=True, context=PQ_CTX + "\ndeparts from: a.ts:f \u2014 x", holds=None))
 pq("a Departs from phrase mid-line does not count", "deny",
    pq_item(port=True, context="This item departs from: a.ts:f", holds=None))
-pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False))
+pq("port false is the writer's word and allows today's item", "allow", pq_item(port=False, departs=True))
 pq("a non-port item with holds is allowed", "allow",
-   pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits."))
+   pq_item(title="Which logo colour?", context="Brand colours differ.", holds="Release waits.", departs=True))
 pq("a database port question is not a port of an app", "allow",
-   pq_item(title="Which port should Postgres use?", context="Postgres needs a port.", holds="Setup waits."))
+   pq_item(title="Which port should Postgres use?", context="Postgres needs a port.", holds="Setup waits.",
+           departs=True))
 pq("switch ports in a rack are not a port of an app", "allow",
-   pq_item(title="Patch switch ports in rack A3", context="Rack A3 needs patching.", holds="Cabling waits."))
+   pq_item(title="Patch switch ports in rack A3", context="Rack A3 needs patching.", holds="Cabling waits.",
+           departs=True))
 pq("a taken port is not a port of an app", "allow",
-   pq_item(title="Dev setup", context="The port is taken.", holds="Setup waits."))
+   pq_item(title="Dev setup", context="The port is taken.", holds="Setup waits.", departs=True))
 pq("the incident's own wording is a known limit and is allowed", "allow",
    pq_item(title="Suspense cards when Card in Hand closes",
-           context="Duo version of the web screen.", holds="Card in Hand plan waits."))
-pq("an item with no kind is allowed", "allow", pq_item(kind=None))
+           context="Duo version of the web screen.", holds="Card in Hand plan waits.", departs=True))
+pq("an item with no kind is allowed", "allow", pq_item(kind=None, departs=True))
 pq("an items set to another artifact is allowed", "allow", pq_item(), url="https://claude.ai/artifact/other")
 pq("a dev server port is not a port of an app", "allow",
-   pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None))
+   pq_item(title="Dev server port 8080 is taken", context="The dev server port 8080 clashes.", holds=None,
+           departs=True))
 pq("a port number is not a port of an app", "allow",
-   pq_item(title="Pick the port number", context="Port 3000 clashes.", holds="Server waits."))
+   pq_item(title="Pick the port number", context="Port 3000 clashes.", holds="Server waits.", departs=True))
 pq("redesign with no Departs from line is denied", "deny",
    pq_item(title="Redesign of the login screen", context="The login screen is new.", holds=None))
 pq("a task about a port with no Departs from line is denied", "deny",
@@ -12131,7 +12261,7 @@ ci("a terminal step with the command on the item is allowed", "allow",
    ci_task(CI_TERMINAL, command=CMD_BOTH_SHELLS))
 ci("a decision that opens a file and runs its command is not judged", "allow",
    {"id": CI_DOC, "kind": "decision", "status": "open", "title": "Delete the stale branches?",
-    "context": OJ_FORM + "\nThe plan file lists them.",
+    "context": OJ_FORM + "\n" + QD_LINE + "\nThe plan file lists them.",
     "options": [{"key": "a", "label": "Delete them",
                  "how": "Open plans/c152-stale-branch-deletes.md and run its command.", "gain": "g", "lose": "l"},
                 {"key": "b", "label": "Keep them", "how": "Do nothing yet.", "gain": "g", "lose": "l"}]})
@@ -12328,7 +12458,7 @@ gl("ssemwal-cdc on a repo not under shivinate7 in powershell only is allowed", "
 # A decision is not judged: it carries the command, with the form lines and gain and lose, and no switch.
 wp_write("gh login switch: a decision that holds a gh command with no switch is not judged", "allow", "gh-login-switch",
          {"id": GL_DOC, "kind": "decision", "status": "open", "title": "Protect main on claude-settings?",
-          "context": OJ_FORM + "\nThe branch rule needs admin, and the active login decides who can run it.",
+          "context": OJ_FORM + "\n" + QD_LINE + "\nThe branch rule needs admin, and the active login decides who can run it.",
           "command": {"powershell": GL_PATCH, "mac": GL_PATCH},
           "options": [{"key": "a", "label": "Apply the rule", "how": "Run the command the item holds.",
                        "gain": "g", "lose": "l"},
@@ -12388,7 +12518,7 @@ tn("an update that carries kind task, context and a Why yours line is allowed", 
 tn("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
 tn("an update of the rank only is allowed", "allow", {"rank": 3}, action="update")
 # The form lines keep this case on the task rule; the question form reads them (OJ_FORM).
-tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + TN_CTX))
+tn("a decision is not judged", "allow", tn_task(kind="decision", context=OJ_FORM + "\n" + QD_LINE + "\n" + TN_CTX))
 tn("an items set to another artifact is allowed", "allow", tn_task(), url="https://claude.ai/artifact/other")
 add("task names its check: a batch with a task that has no Why yours line is denied", "deny", "task-names-check",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
@@ -12446,9 +12576,10 @@ OJ_OPTIONS = [
      "gain": "The lint job gets faster.", "lose": "The test job runs longer."}]
 
 
-def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX):
-    """The context of a decision: the form lines, then the prose. A line passed as None or empty is left out."""
-    return "\n".join(line for line in (goal, problem, *based, tail) if line)
+def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE):
+    """The context of a decision: the form lines, the Departs from line, then the prose. A line passed as None or
+    empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, departs, tail) if line)
 
 
 OJ_GOOD = oj_ctx()
@@ -12662,9 +12793,124 @@ oj("file_path data with the form is allowed", "allow", None, file_path=OJ_FILE_G
 wp_write("owner judge: a widening pick with the form lines is refused by uniform-pick", "deny",
          "uniform-pick", oj_item(context=OJ_GOOD, options=[UP_WIDE, UP_MATCH]), doc_id=OJ_DOC)
 wp_write("owner judge: a port with no Departs from line and the form lines is refused by port-question",
-         "deny", "port-question", oj_item(context=oj_ctx(tail=PQ_CTX)), doc_id=OJ_DOC)
+         "deny", "port-question", oj_item(context=oj_ctx(departs=None, tail=PQ_CTX)), doc_id=OJ_DOC)
 wp_write("owner judge: a press with no link and the form lines is refused by press-link", "deny",
          "press-link", oj_item(context=OJ_GOOD, options=[PL_BAD_OPT, PL_KEEP_OPT]), doc_id=OJ_DOC)
+
+
+# --------------------------------------------------------------------------- a question says how it departs from main
+FAMILY = "question-departs"
+#
+# Rule question-departs (decision owner-judge's ruling, Oct 30: a question to the owner that restates main is
+# not a question). A decision carries a line at a line start in `context`: `Departs from: <what on main> — <what
+# changes>`. Both sides are non-empty, and the change side is not a restatement of main. The check runs after
+# the form and the older rules, at the same ArtifactData call. A closed decision, a task, a note, an update that
+# carries no context, and another artifact's page are not judged. The line sits in `context` only.
+
+QD_DOC = "departs-item"
+QD_RESTATE = "Departs from: agent-model-cap — Opus above the row stays the existing ask"
+QD_WHY = "Why yours: a session on your computer was asked first and none could reach the remote"
+
+
+def qd_item(**over):
+    item = {"id": QD_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
+            "context": oj_ctx(), "options": OJ_OPTIONS, "pick": "a",
+            "why": "The lint job already holds the other format checks."}
+    item.update(over)
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def qd(name, expected, item, action="set", **extra):
+    kw = dict(action=action, collection="items", doc_id=QD_DOC, data=item)
+    kw.update(extra)
+    add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
+
+
+qd("a decision with the form and no Departs from line is denied", "deny", qd_item(context=oj_ctx(departs=None)))
+qd("the refusal says to add the line", "deny", qd_item(context=oj_ctx(departs=None)), carries=("Departs from",))
+qd("an empty Departs from line is denied", "deny", qd_item(context=oj_ctx(departs="Departs from:")))
+qd("a line with no change side is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp —")))
+qd("a line with no separator is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp")))
+qd("a line with no left side is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: — the stamp check moves to the lint job")))
+qd("a line that restates main is denied", "deny", qd_item(context=oj_ctx(departs=QD_RESTATE)))
+qd("a line whose change side is none is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — none")))
+qd("a line whose change side is STAYS, in any case, is denied", "deny",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — STAYS in the lint job")))
+qd("a Departs from phrase mid-line does not count", "deny",
+   qd_item(context=oj_ctx(departs="Why: Departs from: lint/stamp.py:run_stamp — the stamp moves")))
+qd("a line in why, not in context, is denied", "deny", qd_item(context=oj_ctx(departs=None), why=QD_LINE))
+qd("a line in an option, not in context, is denied", "deny",
+   qd_item(context=oj_ctx(departs=None), options=[dict(OJ_OPTIONS[0], how=QD_LINE), OJ_OPTIONS[1]]))
+qd("a valid line is allowed", "allow", qd_item())
+qd("a valid line with a hyphen separator is allowed", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp - the stamp moves to the lint job")))
+qd("a change side that holds the word nonetheless is allowed", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves")))
+qd("comment openers and an apostrophe in the change side are plain text", "allow",
+   qd_item(context=oj_ctx(departs="Departs from: lint/stamp.py:run_stamp — don't parse // or /* or # here")))
+
+qd("a closed decision with the chat answer and no Departs from line is allowed", "allow",
+   qd_item(status="closed", context=OJ_ANSWERED))
+qd("a closed decision with the form and no Departs from line is allowed", "allow",
+   qd_item(status="closed", context=oj_ctx(departs=None)))
+qd("a task with a Why yours line and no Departs from line is allowed", "allow",
+   {"id": QD_DOC, "kind": "task", "status": "open", "title": "Merge the batch", "steps": ["Open Terminal"],
+    "context": QD_WHY})
+qd("a note with the form and no Departs from line is allowed", "allow",
+   qd_item(kind="note", context=oj_ctx(departs=None)))
+qd("an update of the status only is allowed", "allow", {"status": "closed"}, action="update")
+qd("an update that carries kind decision and no context is allowed", "allow",
+   {"kind": "decision", "title": "Which CI job runs the check?"}, action="update")
+qd("an update that carries kind decision and a context with no Departs from line is denied", "deny",
+   {"kind": "decision", "context": oj_ctx(departs=None)}, action="update")
+qd("an update that carries kind decision and a context with a restating line is denied", "deny",
+   {"kind": "decision", "context": oj_ctx(departs=QD_RESTATE)}, action="update")
+qd("an update that carries kind decision and a context with the line is allowed", "allow",
+   {"kind": "decision", "context": oj_ctx()}, action="update")
+qd("an items set to another artifact is allowed", "allow", qd_item(context=oj_ctx(departs=None)),
+   url="https://claude.ai/artifact/other")
+qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="answers")
+add("question departs: a repo with no waiting page allows a decision with no line", "allow", tool="ArtifactData",
+    cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=QD_DOC,
+    data=qd_item(context=oj_ctx(departs=None)))
+
+# The older rules and the form keep their ids: this check runs after them.
+wp_write("question departs: a decision with no Goal and no line is refused as question-form", "deny",
+         "question-form", qd_item(context=oj_ctx(goal=None, departs=None)), doc_id=QD_DOC)
+wp_write("question departs: a port with no line is refused as port-question", "deny", "port-question",
+         qd_item(context=oj_ctx(departs=None, tail=PQ_CTX)), doc_id=QD_DOC)
+wp_write("question departs: a widening pick with no line is refused as uniform-pick", "deny", "uniform-pick",
+         qd_item(context=oj_ctx(departs=None), options=[UP_WIDE, UP_MATCH], pick="a"), doc_id=QD_DOC)
+
+
+def qd_replace(name, expected, old, new, field="context"):
+    add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items", doc_id=QD_DOC,
+        field=field, old_str=old, new_str=new)
+
+
+qd_replace("a str_replace that drops the Departs from line from context is denied", "deny", QD_LINE, "")
+qd_replace("a str_replace that drops the line and keeps the form is denied", "deny", oj_ctx(), oj_ctx(departs=None))
+qd_replace("a str_replace that swaps the line for another valid line is allowed", "allow", QD_LINE,
+           "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job")
+qd_replace("a str_replace that keeps the line and changes the prose is allowed", "allow", oj_ctx(),
+           oj_ctx(tail="The stamp check runs in the test job today."))
+qd_replace("a str_replace whose old_str holds no Departs from line is allowed", "allow", OJ_CTX,
+           "The stamp check runs in the test job today.")
+qd_replace("a str_replace on the title is not judged", "allow", QD_LINE, "", field="title")
+
+add("question departs: a batch with a decision that has no line is denied", "deny", "question-departs",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": QD_DOC, "data": qd_item(context=oj_ctx(departs=None))}])
+add("question departs: a batch of decisions that each carry a line is allowed", "allow", tool="ArtifactData",
+    cwd=PQ_REPO, url=PQ_URL, action="batch",
+    writes=[{"op": "set", "collection": "items", "doc_id": QD_DOC, "data": qd_item()},
+            {"op": "set", "collection": "items", "doc_id": "departs-second", "data": qd_item(id="departs-second")}])
 
 
 # --------------------------------------------------------------------------- an item field the page renders
@@ -12700,7 +12946,8 @@ os.makedirs(os.path.join(ROOT, "ifr"), exist_ok=True)
 
 def if_item(**over):
     """A decision that every other waiting-page rule passes, with `over` on top. A None value drops a key."""
-    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None, **over})
+    return pq_item(**{"title": "Which logo colour?", "context": "Brand colours differ.", "holds": None,
+                      "departs": True, **over})
 
 
 def if_page(slug, body):

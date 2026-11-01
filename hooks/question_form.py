@@ -14,6 +14,7 @@ THE FORM. A decision on the page (in `context`), or a chat question with 2+ opti
     Goal: <the goal, in the owner's terms>
     Problem (<stake>): <the problem in one plain sentence, and why it needs his word>
     Based on (<kind>): <one premise>                                  one to three lines
+    Departs from: <what on main> — <what changes>                     after the form; every such line must be valid
 
 <stake> is one of OWNER_STAKES. A stood pick (`stands: true`) may write `Problem: <text>` with no stake.
 <kind> is one of PREMISE_KINDS. Each option states its gain and its loss: page `gain` and `lose` fields;
@@ -24,7 +25,11 @@ THE OLDER RULES keep their ids and run first, in this order, then the form:
 `gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`. A Problem line that is
-bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`.
+bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`. When all of those pass, a missing
+or empty `Departs from:` line (a bullet or bold label is read), a line with no separator (" — ", an unspaced
+"—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
+nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
+in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
 position's letter) and `rework-off-page` (an open item never says it is being reworked).
 
@@ -131,6 +136,57 @@ def _effects_hit(pairs):
     return PASS
 
 
+# ------------------------------------------------------------------ a question departs from main
+#
+# docs/decisions/port-keeps-behaviour.md, rule `question-departs`, built against a named incident
+# (incident in the record): a lane's "departures" said "Opus above a role's row stays the
+# existing ask", which restates decision agent-model-cap. A question to the owner that restates main is not a
+# question (rule building-port-keeps-behaviour). Each line at a line start `Departs from: <what on main> —
+# <what changes>` must hold both sides, and the change side must not say there is no change. This is the
+# one predicate: the chat box, a page decision and the report's Input Needed pick all call it.
+DEPARTS_RULE = "question-departs"
+# The one pattern for a Departs from line: at a line start, with an optional bullet ("- ", "* ") and an
+# optional bold label ("**Departs from:**"). Group 1 is the rest of the line; a CR from CRLF is no part of it.
+DEPARTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Departs from(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
+# The separator: an em dash, spaced or not, or " - " or " -- ". The first one splits the line.
+DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
+# Whole words and phrases that say the change side restates main. "stay", "remain" and "kept" are not
+# here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
+NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
+                       r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
+# A side that is only an angle-bracket placeholder is the template copied verbatim.
+PLACEHOLDER_SIDE = re.compile(r"<[^<>\n]*>")
+DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
+                  "\"Departs from: <what on main> \u2014 <what changes>\", with both sides filled and a change that "
+                  "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
+                  "only restates what main does, do not ask: act on main's behaviour.")
+PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+
+
+def departs_hit(text) -> str:
+    """The miss reason when `text` lacks a valid Departs from line, else "". Every such line must hold a
+    non-empty side on each side of the first separator (see DEPARTS_SEPARATOR), neither side only a
+    placeholder, and no no-change word in the first clause of the change side: the part before its first
+    ";", or the whole side with none. A word after the ";" says what the change does."""
+    text = str(text or "")
+    lines = DEPARTS_LINE.findall(text)
+    if not lines:
+        return "no Departs from line"
+    for rest in lines:
+        parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
+        if len(parts) < 2:
+            return "Departs from line with no \u2014, - or -- separator between what is on main and what changes"
+        main, change = parts[0].strip(), parts[1].strip()
+        if not main or not change:
+            return "Departs from line with an empty side"
+        if PLACEHOLDER_SIDE.fullmatch(main) or PLACEHOLDER_SIDE.fullmatch(change):
+            return "Departs from line with a side that is only a placeholder: write the real text"
+        word = NO_CHANGE.search(change.split(";", 1)[0])
+        if word:
+            return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
+    return ""
+
+
 # ------------------------------------------------------------------ a port question departs or is not asked
 #
 # docs/decisions/port-keeps-behaviour.md, rule `port-question`, built against a named incident
@@ -139,7 +195,6 @@ def _effects_hit(pairs):
 # the question. The item is read at the ArtifactData call that writes it.
 PORT_WORD = re.compile(r"\b(?:ported|porting|port\s+of|port\s+to|ports\s+the|redesign(?:s|ed|ing)?"
                        r"|rewrite\s+of|rebuild\s+of)\b", re.I)
-DEPARTS_LINE = re.compile(r"^\s*Departs from:", re.I | re.M)
 PORT_REASON = ("A question about a port or redesign of an existing app is asked only when the work "
                "departs from the app, and it never holds work. Add a line to context that starts "
                "\"Departs from: <file>:<symbol> — <what changes>\", leave out holds, or set "
@@ -572,14 +627,21 @@ def decision_form_hit(op: str, data):
             return PASS
     elif data.get("kind") != "decision":
         return PASS
-    if op == "set" or "context" in data:
+    judged_context = op == "set" or "context" in data
+    if judged_context:
         hit = _lines_hit(str(data.get("context") or ""), data.get("stands") is True)
         if hit[0]:
             return hit
     options = data.get("options")
     if (op == "set" or "options" in data) and isinstance(options, list):
-        return _effects_hit([("%d" % i, _filled(o.get("gain")), _filled(o.get("lose")))
-                             for i, o in enumerate(options, 1) if isinstance(o, dict)])
+        hit = _effects_hit([("%d" % i, _filled(o.get("gain")), _filled(o.get("lose")))
+                            for i, o in enumerate(options, 1) if isinstance(o, dict)])
+        if hit[0]:
+            return hit
+    if judged_context:
+        miss = departs_hit(str(data.get("context") or ""))
+        if miss:
+            return DEPARTS_RULE, miss
     return PASS
 
 
@@ -608,6 +670,12 @@ def form_str_replace_hit(entry):
         return FORM_RULE, "context edit that removes the Problem line"
     if BASED_LABEL.search(old) and not BASED_LABEL.search(new):
         return FORM_RULE, "context edit that removes the Based on line"
+    # A context edit that holds a Departs from line in old_str or new_str keeps a valid one: dropping it, or
+    # writing one that restates main, is refused. An edit with no such line in either is not judged.
+    if DEPARTS_LINE.search(old) or DEPARTS_LINE.search(new):
+        miss = departs_hit(new)
+        if miss:
+            return DEPARTS_RULE, "context edit that leaves no valid Departs from line (%s)" % miss
     return PASS
 
 
@@ -861,12 +929,17 @@ def _chat_question_hit(question, options):
         # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
         if not _press_field_ok(label + ". " + EFFECT_TEXT.sub("", desc), links):
             return "press-link", "option presses in a web app with no url to the page"
-    hit = _lines_hit(str(question.get("question") or ""))
+    text = str(question.get("question") or "")
+    hit = _lines_hit(text)
     if hit[0]:
         return hit
-    return _effects_hit([("'%s'" % (_option_text(o, "label") or i), bool(GAIN_TEXT.search(_option_text(o, "description"))),
-                          bool(LOSE_TEXT.search(_option_text(o, "description"))))
-                         for i, o in enumerate(options, 1)])
+    hit = _effects_hit([("'%s'" % (_option_text(o, "label") or i), bool(GAIN_TEXT.search(_option_text(o, "description"))),
+                         bool(LOSE_TEXT.search(_option_text(o, "description"))))
+                        for i, o in enumerate(options, 1)])
+    if hit[0]:
+        return hit
+    miss = departs_hit(text)
+    return (DEPARTS_RULE, miss) if miss else PASS
 
 
 # ------------------------------------------------------------------ the reasons, one table per surface
@@ -875,9 +948,10 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
+                DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
                      % ", ".join(OWNER_STAKES))
 CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LINK_REASON,
-                FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON}
+                FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON, DEPARTS_RULE: DEPARTS_REASON}

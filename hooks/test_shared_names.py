@@ -31,7 +31,25 @@ sys.path.insert(0, HERE)
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 WATCHED = tuple(name.lstrip("/") for name in FROZEN_FILES)
-MACHINE_TAGS = ("<system-reminder>", "<task-notification>")  # pinned; shared_names.py holds the one copy
+MACHINE_TAGS = (  # pinned; shared_names.py holds the one copy
+    "<system-reminder>",
+    "<task-notification>",
+    "<agent-message>",
+    "<agent-message ",
+    "<agent-message\t",
+    "<agent-message\n",
+    "<agent-message\r",
+    "Another Claude session sent a message:\n<agent-message>",
+    "Another Claude session sent a message:\n<agent-message ",
+    "Another Claude session sent a message:\n<agent-message\t",
+    "Another Claude session sent a message:\n<agent-message\n",
+    "Another Claude session sent a message:\n<agent-message\r",
+    "Another Claude session sent a message while you were working:\n<agent-message>",
+    "Another Claude session sent a message while you were working:\n<agent-message ",
+    "Another Claude session sent a message while you were working:\n<agent-message\t",
+    "Another Claude session sent a message while you were working:\n<agent-message\n",
+    "Another Claude session sent a message while you were working:\n<agent-message\r",
+)
 GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN = "shivinate7", "ssemwal-cdc"  # pinned; the owner's ruling, Oct 31 14:55 CDT
 CLOCK = "2026-07-04T10:30:00-05:00"
 TIME_LINE = "Local time: 2026-07-04 10:30 CDT (UTC-05:00)\n"

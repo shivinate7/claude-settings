@@ -8,6 +8,7 @@
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
+. "$root/lint/_test_git.sh"  # test-run signing opt-out
 script=${IOS_SHIP:-$root/bin/ios-ship}
 fail=0; pass_n=0; fail_n=0; failed=
 why=
