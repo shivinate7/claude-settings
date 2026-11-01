@@ -20,8 +20,10 @@ and lost the rest, and the old `fb` and `fb done` words were easy to forget.
   start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
-  text. It is never captured, and it does not count toward a burst. Messages from other sessions are
-  not captured.
+  text. It is never captured, and it does not count toward a burst. Hand-backs and the
+  `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01
+  04:29 CST, covering this skip only; debt `inbox-saves-other-notices`, which tracks other notices
+  the inbox saves). Other peer messages are skipped only where a tag marks them.
 - **Burst.** A turn's messages are the ones captured since the last Stop. They are a burst when there
   are two or more, or when one message has three or more non-blank lines or two or more bullet lines.
   Only a burst's messages need items. A lone message of one or two plain lines never triggers the guard.
