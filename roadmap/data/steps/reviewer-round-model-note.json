@@ -1,9 +1,9 @@
 {
   "title": "A round-2 or round-3 reviewer spawn below Sonnet is caught",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33769,
   "why": "Finding (coordinator, Nov 1 09:03 CST): lane renovate-917-918 ran its round-2 and round-3 reviewers on haiku, against rule roles-third-round-steps-up (reviewers run Sonnet from round 2). Check spawn-model-check (#899) let it through: it checks the role's model, not the round. The lane is re-reviewing on sonnet.",
-  "note": "Triage judged it a note (roles-findings-are-debts-or-notes): first case seen. It becomes a debt if it repeats. A record lane adds one line to docs/debts/notes.md, slug reviewer-round-model-unchecked, pointing to decision agent-model-cap. Done check: the line is in notes.md and ste-lint passes. Needs no answer. Built: draft PR #945 (head 13d08198); with the batch runner (coordinator, Nov 1 09:05 CST).",
-  "updatedAt": "2026-11-01T15:10:00Z"
+  "note": "Triage judged it a note (roles-findings-are-debts-or-notes): first case seen. It becomes a debt if it repeats. A record lane adds one line to docs/debts/notes.md, slug reviewer-round-model-unchecked, pointing to decision agent-model-cap. Done check: the line is in notes.md and ste-lint passes. Needs no answer. Built: draft PR #945 (head 13d08198); with the batch runner (coordinator, Nov 1 09:05 CST). Landed on main in batch 49, #945 (commit 13d08198), main 2039b938, Nov 1 09:19 CST.",
+  "updatedAt": "2026-11-01T15:22:00Z"
 }
