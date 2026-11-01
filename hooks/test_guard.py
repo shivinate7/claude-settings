@@ -66,6 +66,9 @@ import mutate_shared  # noqa: E402  module_files: every module a copied guard ma
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
 VCS = "g" + "it"
+# The settings file sets the agent model to sonnet (decision agent-model-cap), and every guard run in
+# this suite inherits that. A case that tests the unset or empty default names its own `env`.
+os.environ["CLAUDE_CODE_SUBAGENT_MODEL"] = "sonnet"
 
 CASES = []
 
@@ -112,6 +115,7 @@ FAMILIES = {
     "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "rule9": "rule 9, the agent model floor",
+    "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
@@ -301,6 +305,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "no_root": no_root,
         # A case that must be judged within this many seconds. A slower verdict fails the case.
         "max_seconds": max_seconds,
+        # Variables this case sets on the guard's environment. A None value unsets one (see decide).
         "env": env,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
@@ -13231,7 +13236,11 @@ def decide(case):
     # dropped here too. A step-grant case sets its own through `env`.
     env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
-    env.update(case.get("env") or {})   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
+    for name, value in (case.get("env") or {}).items():   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
+        if value is None:   # None unsets the variable, as a case that tests the missing default needs
+            env.pop(name, None)
+        else:
+            env[name] = value
     if case.get("no_root"):   # no forced root, and a PATH with no `ps`: the root is unknown
         env.pop("CLAUDE_GUARD_ROOT_PID")
         env["PATH"] = NOPS
@@ -14001,8 +14010,8 @@ for _tool in ("Agent",):
         add("floor: %s %r with model haiku is denied" % (_tool, _near), "deny",
             "agent-model-floor", tool=_tool, prompt="do it", model="haiku",
             subagent_type=_near)
-add("floor: Agent record-writer with model sonnet is still allowed", "allow",
-    tool="Agent", prompt="x", model="sonnet", subagent_type="record-writer")
+# record-writer on sonnet was allowed here until the role table denied it (the agent-role-model cases,
+# near the end of this file, hold the new expectation).
 
 # ---- Step-up (rule roles-third-round-steps-up, decision agent-model-cap). The brief's fixed form
 # "Round N of 3" steps a reviewer up: the second needs sonnet, the third sonnet or opus. The
@@ -18164,7 +18173,7 @@ GS_LANE = "a1b2c3"  # the lane: its step names it as session_<this>
 GS_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_" + GS_LANE}  # the environment names it as cse_<this>
 GS_STEP = "step-a"  # the step bound to this lane
 GS_AT = "2026-10-17T10:00:00-05:00"  # a grant time before the clock these cases run at
-GS_SONNET = {"prompt": "Round 1 of 3. Review the diff.", "model": "sonnet", "subagent_type": "reviewer"}
+GS_SONNET = {"prompt": "Round 2 of 3. Review the diff.", "model": "sonnet", "subagent_type": "reviewer"}
 GS_WIZARD = {"prompt": "Round 1 of 3. Start the fix.", "model": "claude-opus-5-5", "subagent_type": "wizard"}
 GS_BAD = ("roadmap/data/steps/%s.json" % GS_STEP,  # a bound record cut short: it does not parse
           '{"id": "%s", "lane": "session_%s", "status": ' % (GS_STEP, GS_LANE))
@@ -19715,6 +19724,298 @@ def shard_split_check():
 LOG_CHECKS_EXTRA.append(("GUARD_SHARD: the shards are disjoint and hold every case", shard_split_check))
 LOG_FAMILY["GUARD_SHARD: the shards are disjoint and hold every case"] = "misc"
 FIXTURELESS_CHECKS.add(shard_split_check)
+
+
+# =========================================================================== agent role model
+#
+# Rule agent-role-model (decision agent-model-cap). Three parts, one reader of the table:
+#   1. A spawn whose model ranks above its role's row is denied. The row is read at each spawn from
+#      the pointer checkout's docs/decisions/agent-model-cap.md, so the guard holds no copy of it.
+#   2. A spawn with no model, whose role has no `model:` pin in the pointer's agents/<file>.md, is
+#      denied when CLAUDE_CODE_SUBAGENT_MODEL is unset or empty in the guard's environment.
+#   3. A decision file that cannot be read fails open: the spawn passes, and guard.log gets one
+#      unread line.
+# The pointer is the checkout the owner's global rules name. The cases that judge the owner's rows
+# name the real checkout (REPO), so they judge the rows the owner set. Opus is never this rule's
+# deny: an Opus spawn above a sonnet row stays the agent-model-cap ask (rule 9d).
+FAMILY = "role-model"
+ROLE_RULE = "agent-role-model"
+ROLE_REMEDY = "drop the model field, or name the role's model"
+ROLE_DEFAULT_REMEDY = "name the role's model (sonnet)"
+# A refusal for this rule names its remedy and no other target: not the table, not the agents folder.
+ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
+UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
+EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
+SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
+
+ROLE_TABLE_HEAD = "# Agent model cap\n\n| Point | Model | Effort |\n|---|---|---|\n"
+ROLE_TABLE_TEST_AUTHOR_HAIKU = ROLE_TABLE_HEAD + "| test-author | haiku | xhigh |\n"
+ROLE_TABLE_TEST_AUTHOR_SONNET = ROLE_TABLE_HEAD + "| test-author | sonnet | high |\n"
+# The qualifier rows (`reviewer, rounds 2 and 3`, `builder, try 3 after`, `... that audits`) name no role.
+ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
+    "| Explore, claude-code-guide | haiku | xhigh |\n"
+    "| Explore that audits or judges meaning, not a plain search | sonnet, or opus on the owner's grant | high |\n"
+    "| test-author | haiku | xhigh |\n"
+    "| reviewer | haiku | xhigh |\n"
+    "| reviewer, rounds 2 and 3 | sonnet, the ceiling | high |\n"
+    "| builder | sonnet | high |\n"
+    "| builder, try 3 after a FAIL at review round 2 | opus | high |\n"
+    "| `planner` (`agents/planner.md`) | sonnet | high |\n"
+    "| general-purpose, `claude` | sonnet, by the default | model default |\n")
+ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
+                   "reviewer": "haiku", "builder": "sonnet", "planner": "sonnet",
+                   "general-purpose": "sonnet", "claude": "sonnet"}
+# The owner's real decision file: each role, with the first word of its Model cell.
+ROLE_REAL_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
+                  "reviewer": "haiku", "record-writer": "haiku", "builder": "sonnet", "Plan": "opus",
+                  "designer": "opus", "design-reviewer": "opus", "general-purpose": "sonnet",
+                  "claude": "sonnet"}
+# Bytes that are not text, so no reader can take the decision file as a table.
+ROLE_TABLE_UNREADABLE = b"# Agent model cap\n\xff\xfe\x80 not text\n"
+
+
+def role_table(name, table=None):
+    """A pointer checkout under this run's folder, and its decision file when `table` is given: text,
+    or bytes that are not text. Returns the checkout's folder."""
+    pointer = os.path.join(ROOT, "rolepointer", name)
+    os.makedirs(pointer, exist_ok=True)
+    if table is not None:
+        path = os.path.join(pointer, "docs", "decisions", "agent-model-cap.md")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(table if isinstance(table, bytes) else table.encode("utf-8"))
+    return pointer
+
+
+def role_config(name, pointer):
+    """A config folder whose global rules name the pointer checkout `pointer`, by its `@<path>/CLAUDE.md` line."""
+    config = os.path.join(ROOT, "rolecfg", name)
+    write(os.path.join(config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % slash(pointer))
+    return config
+
+
+ROLE_REAL_CFG = role_config("real", REPO)
+ROLE_MISSING_CFG = role_config("missing", role_table("missing"))
+ROLE_UNREADABLE_CFG = role_config("unreadable", role_table("unreadable", ROLE_TABLE_UNREADABLE))
+ROLE_LIVE_POINTER = role_table("live", ROLE_TABLE_TEST_AUTHOR_HAIKU)
+ROLE_LIVE_CFG = role_config("live", ROLE_LIVE_POINTER)
+ROLE_RULES_POINTER = role_table("rules", ROLE_TABLE_RULES)
+
+
+def role_input(role, model, prompt):
+    """A spawn's tool input. `role` and `model` are left out when they are None."""
+    spawn = {"prompt": prompt}
+    if role is not None:
+        spawn["subagent_type"] = role
+    if model is not None:
+        spawn["model"] = model
+    return spawn
+
+
+def role_spawn(config, spawn, tool="Agent", env=None):
+    """Judge one spawn under `config`, as decide() judges a case, and return (decision, reason)."""
+    return decide({"raw": None, "tool": tool, "tool_input": spawn, "cwd": None, "session": None,
+                   "env_path": None, "config": config, "env": env, "transcript": None, "agent_id": None,
+                   "agent_type": None, "event": None, "stop_active": False, "no_root": False,
+                   "max_seconds": None, "temp": None, "process_cwd": None})
+
+
+def role_model_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, carries=(ROLE_REMEDY,), env=None):
+    add(name, "deny", ROLE_RULE, tool=tool, config=config, env=env, carries=carries, lacks=ROLE_LACKS,
+        **role_input(role, model, prompt))
+
+
+def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, env=None):
+    add(name, "allow", tool=tool, config=config, env=env, **role_input(role, model, prompt))
+
+
+def role_ask(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
+    add(name, "ask", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
+        **role_input(role, model, prompt))
+
+
+# ---- B: a model above its role's row is denied. The reason holds the remedy and no other target.
+role_model_refuse("role-model: test-author on sonnet is denied", "test-author", "sonnet",
+          "Write the failing cases.")
+role_model_refuse("role-model: the same spawn as a Task is denied", "test-author", "sonnet",
+          "Write the failing cases.", tool="Task")
+role_model_refuse("role-model: reviewer on sonnet with no round line is denied", "reviewer", "sonnet",
+          "Check the diff for typos.")
+role_model_refuse("role-model: reviewer on sonnet with a Round 1 of 3 line is denied (round 1 runs on the row)",
+          "reviewer", "sonnet", "Round 1 of 3. Check the diff for typos.")
+role_model_refuse("role-model: record-writer on sonnet is denied", "record-writer", "sonnet", "Record the decision.")
+role_model_refuse("role-model: claude-code-guide on sonnet is denied", "claude-code-guide", "sonnet",
+          "How do the hooks load?")
+role_model_refuse("role-model: test-author on the full sonnet id is denied", "test-author", "claude-sonnet-5-5",
+          "Write the failing cases.")
+# A model the table does not rank is above any row below opus: fail closed. Its rank is unruled, so none is guessed.
+role_model_refuse("role-model: fable on builder is denied, a model the table does not rank fails closed",
+          "builder", "fable", "Fix the failing case.")
+role_model_refuse("role-model: fable on test-author is denied, a model the table does not rank fails closed",
+          "test-author", "fable", "Write the failing cases.")
+role_model_refuse("role-model: claude-fable-5-1 on reviewer with no round line is denied, fails closed",
+          "reviewer", "claude-fable-5-1", "Check the diff for typos.")
+# A role written with a capital letter or a trailing space is the same role, so it takes its row.
+role_model_refuse("role-model: role Test-author on sonnet is denied, matched to its row",
+          "Test-author", "sonnet", "Write the failing cases.")
+role_model_refuse("role-model: role with a trailing space on sonnet is denied, matched to its row",
+          "test-author ", "sonnet", "Write the failing cases.")
+role_model_refuse("role-model: role Reviewer on sonnet with no round line is denied, matched to its row",
+          "Reviewer", "sonnet", "Check the diff for typos.")
+
+# ---- C: at or below the row passes, and an Opus spawn above a sonnet row only asks (rule 9d).
+role_model_allow("role-model: Explore on sonnet is allowed (an audit Explore)", "Explore", "sonnet",
+           "Audit the glossary for meaning drift.")
+role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
+           "Round 2 of 3. Re-check the diff.")
+role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
+           "Round 3 of 3. Re-check the diff.")
+role_model_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
+           "Fix the failing case.")
+role_model_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
+           "Draw the mockup.")
+role_model_allow("role-model: a role not in the table on sonnet is allowed", "scout", "sonnet", "Look around.")
+role_model_allow("role-model: test-author on haiku is allowed (its own row)", "test-author", "haiku",
+           "Write the failing cases.")
+role_model_allow("role-model: test-author on the full haiku id is allowed", "test-author", "claude-haiku-5-5",
+           "Write the failing cases.")
+role_model_allow("role-model: Plan on sonnet is allowed (below its row)", "Plan", "sonnet", "Plan the change.")
+role_model_allow("role-model: general-purpose on sonnet is allowed", "general-purpose", "sonnet", "Find the file.")
+role_model_allow("role-model: claude on sonnet is allowed", "claude", "sonnet", "Find the file.")
+role_model_allow("role-model: claude-code-guide on haiku is allowed", "claude-code-guide", "haiku",
+           "How do the hooks load?")
+role_ask("role-model: builder on opus with no round line asks, and is not this rule's deny",
+         "builder", "opus", "Fix the failing case.")
+role_ask("role-model: general-purpose on opus asks, and is not this rule's deny",
+         "general-purpose", "opus", "Find the file.")
+role_ask("role-model: test-author on opus asks, and is not this rule's deny",
+         "test-author", "opus", "Write the failing cases.")
+
+# ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
+role_model_refuse("role-model: builder with no model is denied when the default is unset",
+          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",
+          "general-purpose", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+role_model_refuse("role-model: claude with no model is denied when the default is unset",
+          "claude", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+role_model_refuse("role-model: a spawn with no role and no model is denied when the default is unset",
+          None, None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+role_model_refuse("role-model: a Task builder with no model is denied when the default is unset",
+          "builder", None, "Fix the failing case.", tool="Task", carries=(ROLE_DEFAULT_REMEDY,),
+          env=UNSET_DEFAULT)
+role_model_refuse("role-model: builder with no model is denied when the default is empty",
+          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
+role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
+           "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
+role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
+           "reviewer", None, "Check the diff for typos.", env=UNSET_DEFAULT)
+role_model_allow("role-model: test-author with no model is allowed when the default is unset (its file pins haiku)",
+           "test-author", None, "Write the failing cases.", env=UNSET_DEFAULT)
+role_model_allow("role-model: Explore with no model is allowed when the default is unset (its file pins haiku)",
+           "Explore", None, "Audit the glossary for meaning drift.", env=UNSET_DEFAULT)
+
+# ---- E: a decision file that cannot be read fails open. The spawn passes, and the rule never denies.
+role_model_allow("role-model: a missing decision file fails open for test-author on sonnet",
+           "test-author", "sonnet", "Write the failing cases.", config=ROLE_MISSING_CFG)
+role_model_allow("role-model: an unreadable decision file fails open for reviewer on sonnet",
+           "reviewer", "sonnet", "Check the diff for typos.", config=ROLE_UNREADABLE_CFG)
+role_model_allow("role-model: no pointer line fails open for test-author on sonnet",
+           "test-author", "sonnet", "Write the failing cases.", config=CFG)
+role_model_allow("role-model: a missing decision file never denies a builder with no model",
+           "builder", None, "Fix the failing case.", config=ROLE_MISSING_CFG, env=UNSET_DEFAULT)
+
+
+def role_model_reader():
+    """The guard's table reader, or None when the guard has none (the checks then fail and say so)."""
+    return getattr(_load_guard_module(), "role_model_table", None)
+
+
+def role_real_table_check():
+    """The owner's decision file reads to the rows the guard enforces: each role, with the first word of its Model cell."""
+    reader = role_model_reader()
+    if reader is None:
+        return False, "the guard has no role_model_table(root) to read the decision file"
+    try:
+        table = reader(REPO) or {}
+    except Exception as exc:
+        return False, "reading the real decision file raised %r" % (exc,)
+    wrong = sorted("%s reads %r, want %r" % (role, table.get(role), want)
+                   for role, want in ROLE_REAL_WANT.items() if table.get(role) != want)
+    if wrong:
+        return False, "; ".join(wrong[:3])
+    return True, "%d roles read from the real decision file, each to its row's first Model word" % len(
+        ROLE_REAL_WANT)
+
+
+def role_rules_check():
+    """Qualifier rows name no role, and a plain row reads its first Model word."""
+    reader = role_model_reader()
+    if reader is None:
+        return False, "the guard has no role_model_table(root) to read the decision file"
+    try:
+        table = reader(ROLE_RULES_POINTER)
+    except Exception as exc:
+        return False, "reading the decision file raised %r" % (exc,)
+    if table != ROLE_RULES_WANT:
+        return False, "the table reads as %r, want %r" % (table, ROLE_RULES_WANT)
+    return True, "the qualifier rows add no role, and each plain row reads its first Model word"
+
+
+def role_live_check():
+    """The table is read at each spawn: a row edited between two spawns changes the second verdict."""
+    spawn = role_input("test-author", "sonnet", "Write the failing cases.")
+    first = role_spawn(ROLE_LIVE_CFG, spawn)
+    if first[0] != "deny" or ROLE_RULE not in first[1]:
+        return False, "with the row at haiku the spawn is %s (%s), want a %s deny" % (
+            first[0], first[1][:70], ROLE_RULE)
+    write(os.path.join(ROLE_LIVE_POINTER, "docs", "decisions", "agent-model-cap.md"),
+          ROLE_TABLE_TEST_AUTHOR_SONNET)
+    second = role_spawn(ROLE_LIVE_CFG, spawn)
+    if second[0] != "allow":
+        return False, "with the row edited to sonnet the spawn is %s (%s), want allow" % (
+            second[0], second[1][:70])
+    return True, "the same spawn is denied at haiku and allowed once its row is edited"
+
+
+def role_unread_log_check(config, spawn, name):
+    """An unread decision file allows the spawn, and writes exactly one noted line for this rule."""
+    path = os.path.join(config, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    got, reason = role_spawn(config, spawn)
+    if got != "allow":
+        return False, "the spawn with the %s file is %s (%s), want allow" % (name, got, reason[:70])
+    if not os.path.exists(path):
+        return False, "no guard.log was written for the %s file" % name
+    with open(path, encoding="utf-8") as handle:
+        lines = [line for line in handle.read().splitlines() if ROLE_RULE in line]
+    if len(lines) != 1:
+        return False, "expected one %s line for the %s file, found %d" % (ROLE_RULE, name, len(lines))
+    fields = lines[0].split("\t")
+    if len(fields) < 5 or fields[2] != "noted" or "unread" not in fields[3] or ROLE_RULE not in fields[3]:
+        return False, "the line does not read noted, with an unread %s rule: %r" % (ROLE_RULE, lines[0])
+    return True, "the %s file allows the spawn, and logs one noted unread line" % name
+
+
+def role_unread_missing_check():
+    return role_unread_log_check(ROLE_MISSING_CFG, role_input("test-author", "sonnet", "Write the failing cases."),
+                                 "missing")
+
+
+def role_unread_bad_check():
+    return role_unread_log_check(ROLE_UNREADABLE_CFG, role_input("reviewer", "sonnet", "Check the diff for typos."),
+                                 "unreadable")
+
+
+for _label, _check in (
+    ("role-model: the owner's real decision file reads to the rows the guard enforces", role_real_table_check),
+    ("role-model: qualifier rows name no role, and a plain row reads its first Model word", role_rules_check),
+    ("role-model: the table is read at each spawn, so an edited row changes the next verdict", role_live_check),
+    ("role-model: a missing decision file logs one unread line and allows the spawn", role_unread_missing_check),
+    ("role-model: an unreadable decision file logs one unread line and allows the spawn", role_unread_bad_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)

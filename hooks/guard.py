@@ -112,6 +112,12 @@ Other tools, in `judge` order:
                        session's ExitWorktree. The reason names the EnterWorktree tool. The clone's
                        `.git`, a target outside the clone, reads and non-writing shell pass. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
+  agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
+                       (haiku < sonnet < opus), or that names no model where the role has no `model:`
+                       pin and no default model is set. Explore, a reviewer on a later-round brief
+                       and every Opus spawn pass it. An unread record
+                       passes and is noted as `agent-role-model-unread`. No override lifts it.
+                       (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
                        The Workflow scan is static. It reads string-literal `model` and
@@ -170,7 +176,7 @@ next refused act through, or every refused act for a time. The narrower Opus ove
 only the Opus spawn ask, and so does a step grant on the lane's roadmap step (decision agent-model-cap).
 No override lifts `frozen-path`, `git-env-set`, a kill of pid 0, 1 or -1, the
 role and model guards (the settings-write ask of `agent-model-cap`,
-`agent-model-floor`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
+`agent-model-floor`, `agent-role-model`, `roles-third-round-steps-up`, `builder-test-edit` and the other role guards),
 or `worktree-home`. No override check reaches the missing-module deny, the `settings.json` deny list
 or the `bin/rm` and `bin/merge` shims; each of those refusals says that no override lifts it. Every
 refusal that goes through refuse() ends with the line the owner types, or with that same sentence.
@@ -253,7 +259,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_head_hit,
+            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -1926,6 +1932,142 @@ def step_up_reason(prompt: str, role, model) -> str:
     return ""
 
 
+# THE ROLE MODEL ROW (rule agent-role-model, decision agent-model-cap). The model per role is read at each spawn from the
+# pointer checkout's decision record, so the guard holds no copy of the table. A row names a role in its first cell and a
+# model in its second; a first cell that holds anything but role words (a qualifier such as `reviewer, rounds 2 and 3`, a
+# skill, a hook) names no role, and the first row for a role wins. Cost per Agent or Task spawn: one read of the record and,
+# for a spawn with no model, one read of the agent files. No process starts and no file is written, except the one
+# `agent-role-model-unread` log line when a read fails.
+ROLE_MODEL_RANK = ("haiku", "sonnet", "opus")
+ROLE_TABLE_FILE = "agent-model-cap.md"   # inside the record folder that lint/layout.py names
+ROLE_TABLE_MAX = 256 * 1024
+ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
+ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
+ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
+ROLE_DEFAULT = "general-purpose"
+# Two points the owner has not ruled yet, each one line to flip. A role in ROLE_ABOVE_ROW_ROLES may name a model above its row.
+# A reviewer brief with a `Round N of 3` marker, N in ROLE_REVIEWER_FREE_ROUNDS, may too; add "1" there to let a reviewer on its first marker run above its row.
+ROLE_ABOVE_ROW_ROLES = ("Explore",)
+ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
+ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+ROLE_MODEL_REASON = (
+    "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
+    "field, or name the role's model. (decision agent-model-cap)"
+)
+ROLE_NO_MODEL_REASON = (
+    "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
+    "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
+    "(decision agent-model-cap)"
+)
+
+
+def role_model_table(pointer_root):
+    """{role: first word of its Model cell} read from the pointer checkout's decision record, or None when the
+    record is missing, not text, or holds no row. The one reader of the table."""
+    if not pointer_root:
+        return None
+    lint = os.path.join(_HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    try:
+        folder = layout.layout()["kinds"]["decisions"]["path"].strip("/")
+        with open(os.path.join(pointer_root, *folder.split("/"), ROLE_TABLE_FILE), encoding="utf-8") as handle:
+            text = handle.read(ROLE_TABLE_MAX)
+    except (OSError, ValueError, layout.LayoutError):
+        return None
+    table = {}
+    for line in text.splitlines():
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        names = [part.strip() for part in ROLE_PARENTHETICAL.sub("", cells[0]).replace("`", "").split(",")]
+        word = ROLE_FIRST_WORD.match(cells[1].replace("`", ""))
+        if not all(ROLE_WORD.match(name) for name in names) or not word or word.group(1).lower() not in ROLE_MODEL_RANK:
+            continue
+        for name in names:
+            table.setdefault(name, word.group(1).lower())
+    return table or None
+
+
+def role_has_model_pin(pointer_root, role):
+    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
+    frontmatter, False when none does, None when the folder cannot be read."""
+    folder = os.path.join(pointer_root, "agents")
+    try:
+        files = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+    except OSError:
+        return None
+    for name in files:
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                lines = handle.read(ROLE_TABLE_MAX).splitlines()
+        except (OSError, ValueError):
+            return None
+        if not lines or lines[0].strip() != "---":
+            continue
+        keys = {}
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            key, _, value = line.partition(":")
+            keys.setdefault(key.strip(), value.strip())
+        if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+            return True
+    return False
+
+
+def role_name(table, subagent_type) -> str:
+    """The role a spawn names, as the table spells it: matched without case and without surrounding space.
+    A role the table lacks keeps its own spelling, stripped. An empty role is the default role."""
+    role = str(subagent_type or "").strip() or ROLE_DEFAULT
+    return next((name for name in table if name.lower() == role.lower()), role)
+
+
+def role_model_check(tool: str, tool_input):
+    """(reason, matched, unread) for an Agent or Task spawn against its role's row. `reason` is the deny, or "".
+    `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
+    opus_spawn_hit. Explore and a reviewer on a
+    later-round brief run above the row by the table's own rows. Pure, so never_lifted may call it too."""
+    if tool not in SPAWN_TOOLS:
+        return "", "", False
+    pointer = pointer_checkout()
+    if not pointer:
+        return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
+    table = role_model_table(pointer)
+    if table is None:
+        return "", pointer, True
+    role = role_name(table, tool_input.get("subagent_type"))
+    model = str(tool_input.get("model") or "").strip()
+    if model:
+        top = len(ROLE_MODEL_RANK) - 1
+        named = next((rank for rank, word in reversed(list(enumerate(ROLE_MODEL_RANK))) if word in model.lower()), None)
+        row = table.get(role)
+        if named is None:
+            # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
+            named = top if row == ROLE_MODEL_RANK[top] else top + 1
+        if named == top or row is None or role in ROLE_ABOVE_ROW_ROLES:
+            return "", "", False
+        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
+                                                      for kind, n in brief_markers(tool_input.get("prompt"))):
+            return "", "", False
+        if named > ROLE_MODEL_RANK.index(row):
+            return ROLE_MODEL_REASON, model, False
+        return "", "", False
+    if os.environ.get(ROLE_MODEL_ENV, "").strip():
+        return "", "", False
+    pinned = role_has_model_pin(pointer, role)
+    if pinned is None:
+        return "", pointer, True
+    if pinned:
+        return "", "", False
+    row = table.get(role, "sonnet")
+    # A remedy never names Haiku: a role on a Haiku row has an agent file that pins it, so it rarely gets here.
+    return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), "no model, role " + role, False
+
+
 # THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
 # use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
 # size. Busy (memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB) refuses a Workflow and an
@@ -3050,7 +3192,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
     check."""
-    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input) or role_model_check(tool, tool_input)[0]
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
     if tool in SHELL_TOOLS:
@@ -3116,6 +3258,14 @@ def judge(payload) -> None:
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
+
+    # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is denied.
+    # An unread table or agent folder passes and logs one line. Opus is judged at 9d.
+    role_reason, role_matched, role_unread = role_model_check(tool, tool_input)
+    if role_unread:
+        record(tool, "noted", "agent-role-model-unread", role_matched)
+    if role_reason:
+        refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
     # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
     # It runs before the Opus ask, because a lifted ask exits refuse() at once and would skip this deny.
