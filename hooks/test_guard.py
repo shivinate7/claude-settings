@@ -103,6 +103,7 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "impeccable": "impeccable is review-only",
+    "debug-port-ask": "a launch that opens a remote-debugging port, or a WebView2 env value that holds one, asks; text that only names the flag is allowed",
     "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
     "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
     "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
@@ -11597,7 +11598,7 @@ sh("impeccable bash: detect on folders is allowed", "npx impeccable detect src/p
 
 
 # impeccable, round two (owner ruling 2026-10-10, decisions/design-skills.md): the plugin is not
-# installed. Its skill folder is pinned at skill-v4.5.2. Every Bash form below reaches the plugin's
+# installed. Its skill folder is pinned at skill-v4.8.0. Every Bash form below reaches the plugin's
 # build or settings commands, through a version pin, a runner flag or a different subcommand.
 
 sh("impeccable bash: a version-pinned hooks on is denied", "npx impeccable@4.5.2 hooks on", "deny",
@@ -11803,6 +11804,130 @@ def run_folder_sweep_case():
 FIXTURELESS_CHECKS.add(run_folder_sweep_case)
 LOG_CHECKS_EXTRA.append(("temp: the sweep removes an old sibling run folder and keeps a new one",
                          run_folder_sweep_case))
+
+
+# --------------------------------------------------------------------------- a debug port asks
+FAMILY = "debug-port-ask"
+#
+# Rule debug-port-ask: a launch that opens a remote-debugging port (either flag form, any value), or a
+# WebView2 environment value that holds one, ASKS. Impeccable 4.8.0's reference steps tell an agent to
+# start such a port, and main opens none without the owner (rule building-port-keeps-behaviour). Text
+# that only names the flag is no launch, so it stays an allow.
+
+sh("debug-port: electron with an equals-form port asks", "electron . --remote-debugging-port=9222",
+   "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: an app bundle with a space-form port asks",
+   "/Applications/Foo.app/Contents/MacOS/Foo --remote-debugging-port 9222", "ask",
+   "debug-port-ask", cwd=NOGIT)
+sh("debug-port: chromium headless on port zero asks",
+   "chromium --headless --remote-debugging-port=0 about:blank", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a WebView2 value on the launch line asks",
+   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 ./app.exe", "ask",
+   "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a WebView2 value with other arguments asks",
+   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--disable-gpu --remote-debugging-port=9222\" ./app.exe",
+   "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: an export of a WebView2 value that holds the port asks",
+   "export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a PowerShell set of a WebView2 value alone asks",
+   "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+# ask-alone (ask-commands-run-alone) denies this chained form. `$env:NAME=value;` is no harmless lead, and
+# widening it would turn a deny into an ask for every ask rule. The lone form above pins the ask itself.
+chained_ask("debug-port: a PowerShell set of a WebView2 value, then a launch, denies as a chained ask command",
+            "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=\"--remote-debugging-port=9222\"; .\\app.exe",
+            tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a launch inside bash -c asks",
+   "bash -c 'electron . --remote-debugging-port=9222'", "ask", "debug-port-ask", cwd=NOGIT)
+
+# A quoted argument is text, so a comment opener, a lone apostrophe or a line break in it does not
+# end the scan. Each case is one command, so ask-alone does not apply to it.
+sh("debug-port: a hash opener in a quoted argument does not hide the port",
+   "electron . --title \"# dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a double-slash opener in a quoted argument does not hide the port",
+   "electron . --title \"// dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a block opener in a quoted argument does not hide the port",
+   "electron . --title \"/* dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a lone apostrophe in a quoted argument does not hide the port",
+   "electron . --title \"it's dev\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+sh("debug-port: a line break in a quoted argument does not hide the port",
+   "electron . --title \"dev\nbuild\" --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+
+# Text that names the flag is no launch, and it stays an allow.
+sh("debug-port: a grep of the skills folder for the flag is allowed",
+   "grep -rn remote-debugging-port skills/", "allow", cwd=NOGIT)
+sh("debug-port: an echo that names the flag is allowed",
+   "echo \"use --remote-debugging-port to attach\"", "allow", cwd=NOGIT)
+sh("debug-port: a commit message that names the flag is allowed",
+   "git commit -m \"note --remote-debugging-port\"", "allow", cwd=NOGIT)
+sh("debug-port: a cat of the impeccable audit reference is allowed",
+   "cat skills/impeccable/reference/audit.md", "allow", cwd=NOGIT)
+sh("debug-port: an impeccable detect over CDP is allowed",
+   "npx impeccable detect --cdp 9222 src/pages", "allow", cwd=NOGIT)
+sh("debug-port: a hash opener in an echo that names the flag is allowed",
+   "echo \"# --remote-debugging-port=9222\"", "allow", cwd=NOGIT)
+sh("debug-port: a lone apostrophe in an echo that names the flag is allowed",
+   "echo \"it's --remote-debugging-port text\"", "allow", cwd=NOGIT)
+sh("debug-port: a multi-line echo that names the flag is allowed",
+   "echo \"start\nuse --remote-debugging-port to attach\nend\"", "allow", cwd=NOGIT)
+sh("debug-port: a WebView2 value without a port is allowed",
+   "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu ./app.exe", "allow", cwd=NOGIT)
+
+# a PowerShell process start, an array argument list, and a container exec.
+sh("debug-port: a Start-Process argument string with the port asks",
+   "Start-Process -Wait app.exe -ArgumentList \"--disable-gpu --remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+# detached-launch denies this form before debug-port-ask could ask. Asking would widen that deny.
+sh("debug-port: a Start-Process array argument list with the port is denied by detached-launch",
+   "Start-Process app.exe -ArgumentList '--disable-gpu','--remote-debugging-port=9222'", "deny",
+   "detached-launch", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a docker exec that launches with the port asks",
+   "docker exec app electron . --remote-debugging-port=9222", "ask", "debug-port-ask", cwd=NOGIT)
+chained_ask("debug-port: a PowerShell append to the WebView2 value, then a launch, denies as a chained ask command",
+            "$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS += \" --remote-debugging-port=9222\"; .\\app.exe",
+            tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a process listing that matches the flag is allowed",
+   "Get-CimInstance Win32_Process | Where-Object CommandLine -match \"--remote-debugging-port\"", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a pgrep of the flag is allowed",
+   "pgrep -af \"--remote-debugging-port\"", "allow", cwd=NOGIT)
+
+# a launcher's argument array or parenthesised list, a call operator, and text-only matches.
+sh("debug-port: a Start-Process argument array with the port asks",
+   "Start-Process -Wait app.exe -ArgumentList @(\"--remote-debugging-port=9222\")", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a Start-Process parenthesised argument list with the port asks",
+   "Start-Process -Wait app.exe -ArgumentList (\"--remote-debugging-port=9222\")", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a call operator with an argument array holding the port asks",
+   "& electron.exe @(\"--remote-debugging-port=9222\")", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a call operator with a quoted argument list holding the port asks",
+   "& electron.exe '--disable-gpu','--remote-debugging-port=9222'", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a pgrep of the flag with a port value is allowed",
+   "pgrep -f \"--remote-debugging-port=9222\"", "allow", cwd=NOGIT)
+sh("debug-port: a process listing that matches the flag with a port value is allowed",
+   "Get-CimInstance Win32_Process | Where-Object CommandLine -match \"--remote-debugging-port=9222\"",
+   "allow", tool="PowerShell", cwd=NOGIT)
+
+# PowerShell's short aliases (`?`, `%`, `sls`, `gc`) and `ForEach-Object` only search. A search of a
+# process listing or a log is text, so it is an allow. A launch with the flag still asks.
+sh("debug-port: a ? alias search of a process listing for the flag is allowed",
+   "Get-Process | ? { $_.CommandLine -match \"--remote-debugging-port=9222\" }", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a % alias and sls search of a process listing for the flag is allowed",
+   "Get-CimInstance Win32_Process | % { $_.CommandLine } | sls \"--remote-debugging-port=9222\"", "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a ForEach-Object search of a process listing for the flag is allowed",
+   "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine -match \"--remote-debugging-port=9222\" }",
+   "allow", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a gc and sls search of a log for the flag is allowed",
+   "gc launch.log | sls \"--remote-debugging-port=9222\"", "allow", tool="PowerShell", cwd=NOGIT)
+sh("debug-port: a Start-Process argument string with the port alone asks",
+   "Start-Process -Wait app.exe -ArgumentList \"--remote-debugging-port=9222\"", "ask",
+   "debug-port-ask", tool="PowerShell", cwd=NOGIT)
 
 
 # --------------------------------------------------------------------------- a port question departs or is not asked
