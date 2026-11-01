@@ -6,7 +6,7 @@ import {
   AGENTS_TIMEOUT_MS, GC_MS, GIT_IDLE_MS, GIT_TIMEOUT_MS, GRACE_MS, HEARTBEAT_MS, MAX_KEYS, MAX_PATH, MAX_POLLS, READ_BUDGET_MS,
   bandText, baseName, clean, cleanPath, detailLines, gitArgs, headerText, isSessionId, isUserOrigin, makeTracker,
   agentRows, configDir, mergeRows, num, parseStatus, readDetail, readEntry, rowText, safeStopMessage, safeStopPlan,
-  GUARD_PY, QUESTION_RULE, answered, liveAgentCount, questionRefusal, startedCount, startsSession, trackedTaskIds, taskNotice,
+  GUARD_PY, QUESTION_RULE, answered, liveAgentCount, questionRefusal, startedCount, startsSession, stoppedTaskId, taskNotice,
 } from './lib.mjs'
 
 const PANE = 'session-board'
@@ -112,6 +112,7 @@ export function register(on) {
       const out = result && result.result
       const task = e.tool === 'Bash' ? out && out.backgroundTaskId : e.tool === 'Workflow' ? out && out.taskId : undefined
       if (typeof task === 'string') bgTasks.add(task)
+      if (e.tool === 'TaskStop' && answered(result)) bgTasks.delete(stoppedTaskId(out, e.input)) // a stopped task sends no tracked notice
       if (startsSession(e.tool) && answered(result)) {
         started++
         startedFor = ''
@@ -157,16 +158,6 @@ export function register(on) {
         if (t && t.status !== 'running') bgTasks.delete(t.id)
       }
     } catch { /* observing never changes the delivery */ }
-    return next(e)
-  }).catch(($, e, next) => next(e))
-
-  // The engine's own list of work in flight, at the main loop's turn end: it replaces the tracked
-  // set, so a missed notice lasts one turn at most.
-  on('classic.Stop', async ($, e, next) => {
-    try {
-      const ids = e.agent_id ? null : trackedTaskIds(e.background_tasks)
-      if (ids) { bgTasks.clear(); for (const id of ids) bgTasks.add(id) }
-    } catch { /* keep the tracked set */ }
     return next(e)
   }).catch(($, e, next) => next(e))
 

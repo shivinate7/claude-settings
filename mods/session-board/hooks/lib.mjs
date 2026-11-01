@@ -364,13 +364,12 @@ export function taskNotice(text) {
   return id ? { id: id[1], status: status ? status[1] : '' } : null
 }
 
-// Background command and workflow ids in a Stop input's background_tasks, or null when it carries
-// no list. A workflow's agents are not in the host's agent list. A monitor is left out: it watches
-// for as long as the session lives and would refuse every box.
-const TRACKED_TASKS = new Set(['shell', 'workflow'])
-export function trackedTaskIds(tasks) {
-  if (!Array.isArray(tasks)) return null
-  return tasks.filter(t => t && TRACKED_TASKS.has(t.type) && typeof t.id === 'string').map(t => t.id)
+// The id a TaskStop call stopped: the output's task_id, else the input's task_id or deprecated shell_id,
+// else the id in the output message "Successfully stopped task: <id>" (hooks/stall_watch.py STOPPED).
+export function stoppedTaskId(out, input) {
+  const pick = ...vals => vals.find(v => typeof v === 'string' && v)
+  const msg = out && typeof out.message === 'string' ? /^\s*Successfully stopped task: (\S+)/.exec(out.message) : null
+  return pick(out && out.task_id, input && input.task_id, input && input.shell_id, msg && msg[1])
 }
 
 const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
