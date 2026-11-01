@@ -23,6 +23,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROBES = os.path.abspath(os.environ.get("PROBES_UNDER_TEST") or os.path.join(HERE, "compliance_probes.py"))
 sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 import check_glossary  # noqa: E402  the glossary the words group reads; a case patches it in this process
 import layout  # noqa: E402
@@ -52,7 +53,7 @@ class Repo:
 
     def git(self, *args):
         subprocess.run(["git", "-C", self.root, "-c", "user.name=test", "-c", "user.email=test@example.com",
-                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+                        *args], check=True, capture_output=True)
         return self
 
     def publish(self):

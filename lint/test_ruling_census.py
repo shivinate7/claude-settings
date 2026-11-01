@@ -18,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CENSUS = os.path.join(HERE, "ruling_census.py")
 
 sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import ruling_census  # noqa: E402
 
 

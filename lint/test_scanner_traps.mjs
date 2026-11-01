@@ -5,6 +5,7 @@
 // blocks, labelled with the scanner. A new scanner joins with one entry in SCANNERS.
 // Run: node lint/test_scanner_traps.mjs  (exit 1 on any FAIL). LIST_TESTS=1 prints each name as LISTED <JSON>.
 // The decision-watch mod test imports machinePaths and codeNouns from this file.
+import "./_test_git.mjs";  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";

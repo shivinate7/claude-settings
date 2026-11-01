@@ -9,6 +9,7 @@ set -uo pipefail
 unset GITHUB_REF GITHUB_BASE_REF GITHUB_ACTIONS MODE BASE
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../lint/_test_git.sh"  # test-run signing opt-out
 RUN_SH="$HERE/run.sh"
 STAMP_JS="$HERE/stamp.mjs"
 WORK="$(mktemp -d)"

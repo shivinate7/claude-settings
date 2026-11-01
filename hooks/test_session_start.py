@@ -18,6 +18,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "session_start.sh")
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
 SESSION = "session-start-cases"  # the session id every run_hook payload names

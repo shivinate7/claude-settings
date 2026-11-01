@@ -5,6 +5,7 @@
 // A child process gets the parent's env with every `GIT_*` variable and `NODE_PATH` removed. A `GIT_*` variable would
 // win over the child's cwd, so `git init` in a scratch folder could hit the parent repository. `NODE_PATH` would hide
 // where `typescript` is found, and the tests must see exactly that.
+import { apply } from '../../../lint/_test_git.mjs';  // test-run signing opt-out (lint/_test_git.mjs)
 import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -21,8 +22,8 @@ export const FIXTURE = join(HERE, 'fixture');
 /** Fail with the missing path, so a case that needs a skill file goes red for that reason and no other. */
 export const needFile = (rel) => assert.ok(existsSync(join(SKILL, rel)), `skills/plain-english-map/${rel} is missing`);
 
-/** The parent's env, with no `GIT_*` key and no `NODE_PATH`. */
-export const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GIT_.*|NODE_PATH)$/i.test(k)));
+/** The parent's env, with no `GIT_*` key and no `NODE_PATH`, and the test-run signing opt-out added back, so no child signs. */
+export const cleanEnv = () => apply(Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GIT_.*|NODE_PATH)$/i.test(k))));
 
 /** A path in one comparable form. `native` expands 8.3 names such as SHIVAM~1. Windows paths compare in lower case. */
 export const real = (p) => (process.platform === 'win32' ? realpathSync.native(p).toLowerCase() : realpathSync.native(p));
@@ -75,7 +76,7 @@ export const scratchRepo = ({ commit = false } = {}) => {
   git('init', '-q');
   if (commit) {
     git('add', '.');
-    git('-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture');
+    git('-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'fixture');
   } else git('add', '-N', '.');
   // The scope first: the copy must be a git repository that tracks the fixture, or a verdict below says nothing about the skill.
   const tracked = git('ls-files').split('\n').map((l) => l.trim());

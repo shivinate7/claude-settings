@@ -19,6 +19,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../lint/_test_git.sh"  # test-run signing opt-out
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
 TRACKED_ROOT=$REPO_ROOT
 # shellcheck source=../testing/tracked_tree.sh
@@ -3016,7 +3017,7 @@ make_github_fixture() {
   tar -xzf "$work/repo.tar.gz" --strip-components=1 -C "$1/src"
   git init -q -b main "$1/src"
   git -C "$1/src" add -A
-  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "fixture main"
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "fixture main"
   git clone -q --bare "$1/src" "$1/bare.git"
 }
 # Commit one change, named $2, to the fixture's main and push it to the bare repo. With $3 = merge, the
@@ -3026,25 +3027,25 @@ advance_github_fixture() {
     git -C "$1/src" checkout -q -b "side-$2"
     printf 'side %s a\n' "$2" > "$1/src/SIDE-$2-a.txt"
     git -C "$1/src" add -A
-    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "side $2 a"
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "side $2 a"
     printf 'side %s b\n' "$2" > "$1/src/SIDE-$2-b.txt"
     git -C "$1/src" add -A
-    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "side $2 b"
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "side $2 b"
     git -C "$1/src" checkout -q main
-    git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false merge -q --no-ff -m "merge $2" "side-$2"
+    git -C "$1/src" -c user.email=t@example.com -c user.name=t merge -q --no-ff -m "merge $2" "side-$2"
     git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
     return
   fi
   printf 'advance %s\n' "$2" > "$1/src/RESUME.txt"
   git -C "$1/src" add RESUME.txt
-  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "advance $2"
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "advance $2"
   git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/main
 }
 # Commit a branch, named $2, off main that deletes CLAUDE.md, and push it to the bare repo. Main is unchanged.
 branch_without_claude_md() {
   git -C "$1/src" checkout -q -b "$2"
   git -C "$1/src" rm -q CLAUDE.md
-  git -C "$1/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q -m "no CLAUDE.md on $2"
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "no CLAUDE.md on $2"
   git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/$2
   git -C "$1/src" checkout -q main
 }
@@ -3333,7 +3334,7 @@ caseK9() {
     return
   fi
 
-  git -C "$co" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m "local only"
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
   local_sha=$(git -C "$co" rev-parse HEAD)
   advance_github_fixture "$fx" second
   cloud_install "$h" "$scratch" "$bin"
@@ -3507,7 +3508,7 @@ move_fixture() {
   fx="$work/$1-fx"; h="$work/$1-home"; co="$work/$1-co"
   mkdir -p "$h"
   make_github_fixture "$fx"
-  gc() { git -C "$fx/src" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false "$@"; }
+  gc() { git -C "$fx/src" -c user.email=t@example.com -c user.name=t "$@"; }
   gc rm -q merge/cloud_allow.json; gc commit -q -m "before the rules"
   old=$(git -C "$fx/src" rev-parse HEAD)
   gc checkout -q HEAD~1 -- merge/cloud_allow.json; gc commit -q -m "the rules"
@@ -3589,7 +3590,7 @@ caseM4() {
   name="caseM4: a clean, detached checkout at a commit main does not hold stays, so the commit is not lost"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   move_fixture m4
-  git -C "$co" -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m "local only"
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
   mine=$(git -C "$co" rev-parse HEAD)
   move_install
   if [ $rc -ne 0 ]; then

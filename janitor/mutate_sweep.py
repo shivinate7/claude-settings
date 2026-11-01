@@ -1480,6 +1480,9 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     janitor_dir = os.path.join(scaffold, "janitor")
     os.makedirs(hooks_dir, exist_ok=True)
     os.makedirs(janitor_dir, exist_ok=True)
+    lint_dir = os.path.join(scaffold, "lint")
+    os.makedirs(lint_dir, exist_ok=True)
+    shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "_nowindow.py"), hooks_dir)  # sweep.py imports it; never mutated
     shutil.copy(os.path.join(REPO_ROOT, "hooks", "shared_names.py"), hooks_dir)  # guard_core.py imports it; never mutated
     # sweep.py and guard_core.py import it. The loop below replaces this copy when `sources` holds

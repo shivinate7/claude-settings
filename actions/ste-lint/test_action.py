@@ -13,6 +13,8 @@ CLAUDE.md names, reads the pin check from it, and with no checkout prints one li
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 CMD = os.path.join(ROOT, "bin", "ste-changed")
 EXCLUDE_FILE = os.path.join(ROOT, ".ste-lint-exclude")
