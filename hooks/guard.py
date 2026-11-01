@@ -1871,14 +1871,12 @@ def lane_effort_hit(tool: str, tool_input) -> str:
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
 
 
-STEP_UP_MARKER = re.compile(r"(?im)^[ \t]*(round|try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
-# A first non-blank line that does not start with a marker also counts its leftmost marker-shaped text, wherever
-# it sits (a role word or markup ahead of it), but only when that text is `Round N of 3`. A later one on the line is
-# prose, so a leftmost `Try N of 3` adds nothing. Case-sensitive, so lowercase prose does not count (decision agent-model-cap).
-FIRST_LINE_MARKER = re.compile(r"\b(Round|Try)[ \t]+(\d)[ \t]+of[ \t]+3\b")
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
+# The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
+from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
+_MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
 
 
 def brief_first_line(brief) -> str:
@@ -1888,16 +1886,28 @@ def brief_first_line(brief) -> str:
     return next((line for line in brief.split("\n") if line.strip()), "")
 
 
-def brief_markers(brief) -> list:
-    """The [(kind, n)] markers of a brief: each line that starts with the marker, plus the leftmost
-    marker in a first non-blank line that does not start with one, when it is `Round N of 3`. The one
-    home of the marker scan."""
+def marker_hits(brief) -> set:
+    """The {(kind, n)} markers of a brief, read from BRIEF_MARKERS: the one marker scanner. A "line-start" row reads
+    every line of the brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None
+    for a row with none (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file.
+    The two positions differ by the owner's ruling (decision agent-model-cap); BRIEF_MARKERS says how."""
     if not isinstance(brief, str):
-        return []
-    found = STEP_UP_MARKER.findall(brief)
+        return set()
     first = brief_first_line(brief)
-    lead = None if STEP_UP_MARKER.match(first) else FIRST_LINE_MARKER.search(first)
-    return found + ([lead.groups()] if lead and lead.group(1) == "Round" else [])
+    hits = set()
+    for kind, rx, position in _MARKER_ROWS:
+        if position == "line-start":
+            found = list(rx.finditer(brief))
+        else:
+            hit = rx.search(first)
+            found = [hit] if hit else []
+        hits.update((kind, hit.group(1) if rx.groups else None) for hit in found)
+    return hits
+
+
+def brief_markers(brief) -> list:
+    """The [(kind, n)] round and try markers of a brief: marker_hits without the audit marker, which has no n."""
+    return sorted((kind, n) for kind, n in marker_hits(brief) if n is not None)
 
 
 def builder_third_round(brief) -> bool:
@@ -1956,7 +1966,7 @@ ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
-# Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
+# Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -2066,8 +2076,7 @@ def role_model_check(tool: str, tool_input):
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
         if named == top or row is None:
             return "", "", False
-        if role == EXPLORE_ROLE and named < top and re.search(r"\b%s" % re.escape(EXPLORE_AUDIT_MARKER),
-                                                              brief_first_line(tool_input.get("prompt"))):
+        if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
             return "", "", False
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
