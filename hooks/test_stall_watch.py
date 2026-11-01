@@ -220,8 +220,9 @@ def rewrite(command):
     return ui["command"], hso
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None):
-    """Run the rewritten command in the given shell. Return (rc or None, text, seconds, cmd).
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None):
+    """Run the rewritten command in the given shell, with `env` as its environment (default: ours).
+    Return (rc or None, text, seconds, cmd).
     The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
     names. Text added to the command would change it, for one ending in a backslash."""
     cmd, _hso = rewrite(command)
@@ -231,7 +232,7 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None):
     start = time.monotonic()
     with open(out_path, "wb") as out:
         proc = subprocess.Popen([shell, "-c", cmd, mark], cwd=d, stdin=subprocess.DEVNULL,
-                                stdout=out, stderr=subprocess.STDOUT)
+                                stdout=out, stderr=subprocess.STDOUT, env=env)
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -466,6 +467,16 @@ def report_names_pid_and_asks_owner_to_stop():
                        "report does not tell the session to ask the owner to stop the job")
     problems += expect(re.search(r"\bkill", text, re.I) is None,
                        "report tells the session to kill; the guard denies that for a reparented job")
+    reap()
+    return problems
+
+
+@posix_case
+def report_names_the_wait_helper():
+    """6b. the report names bin/wait-pid, the one allowed way to wait on the stranded job (roadmap step wait-for-pid-form)"""
+    rc, text, secs, _cmd = run_rewritten("sleep 30")
+    problems = expect(rc == 3, f"exit {rc}, want 3")
+    problems += expect("wait-pid" in text, "report does not name wait-pid, the way to wait on the job")
     reap()
     return problems
 

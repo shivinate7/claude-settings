@@ -68,7 +68,7 @@ LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
-    "wait for its completion notice."
+    "wait for its completion notice. To wait on a pid, use `wait-pid PID [--timeout SECS]`."
 )
 
 
@@ -249,6 +249,7 @@ WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
     "To wait for another condition, use the Monitor tool once, or run the long command in the background and wait for its completion notice. "
+    "To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
     "A single pause under 25 seconds is allowed. Avoid "
     "gh pr checks --watch in the foreground, which serves a cached status. For a server warm-up, use a "
     "readiness check such as curl --retry."
@@ -413,8 +414,8 @@ PATTERN_POLLER_REASON = (
     "the loop's own condition polls for a process by name or by pattern. That pattern can match "
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
-    "Remedy: wait on one pid this session started, such as `kill -0 $PID`. To wait for CI, wait "
-    "for the CI-wake notice that follows gh pr ready."
+    "Remedy: wait on one pid with `wait-pid PID [--timeout SECS]`, which also takes a job a stall "
+    "left behind. To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 
 

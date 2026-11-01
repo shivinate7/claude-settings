@@ -3293,16 +3293,18 @@ TAG_CWD = os.path.join(ROOT, "tagged")   # a scratch folder, not an agent worktr
 TAG_HOLDER = "import os, time; os.setsid(); time.sleep(300)"
 
 
-def tag_orphan(env_entries=(), argv_extra=()):
+def tag_orphan(env_entries=(), argv_extra=(), holder=None):
     """A holder whose shell exits first, so init adopts it (PPID 1). `env_entries` are NAME=value
     strings for its environment, with the inherited tag removed first. `argv_extra` is appended to
-    its argv. Returns its pid, or None when it is not an orphan leading its own process group."""
+    its argv. `holder` replaces the holder's argv (a shell stub, which leads no group of its own,
+    so only PPID 1 is waited for). Returns its pid, or None when it is not an orphan leading its
+    own process group (an orphan, for a `holder`)."""
     env = {key: value for key, value in os.environ.items() if key != TAG}
     env.update(entry.split("=", 1) for entry in env_entries)
     os.makedirs(TAG_CWD, exist_ok=True)
     script = '"$@" </dev/null >/dev/null 2>&1 & echo $!'
     try:
-        answer = subprocess.run(["sh", "-c", script, "sh", sys.executable, "-c", TAG_HOLDER]
+        answer = subprocess.run(["sh", "-c", script, "sh"] + (holder or [sys.executable, "-c", TAG_HOLDER])
                                 + list(argv_extra), cwd=TAG_CWD, env=env, capture_output=True,
                                 text=True, timeout=20)
         pid = int(answer.stdout.strip())
@@ -3312,7 +3314,7 @@ def tag_orphan(env_entries=(), argv_extra=()):
                                         capture_output=True, text=True, timeout=5).stdout.split()
             if ppid != "1":
                 return None
-            if pgid == str(pid):
+            if holder or pgid == str(pid):
                 return pid
             time.sleep(0.05)
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -3320,11 +3322,38 @@ def tag_orphan(env_entries=(), argv_extra=()):
     return None
 
 
+def stranded_job(job_env_words):
+    """The `holder` of a stranded stub: a shell that runs one `sleep` as its child and waits. The
+    child's environment is set by `job_env_words`: `env NAME=value` gives it a tag, `env -u NAME`
+    takes the stub's away. The stub's own environment is `env_entries` of tag_orphan."""
+    return ["sh", "-c", '"$@" & wait', "sh"] + list(job_env_words) + ["sleep", "300"]
+
+
+def stub_job(stub):
+    """The pid of the one child of `stub`, once the stub has forked it, or None."""
+    for _ in range(100):
+        try:
+            rows = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True,
+                                  timeout=10).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for row in rows:
+            fields = row.split()
+            if len(fields) == 2 and fields[1] == str(stub) and fields[0].isdigit():
+                ORPHAN_PIDS.append(int(fields[0]))
+                return int(fields[0])
+        time.sleep(0.05)
+    return None
+
+
 def tag_case(name, expected, env_entries=(), argv_extra=(), session=SUB_SESSION, carries=(),
-             **who):
-    """One kill of a PPID-1 holder. Returns the holder's pid, or None when it was skipped. `who`
-    is agent_id and agent_type, the payload fields that mark an agent call."""
-    pid = tag_orphan(env_entries, argv_extra) if ORPHAN_CASES else None
+             holder=None, job=False, **who):
+    """One kill of a PPID-1 holder, or with `job` of the child under a stranded stub (`holder` from
+    stranded_job). Returns the killed pid, or None when it was skipped. `who` is agent_id and
+    agent_type, the payload fields that mark an agent call."""
+    pid = tag_orphan(env_entries, argv_extra, holder) if ORPHAN_CASES else None
+    if pid is not None and job:
+        pid = stub_job(pid)
     if pid is None:
         skip_case(name, NO_ORPHAN)
     else:
@@ -3365,6 +3394,19 @@ else:
     sh("kill: the group led by a PPID-1 pid whose environment holds this session's id",
        "kill -- -%d" % TAG_LEADER, "allow", cwd=NOGIT, session=SUB_SESSION, config=SUBCFG,
        transcript=SUB_TRANSCRIPT)
+# A STRANDED JOB (roadmap step wait-for-pid-form). After a stall the stub shell is under init, and
+# the job is its child. On Linux the forked stub holds no tag, and the exec'd job holds it.
+# `kill` keeps the predicate the owner ruled on (decision a-kill-by-pid-needs-an-owned-pid: the
+# PPID-1 pid itself). A wider kill needs the owner, so each job below stays refused. The wait form,
+# bin/wait-pid, owns these shapes by its own test (lint/test_wait_pid.py).
+tag_case("kill: a job under an untagged PPID-1 stub, the job holding this session's id, stays refused",
+         "deny", holder=stranded_job(["env", TAG + "=" + SUB_SESSION]), job=True,
+         carries="did not start")
+tag_case("kill: a job under a PPID-1 stub that holds this session's id, the job untagged, stays refused",
+         "deny", env_entries=[TAG + "=" + SUB_SESSION], holder=stranded_job(["env", "-u", TAG]),
+         job=True, carries="did not start")
+tag_case("kill: a job under a PPID-1 stub, neither holding a session id, stays refused", "deny",
+         holder=stranded_job(["env", "-u", TAG]), job=True, carries="did not start")
 
 sh("kill: a pid list made by pgrep", "kill $(pgrep -f node)", "deny", "machine-wide-kill",
    cwd=NOGIT)
@@ -4735,6 +4777,35 @@ for _label, _trigger in (
         cwd=NOGIT, lacks=NO_RUN_WATCH, command=_trigger)
     add("ci-wait: the remedy of %s names the CI-wake notice" % _label, "deny",
         "waiter", cwd=NOGIT, carries=(CI_WAIT_REMEDY,), command=_trigger)
+
+# ------------------------------------------------------------------ wait-pid: the one wait on a pid
+#
+# Roadmap step wait-for-pid-form: after the stall watch trips, the session holds a stranded job's
+# pid and the guard refuses every way to wait on it. `bin/wait-pid PID [--timeout SECS]` is the one
+# allowed form (its own cases: lint/test_wait_pid.py). The guard allows the helper and keeps
+# refusing the loops, so each refusal case pins that it did not move. The three remedies below
+# point at the helper.
+WAIT_PID = "wait-pid"
+for _label, _command in (("a pid", "wait-pid 12345"), ("a pid and a timeout", "wait-pid 12345 --timeout 500")):
+    sh("wait-pid: %s is allowed in the foreground" % _label, _command, "allow", cwd=NOGIT)
+    add("wait-pid: %s is allowed under run_in_background" % _label, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
+sh("wait-pid: a kill -0 loop stays refused, and its remedy names the helper",
+   "while kill -0 12345; do sleep 5; done", "deny", "waiter", cwd=NOGIT, carries=(WAIT_PID,))
+sh("wait-pid: tail --pid with a follow stays refused", "tail --pid=12345 -f /dev/null", "deny",
+   "live-stream", cwd=NOGIT)
+sh("wait-pid: a pgrep loop stays refused", "while pgrep x; do sleep 5; done", "deny", "waiter",
+   cwd=NOGIT)
+# Each remedy is reached by its own trigger. The pattern remedy must not advise `kill -0`: a bare
+# kill -0 loop is a refused form, so that advice sends the reader into a second refusal.
+for _label, _trigger, _rule, _lacks in (
+        ("a followed stream", "tail -f app.log", "live-stream", ()),
+        ("a pause", "sleep 30", "waiter", ()),
+        ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter",
+         ("kill -0",)),
+):
+    add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
+        carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
 
 # Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
 # `--watch` is allowed on main, and stays so.
