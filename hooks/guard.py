@@ -1958,7 +1958,7 @@ ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries EXPLORE_AUDIT_MARKER.
-# Case-sensitive, so lowercase prose does not count. Markup or words ahead of it are allowed, as for FIRST_LINE_MARKER.
+# Case-sensitive, so lowercase prose does not count. It counts leftmost on the first line, with anything ahead of it, as for FIRST_LINE_MARKER.
 EXPLORE_AUDIT_MARKER = "Audit:"
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -1969,7 +1969,8 @@ ROLE_MODEL_REASON = (
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
-# An Explore has a second way past its row, so only its refusal names it.
+# An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
+# does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
 ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
@@ -2075,7 +2076,7 @@ def role_model_check(tool: str, tool_input):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
-            if role == EXPLORE_ROLE:
+            if role == EXPLORE_ROLE and named < top:
                 extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
