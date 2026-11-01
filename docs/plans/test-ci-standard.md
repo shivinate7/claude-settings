@@ -7,7 +7,7 @@ repo's own rules, and one review lane per repo (banchi, degen, home, ios-adblock
 mailaudit, q_max).
 
 The step note (roadmap step `test-ci-standard`) carries the owner's ruling of 2026-11-01 12:23 CST:
-a practice joins the standard only when it makes the build better, never as optional load on
+only a practice that makes the build better joins the standard, never as optional load on
 builders. Each practice below names the harm it stops.
 
 ## The standard
