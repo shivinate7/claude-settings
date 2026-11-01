@@ -215,11 +215,12 @@ def _artifact_link(found, where):
 
 def artifact_id(url):
     """The artifact id of a claude.ai artifact link: its last path segment, with a trailing slash, a query
-    and a fragment ignored. "" when `url` is no string or names no id. The one home of "same artifact", so
-    the /artifact/ and /code/artifact/ forms of one page compare equal."""
+    and a fragment ignored. "" when `url` is no string or names no id, as a bare `.../artifact/` does. The one
+    home of "same artifact", so the /artifact/ and /code/artifact/ forms of one page compare equal."""
     if not isinstance(url, str):
         return ""
-    return url.split("#", 1)[0].split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    found = url.split("#", 1)[0].split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return "" if found == "artifact" else found
 
 
 def is_waiting_page_url(root, url):

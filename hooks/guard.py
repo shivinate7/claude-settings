@@ -2806,8 +2806,8 @@ def page_stale_hit(tool_input, cwd):
         return None
     if not stale_pages.matches(text, live):
         return PAGE_STALE_REASON, path
-    if blob:
-        stale_pages.write_stamp(root, blob)
+    if blob and not stale_pages.write_stamp(root, blob):
+        record(PAGE_TOOL, "noted", "page-stale", "unknown: the stamp cannot be written")
     return None
 
 
