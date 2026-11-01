@@ -11597,7 +11597,7 @@ sh("impeccable bash: detect on folders is allowed", "npx impeccable detect src/p
 
 
 # impeccable, round two (owner ruling 2026-10-10, decisions/design-skills.md): the plugin is not
-# installed. Its skill folder is pinned at skill-v4.5.2. Every Bash form below reaches the plugin's
+# installed. Its skill folder is pinned at skill-v4.8.0. Every Bash form below reaches the plugin's
 # build or settings commands, through a version pin, a runner flag or a different subcommand.
 
 sh("impeccable bash: a version-pinned hooks on is denied", "npx impeccable@4.5.2 hooks on", "deny",
