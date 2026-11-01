@@ -252,7 +252,17 @@ CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool acce
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
-WIDENS_MARK = re.compile(re.escape(WIDENS_TEXT), re.I)
+# The card words before 2026-11-01. Sessions started before that merge still write them in chat, so the
+# mark still reads them; no card, rule text or reason carries them.
+LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
+
+
+def _words_pattern(text):
+    # Any run of whitespace between words, so a reflowed or wrapped sentence still matches.
+    return r"\s+".join(re.escape(w) for w in text.split())
+
+
+WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGACY_WIDENS_TEXT)), re.I)
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
