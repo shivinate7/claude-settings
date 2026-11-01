@@ -430,7 +430,7 @@
       "source": {
         "source": "github",
         "repo": "anthropics/claude-code",
-        "ref": "v2.1.296"
+        "ref": "v2.1.316"
       }
     },
     "claude-settings": {
