@@ -364,13 +364,21 @@ export function taskNotice(text) {
   return id ? { id: id[1], status: status ? status[1] : '' } : null
 }
 
-// Background command and workflow ids in a Stop input's background_tasks, or null when it carries
-// no list. A workflow's agents are not in the host's agent list. A monitor is left out: it watches
-// for as long as the session lives and would refuse every box.
-const TRACKED_TASKS = new Set(['shell', 'workflow'])
-export function trackedTaskIds(tasks) {
-  if (!Array.isArray(tasks)) return null
-  return tasks.filter(t => t && TRACKED_TASKS.has(t.type) && typeof t.id === 'string').map(t => t.id)
+// The id a TaskStop call stopped: the output's task_id, else the input's task_id or deprecated shell_id,
+// else the id in the output message "Successfully stopped task: <id>" (hooks/stall_watch.py STOPPED).
+export function stoppedTaskId(out, input) {
+  const pick = (...vals) => vals.find(v => typeof v === 'string' && v)
+  const msg = out && typeof out.message === 'string' ? /^\s*Successfully stopped task: (\S+)/.exec(out.message) : null
+  return pick(out && out.task_id, input && input.task_id, input && input.shell_id, msg && msg[1])
+}
+
+// The id in a TaskStop failure "No task found with ID: <id>": no task has that id, so it is not tracked.
+// The failure arrives as a thrown error or an error result, so the text is read from either.
+export function goneTaskId(failure) {
+  let text = ''
+  try { text = failure instanceof Error ? failure.message : JSON.stringify(failure) || '' } catch { /* no text */ }
+  const m = /No task found with ID: ([^\s"'\\,}]+)/.exec(text)
+  return m ? m[1] : undefined
 }
 
 const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
@@ -381,8 +389,8 @@ const plural = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
 export const SESSION_START_TOOLS = ['mcp__ccd_session__start_session', 'mcp__claude-code-remote__create_session']
 export const startsSession = tool => SESSION_START_TOOLS.includes(tool)
 
-// A tool.call result that answered without error: a deny or an error result is no start.
-export const answered = r => !!r && typeof r === 'object' && 'result' in r && !r.deny && r.isError !== true
+// A tool.call result that answered without error (isError or is_error): a deny or an error result is no start.
+export const answered = r => !!r && typeof r === 'object' && 'result' in r && !r.deny && r.isError !== true && r.is_error !== true
 
 // The count a start record (store key started:<id>, { n, at }) holds, 0 when it holds none.
 export const startedCount = raw => (raw && typeof raw === 'object' ? num(raw.n, 0, 999) ?? 0 : 0)
