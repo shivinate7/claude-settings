@@ -1,9 +1,9 @@
 {
   "title": "The feedback check finds an item's home in the repo it belongs to, not only the cwd's",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 103.33771,
   "why": "Possible false alarm (coordinator, Nov 1 11:35 CST): with its cwd in the banchi checkout, the feedback check (#940) reported 'home is not a file that git tracks on any branch' for five inbox items whose homes (docs/decisions/session-tiers.md, docs/decisions/owner-feedback-inbox.md, docs/debts/inbox-saves-other-notices.md) are tracked in claude-settings. The check resolves a home against the cwd's repo only.",
-  "note": "Triage judged it a note (roles-findings-are-debts-or-notes): first case, and only a session that works across repos meets it. It becomes a debt if it repeats. A record lane adds one line to docs/debts/notes.md, slug feedback-home-resolves-cwd, pointing to decision owner-feedback-inbox and naming hooks/feedback_guard.py, with the fix idea: resolve against the session's repo roots, or let a home name its repo. Done check: the line is in notes.md and ste-lint passes. Needs no answer. Built: draft PR #949 (head 08a6b54f); with the batch runner (coordinator, Nov 1 11:36 CST).",
-  "updatedAt": "2026-11-01T17:42:00Z"
+  "note": "Triage judged it a note (roles-findings-are-debts-or-notes): first case, and only a session that works across repos meets it. It becomes a debt if it repeats. A record lane adds one line to docs/debts/notes.md, slug feedback-home-resolves-cwd, pointing to decision owner-feedback-inbox and naming hooks/feedback_guard.py, with the fix idea: resolve against the session's repo roots, or let a home name its repo. Done check: the line is in notes.md and ste-lint passes. Needs no answer. Built: draft PR #949 (head 08a6b54f); with the batch runner (coordinator, Nov 1 11:36 CST). Landed on main in batch 52, #949 (commit 08a6b54f), main 4d104d1c, Nov 1 11:48 CST.",
+  "updatedAt": "2026-11-01T17:54:00Z"
 }
