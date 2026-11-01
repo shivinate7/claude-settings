@@ -6,7 +6,7 @@ allows a kill of a PPID-1 pid; the SessionEnd sweep asks it before it stops a sc
 A server an agent's Bash call starts holds `CLAUDE_CODE_SESSION_ID=<the session's id>` in its
 exec-time environment, the same id the hook payload carries as `session_id`. No agent-level tag
 exists. The tool's own zsh does not hold it at exec (the shell sets it afterwards), so a forked
-shell stub reads untagged. Read on macOS; the Linux `/proc` read is unmeasured live.
+shell stub reads untagged. Read on macOS and on Linux; lint/test_wait_pid.py reads it live on Linux.
 
 Stdlib only, no child process. Every failure (EPERM, EINVAL, a dead pid, a bad id) answers False.
 """
