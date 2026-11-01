@@ -46,9 +46,9 @@ def config_dir() -> str:
     )
 
 
-def denials_path(session_id):
+def refusals_path(session_id):
     """The file of tool refusals a session has not yet raised with the owner, or None for an id that
-    is not a plain name. Written by hooks/denial_note.py, read and trimmed by lint/report_guard.py."""
+    is not a plain name. Written by hooks/refusal_note.py, read and trimmed by lint/report_guard.py."""
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
-    return os.path.join(config_dir(), STATE_DIR_NAME, "denials", session_id + ".jsonl")
+    return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")

@@ -147,8 +147,8 @@ jobs:
       - name: SendMessage state fixture suite
         run: python3 hooks/test_sendmessage_state.py
 
-      - name: Denial note fixture suite
-        run: python3 hooks/test_denial_note.py
+      - name: Refusal note fixture suite
+        run: python3 hooks/test_refusal_note.py
 
       - name: Call judge fixture suite
         run: python3 hooks/test_call_judge.py
@@ -736,9 +736,9 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_sendmessage_state.py
 
-      - name: Denial note fixture suite
+      - name: Refusal note fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_denial_note.py
+        run: python3 hooks/test_refusal_note.py
 
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1248,9 +1248,9 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_sendmessage_state.py
 
-      - name: Denial note fixture suite
+      - name: Refusal note fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python hooks/test_denial_note.py
+        run: python hooks/test_refusal_note.py
 
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
