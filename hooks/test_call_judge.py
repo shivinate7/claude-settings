@@ -26,8 +26,7 @@ Interface the hook must match:
 - Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus.
   Every other refusal is liftable.
 - The Explore remedy: the spawn prompt's fix clause and the Agent fallback reason name the audit marker,
-  EXPLORE_AUDIT_MARKER. Its one home is hooks/shared_names.py; guard.py re-imports it. The test reads
-  it through guard at run time and never copies it here.
+  EXPLORE_AUDIT_MARKER in hooks/guard.py, read at test time and never copied here.
 - Any model error, or malformed input, fails open: no deny, exit 0, one stderr line.
 - AskUserQuestion: a box that fails the code check (hooks/question_form.py chat_hit) is refused before
   any model call, with the rule chat_hit names. The model sees only a box that passes it, and judges only
