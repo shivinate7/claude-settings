@@ -186,12 +186,14 @@ def staged_suite(run, required: str):
     `run(only) -> (code, red, ran)`: `only` is the required case fragment to run alone, or None
     for the full suite. `ran` is the suite's per-case result lines, passed and failed.
 
-    Stage 1 runs only the cases named by `required`. When any `ran` line names the case, the case
-    ran, so stage 1's (code, red) is the verdict: the full suite would only run the same case
-    again, at about 450 s a mutant against 3 s for stage 1. A suite that ignores the filter runs
-    every case in stage 1, which gives the same verdict. Only a stage 1 that ran no named case
-    (none selected, or a crash before it) falls back to the full suite. MUTATE_FULL=1 runs the
-    full suite alone.
+    Stage 1 runs only the cases named by `required`. When any `ran` line names the case, stage 1's
+    (code, red) is the verdict: once the required case ran, a non-kill fails the run either way, and
+    stage 1 takes about 3 s against about 450 s for the full suite. A required case that passes
+    reads SURVIVED (0 red), where the full suite would read WRONG CAUSE with its saw: lines; run
+    with MUTATE_FULL=1 to get those lines for diagnosis. A suite that ignores the filter runs every
+    case in stage 1. A stage 1 that ran no named case falls back to the full suite: none selected,
+    a crash before the case, or a required case whose only row is a SKIP, which is not collected.
+    MUTATE_FULL=1 runs the full suite alone.
     """
     if os.environ.get("MUTATE_FULL"):
         code, red, _ran = run(None)

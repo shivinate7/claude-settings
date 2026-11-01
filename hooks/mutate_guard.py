@@ -1205,9 +1205,9 @@ MUTATIONS = [
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
      # An agent call from an agent-named tree is also shielded by session_home_agent_tree further
-     # down, so dropping the agent_id return alone changes nothing the suite's case can see (it
-     # survived stage 1 and then ran the whole suite for minutes). The replacement switches both
-     # layers off, which is the rule broken: an agent call writes the session's record.
+     # down, so dropping the agent_id return alone changes nothing the suite's case can see: the
+     # mutant survives. The replacement switches both layers off, which is the rule broken: an
+     # agent call writes the session's record.
      '        globals()["session_home_agent_tree"] = lambda _lane: False\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
      "guard", "session-home: an agent call writes and rewrites no session record"),
     ("session-home: ExitWorktree leaves the session's record",
