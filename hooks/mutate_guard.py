@@ -1778,7 +1778,10 @@ def report_main(argv) -> int:
 
 
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
-    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines)."""
+    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines).
+
+    The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
+    to know whether stage 1 ran the required case."""
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
@@ -1797,8 +1800,11 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         [sys.executable, suite], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
         env=env, timeout=1200,
     )
-    red = [line for line in result.stdout.splitlines() if line.startswith("FAIL")]
-    return result.returncode, red
+    lines = result.stdout.splitlines()
+    red = [line for line in lines if line.startswith("FAIL")]
+    # "PASS" and "FAIL" start each case line in every suite here; "ok " is test_call_judge.py's pass.
+    ran = [line for line in lines if line.startswith(("PASS", "FAIL", "ok "))]
+    return result.returncode, red, ran
 
 
 def mutation_parts(entry):

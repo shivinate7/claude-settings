@@ -181,20 +181,26 @@ def report_verdict(label: str, code, red, required: str) -> str:
 
 
 def staged_suite(run, required: str):
-    """Run one mutant's suite in two stages. `run(only) -> (code, red)`: `only` is the required
-    case fragment to run alone, or None for the full suite.
+    """Run one mutant's suite in two stages. Return (code, red).
 
-    Stage 1 runs only the cases named by `required`. A nonzero exit with `required` among the red
-    lines is a kill, the same kill the full suite would report, so stop there. Anything else
-    (cases pass, none selected, red without the name) falls to the full suite, whose result is
-    the verdict, exactly as before. MUTATE_FULL=1 skips stage 1, for debugging the old mode.
+    `run(only) -> (code, red, ran)`: `only` is the required case fragment to run alone, or None
+    for the full suite. `ran` is the suite's per-case result lines, passed and failed.
+
+    Stage 1 runs only the cases named by `required`. When any `ran` line names the case, the case
+    ran, so stage 1's (code, red) is the verdict: the full suite would only run the same case
+    again, at about 450 s a mutant against 3 s for stage 1. A suite that ignores the filter runs
+    every case in stage 1, which gives the same verdict. Only a stage 1 that ran no named case
+    (none selected, or a crash before it) falls back to the full suite. MUTATE_FULL=1 runs the
+    full suite alone.
     """
     if os.environ.get("MUTATE_FULL"):
-        return run(None)
-    code, red = run(required)
-    if code != 0 and any(required in line for line in red):
+        code, red, _ran = run(None)
         return code, red
-    return run(None)
+    code, red, ran = run(required)
+    if any(required in line for line in ran):
+        return code, red
+    code, red, _ran = run(None)
+    return code, red
 
 
 def run_mutants(entries, run_one):
